@@ -94,7 +94,8 @@ export class SimulatedFusionPlatform implements FusionPlatform {
     const child = spawn(this.ffmpeg, [
       "-hide_banner", "-loglevel", "error", "-re", "-f", "lavfi", "-i", source,
       "-an", "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-profile:v", "baseline", "-pix_fmt", "yuv420p",
-      "-b:v", String(bitrate), "-g", String(fps * 2), "-bsf:v", "h264_metadata=aud=insert", "-f", "h264", "-",
+      "-b:v", String(bitrate), "-g", String(fps * 2), // Framed, as the Windows helper writes it (`H264AccessUnits`).
+      "-bsf:v", "h264_metadata=aud=insert,setts=ts=N", "-flush_packets", "1", "-f", "avi", "-",
     ], { stdio: ["pipe", "pipe", "pipe"] });
     return processSource(child, onUnit, onEnd);
   }

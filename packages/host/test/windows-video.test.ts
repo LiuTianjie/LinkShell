@@ -35,6 +35,38 @@ describe("Windows H.264 media", () => {
     for (const byte of bytes) parser.push(Buffer.from([byte]), unit => result.push(unit));
     expect(result).toEqual([first, second]);
   });
+  it("hands on a framed picture with its last byte, at every pipe boundary", () => {
+    const chunk = (unit: Buffer) => { const size = Buffer.alloc(4); size.writeUInt32LE(unit.length); return Buffer.concat([Buffer.from("00dc"), size, unit, Buffer.alloc(unit.length & 1)]); };
+    const first = Buffer.concat([aud, nal(0x67), nal(0x68), nal(0x65)]);
+    const second = Buffer.concat([aud, nal(0x41), Buffer.from([7])]);
+    // What FFmpeg's AVI muxer writes before the pictures, a stand-in: headers that are not chunks of pictures.
+    const header = Buffer.concat([Buffer.from("RIFF\xff\xff\xff\xffAVI LIST", "latin1"), Buffer.alloc(40, 0x30), Buffer.from("00dcLIST\xff\xff\xff\xffmovi", "latin1")]);
+    const empty = Buffer.concat([Buffer.from("00dc"), Buffer.alloc(4)]);
+    const bytes = Buffer.concat([header, chunk(first), empty, empty, chunk(second)]);
+    for (let split = 1; split < bytes.length; split++) {
+      const parser = new H264AccessUnits(), result: [Buffer, boolean][] = [];
+      parser.push(bytes.subarray(0, split), (unit, key) => result.push([Buffer.from(unit), key]));
+      // The first picture is whole as soon as its own bytes are: nothing of the next is needed.
+      if (split >= header.length + 8 + first.length && split < bytes.length - 1) expect(result).toEqual([[first, true]]);
+      if (split < header.length + 8 + first.length) expect(result).toEqual([]);
+      parser.push(bytes.subarray(split), (unit, key) => result.push([Buffer.from(unit), key]));
+      expect(result).toEqual([[first, true], [second, false]]);
+    }
+    const parser = new H264AccessUnits(), result: Buffer[] = [];
+    for (const byte of bytes) parser.push(Buffer.from([byte]), unit => result.push(Buffer.from(unit)));
+    expect(result).toEqual([first, second]);
+  });
+  it("finds the next framed picture after bytes that are not one", () => {
+    const chunk = (unit: Buffer) => { const size = Buffer.alloc(4); size.writeUInt32LE(unit.length); return Buffer.concat([Buffer.from("00dc"), size, unit, Buffer.alloc(unit.length & 1)]); };
+    const first = Buffer.concat([aud, nal(0x65)]), second = Buffer.concat([aud, nal(0x41)]);
+    const parser = new H264AccessUnits(), result: Buffer[] = [];
+    parser.push(Buffer.concat([Buffer.from("RIFF"), chunk(first), Buffer.from("ix00\x04\x00\x00\x00junk00dcxx", "latin1"), chunk(second)]), unit => result.push(Buffer.from(unit)));
+    expect(result).toEqual([first, second]);
+    // A long run of nothing is let go of, not kept.
+    for (let i = 0; i < 40; i++) parser.push(Buffer.alloc(1024 * 1024, 0x30), () => {});
+    parser.push(chunk(first), unit => result.push(Buffer.from(unit)));
+    expect(result).toEqual([first, second, first]);
+  });
   it("bounds malformed encoder output", () => {
     const parser = new H264AccessUnits();
     parser.push(Buffer.alloc(16 * 1024 * 1024), () => {});

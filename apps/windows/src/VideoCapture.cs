@@ -97,6 +97,7 @@ namespace LinkShell.Windows {
 
         static bool RunVideoEncoder(IntPtr job, Stream destination, string executable, string source, int width, int height, int fps, int bitrate, string encoder, bool compatible) {
             string filter = source;
+            bool framed = Environment.GetEnvironmentVariable("LINKSHELL_VIDEO_FRAMED") == "1";
             // Older drivers reject D3D11_BIND_VIDEO_ENCODER surfaces. Use the vendor's scaler
             // where available, then allow CPU conversion while retaining hardware encoding.
             if (compatible) filter += "hwdownload,format=bgra,scale=" + width + ":" + height + ":flags=fast_bilinear,format=nv12";
@@ -109,7 +110,13 @@ namespace LinkShell.Windows {
             string args = "-hide_banner -loglevel warning -nostats -f lavfi -i \"" + filter + "\" -an -c:v " + encoder + " " + tuning +
                 // Level 4.2 stops at 1080p; a Fusion window's canvas is its monitor, up to 4K (5.1).
                 (encoder == "h264_nvenc" ? " -profile:v baseline -level:v " + (width * height > 2088960 ? "5.1" : "4.2") : encoder == "h264_amf" ? " -profile:v constrained_baseline -level:v " + (width * height > 2088960 ? "51" : "42") : " -profile:v 66 -level:v " + (width * height > 2088960 ? "51" : "42")) + " -bf 0 -g " + fps + " -b:v " + bitrate + " -maxrate " + bitrate + " -bufsize " + (bitrate / 4) +
-                " -force_key_frames \"expr:gte(t,n_forced)\" -fps_mode passthrough -bsf:v h264_metadata=aud=insert -flush_packets 1 -f h264 pipe:1";
+                " -force_key_frames \"expr:gte(t,n_forced)\" -fps_mode passthrough" +
+                // Framed (the host asks): AVI, each picture in a chunk that says its length and is
+                // written as it is encoded, so the host hands it on at its last byte. Raw H.264
+                // only says where a picture starts: each waited for the next one, a frame late.
+                // setts counts the pictures: AVI fills a gap in time with empty chunks, and gives
+                // up over a long one, where a window's capture simply had nothing new to send.
+                (framed ? " -bsf:v h264_metadata=aud=insert,setts=ts=N -flush_packets 1 -f avi pipe:1" : " -bsf:v h264_metadata=aud=insert -flush_packets 1 -f h264 pipe:1");
             using (var process = new Process()) {
                 process.StartInfo = new ProcessStartInfo(executable, args) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
                 process.ErrorDataReceived += (sender, e) => { if (e.Data != null) Console.Error.WriteLine("[video:" + encoder + "] " + e.Data); };
@@ -120,8 +127,18 @@ namespace LinkShell.Windows {
                 int received = 0;
                 var copy = Task.Run(() => {
                     var buffer = new byte[65536]; int count;
+                    // AVI's headers are written before any picture is: an encoder that then fails
+                    // has made nothing, and the next way of encoding must still be tried. Pictures
+                    // begin after "movi".
+                    byte[] mark = { (byte)'m', (byte)'o', (byte)'v', (byte)'i' };
+                    int matched = framed ? 0 : mark.Length;
                     while ((count = process.StandardOutput.BaseStream.Read(buffer, 0, buffer.Length)) > 0) {
-                        if (Interlocked.Exchange(ref received, 1) == 0) Console.Error.WriteLine("[video] encoder=" + encoder + " width=" + width + " height=" + height + " fps=" + fps + " path=" + (compatible ? "compatible" : "native"));
+                        bool pictures = matched == mark.Length;
+                        for (int i = 0; i < count && !pictures; i++) {
+                            matched = buffer[i] == mark[matched] ? matched + 1 : buffer[i] == mark[0] ? 1 : 0;
+                            if (matched == mark.Length) pictures = i + 1 < count;
+                        }
+                        if (pictures && Interlocked.Exchange(ref received, 1) == 0) Console.Error.WriteLine("[video] encoder=" + encoder + " width=" + width + " height=" + height + " fps=" + fps + " path=" + (compatible ? "compatible" : "native"));
                         destination.Write(buffer, 0, count); destination.Flush();
                     }
                 });

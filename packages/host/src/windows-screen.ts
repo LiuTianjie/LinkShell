@@ -38,7 +38,9 @@ export function windowsHelper(): string | undefined {
 let videoHint: string | undefined;
 
 export function windowsVideoEnv(): NodeJS.ProcessEnv {
-  return videoHint ? { ...process.env, LINKSHELL_WINDOWS_VIDEO_HINT: videoHint } : process.env;
+  // Framed: each picture with its length, so it is handed on as it ends and not when the next
+  // begins (`H264AccessUnits`). A helper that does not know the request writes what it always did.
+  return { ...process.env, LINKSHELL_VIDEO_FRAMED: "1", ...(videoHint ? { LINKSHELL_WINDOWS_VIDEO_HINT: videoHint } : {}) };
 }
 
 /** Reads the helper's `[video] encoder=h264_qsv … path=compatible` line. */
