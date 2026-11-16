@@ -91,6 +91,12 @@ enum Tuning {
   /// lifted the floor within 9–27 s of it being set. Round trip and loss still lift it at once:
   /// those say the path itself is full, not that the pacer has a moment's work in hand.
   static let lanFloorSettle = 5
+  /// Seconds running the sender must queue before that lifts the floor. On a watched Mac's log
+  /// a third of all lifts (26 of 78) were one second of queueing, 54–263 ms, within seconds of
+  /// the floor being set: one large frame at the pacer's rate, not a network refusing the rate.
+  /// The floor went, the estimate fell, and the next large frames waited far longer. The same
+  /// count as `frameRateDownAfter`: a queue that lasts this long costs the frame rate anyway.
+  static let lanFloorLiftSendDelaySeconds = 3
   /// Calm seconds before a lifted floor comes back, and lifts after which it never does.
   static let lanFloorRecalm = 30
   static let lanFloorMaxLifts = 2

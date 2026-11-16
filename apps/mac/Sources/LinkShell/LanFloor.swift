@@ -47,6 +47,8 @@ struct LanFloor {
   /// Seconds the floor has been in force. While this is under `Tuning.lanFloorSettle` the
   /// queueing the floor itself caused is not read as the network refusing it.
   private var held = 0
+  /// Seconds running, with the floor settled, that packets have queued in the sender.
+  private var queued = 0
 
   /// `ceiling`: the most the encoding may send; the floor is never above it.
   mutating func judge(_ second: Second, ceiling: Int) -> Action {
@@ -63,8 +65,12 @@ struct LanFloor {
       if lost > Tuning.lanFloorLiftLoss { return lift(String(format: "%.0f%% of packets were lost", lost * 100)) }
       // Packets queueing in the sender: the network is not taking what the floor lets out. Not
       // while the floor is settling, when the queue is the encoder answering the new rate.
-      if held > Tuning.lanFloorSettle, waited > Tuning.lanFloorLiftSendDelayMs {
-        return lift(String(format: "packets waited %.0f ms to be sent", waited))
+      // And not for one second of it: the queue is the sender's own, and a single large frame (a
+      // window switched to, the key frame after a loss) fills it for a moment at any rate the
+      // network would take. A network that does not take the floor keeps it full.
+      queued = held > Tuning.lanFloorSettle && waited > Tuning.lanFloorLiftSendDelayMs ? queued + 1 : 0
+      if queued >= Tuning.lanFloorLiftSendDelaySeconds {
+        return lift(String(format: "packets waited %.0f ms to be sent, for %d s running", waited, queued))
       }
       if held > Tuning.lanFloorSettle, rtts.count >= Tuning.lanFloorWindow, let lowest = rtts.min(), lowest > Tuning.lanFloorLiftRttMs {
         return lift(String(format: "the round trip stayed above %.0f ms", lowest))
@@ -86,6 +92,7 @@ struct LanFloor {
     let wanted = min(Tuning.lanFloor, ceiling)
     floor = wanted
     held = 0
+    queued = 0
     return .apply(wanted)
   }
 
@@ -94,6 +101,7 @@ struct LanFloor {
     rtts.removeAll()
     calm = 0
     held = 0
+    queued = 0
     lifts += 1
     return .lift(reason)
   }

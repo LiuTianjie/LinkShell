@@ -101,10 +101,28 @@ final class LanFloorTests: XCTestCase {
     for _ in 0..<Tuning.lanFloorWindow { _ = floor.judge(second(rtt: 4), ceiling: ceiling) }
     var queued = second(rtt: 4)
     queued.sendDelayMs = 300
-    for _ in 0..<Tuning.lanFloorSettle {
-      guard case .keep = floor.judge(queued, ceiling: ceiling) else { return XCTFail("the settling floor was lifted") }
+    for _ in 0..<Tuning.lanFloorSettle + Tuning.lanFloorLiftSendDelaySeconds - 1 {
+      guard case .keep = floor.judge(queued, ceiling: ceiling) else { return XCTFail("the floor was lifted before the queue had lasted") }
     }
     guard case .lift = floor.judge(queued, ceiling: ceiling) else { return XCTFail("queueing kept the floor") }
+  }
+
+  /// One large frame fills the sender's queue for a second at any rate: that is not the network
+  /// refusing the floor, however often it happens.
+  func testOneSecondOfQueueingKeepsTheFloor() {
+    var floor = LanFloor()
+    for _ in 0..<Tuning.lanFloorWindow { _ = floor.judge(second(rtt: 4), ceiling: ceiling) }
+    for _ in 0..<Tuning.lanFloorSettle { _ = floor.judge(second(rtt: 4), ceiling: ceiling) }
+    var burst = second(rtt: 4)
+    burst.sendDelayMs = 263
+    for _ in 0..<10 {
+      for _ in 0..<Tuning.lanFloorLiftSendDelaySeconds - 1 {
+        guard case .keep = floor.judge(burst, ceiling: ceiling) else { return XCTFail("a burst lifted the floor") }
+      }
+      guard case .keep = floor.judge(second(rtt: 4), ceiling: ceiling) else { return XCTFail("a quiet second lifted the floor") }
+    }
+    XCTAssertNotNil(floor.floor)
+    XCTAssertEqual(floor.lifts, 0)
   }
 
   /// The burst the floor itself causes goes away by the time it has settled, and keeps the floor.
