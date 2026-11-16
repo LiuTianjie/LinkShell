@@ -2,6 +2,14 @@ import type { ContentInsets } from "./adaptive-insets";
 
 export const hasSideToolbar = (insets: ContentInsets) => Math.max(insets.left, insets.right) >= 80;
 
+/**
+ * Custom toolbar views (`UIBarButtonItem(customView:)`) cannot enter iPhone Duo's vertical side bar
+ * and force UIKit to mount an auxiliary full-width top bar; keep native button items on side toolbars.
+ */
+export function usesCustomLiveToolbarItem(platform: string, systemInsets: ContentInsets, live?: boolean) {
+  return platform === "ios" && live !== undefined && !hasSideToolbar(systemInsets);
+}
+
 export function homeUsesInlineControls(systemInsets: ContentInsets, detailVisible: boolean) {
   // A fold report can briefly change `split`; an empty list still has no native title or actions.
   return !detailVisible && !hasSideToolbar(systemInsets);

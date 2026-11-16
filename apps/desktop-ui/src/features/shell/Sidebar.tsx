@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
@@ -20,17 +21,18 @@ import {
   fusionCapabilityMessage,
   openProjectContextMenu,
   openSessionContextMenu,
+  projectFoldKey,
   projectScopeStore,
-  readLocal,
+  readTreeFold,
   refreshConnectionProjects,
   revealInFilesLabel,
   revealPathOnDesktop,
-  saveLocal,
   sessionFamilies,
   sessionGroup,
   sessionTitle,
   setProjectScope,
-  STORAGE_KEYS,
+  setTreeFold,
+  treeFoldStore,
   useActiveDesktopPlatform,
   useFusionState,
   useI18n,
@@ -90,21 +92,26 @@ function openRowContextMenu(row: HTMLElement): void {
 /** A collapse choice the user made, remembered per computer so reloads and the hover drawer keep it. */
 function usePersistedFold(
   computerKey: string,
-  groupKey: string,
+  groupOrKey: string | Pick<DesktopProjectGroup, "key" | "cwd" | "generated">,
   initial: () => boolean,
-): [boolean, (next: boolean) => void] {
-  const storageKey = STORAGE_KEYS.treeFolded(computerKey);
-  const [collapsed, setCollapsedState] = useState(() => {
-    const stored = readLocal<Record<string, boolean>>(storageKey, {});
-    return typeof stored[groupKey] === "boolean" ? stored[groupKey]! : initial();
-  });
+): [boolean, (next?: boolean | ((prev: boolean) => boolean)) => void] {
+  useStore(treeFoldStore, (state) => state.revision);
+  const foldKey = projectFoldKey(groupOrKey);
+  const explicit = readTreeFold(computerKey, foldKey);
+  const defaultRef = useRef<{ key: string; value: boolean } | null>(null);
+  const scopeKey = `${computerKey}\n${foldKey}`;
+  if (!defaultRef.current || defaultRef.current.key !== scopeKey) {
+    defaultRef.current = { key: scopeKey, value: initial() };
+  }
+  const collapsed = explicit ?? defaultRef.current.value;
   const setCollapsed = useCallback(
-    (next: boolean) => {
-      setCollapsedState(next);
-      const stored = readLocal<Record<string, boolean>>(storageKey, {});
-      saveLocal(storageKey, { ...stored, [groupKey]: next });
+    (next?: boolean | ((prev: boolean) => boolean)) => {
+      const current = readTreeFold(computerKey, foldKey) ?? defaultRef.current?.value ?? false;
+      const resolved =
+        typeof next === "function" ? next(current) : next !== undefined ? next : !current;
+      setTreeFold(computerKey, foldKey, resolved);
     },
-    [groupKey, storageKey],
+    [computerKey, foldKey],
   );
   return [collapsed, setCollapsed];
 }
@@ -393,7 +400,7 @@ function ProjectTreeBlock({
       activeComputerKey === computerKey &&
       group.sessions.some((s) => s.id === activeSessionId),
   );
-  const [collapsed, setCollapsed] = usePersistedFold(computerKey, group.key, () => {
+  const [collapsed, setCollapsed] = usePersistedFold(computerKey, group, () => {
     if (group.running > 0 || groupContainsActiveRoute) return false;
     if (groupIndex < 3) return false;
     return (
@@ -403,9 +410,18 @@ function ProjectTreeBlock({
   });
   const [showAll, setShowAll] = useState(false);
 
+  // Expand only when navigation newly lands on a session inside this project; never override a manual collapse of the active project.
+  const activeRouteKey = groupContainsActiveRoute
+    ? `${activeComputerKey}:${activeSessionId}`
+    : undefined;
+  const prevActiveRouteKeyRef = useRef(activeRouteKey);
   useEffect(() => {
-    if (groupContainsActiveRoute && collapsed) setCollapsed(false);
-  }, [collapsed, groupContainsActiveRoute, setCollapsed]);
+    const prev = prevActiveRouteKeyRef.current;
+    prevActiveRouteKeyRef.current = activeRouteKey;
+    if (activeRouteKey && activeRouteKey !== prev && collapsed) {
+      setCollapsed(false);
+    }
+  }, [activeRouteKey, collapsed, setCollapsed]);
 
   const families = useMemo(() => sessionFamilies(group.sessions), [group.sessions]);
   const visibleFamilies = showAll ? families : families.slice(0, INITIAL_VISIBLE_SESSIONS);
@@ -484,7 +500,7 @@ function ProjectTreeBlock({
       type="button"
       aria-expanded={!collapsed}
       className="tree-project__toggle"
-      onClick={() => setCollapsed(!collapsed)}
+      onClick={() => setCollapsed()}
       onContextMenu={
         isElectronDesktop && connection
           ? (event) => {
@@ -645,7 +661,7 @@ function ComputerTreeBlock({
           type="button"
           aria-expanded={!collapsed}
           className="tree-computer__toggle"
-          onClick={() => setCollapsed(!collapsed)}
+          onClick={() => setCollapsed()}
         >
           <span className="tree-computer__chevron" aria-hidden="true">
             <DesktopIcon name="chevron-right" size="xs" />
@@ -687,7 +703,7 @@ function ComputerTreeBlock({
             ) : (
               visibleCompGroups.map((group, idx) => (
                 <ProjectTreeBlock
-                  key={group.key}
+                  key={`${compTree.key}:${projectFoldKey(group)}`}
                   group={group}
                   groupIndex={idx}
                   computerKey={compTree.key}
@@ -854,6 +870,28 @@ export function Sidebar({
       return;
     }
     if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+    if (
+      (event.key === "ArrowLeft" || event.key === "ArrowRight") &&
+      target.matches(".tree-project__toggle, .tree-computer__toggle")
+    ) {
+      const isExpanded = target.getAttribute("aria-expanded") === "true";
+      if ((event.key === "ArrowLeft" && isExpanded) || (event.key === "ArrowRight" && !isExpanded)) {
+        event.preventDefault();
+        target.click();
+        return;
+      }
+      if (event.key === "ArrowLeft" && target.matches(".tree-project__toggle")) {
+        const parentToggle = target
+          .closest(".tree-computer")
+          ?.querySelector<HTMLElement>(".tree-computer__toggle");
+        if (parentToggle) {
+          event.preventDefault();
+          parentToggle.focus();
+          return;
+        }
+      }
+      return;
+    }
     const rows = Array.from(
       event.currentTarget.querySelectorAll<HTMLElement>(ROW_SELECTOR),
     ).filter((row) => !row.closest("[inert]"));
@@ -1194,7 +1232,7 @@ export function Sidebar({
           ) : visibleGroups.length > 0 ? (
             visibleGroups.map((group, idx) => (
               <ProjectTreeBlock
-                key={group.key}
+                key={`${activeComputerKey}:${projectFoldKey(group)}`}
                 group={group}
                 groupIndex={idx}
                 computerKey={activeComputerKey}

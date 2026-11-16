@@ -469,6 +469,13 @@ export function SessionContent({
     else if (workspace) workspace.show("changes");
     else router.push({ pathname: "/session/[id]/changes", params: { id } });
   };
+  const subagentsLabel = taskCount
+    ? pick({ zh: `后台任务（${tasksRunning}）`, en: `Tasks (${tasksRunning})`, ja: `タスク (${tasksRunning})` })
+    : hasWorkflows
+      ? pick({ zh: "Agent 与工作流", en: "Agents & Workflows", ja: "Agent とワークフロー" })
+      : subagentsRunning
+        ? pick({ zh: `子 Agent（${subagentsRunning}）`, en: `Subagents (${subagentsRunning})`, ja: `サブエージェント (${subagentsRunning})` })
+        : pick({ zh: "子 Agent", en: "Subagents", ja: "サブエージェント" });
   const starterPrompts = [
     { label: t("composer.quickSummarize"), prompt: t("composer.quickSummarizePrompt") },
     { label: t("composer.quickRunTests"), prompt: t("composer.quickRunTestsPrompt") },
@@ -597,13 +604,7 @@ export function SessionContent({
                           kind: "button" as const,
                           key: "subagents",
                           icon: { sf: "square.stack.3d.up", md: "layers" } as const,
-                          label: taskCount
-                            ? pick({ zh: `后台任务（${tasksRunning}）`, en: `Tasks (${tasksRunning})`, ja: `タスク (${tasksRunning})` })
-                            : hasWorkflows
-                              ? pick({ zh: "Agent 与工作流", en: "Agents & Workflows", ja: "Agent とワークフロー" })
-                              : subagentsRunning
-                                ? pick({ zh: `子 Agent（${subagentsRunning}）`, en: `Subagents (${subagentsRunning})`, ja: `サブエージェント (${subagentsRunning})` })
-                                : pick({ zh: "子 Agent", en: "Subagents", ja: "サブエージェント" }),
+                          label: subagentsLabel,
                           live: subagentsRunning > 0 || tasksRunning > 0,
                           onPress: () => router.push({ pathname: "/session/[id]/agents", params: { id } }),
                         },
@@ -683,6 +684,16 @@ export function SessionContent({
                         icon: { sf: "magnifyingglass", md: "search" },
                         onPress: () => setOutlineOpen(true),
                       },
+                      ...(hasSubagents
+                        ? [
+                            {
+                              section: "look",
+                              title: subagentsLabel,
+                              icon: { sf: "square.stack.3d.up", md: "layers" } as const,
+                              onPress: () => router.push({ pathname: "/session/[id]/agents", params: { id } }),
+                            },
+                          ]
+                        : []),
                       {
                         section: "look",
                         title: t("nav.changes"),

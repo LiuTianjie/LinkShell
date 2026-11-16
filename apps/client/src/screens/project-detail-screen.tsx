@@ -158,12 +158,12 @@ export function ProjectDetailScreen() {
           .filter((session: SessionSummary) => {
             const source = session.worktree?.source ?? session.cwd;
             const location = projectLocation(source);
-            return !session.archived && (generated ? location.generated && location.key === cwd : source === cwd);
+            return !session.archived && (generated ? location.generated && sameProjectDirectory(location.key, cwd ?? "") : sameProjectDirectory(source, cwd ?? ""));
           })
           .map((session) => ({ key: session.id, at: session.updatedAt, session })),
         ...terminals.filter((terminal) => {
           const location = projectLocation(terminal.cwd);
-          return generated ? location.generated && location.key === cwd : terminal.cwd === cwd;
+          return generated ? location.generated && sameProjectDirectory(location.key, cwd ?? "") : sameProjectDirectory(terminal.cwd, cwd ?? "");
         }).map((terminal) => ({ key: `t-${terminal.id}`, at: terminal.activeAt, terminal })),
       ].sort((a, b) => b.at - a.at),
     [sessionsById, terminals, cwd, generated],

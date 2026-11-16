@@ -23,6 +23,7 @@ import {
   management,
   openProjectContextMenu,
   openSessionContextMenu,
+  resetDesktopStorageForTests,
   routerStore,
   setDesktopLocalePreference,
   setProjectScope,
@@ -2018,5 +2019,135 @@ describe("Slice 2B-1 DesktopAppShell, Chrome Geometry, Sidebar E2E Hooks & Comma
       (host.querySelector(".shell-notice button") as HTMLButtonElement).click();
     });
     expect(host.querySelector(".shell-notice")).toBeNull();
+  });
+
+  it("collapses and expands Windows projects reliably across active sessions, path-case updates, peek drawer, keyboard arrows, and ProjectsOverview", () => {
+    resetDesktopStorageForTests({});
+    const winPc: Computer = {
+      key: DESKTOP_LOCAL,
+      gateway: "local",
+      machine: {
+        id: "machine-win-local",
+        name: "PC - 3450u",
+        online: true,
+        platform: "win32",
+        signKey: "win-sign",
+        boxKey: "win-box",
+        via: "paired",
+      },
+    };
+    const s1 = sessionFixture("win-s1", {
+      cwd: "c:\\users\\dev\\glance",
+      title: "小屏最新代码刷写",
+      updatedAt: 9_000,
+    });
+    const s2 = sessionFixture("win-s2", {
+      cwd: "C:/Users/Dev/glance/firmware",
+      title: "窗口无法拖动",
+      updatedAt: 8_000,
+    });
+    const conn = makeMockConnection(winPc, { sessions: [s1, s2] });
+    engine.state.setState({
+      computers: [winPc],
+      localComputer: winPc,
+      connection: conn,
+      locked: false,
+    });
+    routerStore.getState().openSession(DESKTOP_LOCAL, "win-s1");
+
+    mount(
+      <DesktopAppShell
+        platformOverride="windows"
+        renderSessionWorkspace={({ sessionId }) => <div data-testid="win-session">{sessionId}</div>}
+      />,
+    );
+
+    const projectBlock = () => host.querySelector(".desktop-sidebar .tree-project") as HTMLElement;
+    const projectToggle = () =>
+      host.querySelector(".desktop-sidebar .tree-project__toggle") as HTMLButtonElement;
+
+    expect(projectBlock().dataset.open).toBe("true");
+    expect(projectToggle().getAttribute("aria-expanded")).toBe("true");
+
+    // 1. Collapsing the project containing the currently open session stays collapsed instead of snapping back open.
+    act(() => {
+      projectToggle().click();
+    });
+    expect(projectBlock().dataset.open).toBe("false");
+    expect(projectToggle().getAttribute("aria-expanded")).toBe("false");
+    expect(
+      projectBlock().querySelector(".ls-collapse-grid__inner")?.hasAttribute("inert"),
+    ).toBe(true);
+
+    // 2. Arriving projects.list with different Windows drive case & trailing backslash keeps the collapsed state.
+    act(() => {
+      conn.store.setState({
+        projects: [
+          {
+            cwd: "C:\\Users\\Dev\\glance\\",
+            name: "glance",
+            createdAt: 1_000,
+            lastActiveAt: 9_000,
+            sessionCount: 2,
+          },
+        ],
+      });
+    });
+    expect(projectBlock().dataset.open).toBe("false");
+
+    // 3. Keyboard ArrowRight expands and ArrowLeft collapses on .tree-project__toggle.
+    projectToggle().focus();
+    act(() => {
+      projectToggle().dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }),
+      );
+    });
+    expect(projectBlock().dataset.open).toBe("true");
+
+    act(() => {
+      projectToggle().dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true, cancelable: true }),
+      );
+    });
+    expect(projectBlock().dataset.open).toBe("false");
+
+    // 4. Navigating to a different session inside the collapsed project automatically expands it.
+    act(() => {
+      routerStore.getState().openSession(DESKTOP_LOCAL, "win-s2");
+    });
+    expect(projectBlock().dataset.open).toBe("true");
+
+    // 5. ProjectsOverview keeps expanded state across Windows path spelling updates and toggles when clicking row metadata.
+    act(() => {
+      routerStore.getState().navigate({ kind: "projects" });
+    });
+    const entityGroup = () => host.querySelector(".shell-page .ls-entity-group") as HTMLElement;
+    const entityMeta = () => host.querySelector(".shell-page .ls-entity-row__meta") as HTMLElement;
+    expect(entityGroup().dataset.open).toBe("false");
+
+    act(() => {
+      entityMeta().click();
+    });
+    expect(entityGroup().dataset.open).toBe("true");
+    // Exact root session ("c:\users\dev\glance" vs "C:\Users\Dev\glance") shows no bogus subdir chip, while firmware does.
+    const subdirs = Array.from(
+      host.querySelectorAll(".shell-page .ls-entity-subrow__subdir"),
+    ).map((el) => el.textContent);
+    expect(subdirs).toEqual(["firmware"]);
+
+    act(() => {
+      conn.store.setState({
+        projects: [
+          {
+            cwd: "c:/users/dev/glance",
+            name: "glance",
+            createdAt: 1_000,
+            lastActiveAt: 9_500,
+            sessionCount: 2,
+          },
+        ],
+      });
+    });
+    expect(entityGroup().dataset.open).toBe("true");
   });
 });

@@ -24,6 +24,12 @@ function sameDirectoryKey(key: string): string {
   return key.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
 }
 
+/** Stable lookup key for a project or generated chat group across Windows drive-case and slash spellings. */
+export function projectDirectoryKey(key: string): string {
+  if (key.startsWith("codex-chats:")) return `codex-chats:${sameDirectoryKey(key.slice("codex-chats:".length))}`;
+  return sameDirectoryKey(key);
+}
+
 /** Whether two working directories are the same folder (a route keeps one spelling, a group another). */
 export function sameProjectDirectory(a: string, b: string): boolean {
   return a === b || sameDirectoryKey(a) === sameDirectoryKey(b);
@@ -36,7 +42,7 @@ export function groupProjects(projects: ProjectSummary[], sessions: SessionSumma
     const location = projectLocation(project.cwd);
     const key = location.generated ? `codex-chats:${location.key}` : location.key;
     // Found by what the directory is; `key` stays the first spelling seen, as routes hold it.
-    const found = sameDirectoryKey(key);
+    const found = projectDirectoryKey(key);
     let group = groups.get(found);
     if (!group) {
       group = { ...project, key, cwd: location.key, name: location.name ?? project.name, generated: location.generated,

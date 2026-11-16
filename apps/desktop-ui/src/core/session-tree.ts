@@ -235,6 +235,29 @@ export function normalizeProjectPathKey(cwd: string): string {
   return parsed.caseInsensitive ? canonical.toLowerCase() : canonical;
 }
 
+/**
+ * Canonical fold/React key for a project group so Windows drive-letter case (`C:` vs `c:`)
+ * and path separators (`\` vs `/`) never split or reset expand/collapse state.
+ */
+export function projectFoldKey(
+  groupOrKey: string | Pick<ProjectGroup, "key" | "cwd" | "generated">,
+): string {
+  if (typeof groupOrKey === "string") {
+    if (groupOrKey === "__computer__") return groupOrKey;
+    if (groupOrKey.startsWith("codex-chats:")) {
+      return `codex-chats:${normalizeProjectPathKey(groupOrKey.slice("codex-chats:".length))}`;
+    }
+    return normalizeProjectPathKey(groupOrKey);
+  }
+  if (groupOrKey.generated) {
+    const raw = groupOrKey.key.startsWith("codex-chats:")
+      ? groupOrKey.key.slice("codex-chats:".length)
+      : (groupOrKey.cwd || groupOrKey.key);
+    return `codex-chats:${normalizeProjectPathKey(raw)}`;
+  }
+  return normalizeProjectPathKey(groupOrKey.cwd || groupOrKey.key);
+}
+
 function detectHomeSegmentLength(parsed: ParsedOsPath): number | undefined {
   const { kind, segments } = parsed;
   if (kind === "posix") {
@@ -893,4 +916,46 @@ subscribeStorageReady(() => {
 export function setProjectScope(scope: ProjectScope): void {
   saveLocal(STORAGE_KEYS.projectScope, scope);
   projectScopeStore.setState({ scope });
+}
+
+export const treeFoldStore = createStore<{ revision: number }>(() => ({
+  revision: 0,
+}));
+
+subscribeStorageReady(() => {
+  treeFoldStore.setState((state) => ({ revision: state.revision + 1 }));
+});
+
+export function readTreeFold(
+  computerKey: string,
+  groupOrKey: string | Pick<ProjectGroup, "key" | "cwd" | "generated">,
+): boolean | undefined {
+  const stored = readLocal<Record<string, boolean>>(STORAGE_KEYS.treeFolded(computerKey), {});
+  const canonical = projectFoldKey(groupOrKey);
+  if (typeof stored[canonical] === "boolean") return stored[canonical];
+  for (const [rawKey, value] of Object.entries(stored)) {
+    if (typeof value === "boolean" && projectFoldKey(rawKey) === canonical) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+export function setTreeFold(
+  computerKey: string,
+  groupOrKey: string | Pick<ProjectGroup, "key" | "cwd" | "generated">,
+  collapsed: boolean,
+): void {
+  const storageKey = STORAGE_KEYS.treeFolded(computerKey);
+  const stored = readLocal<Record<string, boolean>>(storageKey, {});
+  const canonical = projectFoldKey(groupOrKey);
+  const next: Record<string, boolean> = {};
+  for (const [rawKey, value] of Object.entries(stored)) {
+    if (typeof value === "boolean" && projectFoldKey(rawKey) !== canonical) {
+      next[rawKey] = value;
+    }
+  }
+  next[canonical] = collapsed;
+  saveLocal(storageKey, next);
+  treeFoldStore.setState((state) => ({ revision: state.revision + 1 }));
 }

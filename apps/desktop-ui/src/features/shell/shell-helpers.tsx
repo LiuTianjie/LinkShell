@@ -437,7 +437,7 @@ export function shortenHomePath(pathValue: string): string {
   if (unixMatch) {
     return `~${unixMatch[1] ?? ""}`;
   }
-  const winMatch = /^[A-Za-z]:\\Users\\[^\\]+(\\.*)?$/.exec(pathValue);
+  const winMatch = /^[A-Za-z]:[\\/]Users[\\/][^\\/]+([\\/].*)?$/i.exec(pathValue);
   if (winMatch) {
     return `~${winMatch[1] ?? ""}`;
   }
@@ -448,6 +448,18 @@ export function relativeSubdirLabel(projectRoot: string, cwd: string): string | 
   const cleanRoot = projectRoot.replace(/[\\/]+$/, "");
   const cleanCwd = cwd.replace(/[\\/]+$/, "");
   if (!cleanCwd || cleanCwd === cleanRoot) return undefined;
+  const isWin =
+    /^(?:[A-Za-z]:(?:[\\/]|$)|\\\\)/.test(cleanRoot) ||
+    /^(?:[A-Za-z]:(?:[\\/]|$)|\\\\)/.test(cleanCwd);
+  if (isWin) {
+    const normRoot = cleanRoot.replace(/\\/g, "/").toLowerCase();
+    const normCwd = cleanCwd.replace(/\\/g, "/").toLowerCase();
+    if (normCwd === normRoot) return undefined;
+    if (normRoot && normCwd.startsWith(`${normRoot}/`)) {
+      return cleanCwd.slice(cleanRoot.length + 1);
+    }
+    return folderBasename(cleanCwd);
+  }
   if (cleanRoot && (cleanCwd.startsWith(`${cleanRoot}/`) || cleanCwd.startsWith(`${cleanRoot}\\`))) {
     return cleanCwd.slice(cleanRoot.length + 1);
   }

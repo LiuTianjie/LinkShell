@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import type { ProjectSummary, SessionSummary } from "@linkshell/wire";
-import { groupProjects, projectLocation, sameProjectDirectory } from "../src/projects.js";
+import { groupProjects, projectDirectoryKey, projectLocation, sameProjectDirectory } from "../src/projects.js";
 
 const project = (cwd: string, count = 1): ProjectSummary => ({ cwd, name: cwd.split(/[\\/]/).pop()!, sessionCount: count, lastActiveAt: count });
 
@@ -57,6 +57,11 @@ it("lists a Windows folder once, however its drive letter and slashes are writte
   expect(shop.sessionCount).toBe(4);
   expect(shop.sessions.map((s) => s.id).sort()).toEqual(["a", "b"]);
   expect(sameProjectDirectory("c:\\users\\ME\\shop\\", shop.cwd)).toBe(true);
+  expect(projectDirectoryKey("C:\\Users\\me\\shop\\")).toBe(projectDirectoryKey("c:/users/me/Shop"));
+  expect(groupProjects([
+    project("C:\\Users\\me\\Documents\\Codex\\2026-10-29\\a"),
+    project("c:\\users\\me\\Documents\\Codex\\2026-10-30\\b"),
+  ])).toHaveLength(1);
   // Elsewhere a name's case is part of it.
   expect(groupProjects([project("/Users/me/shop"), project("/Users/me/Shop")])).toHaveLength(2);
   expect(sameProjectDirectory("/Users/me/shop", "/Users/me/Shop")).toBe(false);

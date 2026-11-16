@@ -1,8 +1,10 @@
 import { AppMenu } from "@/components/app-menu";
 import { Stack } from "expo-router";
 import { Platform, Pressable, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useContentWidth } from "@/lib/content-width";
 import { haptics } from "@/lib/haptics";
+import { usesCustomLiveToolbarItem } from "@/lib/home-layout";
 import { colors } from "@/theme/colors";
 import { Icon, type IconProps } from "./icon";
 import { StatusDot } from "./status";
@@ -58,16 +60,23 @@ export type HeaderAction =
  * the Android toolbar can't draw SF Symbols.
  */
 export function HeaderActions({ actions }: { actions: HeaderAction[] }) {
+  const systemInsets = useSafeAreaInsets();
   if (Platform.OS === "ios") {
     return (
       <Stack.Toolbar placement="right">
         {actions.map((action) =>
-          action.kind === "button" ? action.live !== undefined ? (
+          action.kind === "button" ? usesCustomLiveToolbarItem(Platform.OS, systemInsets, action.live) ? (
             <Stack.Toolbar.View key={action.key}>
               <IconButton icon={action.icon} label={action.label} live={action.live} onPress={action.onPress} />
             </Stack.Toolbar.View>
           ) : (
-            <Stack.Toolbar.Button key={action.key} icon={action.icon.sf} accessibilityLabel={action.label} onPress={action.onPress}>
+            <Stack.Toolbar.Button
+              key={action.key}
+              icon={action.icon.sf}
+              tintColor={action.live ? colors.running : undefined}
+              accessibilityLabel={action.label}
+              onPress={action.onPress}
+            >
               <Stack.Toolbar.Label>{action.label}</Stack.Toolbar.Label>
             </Stack.Toolbar.Button>
           ) : (

@@ -6,6 +6,7 @@ import {
   computerSessionTrees,
   desktopSessionTree,
   engine,
+  projectFoldKey,
   projectScopeStore,
   revealInFilesLabel,
   revealPathOnDesktop,
@@ -133,6 +134,14 @@ function ProjectListRow({
   );
 
   const moreActionsLabel = t("desktop.shell.projectActions", { name: group.name });
+  const activatePrimaryAction = () => {
+    if (hasSessions) {
+      setExpanded((prev) => !prev);
+    } else {
+      selectComputerIfNeeded(computer);
+      onRequestNewSession(computerKey, projectPath || undefined);
+    }
+  };
 
   return (
     <div
@@ -140,19 +149,23 @@ function ProjectListRow({
       className="ls-entity-group"
       data-open={expanded && hasSessions ? "true" : "false"}
     >
-      <div className="ls-entity-row">
+      <div
+        className="ls-entity-row"
+        onClick={(event) => {
+          if (
+            event.target instanceof Element &&
+            event.target.closest("button, a, input, select, [role='button'], [role='menuitem']")
+          ) {
+            return;
+          }
+          activatePrimaryAction();
+        }}
+      >
         <button
           type="button"
           aria-expanded={hasSessions ? expanded : undefined}
           className="ls-entity-row__main"
-          onClick={() => {
-            if (hasSessions) {
-              setExpanded((prev) => !prev);
-            } else {
-              selectComputerIfNeeded(computer);
-              onRequestNewSession(computerKey, projectPath || undefined);
-            }
-          }}
+          onClick={activatePrimaryAction}
         >
           <span
             className="ls-entity-row__chevron"
@@ -544,7 +557,7 @@ export function ProjectsOverview({ onRequestNewSession }: ProjectsOverviewProps)
                       >
                         {filteredGroups.map((group) => (
                           <ProjectListRow
-                            key={`${compTree.key}:${group.key}`}
+                            key={`${compTree.key}:${projectFoldKey(group)}`}
                             computerKey={compTree.key}
                             computer={comp}
                             computerTitle={compTitle}
@@ -580,7 +593,7 @@ export function ProjectsOverview({ onRequestNewSession }: ProjectsOverviewProps)
                 );
                 return (
                   <ProjectListRow
-                    key={`${activeComputerKey}:${group.key}`}
+                    key={`${activeComputerKey}:${projectFoldKey(group)}`}
                     computerKey={activeComputerKey}
                     computer={activeComputer}
                     computerTitle={compTitle}

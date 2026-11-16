@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useStore } from "zustand";
-import { groupProjects } from "@linkshell/client-core";
+import { groupProjects, projectDirectoryKey } from "@linkshell/client-core";
 import type { SessionSummary } from "@linkshell/wire";
 import { Layers3, MessageSquare, GitBranch, Plus, Search, ChevronDown, RefreshCw, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -88,7 +88,7 @@ function AllProjectList({ sources, projects, openComputerView }: {
         </div>
         {project.members.map((member) => {
           const source = byKey.get(member.computerKey)!;
-          const memberKey = `${member.computerKey}:${member.project.key}`;
+          const memberKey = `${member.computerKey}:${projectDirectoryKey(member.project.key)}`;
           const sessions = needle || expanded[memberKey] ? member.project.sessions : member.project.sessions.slice(0, 3);
           return <div key={memberKey} className="project-computer">
             <div className="project-computer-heading">
@@ -213,9 +213,10 @@ function ProjectList({ create, navigate, title = "项目", scopeChoice = false, 
       {!state.sessionsLoaded && !state.sessionsError && <LoadState loading />}
       <div className="project-list">
         {projects.map((project) => {
-          const shown = query.trim() || expanded[project.key] ? project.sessions : project.sessions.slice(0, 3);
+          const dirKey = projectDirectoryKey(project.key);
+          const shown = query.trim() || expanded[dirKey] ? project.sessions : project.sessions.slice(0, 3);
           return (
-            <section key={project.key} className="project-group" aria-label={project.name}>
+            <section key={dirKey} className="project-group" aria-label={project.name}>
               <div className="project-row">
                 {project.generated ? <MessageSquare className="project-icon" aria-hidden /> : <Layers3 className="project-icon" aria-hidden />}
                 <div className="project-copy">
@@ -258,11 +259,11 @@ function ProjectList({ create, navigate, title = "项目", scopeChoice = false, 
                     <button
                       type="button"
                       className="project-more"
-                      aria-expanded={!!expanded[project.key]}
-                      onClick={() => setExpanded((current) => ({ ...current, [project.key]: !current[project.key] }))}
+                      aria-expanded={!!expanded[dirKey]}
+                      onClick={() => setExpanded((current) => ({ ...current, [dirKey]: !current[dirKey] }))}
                     >
-                      <ChevronDown aria-hidden data-open={expanded[project.key] || undefined} />
-                      {expanded[project.key] ? "收起" : `其余 ${project.sessions.length - 3} 个会话`}
+                      <ChevronDown aria-hidden data-open={expanded[dirKey] || undefined} />
+                      {expanded[dirKey] ? "收起" : `其余 ${project.sessions.length - 3} 个会话`}
                     </button>
                   )}
                 </div>

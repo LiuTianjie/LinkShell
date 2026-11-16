@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { homeNavigationLayout, homeUsesInlineControls } from "../src/lib/home-layout";
+import { homeNavigationLayout, homeUsesInlineControls, usesCustomLiveToolbarItem } from "../src/lib/home-layout";
 import { workspaceLayout } from "../src/lib/workspace-layout";
 
 describe("Home native header geometry", () => {
@@ -38,5 +38,21 @@ describe("Home native header geometry", () => {
   it("still clears a horizontal header on conventional landscape phones", () => {
     const page = { top: 0, left: 0, right: 0, bottom: 21 };
     expect(homeNavigationLayout(page, { ...page, left: 59, right: 59 }, 44).contentTop).toBe(44);
+  });
+
+  it("keeps live subagent actions inside Duo's vertical side toolbar instead of forcing a custom top bar", () => {
+    const portrait = { top: 62, left: 0, right: 0, bottom: 34 };
+    const landscapePhone = { top: 0, left: 59, right: 59, bottom: 21 };
+    const duoRight = { top: 0, left: 0, right: 84, bottom: 0 };
+    const duoLeft = { top: 0, left: 84, right: 0, bottom: 0 };
+
+    expect(usesCustomLiveToolbarItem("ios", portrait, true)).toBe(true);
+    expect(usesCustomLiveToolbarItem("ios", portrait, false)).toBe(true);
+    expect(usesCustomLiveToolbarItem("ios", portrait, undefined)).toBe(false);
+    expect(usesCustomLiveToolbarItem("ios", landscapePhone, true)).toBe(true);
+    expect(usesCustomLiveToolbarItem("ios", duoRight, true)).toBe(false);
+    expect(usesCustomLiveToolbarItem("ios", duoRight, false)).toBe(false);
+    expect(usesCustomLiveToolbarItem("ios", duoLeft, true)).toBe(false);
+    expect(usesCustomLiveToolbarItem("android", portrait, true)).toBe(false);
   });
 });

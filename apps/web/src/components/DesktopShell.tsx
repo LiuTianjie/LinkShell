@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNod
 import { useStore } from "zustand";
 import { HOST_PROTOCOL, type ProjectSummary, type SessionSummary } from "@linkshell/wire";
 import type { ProjectGroup } from "@linkshell/client-core";
-import { LOCALE_LABELS, isLocalePreference, t as translate, type I18nKey, type Locale } from "@linkshell/client-core";
+import { LOCALE_LABELS, isLocalePreference, projectDirectoryKey, t as translate, type I18nKey, type Locale } from "@linkshell/client-core";
 import {
   AppWindowMac,
   BookOpen,
@@ -381,12 +381,19 @@ function SessionTree({ connection, view, navigate, background = false, scopeMenu
   });
   const tree = useMemo(() => desktopSessionTree(projects, Object.values(sessions)), [sessions, projects]);
   const active = projectKey ? [] : tree.active;
-  const groups = projectKey ? tree.groups.filter((group) => group.key === projectKey) : tree.groups;
+  const groups = projectKey
+    ? tree.groups.filter((group) => projectDirectoryKey(group.key) === projectDirectoryKey(projectKey))
+    : tree.groups;
   const currentProject = groups.find((group) => group.sessions.some((session) => session.id === view))?.key;
-  const isOpen = (group: ProjectGroup, index: number) =>
-    projectKey !== undefined || (open[group.key] ?? (group.key === currentProject || index === 0));
+  const isOpen = (group: ProjectGroup, index: number) => {
+    const dirKey = projectDirectoryKey(group.key);
+    return projectKey !== undefined || (open[dirKey] ?? open[group.key] ?? (group.key === currentProject || index === 0));
+  };
   const toggle = (group: ProjectGroup, index: number) => {
-    const next = { ...open, [group.key]: !isOpen(group, index) };
+    const dirKey = projectDirectoryKey(group.key);
+    const nextOpen = !isOpen(group, index);
+    const next = { ...open, [dirKey]: nextOpen };
+    if (group.key !== dirKey) delete next[group.key];
     setOpen(next);
     try { saveLocal(storageKey, next); } catch { /* The tree still works without storage. */ }
   };
@@ -457,12 +464,13 @@ function SessionTree({ connection, view, navigate, background = false, scopeMenu
           : !loaded && <p className="tree-note">正在载入会话…</p>}
         {loaded && !groups.length && <p className="tree-note">还没有会话。按 {shortcutText(desktopShortcuts.newSession)} 开始第一个任务。</p>}
         {shown.map((group, index) => {
+          const groupDirKey = projectDirectoryKey(group.key);
           const expanded = isOpen(group, index);
           const all = sessionFamilies(group.sessions);
-          const limit = more[group.key] ? 40 : SESSIONS_SHOWN;
+          const limit = more[groupDirKey] ? 40 : SESSIONS_SHOWN;
           const list = all.filter((family, index) => index < limit || family.root.id === view || family.children.some((child) => child.id === view));
           return (
-            <div className="tree-project" key={group.key}>
+            <div className="tree-project" key={groupDirKey}>
               {!projectKey && <div
                 className="tree-project-row"
                 data-menu-open={menuFor === `project:${group.key}` || undefined}
@@ -511,17 +519,17 @@ function SessionTree({ connection, view, navigate, background = false, scopeMenu
                       />
                     ));
                   })}
-                  {(more[group.key] || Math.min(all.length, 40) > list.length) && (
+                  {(more[groupDirKey] || Math.min(all.length, 40) > list.length) && (
                     <button
                       type="button"
                       className="tree-more"
-                      onClick={() => setMore((state) => ({ ...state, [group.key]: !state[group.key] }))}
+                      onClick={() => setMore((state) => ({ ...state, [groupDirKey]: !state[groupDirKey] }))}
                     >
-                      {more[group.key] ? "收起" : `显示其余 ${Math.min(all.length, 40) - list.length} 个`}
+                      {more[groupDirKey] ? "收起" : `显示其余 ${Math.min(all.length, 40) - list.length} 个`}
                     </button>
                   )}
                   {/* The sidebar stops at 40; the project's page has them all. */}
-                  {more[group.key] && all.length > 40 && (
+                  {more[groupDirKey] && all.length > 40 && (
                     <button type="button" className="tree-more" onClick={() => navigate("projects")}>
                       在项目中查看全部 {all.length} 个
                     </button>
