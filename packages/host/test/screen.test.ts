@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { closeInputApp, shippedApp } from "../src/input.js";
 import { AccessUnitSplitter, ScreenShare, captureArgs, endCapture, resolvedCandidate, videoMatch, videoWidth, videoMaxFps } from "../src/screen.js";
+import { answerClipboard } from "../src/screen.js";
 
 const nal = (type: number, ...body: number[]) => [0, 0, 0, 1, type, ...body];
 const aud = () => nal(9, 0xf0);
@@ -140,5 +141,26 @@ describe("a browser's mDNS host candidates", () => {
     const never = () => Promise.reject(new Error("should not be asked"));
     expect(await resolvedCandidate(plain, never)).toBe(plain);
     expect(await resolvedCandidate("", never)).toBe("");
+  });
+});
+
+describe("the viewer page's clipboard buttons", () => {
+  it("puts the viewer's text on the computer and gives the computer's back", async () => {
+    let held = "on the computer";
+    const clipboard = { read: async () => ({ text: held }), write: async (text: string) => { held = text; return { ok: true }; } };
+    expect(await answerClipboard({ t: "clipboard.read" }, clipboard)).toEqual({ clipboard: { text: "on the computer" } });
+    expect(await answerClipboard({ t: "clipboard.write", text: "from the phone" }, clipboard)).toEqual({ clipboardResult: { ok: true } });
+    expect(held).toBe("from the phone");
+  });
+
+  it("refuses nothing, too much, and says why a write failed", async () => {
+    const written: string[] = [];
+    const clipboard = { read: async () => ({ text: "x".repeat(300_000) }), write: async (text: string) => { written.push(text); throw new Error("电脑未安装剪贴板工具"); } };
+    expect(await answerClipboard({ t: "clipboard.write" }, clipboard)).toMatchObject({ clipboardResult: { ok: false } });
+    expect(await answerClipboard({ t: "clipboard.write", text: "x".repeat(100_001) }, clipboard)).toMatchObject({ clipboardResult: { ok: false } });
+    expect(written).toEqual([]);
+    expect(await answerClipboard({ t: "clipboard.write", text: "ok" }, clipboard)).toEqual({ clipboardResult: { ok: false, message: "电脑未安装剪贴板工具" } });
+    const read = await answerClipboard({ t: "clipboard.read" }, clipboard) as { clipboard: { text: string } };
+    expect(read.clipboard.text.length).toBe(100_000);
   });
 });

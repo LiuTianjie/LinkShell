@@ -355,7 +355,9 @@ export class FusionNodeMedia {
     const timestamp = stream.rtp.timestamp;
     stream.sending = stream.sending.then(async () => {
       for (let i = 0; i < payloads.length; i += 32) {
-        if (this.closed) return;
+        // A closed stream's transceiver may already carry another window: what is still queued
+        // for the old one would go out between the new one's packets.
+        if (this.closed || this.streams.get(stream.key) !== stream) return;
         await Promise.all(payloads.slice(i, i + 32).map((payload, offset) => stream.transceiver.sender.sendRtp(new RtpPacket(new RtpHeader({
           payloadType: 96, sequenceNumber: stream.rtp.seq++ & 0xffff, timestamp, ssrc: stream.transceiver.sender.ssrc, marker: i + offset === payloads.length - 1,
         }), payload))));

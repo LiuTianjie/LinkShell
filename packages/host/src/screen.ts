@@ -1,4 +1,5 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { readClipboard, writeClipboard } from "./clipboard.js";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { createServer, type Server } from "node:http";
@@ -285,6 +286,31 @@ interface VideoViewer {
 const RECENT_TOKENS = 4;
 
 /** The loopback viewer server; started on first use, one capture per watching device. */
+export interface ScreenClipboard {
+  read(): Promise<{ text: string }>;
+  write(text: string): Promise<{ ok: boolean }>;
+}
+
+/** The most text a viewer may put on, or take from, the computer's clipboard in one go. */
+const CLIPBOARD_TEXT = 100_000;
+
+/**
+ * The viewer page's two clipboard buttons, where nothing else carries them: a browser that
+ * opened the page itself, and the phone app. (The web console calls the RPC instead.) Before
+ * this the page sent these and nobody answered: the buttons said "synced" and did nothing.
+ */
+export async function answerClipboard(message: unknown, clipboard: ScreenClipboard): Promise<Record<string, unknown>> {
+  const { t, text } = (message ?? {}) as { t?: unknown; text?: unknown };
+  try {
+    if (t === "clipboard.read") return { clipboard: { text: (await clipboard.read()).text.slice(0, CLIPBOARD_TEXT) } };
+    if (typeof text !== "string" || !text || text.length > CLIPBOARD_TEXT) return { clipboardResult: { ok: false, message: "剪贴板内容为空或过长" } };
+    await clipboard.write(text);
+    return { clipboardResult: { ok: true } };
+  } catch (error) {
+    return { clipboardResult: { ok: false, message: (error instanceof Error ? error.message : String(error)).slice(0, 200) } };
+  }
+}
+
 export class ScreenShare {
   private server?: Server;
   /** Two starts at once (the phone and a desktop, a retry) must share one bind, not read an unbound address. */
@@ -319,6 +345,9 @@ export class ScreenShare {
   ) {
     void reapOrphanCaptures(log);
   }
+
+  /** The computer's clipboard, as the viewer page's buttons use it. Replaced in tests. */
+  clipboard: ScreenClipboard = { read: () => readClipboard(), write: (text) => writeClipboard(text) };
 
   hasActiveViewers(): boolean {
     return this.viewers.size > 0;
@@ -1119,6 +1148,12 @@ export class ScreenShare {
       } else if (kind === "rtc.failed") fallBack();
       else if (kind === "ping") tell({ pong: { n: (message as { n?: unknown }).n, at: (message as { at?: unknown }).at, now: Date.now() } });
       else if (kind === "measure") this.log(`[screen] measured: ${screenMeasurementLog(message)}`);
+      else if (kind === "clipboard.write" || kind === "clipboard.read") {
+        // A viewer in control can already type on this computer and press copy and paste: its
+        // clipboard, as text, is no more than that. One that only watches gets neither.
+        if (desired.paused || !inputEnabled) return tell({ clipboardResult: { ok: false, message: "需要先获得控制权限" } });
+        void answerClipboard(message, this.clipboard).then((answer) => { if (live()) tell(answer); });
+      }
       else if (kind === "control" && !desired.paused) {
         // Requesting control only records intent. Input still needs the applied generation,
         // and startup/configuration must finish before the helper can be joined.

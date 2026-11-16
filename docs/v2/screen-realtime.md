@@ -464,7 +464,7 @@ Mac 回环新增按帧匹配的编码输入→解码观测：诊断模式在 H.2
 
 **读代码确认、影响较小的**
 
-- HEVC 下 libwebrtc 一旦给出裁剪过的帧（它自己降分辨率时会），自有编码器直接报错停止（`the HEVC encoder stopped (a frame that is not a whole pixel buffer)`，日志里出现过 1 次），由 libwebrtc 换下一个编码；H.264 下是永久换成 stock 编码器。
+- **裁剪过的帧（已改，2026-11-16）**：libwebrtc 自己降分辨率时会裁掉一行或一列。原来自有编码器遇到就退出：H.264 整通电话换成 stock 编码器，HEVC 直接停止（日志里 `the HEVC encoder stopped (a frame that is not a whole pixel buffer)`，出现过 1 次）。现在自己把那一块裁出来（`RTCCVPixelBuffer.cropAndScale`，缓冲池复用）继续编码；有单元测试（两种编码、裁出的像素位置），没有在真的降分辨率场景下跑过。
 - **Windows 发送端每帧多等一帧（已改，2026-11-16）**：原始 Annex-B 只说一帧从哪里开始，`H264AccessUnits` 要等到下一帧的分隔符才交出这一帧，60 fps 下固定约 16.7 ms，最后一帧永远交不出。现在 host 给助手程序 `LINKSHELL_VIDEO_FRAMED=1`，助手程序让 FFmpeg 写 AVI（`-bsf:v h264_metadata=aud=insert,setts=ts=N -f avi`）：同样的 Annex-B 字节，每帧一个带长度的 `00dc` 块，编出来就写；host 读到一帧的最后一个字节就交出。
   - 选 AVI 的原因：IVF 和 multipart 拒绝 H.264；分片 MP4 要等下一帧才知道时长，自己就晚一帧；FLV、Matroska 要把参数集放到带外，会改变对硬件编码器的要求。AVI 不要求带外参数集，编码器的输出和原来逐字节相同。
   - `setts=ts=N`：AVI 用空块填时间上的空缺，空缺太长会报错退出，而窗口截取在画面不变时本来就不出帧。
@@ -473,6 +473,8 @@ Mac 回环新增按帧匹配的编码输入→解码观测：诊断模式在 H.2
   - 本机实测（FFmpeg 7.1、libx264、每秒 2 帧）：原来每帧在 FFmpeg 写出后约 470 ms（一个帧间隔）才交出，8 帧只交出 7 帧；改后写出即交出，8 帧都交出。1.76 GB 经管道连续写出，没有分段、没有杂字节。融合的单机端到端测试（模拟远端改用同样的输出）8 项通过。**没有在 Windows 上跑过**：四种硬件编码器配 AVI 的实际输出、C# 的改动都没有验证。
 - Windows 每秒一个关键帧（`-g fps` 加 `force_key_frames`）、250 ms 码率缓冲、不带 playout-delay 扩展。
 - Mac 查看端按显示链接每个刷新周期取最新一帧呈现，平均多等半个刷新周期（120 Hz 约 4 ms）；这是防撕裂的常规做法，不算短板。
+
+**观看页的剪贴板按钮（已改，2026-11-16）**：「粘贴到电脑」「从电脑复制」在手机 App 和直接打开观看页的浏览器里没有接收方：页面发 `clipboard.write` / `clipboard.read`（或告诉 App `clipboardWrite` / `clipboardRead`），host 的 `/stream` 和 App 都不处理，按钮提示「已同步」而什么都没发生（网页控制台走 RPC，是好的）。现在 host 在 `/stream` 上应答（`answerClipboard`：只对有控制权的查看端，文字，最多 10 万字符），页面不经桥接时一律走这条连接并按应答提示成功或失败；App 新增 `setDeviceClipboard`，把电脑的剪贴板写进手机。旧版 App 上「粘贴到电脑」随 host 升级即可用，「从电脑复制」要等新版 App（页面会先试浏览器自己的写入，多半不被允许）。有 host 与页面的单元测试，没有在手机上点过。
 
 **查过、不成立或待验证的**
 

@@ -690,6 +690,13 @@ describe("the running viewer screen session", () => {
     ui.window.linkshellRemoteClipboard({ text: "from-mac" });
     expect(ui.reports.some((message) => message.type === "setDeviceClipboard" && message.text === "from-mac")).toBe(true);
 
+    // And over the stream's own socket, which is what answers in the phone app and in a browser.
+    expect(ui.messages()).toContainEqual({ t: "clipboard.read" });
+    expect(ui.messages()).toContainEqual({ t: "clipboard.write", text: "secret-token-123" });
+    ui.receive({ clipboard: { text: "copied-on-the-computer" } });
+    expect(ui.reports.some((message) => message.type === "setDeviceClipboard" && message.text === "copied-on-the-computer")).toBe(true);
+    ui.receive({ clipboardResult: { ok: false, message: "需要先获得控制权限" } });
+
     tapTile("privacycurtain");
     expect(ui.reports.some((message) => message.type === "screenPrivacy" && message.curtain === true)).toBe(true);
     expect(ui.elements.get("privacycurtain")!.classList.contains("on")).toBe(true);

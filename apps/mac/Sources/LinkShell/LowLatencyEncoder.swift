@@ -124,6 +124,7 @@ final class LowLatencyH264Encoder: NSObject, RTCVideoEncoder {
   func release() -> Int {
     invalidateCallbacks()
     compressor = nil
+    cropPool = nil
     return stock?.release() ?? Code.ok
   }
 
@@ -133,12 +134,24 @@ final class LowLatencyH264Encoder: NSObject, RTCVideoEncoder {
       let result = fallBack(reason)
       if result != Code.ok { return result }
     }
-    // A frame that is not a whole pixel buffer (cropped, or not from the screen) is libwebrtc's
-    // encoder's to copy and convert.
+    // A frame that is not a pixel buffer (not from the screen) is libwebrtc's encoder's to copy
+    // and convert.
     let native = frame.buffer as? RTCCVPixelBuffer
-    if stock == nil, compressor != nil, native == nil || native?.requiresCropping() == true {
-      let result = fallBack("a frame that is not a whole pixel buffer")
+    if stock == nil, compressor != nil, native == nil {
+      let result = fallBack("a frame that is not a pixel buffer")
       if result != Code.ok { return result }
+    }
+    // A cropped one is cut out here. libwebrtc crops a row or a column when it makes the picture
+    // smaller (to keep its shape at the new size); handing those to its own encoder meant the
+    // low-latency encoder was never used again that call, and for HEVC, which it cannot encode,
+    // that the codec stopped.
+    var cut: CVPixelBuffer?
+    if stock == nil, compressor != nil, let native, native.requiresCropping(), let settings {
+      cut = cropped(native, width: Int(settings.width), height: Int(settings.height))
+      if cut == nil {
+        let result = fallBack("a cropped frame could not be cut out")
+        if result != Code.ok { return result }
+      }
     }
     if let stock {
       // A change of encoder begins with a key frame, whatever was asked for.
@@ -199,7 +212,7 @@ final class LowLatencyH264Encoder: NSObject, RTCVideoEncoder {
       MediaStageProbe.shared.reference(native.pixelBuffer, began: began)
     }
     let fusion = FusionMetadata.layout(of: native.pixelBuffer)
-    compressor.encode(native.pixelBuffer, at: CMTime(value: frame.timeStampNs, timescale: 1_000_000_000), key: job.key) { [state, queue, clock] result in
+    compressor.encode(cut ?? native.pixelBuffer, at: CMTime(value: frame.timeStampNs, timescale: 1_000_000_000), key: job.key) { [state, queue, clock] result in
       guard state.withLock({ state in
         guard state.generation == job.generation else { return false }
         state.pending -= 1
@@ -273,6 +286,32 @@ final class LowLatencyH264Encoder: NSObject, RTCVideoEncoder {
   var resolutionAlignment: Int { 1 }
   var applyAlignmentToAllSimulcastLayers: Bool { false }
   var supportsNativeHandle: Bool { true }
+
+  // MARK: Cropped frames
+
+  private var cropPool: (pool: CVPixelBufferPool, width: Int, height: Int)?
+
+  /// The part of the buffer libwebrtc means, at the size the encoder was started for.
+  private func cropped(_ source: RTCCVPixelBuffer, width: Int, height: Int) -> CVPixelBuffer? {
+    let format = CVPixelBufferGetPixelFormatType(source.pixelBuffer)
+    guard width > 0, height > 0, format == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange || format == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange else { return nil }
+    if cropPool?.width != width || cropPool?.height != height {
+      let attributes: [CFString: Any] = [
+        kCVPixelBufferPixelFormatTypeKey: format, kCVPixelBufferWidthKey: width, kCVPixelBufferHeightKey: height,
+        kCVPixelBufferIOSurfacePropertiesKey: [:] as CFDictionary,
+      ]
+      var pool: CVPixelBufferPool?
+      guard CVPixelBufferPoolCreate(nil, nil, attributes as CFDictionary, &pool) == kCVReturnSuccess, let pool else { return nil }
+      cropPool = (pool, width, height)
+    }
+    var made: CVPixelBuffer?
+    guard let pool = cropPool?.pool, CVPixelBufferPoolCreatePixelBuffer(nil, pool, &made) == kCVReturnSuccess, let made else { return nil }
+    // Scaling as well as cropping needs room to work in; cropping alone needs none.
+    let room = Int(source.bufferSizeForCroppingAndScaling(toWidth: Int32(width), height: Int32(height)))
+    let scratch = room > 0 ? UnsafeMutablePointer<UInt8>.allocate(capacity: room) : nil
+    defer { scratch?.deallocate() }
+    return source.cropAndScale(to: made, withTempBuffer: scratch) ? made : nil
+  }
 
   // MARK: libwebrtc's encoder, when this one can't
 

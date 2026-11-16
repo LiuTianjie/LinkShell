@@ -47,11 +47,17 @@ extension FusionRemoteSession {
   /// overlays (such as Google Chrome's omnibox autocomplete dropdown, Find bar, status/permission bubbles)
   /// are recognized as child auxiliary overlays of their parent browser window rather than separate root windows!
   func classifyAXWindow(pid: pid_t, id: CGWindowID, now: Double) -> AXWindowKind {
-    if let cached = windowKinds[id] {
-      if cached.exists || now - cached.checkedAt < 0.15 { return cached }
+    let before = windowKinds[id]
+    if let cached = before {
+      // A new window is listed within a moment, and is asked about often until it is. One that
+      // never is (a Chromium helper window, an app that is not answering) was asked about seven
+      // times a second for as long as it existed, each a call to another process from the main
+      // thread, with every window's layout waiting behind it: after the first few, rarely.
+      let wait = cached.misses < 5 ? 0.15 : min(2, 0.15 * pow(2, Double(cached.misses - 4)))
+      if cached.exists || now - cached.checkedAt < wait { return cached }
     }
     guard let w = axWindow(pid: pid, id: id) else {
-      let miss = AXWindowKind(exists: false, isStandardRoot: false, checkedAt: now)
+      let miss = AXWindowKind(exists: false, isStandardRoot: false, checkedAt: now, misses: (before?.misses ?? 0) + 1)
       windowKinds[id] = miss
       return miss
     }

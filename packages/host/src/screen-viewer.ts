@@ -994,6 +994,7 @@ function heard(message) {
   if (message.rtc) return signal(message.rtc);
   if (message.pong) return meter && meter.pong(message.pong);
   if (message.clipboard) return receiveComputerClipboard(message.clipboard);
+  if (message.clipboardResult) return window.linkshellClipboardResult(message.clipboardResult);
   if (message.privacy) return receivePrivacyState(message.privacy);
   if (message.restart) {
     jpegGeneration += 1;
@@ -3138,9 +3139,11 @@ function pushClipboardToComputer(text) {
   const trimmed = text.slice(0, 100000);
   const bridged = bridgeCall({ type: "clipboard-write", text: trimmed });
   if (app) tellApp({ type: "clipboardWrite", text: trimmed });
-  if (!bridged && !app) send({ t: "clipboard.write", text: trimmed });
+  // Over the stream's own socket wherever there is no bridge: the host answers with the result.
+  // (An app that also acts on the message above writes the same text twice, which is once.)
+  if (!bridged) send({ t: "clipboard.write", text: trimmed });
   tellApp({ type: "haptic", kind: "light" });
-  hint(L().clipSynced, 1800);
+  if (bridged) hint(L().clipSynced, 1800);
 }
 
 function requestPasteToComputer() {
@@ -3161,7 +3164,7 @@ function requestPasteToComputer() {
 function requestCopyFromComputer() {
   const bridged = bridgeCall({ type: "clipboard-read" });
   if (app) tellApp({ type: "clipboardRead" });
-  if (!bridged && !app) send({ t: "clipboard.read" });
+  if (!bridged) send({ t: "clipboard.read" });
 }
 
 function receiveComputerClipboard(payload) {
@@ -3170,6 +3173,8 @@ function receiveComputerClipboard(payload) {
   if (app) {
     tellApp({ type: "setDeviceClipboard", text });
     tellApp({ type: "haptic", kind: "light" });
+    // An app from before it knew that message: the page may be allowed to write it itself.
+    try { if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") navigator.clipboard.writeText(text).catch(() => {}); } catch (error) {}
     return hint(L().clipSynced, 1800);
   }
   if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {

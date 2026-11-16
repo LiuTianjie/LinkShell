@@ -134,6 +134,40 @@ final class EncoderTests: XCTestCase {
     XCTAssertEqual(compression.keys.count, 3)
   }
 
+  /// libwebrtc crops a row or a column when it makes the picture smaller: this encoder cuts the
+  /// part out itself and goes on, where it used to hand the call to libwebrtc's (or, for HEVC, stop).
+  func testACroppedFrameIsCutOutAndEncodedHere() throws {
+    for name in ["H264", "H265"] {
+      let compression = Compression()
+      let stock = Stock()
+      let codec = RTCVideoCodecInfo(name: name, parameters: name == "H264" ? info.parameters : [:])
+      let encoder = LowLatencyH264Encoder(info: codec, keyBudget: false, queueAdmission: false, makeCompressor: { _ in compression }, makeStock: { _, _ in stock })
+      encoder.setCallback { _, _ in true }
+      XCTAssertEqual(encoder.startEncode(with: settings(), numberOfCores: 2), 0)
+      // 326×184 on the screen, of which libwebrtc means the middle 320×180.
+      var buffer: CVPixelBuffer?
+      XCTAssertEqual(CVPixelBufferCreate(nil, 326, 184, kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange, [kCVPixelBufferIOSurfacePropertiesKey: [:] as CFDictionary] as CFDictionary, &buffer), kCVReturnSuccess)
+      let whole = try XCTUnwrap(buffer)
+      CVPixelBufferLockBaseAddress(whole, [])
+      let luma = CVPixelBufferGetBaseAddressOfPlane(whole, 0)!.assumingMemoryBound(to: UInt8.self)
+      let row = CVPixelBufferGetBytesPerRowOfPlane(whole, 0)
+      for y in 0..<184 { for x in 0..<326 { luma[y * row + x] = UInt8((x + y) & 0xff) } }
+      CVPixelBufferUnlockBaseAddress(whole, [])
+      let cropped = RTCCVPixelBuffer(pixelBuffer: whole, adaptedWidth: 320, adaptedHeight: 180, cropWidth: 320, cropHeight: 180, cropX: 2, cropY: 2)
+      XCTAssertTrue(cropped.requiresCropping())
+      let frame = RTCVideoFrame(buffer: cropped, rotation: ._0, timeStampNs: 1_000_000)
+      XCTAssertEqual(encoder.encode(frame, codecSpecificInfo: nil, frameTypes: delta), 0, name)
+      XCTAssertEqual(stock.starts, 0, "\(name): libwebrtc's encoder took over")
+      let given = try XCTUnwrap(compression.buffers.last, "\(name): nothing was encoded")
+      XCTAssertEqual(CVPixelBufferGetWidth(given), 320)
+      XCTAssertEqual(CVPixelBufferGetHeight(given), 180)
+      // The cut starts two in and two down: its first pixel is the whole picture's at (2, 2).
+      CVPixelBufferLockBaseAddress(given, .readOnly)
+      XCTAssertEqual(CVPixelBufferGetBaseAddressOfPlane(given, 0)!.assumingMemoryBound(to: UInt8.self)[0], 4)
+      CVPixelBufferUnlockBaseAddress(given, .readOnly)
+    }
+  }
+
   private func settings() -> RTCVideoEncoderSettings {
     let settings = RTCVideoEncoderSettings()
     settings.name = "H264"
@@ -157,10 +191,12 @@ final class EncoderTests: XCTestCase {
     init(mode: String = "low-latency") { self.mode = mode }
     var done: ((Result<VideoCompressor.Frame?, VideoCompressor.Failure>) -> Void)?
     var keys: [Bool] = []
+    var buffers: [CVPixelBuffer] = []
     func setRates(bitrate: Int, ceiling: Int?, fps: Int) {}
     func encode(_ buffer: CVPixelBuffer, at time: CMTime, key: Bool, done: @escaping (Result<VideoCompressor.Frame?, VideoCompressor.Failure>) -> Void) {
       self.done = done
       keys.append(key)
+      buffers.append(buffer)
     }
   }
 

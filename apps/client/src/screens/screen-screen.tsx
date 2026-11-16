@@ -144,6 +144,9 @@ export function ScreenScreen() {
           .then((text) => {
             if (focusGeneration.current === focusAtRead) inject(owner, `window.linkshellClipboard && window.linkshellClipboard(${JSON.stringify(text.slice(0, 20_000))}); true;`, generation);
           });
+      } else if (message.type === "setDeviceClipboard") {
+        // What the computer copied, fetched by the page over its own connection to the host.
+        if (typeof message.text === "string" && message.text) void Clipboard.setStringAsync(message.text.slice(0, 100_000)).catch(() => {});
       } else if (message.type === "ready" && Platform.OS === "android") focus(owner);
     },
     [present, focus, inject, owner],

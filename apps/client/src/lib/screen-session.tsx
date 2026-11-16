@@ -25,6 +25,7 @@ export interface ScreenPageMessage {
   width?: unknown;
   pacing?: unknown;
   reason?: string;
+  text?: unknown;
   session?: { t?: string; configure?: boolean; pause?: boolean; paused?: boolean; version?: number };
 }
 

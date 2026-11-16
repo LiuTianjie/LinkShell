@@ -36,6 +36,8 @@ final class FusionRemoteSession: @unchecked Sendable {
     let exists: Bool
     let isStandardRoot: Bool
     let checkedAt: Double
+    /// Times running that Accessibility did not list it.
+    var misses = 0
   }
 
   struct PendingPlace {
