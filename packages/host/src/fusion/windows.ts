@@ -66,6 +66,8 @@ export class WindowsFusionPlatform implements FusionPlatform {
       reply?.(message);
       return;
     }
+    // Which window was taken for which app is the first thing to read when an app shows nothing.
+    if (message.t === "log" && typeof message.message === "string") console.error(`[fusion] ${message.message.slice(0, 500)}`);
     if (message.t === "monitors" && Array.isArray(message.monitors)) {
       this.monitorList = message.monitors.map((m) => {
         const mon = m as Record<string, number>;

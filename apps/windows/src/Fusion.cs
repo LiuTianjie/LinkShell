@@ -83,6 +83,18 @@ namespace LinkShell.Windows {
         static readonly HashSet<string> Fused = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         /// <summary>A classic app's catalog id by its executable, lower-cased (`{FOLDERID}\path.exe` resolved).</summary>
         static readonly Dictionary<string, string> AppByExe = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        /// <summary>Every id the catalog lists: a window's own id is believed only when it is one of these.</summary>
+        static readonly HashSet<string> CatalogIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        /// <summary>
+        /// What a launched app's windows turned out to call themselves, to the app that was launched:
+        /// a launcher starts another executable, a browser names its windows after a profile.
+        /// </summary>
+        static readonly Dictionary<string, string> AppAliases = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        sealed class PendingLaunch { public DateTime At; public HashSet<IntPtr> Before; }
+        /// <summary>Launches whose window has not been seen yet; a slow computer takes its time.</summary>
+        static readonly Dictionary<string, PendingLaunch> Launches = new Dictionary<string, PendingLaunch>(StringComparer.OrdinalIgnoreCase);
+        static readonly HashSet<IntPtr> SeenWindows = new HashSet<IntPtr>();
+        const int LaunchWaitSeconds = 180;
         /// <summary>Title bar measurements by window and size: probing is cheap, but not 30 times a second.</summary>
         static readonly Dictionary<IntPtr, KeyValuePair<string, object>> ChromeCache = new Dictionary<IntPtr, KeyValuePair<string, object>>();
         static readonly Dictionary<IntPtr, long> ChromeProbed = new Dictionary<IntPtr, long>();
@@ -176,6 +188,7 @@ namespace LinkShell.Windows {
                 case "launch": {
                     string app = Str(c, "app");
                     lock (Fused) Fused.Add(app);
+                    Launches[app] = new PendingLaunch { At = DateTime.UtcNow, Before = new HashSet<IntPtr>(SeenWindows) };
                     try {
                         Process.Start(new ProcessStartInfo("explorer.exe", "shell:AppsFolder\\" + app) { UseShellExecute = false });
                         Write(new { rid = rid, ok = true });
@@ -311,6 +324,9 @@ namespace LinkShell.Windows {
                 });
                 return true;
             }, IntPtr.Zero);
+            SeenWindows.Clear();
+            foreach (var w in found) SeenWindows.Add(w.Handle);
+            AdoptLaunched(found);
             if (all) return found;
             var shown = found.Where(w => !w.Popup && fused.Contains(w.App)).ToList();
             var shownPids = new HashSet<uint>(shown.Select(w => w.Pid));
@@ -323,6 +339,41 @@ namespace LinkShell.Windows {
                 result.Add(p);
             }
             return result;
+        }
+
+        /// <summary>
+        /// A launched app whose window does not carry its id: the window that came after the launch,
+        /// from a process started by it or to the front, and that belongs to no app in the catalog,
+        /// is that app's, and so is everything else that names itself the same way.
+        /// </summary>
+        static void AdoptLaunched(List<FusionWindow> found) {
+            if (Launches.Count == 0) return;
+            // Before the catalog is in, every window looks like it belongs to no app.
+            lock (CatalogLock) if (CatalogIds.Count == 0) return;
+            foreach (string app in Launches.Keys.ToList()) {
+                var launch = Launches[app];
+                if ((DateTime.UtcNow - launch.At).TotalSeconds > LaunchWaitSeconds || found.Any(w => !w.Popup && String.Equals(w.App, app, StringComparison.OrdinalIgnoreCase))) { Launches.Remove(app); continue; }
+                IntPtr front = GetForegroundWindow();
+                foreach (var w in found) {
+                    if (w.Popup || w.Minimized || w.App == "" || launch.Before.Contains(w.Handle) || w.Title == "") continue;
+                    if (w.Frame.Right - w.Frame.Left < 200 || w.Frame.Bottom - w.Frame.Top < 120) continue;
+                    bool known;
+                    lock (CatalogLock) known = CatalogIds.Contains(w.App);
+                    if (known || AppAliases.ContainsKey(w.App)) continue;
+                    if (w.Handle != front && !StartedSince(w.Pid, launch.At)) continue;
+                    AppAliases[w.App] = app;
+                    Write(new { t = "log", message = "fusion: windows of " + w.App + " belong to " + app });
+                    string was = w.App;
+                    foreach (var other in found) if (String.Equals(other.App, was, StringComparison.OrdinalIgnoreCase)) other.App = app;
+                    Launches.Remove(app);
+                    break;
+                }
+            }
+        }
+
+        static bool StartedSince(uint pid, DateTime at) {
+            try { using (var process = Process.GetProcessById((int)pid)) return process.StartTime.ToUniversalTime() >= at.AddSeconds(-2); }
+            catch { return false; }
         }
 
         static object[] FusionWindowsJson() {
@@ -387,10 +438,25 @@ namespace LinkShell.Windows {
         static readonly Guid AppUserModelKey = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3");
         static readonly Dictionary<uint, string> AppByPid = new Dictionary<uint, string>();
 
-        /// <summary>The catalog's id for a window: its own AppUserModelID, its process's, or its executable's entry.</summary>
+        /// <summary>
+        /// The catalog's id for a window: its own AppUserModelID when the catalog lists it, else its
+        /// process's id or its executable's entry, else whatever it was learned to be at a launch.
+        /// </summary>
         static string AppOf(IntPtr hwnd, uint pid) {
             string id = WindowAppId(hwnd);
-            if (!String.IsNullOrEmpty(id)) return id;
+            bool listed = false;
+            if (!String.IsNullOrEmpty(id)) lock (CatalogLock) listed = CatalogIds.Contains(id);
+            if (listed) return id;
+            string result = ProcessApp(pid);
+            lock (CatalogLock) listed = CatalogIds.Contains(result);
+            // A window may name itself something the catalog never heard of (a browser profile).
+            if (!listed && !String.IsNullOrEmpty(id)) result = id;
+            string alias;
+            if (!listed && AppAliases.TryGetValue(result, out alias)) return alias;
+            return result;
+        }
+
+        static string ProcessApp(uint pid) {
             string cached;
             if (AppByPid.TryGetValue(pid, out cached)) return cached;
             string result = "";
@@ -453,6 +519,15 @@ namespace LinkShell.Windows {
                 string exe = ResolveKnownFolder(id);
                 if (exe != null && exe.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) lock (CatalogLock) AppByExe[exe] = id;
                 else if (exe != null && !id.Contains("!")) continue;
+                // A shortcut with an id of its own (most installers write one): the executable it
+                // starts is the only thing its windows have in common with it.
+                if (exe == null && !id.Contains("!")) {
+                    string target = null;
+                    try { target = Convert.ToString(item.GetType().InvokeMember("ExtendedProperty", BindingFlags.InvokeMethod, null, item, new object[] { "System.Link.TargetParsingPath" })); } catch { }
+                    if (String.IsNullOrEmpty(target) && id.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) && Path.IsPathRooted(id)) target = id;
+                    if (!String.IsNullOrEmpty(target) && target.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) lock (CatalogLock) { if (!AppByExe.ContainsKey(target)) AppByExe[target] = id; }
+                }
+                lock (CatalogLock) CatalogIds.Add(id);
                 bool system = id.StartsWith("Microsoft.Windows", StringComparison.OrdinalIgnoreCase) || id.StartsWith("windows.", StringComparison.OrdinalIgnoreCase) || id.IndexOf("\\WINDOWS\\", StringComparison.OrdinalIgnoreCase) >= 0;
                 apps.Add(new Dictionary<string, object> { { "app", id }, { "name", name }, { "category", "" }, { "system", system } });
             }
