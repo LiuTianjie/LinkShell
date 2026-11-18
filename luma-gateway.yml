@@ -1,5 +1,8 @@
 name: linkshell-gateway
-image: nickname4th/linkshell-gateway:0.6.71
+build:
+  context: .
+  dockerfile: packages/gateway/Dockerfile
+  platform: linux/amd64
 region: cn
 exposure: cn-edge
 domain: gateway.itool.tech

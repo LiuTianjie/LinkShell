@@ -193,7 +193,7 @@ docker rm -f gw-check && docker volume rm gw-check
 
 ## 6. 部署官方网关（Luma）
 
-官方网关 `gateway.itool.tech` 由 Luma 部署，清单是仓库根目录的 `luma-gateway.yml`，其中 `image:` 写死了镜像版本。所有 Pro 用户的电脑和手机都连着它：部署会断开所有连接（两端会自动重连），所以挑人少的时候做，做之前和之后都要看。
+官方网关 `gateway.itool.tech` 由 Luma 部署，清单是仓库根目录的 `luma-gateway.yml`，其中 `build:` 指向网关 Dockerfile；独立 Builder 将指定提交构建到 ACR。所有 Pro 用户的电脑和手机都连着它：部署会断开所有连接（两端会自动重连），所以挑人少的时候做，做之前和之后都要看。
 
 **部署前**
 
@@ -201,7 +201,8 @@ docker rm -f gw-check && docker volume rm gw-check
 curl -s https://gateway.itool.tech/healthz
 # 记下 version 和 relay（当前在线的连接数）
 
-docker manifest inspect nickname4th/linkshell-gateway:X.Y.Z >/dev/null && echo "image exists"
+luma builder status
+# 发布版本必须已经推送；Docker Hub 镜像继续服务自建用户。
 ```
 
 确认 `luma-gateway.yml` 里这三处没有被动过：
@@ -215,13 +216,8 @@ docker manifest inspect nickname4th/linkshell-gateway:X.Y.Z >/dev/null && echo "
 **部署**
 
 ```bash
-# 把 luma-gateway.yml 的 image 改成 nickname4th/linkshell-gateway:X.Y.Z
-luma deploy luma-gateway.yml --dry-run
-luma deploy luma-gateway.yml --timeout 3000
-
-git add luma-gateway.yml
-git commit -m "release: deploy gateway vX.Y.Z"
-git push origin main
+# 指定已推送的版本；省略 LUMA_REF 时脚本使用当前 HEAD。
+LUMA_REF=gateway-vX.Y.Z bash scripts/deploy-luma.sh
 ```
 
 `SUPABASE_*` 在清单里是 `${…}` 占位符，由 Luma 的密钥库在服务端填入，本地不需要这些值。
@@ -240,7 +236,7 @@ linkshell host status      # 自己这台电脑：Gateway 一行是 online，账
 
 **回滚**
 
-把 `luma-gateway.yml` 的 `image:` 改回上一个版本（`git log -- luma-gateway.yml` 里能看到），重新 `luma deploy`，再做一遍“部署后”的检查。数据卷不动：只要表结构没变，旧镜像读的是同一个 `relay.db`。回滚时同样不要删卷、不要改 `RELAY_DATA_PATH`。
+通过 `luma app versions linkshell-gateway` 选择已验证版本后执行 `luma app rollback linkshell-gateway --to-version N`，再做一遍“部署后”的检查。旧 Registry 退役前，必须保留仍用于回滚的镜像。数据卷不动：只要表结构没变，旧镜像读的是同一个 `relay.db`。回滚时同样不要删卷、不要改 `RELAY_DATA_PATH`。
 
 ## 7. 更新 Homebrew Formula
 
@@ -389,3 +385,14 @@ Windows 当前按未签名方式发布，无需等待 Authenticode 证书。发�
 4. 下载 `LinkShell-Windows-x64-unsigned` artifact，核对安装器 EXE、便携 ZIP 及各自的 `.sha256`，并核对 ZIP 中 `standalone.json`、`resources/app/package.json` 和内置 CLI 的版本。界面有改动时看一眼 `LinkShell-Windows-window-shots` 的三张截图（深色、浅色、本机管理）：打包 smoke 真实启动了 Electron 窗口，但只检查 DOM，看不出排版。
 5. 将这四个文件上传到 `desktop-vX.Y.Z` Release，保留已有 Mac DMG，桌面 Release 仍使用 `--latest=false`，带 APK 的移动版继续作为 latest。
 6. 核对远端文件大小和摘要、实际下载可用性后，清理本轮下载、解压及构建临时目录，保留最终制品与校验记录。原生 ARM64、手机真机与公网屏幕性能不属于 CI 构建或更新 E2E 证明。
+
+Use Luma CLI 0.2.79 or newer. The independent Builder owns the ACR
+registry host, namespace and push credentials; application manifests keep `build:`.
+The Builder's GitHub credential must have access to this repository. Control's
+saved Git Provider alone does not configure the independent Builder.
+`--env` supplies runtime scoped secrets, not Docker build arguments.
+On the first migration, review the workflow difference and pass
+`--accept-workflow-change` explicitly for that deployment; it is not a CI default.
+Existing applications keep their names, runtime nodes, routing and storage.
+Source/CI changes do not migrate running images or historical rollback images;
+that happens only in a subsequent authorized release.

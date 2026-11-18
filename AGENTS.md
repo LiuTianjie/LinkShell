@@ -129,7 +129,7 @@ When the user asks to release LinkShell, execute the full release workflow, incl
 
 - npm, always `pnpm publish` (it rewrites `workspace:*`), in dependency order: wire → mac → host → gateway → cli; skip what didn't change.
 - `@linkshell/mac` must be published from a Mac with the Developer ID Application certificate (`prepack` refuses to build unsigned).
-- Tag `gateway-vX.Y.Z` → CI builds and pushes `nickname4th/linkshell-gateway` (`.github/workflows/docker-publish.yml`). That only builds: the official gateway is deployed by bumping the image in `luma-gateway.yml`.
+- Tag `gateway-vX.Y.Z` → CI builds and pushes `nickname4th/linkshell-gateway` (`.github/workflows/docker-publish.yml`). That only publishes the public image. Deploy the official gateway from a pushed commit with `bash scripts/deploy-luma.sh`; the independent Builder publishes to ACR.
 - Standalone desktop: `desktop-vX.Y.Z` ships notarized architecture-specific DMGs, then publishes Sparkle feeds to Pages. Bundle CLI/Host changes in a new desktop release too; do not make users run npm updates inside the app. See `docs/release-sop.md`.
 - Tag `cli-vX.Y.Z` marks a CLI release (no CI). `./scripts/update-brew.sh` updates the Homebrew tap.
 - Mobile app (`vX.Y.Z`) → built and released locally on macOS (`./scripts/release-mobile.sh X.Y.Z --yes`, or `node scripts/release.mjs ios|android X.Y.Z` + `gh release create vX.Y.Z`): iOS to TestFlight, Android AAB + APK to a GitHub release. There is no GitHub Actions runner for mobile builds.
