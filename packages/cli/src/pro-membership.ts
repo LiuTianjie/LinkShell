@@ -9,10 +9,6 @@ export interface DesktopMembership {
   planExpiresAt: string | null;
   /** The iTool membership tier behind "pro"; null otherwise. */
   tier?: MembershipTier | null;
-  /** True when the active entitlement comes from the 7-day sign-up trial. */
-  isTrial?: boolean;
-  /** When the 7-day sign-up trial ends (ISO 8601), when reported by the backend. */
-  trialEndsAt?: string | null;
 }
 
 const unknownMembership: DesktopMembership = { plan: "unknown", planExpiresAt: null, tier: null };
@@ -27,15 +23,10 @@ export function cachedMembership(userId: string): DesktopMembership {
     const expiry = typeof value.planExpiresAt === "string" && Number.isFinite(Date.parse(value.planExpiresAt)) ? value.planExpiresAt : null;
     if (value.plan === "pro" && !expiry) return { ...unknownMembership };
     const tier: MembershipTier | null = value.tier === "yearly" || value.tier === "monthly" ? value.tier : null;
-    const trialEndsAt = typeof value.trialEndsAt === "string" && Number.isFinite(Date.parse(value.trialEndsAt)) ? value.trialEndsAt : undefined;
-    const trialFields = {
-      ...(typeof value.isTrial === "boolean" ? { isTrial: value.isTrial } : {}),
-      ...(trialEndsAt !== undefined ? { trialEndsAt } : {}),
-    };
-    if (value.plan !== "pro") return { plan: value.plan, planExpiresAt: expiry, tier: null, ...(trialEndsAt !== undefined ? { trialEndsAt } : {}) };
+    if (value.plan !== "pro") return { plan: value.plan, planExpiresAt: expiry, tier: null };
     return Date.parse(expiry!) > Date.now()
-      ? { plan: "pro", planExpiresAt: expiry, tier: tier ?? "monthly", ...trialFields }
-      : { plan: "free", planExpiresAt: expiry, tier: null, ...(trialEndsAt !== undefined ? { trialEndsAt } : {}) };
+      ? { plan: "pro", planExpiresAt: expiry, tier: tier ?? "monthly" }
+      : { plan: "free", planExpiresAt: expiry, tier: null };
   } catch {
     return { ...unknownMembership };
   }
@@ -73,8 +64,6 @@ export async function lookupMembership(accessToken: string, signal?: AbortSignal
     plan: membership.plan,
     planExpiresAt: membership.expiresAt ?? null,
     tier: membership.tier ?? null,
-    ...(typeof membership.isTrial === "boolean" ? { isTrial: membership.isTrial } : {}),
-    ...(membership.trialEndsAt ? { trialEndsAt: membership.trialEndsAt } : {}),
   };
 }
 

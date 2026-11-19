@@ -324,7 +324,7 @@ export async function refreshGateway(waitMs: number): Promise<GatewayStatus | un
 
 export function describeGateway(gateway: GatewayStatus): string {
   if (gateway.status === "off") {
-    return "off (linkshell login for 7-day free trial / official gateway, linkshell host --lan, or linkshell host --gateway <url>)";
+    return "off (linkshell login for official gateway, linkshell host --lan, or linkshell host --gateway <url>)";
   }
   const label = gateway.account ? (gateway.account.email ?? loadAuth()?.email ?? gateway.account.userId) : undefined;
   const account = label ? `, account ${label}` : "";
@@ -370,7 +370,7 @@ export async function joinGatewayAfterLogin(plan: "pro" | "free"): Promise<void>
   if (!chosen && plan !== "pro") {
     // A running host now gets the gateway's own answer, instead of an old login's.
     await refreshGateway(0);
-    out("The official gateway requires an active 7-day free trial or iTool membership: https://www.itool.tech/pro?from=linkshell");
+    out("The official gateway requires an active iTool membership: https://www.itool.tech/pro?from=linkshell");
     out("Invite a friend to earn +14 / +30 days, use same-Wi-Fi LAN (linkshell host --lan), or self-host (linkshell host --gateway <url> && linkshell pair).\n");
     return;
   }

@@ -160,52 +160,17 @@ export function MembershipStatus({
   }
 
   if (membership.plan === "pro") {
-    const isTrial = Boolean(membership.isTrial);
-    const rawTrialEnd = membership.trialEndsAt ?? membership.expiresAt;
-    const daysRemaining =
-      typeof membership.daysRemaining === "number"
-        ? membership.daysRemaining
-        : isTrial && rawTrialEnd && !Number.isNaN(Date.parse(rawTrialEnd))
-          ? Math.max(0, Math.ceil((Date.parse(rawTrialEnd) - Date.now()) / 86_400_000))
-          : undefined;
-    const trialExpiringSoon = isTrial && daysRemaining !== undefined && daysRemaining <= 2;
     const upgradeCopy = MONTHLY_UPGRADE_COPY[activeLocale] ?? MONTHLY_UPGRADE_COPY.en;
     return (
       <>
         <span className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-          {isTrial ? (
-            <Badge variant="secondary" className="h-5 px-1.5 text-[11px] font-medium">
-              {membershipTierLabel(membership.tier, {
-                isTrial: true,
-                daysRemaining,
-                locale: activeLocale,
-              })}
-            </Badge>
-          ) : (
-            <span className="truncate">
-              {membershipTierLabel(membership.tier, { locale: activeLocale })}
-              {membership.expiresAt ? ` · ${t("desktop.membership.expiresOn", { date: expiry(membership.expiresAt, activeLocale) })}` : ""}
-            </span>
-          )}
-          {isTrial && membership.expiresAt && (
-            <span className="truncate">
-              {t("desktop.membership.expiresOn", { date: expiry(membership.expiresAt, activeLocale) })}
-            </span>
-          )}
+          <span className="truncate">
+            {membershipTierLabel(membership.tier, { locale: activeLocale })}
+            {membership.expiresAt ? ` · ${t("desktop.membership.expiresOn", { date: expiry(membership.expiresAt, activeLocale) })}` : ""}
+          </span>
           {refresh}
         </span>
-        {trialExpiringSoon && (
-          <div
-            className="mt-1 flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/50 px-2.5 py-1.5 text-xs text-foreground"
-            role="status"
-          >
-            <span>{t("desktop.membership.trialExpiringBanner", { days: daysRemaining ?? 0 })}</span>
-            <ShopLink url={itoolMembershipUrl(activeLocale)} onShop={onShop}>
-              {t("desktop.membership.activateOfficialPlan")}
-            </ShopLink>
-          </div>
-        )}
-        {!isTrial && membership.tier === "monthly" && (
+        {membership.tier === "monthly" && (
           <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
             <span className="truncate">{upgradeCopy.unlocked} ·</span>
             <ShopLink url={itoolYearlyUpgradeUrl(activeLocale)} onShop={onShop}>

@@ -75,7 +75,7 @@ const {
   setMobileLocalePreference,
 } = await import("../src/lib/locale");
 
-const { computeTrialDaysRemaining, formatMobileMembershipState } = await import(
+const { formatMobileMembershipState } = await import(
   "../src/components/account-membership"
 );
 
@@ -108,7 +108,7 @@ const { listComputers, normalizeLanUrl, useComputers } = await import("../src/li
 const { isHostLowBattery } = await import("../src/components/computer-metrics");
 const { formatApiComputeValue } = await import("../src/components/usage-dashboard");
 
-describe("Mobile Localization & App-Store-Safe Trial Status", () => {
+describe("Mobile Localization & App-Store-Safe Membership Status", () => {
   beforeEach(() => {
     kvMap.clear();
   });
@@ -131,32 +131,24 @@ describe("Mobile Localization & App-Store-Safe Trial Status", () => {
     expect(mt("composer.quickRunTests")).toContain("test");
   });
 
-  it("renders 7-day trial status accurately across zh/en/ja with zero buy links or price tags", () => {
-    const now = Date.parse("2026-06-01T00:00:00Z");
-    const trialMembership = {
+  it("renders membership and free status across zh/en/ja with zero trial copy, buy links, or price tags", () => {
+    const activeMembership = {
       plan: "pro" as const,
       tier: "yearly" as const,
-      isTrial: true,
-      trialEndsAt: "2026-06-06T00:00:00Z",
       expiresAt: "2026-06-06T00:00:00Z",
     };
-    expect(computeTrialDaysRemaining(trialMembership, now)).toBe(5);
 
     const prohibited = new RegExp(["itool\\.tech/pro", "checkout=", "\\u00a5", "\\$[0-9]"].join("|"), "i");
 
     for (const locale of ["zh", "en", "ja"] as const) {
-      const state = formatMobileMembershipState(trialMembership, false, locale, now);
-      expect(state.isTrial).toBe(true);
-      expect(state.headline).toContain("5");
-      // Must not mislabel trial users as paid Yearly members
-      expect(state.headline.toLowerCase()).not.toContain("yearly");
-      expect(state.headline).not.toContain("年度会员");
-      expect(state.headline).not.toContain("年額");
+      const state = formatMobileMembershipState(activeMembership, false, locale);
+      expect(state.headline).toContain("LinkShell");
       expect(`${state.headline} ${state.subtitle} ${state.freeHint ?? ""}`).not.toMatch(prohibited);
+      expect(`${state.headline} ${state.subtitle} ${state.freeHint ?? ""}`).not.toMatch(/7\s*天|7-day|7日間|トライアル|trial/i);
 
-      const freeState = formatMobileMembershipState({ plan: "free" }, false, locale, now);
-      expect(freeState.isTrial).toBe(false);
+      const freeState = formatMobileMembershipState({ plan: "free" }, false, locale);
       expect(`${freeState.headline} ${freeState.subtitle} ${freeState.freeHint ?? ""}`).not.toMatch(prohibited);
+      expect(`${freeState.headline} ${freeState.subtitle} ${freeState.freeHint ?? ""}`).not.toMatch(/7\s*天|7-day|7日間|トライアル|trial/i);
     }
   });
 });

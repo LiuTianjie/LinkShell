@@ -19,8 +19,6 @@ export interface DesktopAccount {
   planExpiresAt?: string;
   /** The iTool membership tier behind "pro" (CLI 0.10.94+); older CLIs leave it out. */
   tier?: string | null;
-  isTrial?: boolean;
-  trialEndsAt?: string;
   daysRemaining?: number;
 }
 export interface DesktopSnapshot {
@@ -58,7 +56,7 @@ export type Membership =
   | { kind: "signed-out" }
   | { kind: "unknown" }
   | { kind: "free" }
-  | { kind: "pro"; expiresAt: Date; tier: "monthly" | "yearly"; isTrial?: boolean; daysRemaining?: number };
+  | { kind: "pro"; expiresAt: Date; tier: "monthly" | "yearly"; daysRemaining?: number };
 
 export function isManageView(view: string): boolean {
   return view === "manage" || view.startsWith("manage:");
@@ -82,7 +80,7 @@ export function manageView(page: ManagePage = "overview"): string {
 export function membershipOf(account: DesktopAccount | undefined, now = Date.now()): Membership {
   if (account?.state !== "signed-in") return { kind: "signed-out" };
   if (account.plan === "free") return { kind: "free" };
-  const rawExpiry = account.planExpiresAt ?? account.trialEndsAt;
+  const rawExpiry = account.planExpiresAt;
   if (account.plan !== "pro" || !rawExpiry) return { kind: "unknown" };
   const expiresAt = new Date(rawExpiry);
   if (Number.isNaN(expiresAt.getTime())) return { kind: "unknown" };
@@ -92,7 +90,6 @@ export function membershipOf(account: DesktopAccount | undefined, now = Date.now
     kind: "pro",
     expiresAt,
     tier: account.tier === "yearly" ? "yearly" : "monthly",
-    isTrial: Boolean(account.isTrial),
     daysRemaining: typeof account.daysRemaining === "number" ? account.daysRemaining : computedDays,
   };
 }

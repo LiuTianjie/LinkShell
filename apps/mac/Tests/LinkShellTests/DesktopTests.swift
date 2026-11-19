@@ -63,21 +63,19 @@ final class DesktopTests: XCTestCase {
     guard case .pro(_, .monthly) = result.account?.membership() ?? .unknown else { return XCTFail("An active membership should be shown with its tier") }
   }
 
-  func testTrialBadgeRenewalThresholdAndLocaleAwareMembershipURLs() throws {
+  func testBadgeLabelAndLocaleAwareMembershipURLs() throws {
     let now = Date(timeIntervalSince1970: 1_798_761_600)
-    let activeTrial = try JSONDecoder().decode(
+    let monthly = try JSONDecoder().decode(
       DesktopSnapshot.Account.self,
-      from: Data(#"{"state":"signed-in","userId":"one","plan":"pro","tier":"monthly","isTrial":true,"daysRemaining":5,"planExpiresAt":"2027-01-06T00:00:00Z"}"#.utf8)
+      from: Data(#"{"state":"signed-in","userId":"one","plan":"pro","tier":"monthly","planExpiresAt":"2027-01-06T00:00:00Z"}"#.utf8)
     )
-    XCTAssertEqual(activeTrial.badgeLabel(at: now), "7 天免费试用 · 剩余 5 天")
-    XCTAssertFalse(activeTrial.isTrialExpiringSoon(at: now))
+    XCTAssertEqual(monthly.badgeLabel(at: now), "LinkShell 会员")
 
-    let expiringTrial = try JSONDecoder().decode(
+    let yearly = try JSONDecoder().decode(
       DesktopSnapshot.Account.self,
-      from: Data(#"{"state":"signed-in","userId":"one","plan":"pro","tier":"monthly","isTrial":true,"daysRemaining":2,"planExpiresAt":"2027-01-03T00:00:00Z"}"#.utf8)
+      from: Data(#"{"state":"signed-in","userId":"one","plan":"pro","tier":"yearly","planExpiresAt":"2027-01-03T00:00:00Z"}"#.utf8)
     )
-    XCTAssertEqual(expiringTrial.badgeLabel(at: now), "7 天免费试用 · 剩余 2 天")
-    XCTAssertTrue(expiringTrial.isTrialExpiringSoon(at: now))
+    XCTAssertEqual(yearly.badgeLabel(at: now), "LinkShell 会员")
 
     XCTAssertEqual(ITool.membershipURL(locale: "zh-Hans-CN"), "https://www.itool.tech/zh/pro?product=linkshell")
     XCTAssertEqual(ITool.membershipURL(locale: "en-US"), "https://www.itool.tech/en/pro?product=linkshell")

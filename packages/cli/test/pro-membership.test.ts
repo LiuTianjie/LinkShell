@@ -82,7 +82,7 @@ describe("desktop membership", () => {
     expect(file).not.toContain("u1-refresh");
   });
 
-  it("preserves isTrial and trialEndsAt when reported by the entitlement endpoint", async () => {
+  it("treats active legacy trial responses as active pro access without exposing trial fields", async () => {
     const planExpiresAt = new Date(Date.now() + 7 * 86_400_000).toISOString();
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({
       ok: true,
@@ -101,15 +101,11 @@ describe("desktop membership", () => {
       plan: "pro",
       planExpiresAt,
       tier: "yearly",
-      isTrial: true,
-      trialEndsAt: planExpiresAt,
     });
     expect(cachedMembership("u1")).toEqual({
       plan: "pro",
       planExpiresAt,
       tier: "yearly",
-      isTrial: true,
-      trialEndsAt: planExpiresAt,
     });
   });
 });

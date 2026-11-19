@@ -481,8 +481,6 @@ function SignedInWorkspacePanel({
             {membership?.plan === "pro" ? (
               <span className="ls-system-row__detail">
                 {membershipTierLabel(membership.tier, {
-                  isTrial: membership.isTrial,
-                  daysRemaining: membership.daysRemaining,
                   locale,
                 })}
                 {membership.expiresAt

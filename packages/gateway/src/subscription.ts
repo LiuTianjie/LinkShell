@@ -23,15 +23,15 @@ export function admissionDenialMessage(code: AdmissionDenialCode, locale?: Gatew
   const url = membershipUrl(locale);
   switch (code) {
     case "login_required":
-      if (locale === "zh") return "官方网关需要登录账号（新账号注册享 7 天免费试用）：在电脑上运行 linkshell login";
-      if (locale === "en") return "Official gateway requires sign-in (new accounts include a 7-day free trial): run linkshell login";
-      if (locale === "ja") return "公式ゲートウェイの利用にはログインが必要です（新規登録で 7 日間無料トライアル）：PC で linkshell login を実行してください";
-      return "官方网关需要登录账号（新账号注册享 7 天免费试用）：在电脑上运行 linkshell login · Official gateway requires sign-in (new accounts include a 7-day free trial): run linkshell login";
+      if (locale === "zh") return "官方网关需要登录账号：在电脑上运行 linkshell login";
+      if (locale === "en") return "Official gateway requires sign-in: run linkshell login";
+      if (locale === "ja") return "公式ゲートウェイの利用にはログインが必要です：PC で linkshell login を実行してください";
+      return "官方网关需要登录账号：在电脑上运行 linkshell login · Official gateway requires sign-in: run linkshell login";
     case "membership_required":
-      if (locale === "zh") return `官方网关需要 iTool 会员（新账号注册享 7 天免费试用）：${url}`;
-      if (locale === "en") return `Official gateway requires an iTool membership (new accounts include a 7-day free trial): ${url}`;
-      if (locale === "ja") return `公式ゲートウェイには iTool メンバーシップが必要です（新規アカウントは 7 日間無料トライアル付き）：${url}`;
-      return `官方网关需要 iTool 会员（新账号注册享 7 天免费试用）：${url} · Official gateway requires an iTool membership (7-day free trial on new accounts)`;
+      if (locale === "zh") return `官方网关需要 iTool 会员：${url}`;
+      if (locale === "en") return `Official gateway requires an iTool membership: ${url}`;
+      if (locale === "ja") return `公式ゲートウェイには iTool メンバーシップが必要です：${url}`;
+      return `官方网关需要 iTool 会员：${url} · Official gateway requires an iTool membership: ${url}`;
     case "temporarily_unavailable":
       if (locale === "zh") return "暂时无法验证 iTool 会员，请稍后重试";
       if (locale === "en") return "Unable to verify iTool membership right now; please try again shortly";

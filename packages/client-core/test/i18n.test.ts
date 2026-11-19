@@ -40,9 +40,9 @@ describe("i18n dictionary & locale detection", () => {
   });
 
   it("interpolates variables accurately across locales", () => {
-    expect(t("zh", "desktop.membership.trialBadge", { days: 5 })).toBe("7 天免费试用 · 剩余 5 天");
-    expect(t("en", "desktop.membership.trialBadge", { days: 5 })).toBe("7-day free trial · 5d left");
-    expect(t("ja", "desktop.membership.trialBadge", { days: 5 })).toBe("7日間無料トライアル · 残り 5 日");
+    expect(t("zh", "mobile.membership.validUntil", { date: "2027-01-01" })).toBe("LinkShell 有效期至 2027-01-01");
+    expect(t("en", "mobile.membership.validUntil", { date: "2027-01-01" })).toBe("LinkShell active until 2027-01-01");
+    expect(t("ja", "mobile.membership.validUntil", { date: "2027-01-01" })).toBe("LinkShell 有効期限：2027-01-01");
     expect(t("en", "ports.readyPill", { port: 5173 })).toBe("localhost:5173 Ready");
     expect(t("zh", "changes.submitReview", { count: 3 })).toBe("汇总发送批注 (3)");
   });

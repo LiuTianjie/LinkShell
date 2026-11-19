@@ -401,7 +401,7 @@ program
 
 program
   .command("login")
-  .description("Log in to LinkShell (official gateway: 7-day free trial on new accounts, no pairing needed)")
+  .description("Log in to LinkShell (official gateway, no pairing needed)")
   .action(async () => {
     const result = await runLogin();
     if (!result) return;

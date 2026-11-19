@@ -17,7 +17,7 @@ linkshell setup
 
 Connect your phone one of two ways:
 
-- **Official gateway (7-day free trial on sign-up, no card required).** `linkshell login`, then sign in to the app with the same account. New accounts get a 7-day free trial automatically, and the computer shows up by itself.
+- **Official gateway (iTool membership).** `linkshell login`, then sign in to the app with the same account, and the computer shows up by itself.
 - **Your own gateway.** Run one (below), then:
 
   ```bash
@@ -25,7 +25,7 @@ Connect your phone one of two ways:
   linkshell pair    # scan the QR code in the app
   ```
 
-After the 7-day free trial, buy LinkShell on its own (CNY 9.9/month or 49/year; USD 3.19/month or 13.49/year), or choose the all-products annual bundle (CNY 99 or USD 26.49). Prices include tax. [Choose a plan on iTool](https://www.itool.tech/en/pro?product=linkshell) with the same account; Alipay is one-time and Creem renews automatically until canceled. Refresh membership in the desktop app or web workspace after purchase. Existing access and referral rewards are preserved.
+Buy LinkShell on its own (CNY 9.9/month or 49/year; USD 3.19/month or 13.49/year), or choose the all-products annual bundle (CNY 99 or USD 26.49). Prices include tax. [Choose a plan on iTool](https://www.itool.tech/en/pro?product=linkshell) with the same account; Alipay is one-time and Creem renews automatically until canceled. Refresh membership in the desktop app or web workspace after purchase. Existing access and referral rewards are preserved.
 
 Start sessions from the phone, or launch agents from your terminal so they can be handed over at any time:
 

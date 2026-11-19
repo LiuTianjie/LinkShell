@@ -152,10 +152,6 @@ export function SystemOverviewPage({
 
   const membership = membershipOf(snapshot?.account);
   const upgradeCopy = MONTHLY_UPGRADE_COPY[locale] ?? MONTHLY_UPGRADE_COPY.en;
-  const trialExpiringSoon =
-    membership.kind === "pro" &&
-    Boolean(membership.isTrial) &&
-    (membership.daysRemaining ?? 99) <= 2;
 
   const recentActivity = state.activity.slice(0, 5);
 
@@ -284,13 +280,8 @@ export function SystemOverviewPage({
                 </div>
                 <div className="ls-system-row__controls">
                   {membership.kind === "pro" ? (
-                    <Badge
-                      tone={membership.isTrial ? "waiting" : "ok"}
-                      dot={membership.isTrial ? "waiting" : "ok"}
-                    >
+                    <Badge tone="ok" dot="ok">
                       {membershipTierLabel(membership.tier, {
-                        isTrial: membership.isTrial,
-                        daysRemaining: membership.daysRemaining,
                         locale,
                       })}
                     </Badge>
@@ -310,29 +301,7 @@ export function SystemOverviewPage({
                 </div>
               </div>
 
-              {trialExpiringSoon && membership.kind === "pro" ? (
-                <button
-                  type="button"
-                  className="ls-system-row"
-                  onClick={() => openMembershipPage(locale)}
-                >
-                  <div className="ls-system-row__copy">
-                    <span className="ls-system-row__title">
-                      {tCore("desktop.membership.trialExpiringBanner", {
-                        days: membership.daysRemaining ?? 0,
-                      })}
-                    </span>
-                  </div>
-                  <div className="ls-system-row__controls">
-                    <span className="ls-signin-link">
-                      {tCore("desktop.membership.activateOfficialPlan")}
-                    </span>
-                  </div>
-                </button>
-              ) : null}
-
               {membership.kind === "pro" &&
-              !membership.isTrial &&
               membership.tier === "monthly" ? (
                 <button
                   type="button"

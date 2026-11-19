@@ -2,7 +2,7 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
   <url>
     <loc>https://linkshell.itool.tech/</loc>
-    <lastmod>2026-11-16</lastmod>
+    <lastmod>2026-11-19</lastmod>
     <image:image><image:loc>https://linkshell.itool.tech/assets/og.png</image:loc></image:image>
     <image:image><image:loc>https://linkshell.itool.tech/assets/adaptive-icon.png</image:loc></image:image>
     <image:image><image:loc>https://linkshell.itool.tech/assets/promo/film.jpg</image:loc></image:image>
@@ -34,7 +34,7 @@
   </url>
   <url>
     <loc>https://linkshell.itool.tech/en/</loc>
-    <lastmod>2026-11-16</lastmod>
+    <lastmod>2026-11-19</lastmod>
     <image:image><image:loc>https://linkshell.itool.tech/assets/og-en.png</image:loc></image:image>
     <image:image><image:loc>https://linkshell.itool.tech/assets/adaptive-icon.png</image:loc></image:image>
     <image:image><image:loc>https://linkshell.itool.tech/assets/promo/film-en.jpg</image:loc></image:image>
@@ -67,7 +67,7 @@
   </url>
   <url>
     <loc>https://linkshell.itool.tech/docs/</loc>
-    <lastmod>2026-11-16</lastmod>
+    <lastmod>2026-11-19</lastmod>
     <image:image><image:loc>https://linkshell.itool.tech/assets/og.png</image:loc></image:image>
     <image:image><image:loc>https://linkshell.itool.tech/assets/adaptive-icon.png</image:loc></image:image>
     <xhtml:link rel="alternate" hreflang="zh-CN" href="https://linkshell.itool.tech/docs/" />
@@ -76,7 +76,7 @@
   </url>
   <url>
     <loc>https://linkshell.itool.tech/en/docs/</loc>
-    <lastmod>2026-11-16</lastmod>
+    <lastmod>2026-11-19</lastmod>
     <image:image><image:loc>https://linkshell.itool.tech/assets/og-en.png</image:loc></image:image>
     <image:image><image:loc>https://linkshell.itool.tech/assets/adaptive-icon.png</image:loc></image:image>
     <xhtml:link rel="alternate" hreflang="zh-CN" href="https://linkshell.itool.tech/docs/" />
@@ -85,7 +85,7 @@
   </url>
   <url>
     <loc>https://linkshell.itool.tech/pricing/</loc>
-    <lastmod>2026-11-15</lastmod>
+    <lastmod>2026-11-19</lastmod>
     <image:image><image:loc>https://linkshell.itool.tech/assets/og.png</image:loc></image:image>
     <image:image><image:loc>https://linkshell.itool.tech/assets/adaptive-icon.png</image:loc></image:image>
     <xhtml:link rel="alternate" hreflang="zh-CN" href="https://linkshell.itool.tech/pricing/" />
@@ -94,7 +94,7 @@
   </url>
   <url>
     <loc>https://linkshell.itool.tech/en/pricing/</loc>
-    <lastmod>2026-11-15</lastmod>
+    <lastmod>2026-11-19</lastmod>
     <image:image><image:loc>https://linkshell.itool.tech/assets/og-en.png</image:loc></image:image>
     <image:image><image:loc>https://linkshell.itool.tech/assets/adaptive-icon.png</image:loc></image:image>
     <xhtml:link rel="alternate" hreflang="zh-CN" href="https://linkshell.itool.tech/pricing/" />
@@ -103,7 +103,7 @@
   </url>
   <url>
     <loc>https://linkshell.itool.tech/claude-code/</loc>
-    <lastmod>2026-11-15</lastmod>
+    <lastmod>2026-11-19</lastmod>
     <image:image><image:loc>https://linkshell.itool.tech/assets/og.png</image:loc></image:image>
     <image:image><image:loc>https://linkshell.itool.tech/assets/adaptive-icon.png</image:loc></image:image>
     <image:image><image:loc>https://linkshell.itool.tech/assets/promo/clip-follow.jpg</image:loc></image:image>
@@ -118,7 +118,7 @@
   </url>
   <url>
     <loc>https://linkshell.itool.tech/en/claude-code/</loc>
-    <lastmod>2026-11-15</lastmod>
+    <lastmod>2026-11-19</lastmod>
     <image:image><image:loc>https://linkshell.itool.tech/assets/og-en.png</image:loc></image:image>
     <image:image><image:loc>https://linkshell.itool.tech/assets/adaptive-icon.png</image:loc></image:image>
     <image:image><image:loc>https://linkshell.itool.tech/assets/promo/clip-follow.jpg</image:loc></image:image>
@@ -133,7 +133,7 @@
   </url>
   <url>
     <loc>https://linkshell.itool.tech/ja/claude-code/</loc>
-    <lastmod>2026-11-15</lastmod>
+    <lastmod>2026-11-19</lastmod>
     <image:image><image:loc>https://linkshell.itool.tech/assets/og-en.png</image:loc></image:image>
     <image:image><image:loc>https://linkshell.itool.tech/assets/adaptive-icon.png</image:loc></image:image>
     <image:image><image:loc>https://linkshell.itool.tech/assets/promo/clip-follow.jpg</image:loc></image:image>
@@ -148,7 +148,7 @@
   </url>
   <url>
     <loc>https://linkshell.itool.tech/codex/</loc>
-    <lastmod>2026-11-15</lastmod>
+    <lastmod>2026-11-19</lastmod>
     <image:image><image:loc>https://linkshell.itool.tech/assets/og.png</image:loc></image:image>
     <image:image><image:loc>https://linkshell.itool.tech/assets/adaptive-icon.png</image:loc></image:image>
     <image:image><image:loc>https://linkshell.itool.tech/assets/promo/computer-use.png</image:loc></image:image>
@@ -160,7 +160,7 @@
   </url>
   <url>
     <loc>https://linkshell.itool.tech/en/codex/</loc>
-    <lastmod>2026-11-15</lastmod>
+    <lastmod>2026-11-19</lastmod>
     <image:image><image:loc>https://linkshell.itool.tech/assets/og-en.png</image:loc></image:image>
     <image:image><image:loc>https://linkshell.itool.tech/assets/adaptive-icon.png</image:loc></image:image>
     <image:image><image:loc>https://linkshell.itool.tech/assets/promo/computer-use.png</image:loc></image:image>
@@ -172,7 +172,7 @@
   </url>
   <url>
     <loc>https://linkshell.itool.tech/ja/codex/</loc>
-    <lastmod>2026-11-15</lastmod>
+    <lastmod>2026-11-19</lastmod>
     <image:image><image:loc>https://linkshell.itool.tech/assets/og-en.png</image:loc></image:image>
     <image:image><image:loc>https://linkshell.itool.tech/assets/adaptive-icon.png</image:loc></image:image>
     <image:image><image:loc>https://linkshell.itool.tech/assets/promo/computer-use.png</image:loc></image:image>

@@ -107,7 +107,7 @@ const CALLBACK_PAGE = `<!DOCTYPE html>
 export async function runLogin(options: { signal?: AbortSignal } = {}): Promise<LoginResult | null> {
   if (options.signal?.aborted) return null;
   process.stderr.write("\n  LinkShell Login\n");
-  process.stderr.write("  \x1b[2mNew accounts include a 7-day free trial of the official gateway (no credit card needed).\x1b[0m\n\n");
+  process.stderr.write("  \x1b[2mSign in with your iTool account to use the official gateway.\x1b[0m\n\n");
 
   return new Promise<LoginResult | null>((resolve) => {
     let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -162,14 +162,7 @@ export async function runLogin(options: { signal?: AbortSignal } = {}): Promise<
         res.writeHead(200);
         res.end("ok");
 
-        const trialDaysLeft =
-          result.isTrial && result.trialEndsAt && Number.isFinite(Date.parse(result.trialEndsAt))
-            ? Math.max(1, Math.ceil((Date.parse(result.trialEndsAt) - Date.now()) / 86_400_000))
-            : undefined;
-        const activeLabel = result.isTrial
-          ? `7-day free trial${trialDaysLeft !== undefined ? ` · ${trialDaysLeft}d left` : ""}`
-          : "LinkShell member";
-        const planLabel = result.plan === "pro" ? `\x1b[32m${activeLabel}\x1b[0m` : "Free";
+        const planLabel = result.plan === "pro" ? "\x1b[32mLinkShell member\x1b[0m" : "Free";
         process.stderr.write(
           `  \x1b[32m✓\x1b[0m Logged in as ${result.email || result.userId} (${planLabel})\n\n`,
         );

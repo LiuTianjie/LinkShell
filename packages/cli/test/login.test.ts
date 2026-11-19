@@ -127,21 +127,21 @@ describe("linkshell login", () => {
     expect(await login.result).toMatchObject({ plan: "free" });
   });
 
-  it("announces the 7-day free trial when signing in with a new trial account", async () => {
-    const trialEndsAt = new Date(Date.now() + 7 * 86_400_000).toISOString();
+  it("announces LinkShell member without trial copy when signing in with an active entitlement", async () => {
+    const validUntil = new Date(Date.now() + 7 * 86_400_000).toISOString();
     vi.stubGlobal("fetch", (input: string | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.startsWith("http://localhost:")) return realFetch(input, init);
-      if (url.includes("/auth/v1/user")) return Promise.resolve(Response.json({ id: "u-trial", email: "trial@example.com" }));
+      if (url.includes("/auth/v1/user")) return Promise.resolve(Response.json({ id: "u-active", email: "active@example.com" }));
       if (url.includes("/api/membership/entitlement")) {
         return Promise.resolve(Response.json({
           ok: true,
           product: "linkshell",
           required_tier: "monthly",
           active: true,
-          valid_until: trialEndsAt,
+          valid_until: validUntil,
           tier: "yearly",
-          trial_ends_at: trialEndsAt,
+          trial_ends_at: validUntil,
           is_trial: true,
           server_time: new Date().toISOString(),
         }));
@@ -154,10 +154,10 @@ describe("linkshell login", () => {
     expect(await login.result).toMatchObject({
       success: true,
       plan: "pro",
-      isTrial: true,
-      trialEndsAt,
-      email: "trial@example.com",
+      tier: "yearly",
+      email: "active@example.com",
     });
-    expect(login.said()).toContain("7-day free trial");
+    expect(login.said()).toContain("LinkShell member");
+    expect(login.said()).not.toMatch(/7-day|trial/i);
   });
 });

@@ -72,9 +72,6 @@ struct DesktopSnapshot: Decodable {
     let planExpiresAt: String?
     /// The iTool membership tier behind "pro"; older CLIs leave it out (read as monthly).
     let tier: String?
-    let isTrial: Bool?
-    let trialEndsAt: String?
-    let daysRemaining: Int?
 
     private static func parseISO8601(_ value: String) -> Date? {
       let formatter = ISO8601DateFormatter()
@@ -87,32 +84,14 @@ struct DesktopSnapshot: Decodable {
     func membership(at now: Date = Date()) -> DesktopMembership {
       guard state == "signed-in" else { return .signedOut }
       if plan == "free" { return .free }
-      guard plan == "pro", let rawExpiry = planExpiresAt ?? trialEndsAt,
+      guard plan == "pro", let rawExpiry = planExpiresAt,
             let expiresAt = Self.parseISO8601(rawExpiry) else { return .unknown }
       return expiresAt > now ? .pro(expiresAt, tier == "yearly" ? .yearly : .monthly) : .free
     }
 
-    func resolvedTrialDays(at now: Date = Date()) -> Int? {
-      guard isTrial == true else { return nil }
-      if let daysRemaining { return max(0, daysRemaining) }
-      guard let rawExpiry = trialEndsAt ?? planExpiresAt,
-            let expiresAt = Self.parseISO8601(rawExpiry),
-            expiresAt > now else { return nil }
-      return max(0, Int(ceil(expiresAt.timeIntervalSince(now) / 86_400)))
-    }
-
     func badgeLabel(at now: Date = Date()) -> String? {
       guard case .pro(_, let tierValue) = membership(at: now) else { return nil }
-      if isTrial == true {
-        if let days = resolvedTrialDays(at: now) { return "7 天免费试用 · 剩余 \(days) 天" }
-        return "7 天免费试用"
-      }
       return tierValue.label
-    }
-
-    func isTrialExpiringSoon(at now: Date = Date()) -> Bool {
-      guard case .pro = membership(at: now), let days = resolvedTrialDays(at: now) else { return false }
-      return days <= 2
     }
   }
   let account: Account?
@@ -282,8 +261,6 @@ enum DesktopCommand {
   var accountLabel: String { snapshot?.account?.email ?? snapshot?.account?.userId ?? "未登录" }
   var membership: DesktopMembership { snapshot?.account?.membership() ?? .signedOut }
   var membershipBadgeLabel: String? { snapshot?.account?.badgeLabel() }
-  var trialDaysRemaining: Int? { snapshot?.account?.resolvedTrialDays() }
-  var trialExpiringSoon: Bool { snapshot?.account?.isTrialExpiringSoon() ?? false }
   /// Set when the buy page was opened, so coming back to the app asks again.
   private var visitedMembershipPage = false
   var home: String { snapshot?.home ?? DesktopRuntime.home }

@@ -308,11 +308,10 @@ const zh = {
   "mobile.membership.refresh": "刷新账户状态",
   "mobile.membership.refreshing": "正在刷新…",
   "mobile.membership.freeAccount": "基础账户",
-  "mobile.membership.freeHint": "跨网官方中继网关需要有效的 iTool 账户权益（新注册账号确认邮箱即享 7 天免费体验）。可在电脑端 LinkShell 管理账户状态，回到此处自动同步；同一 Wi-Fi 下也可使用局域网直连或自建网关。",
-  "mobile.membership.trialBadge": "7 天免费体验 · 剩余 {days} 天",
+  "mobile.membership.freeHint": "跨网官方中继网关需要有效的 iTool 账户权益。可在电脑端 LinkShell 管理账户状态，回到此处自动同步；同一 Wi-Fi 下也可使用局域网直连或自建网关。",
   "mobile.membership.validUntil": "LinkShell 有效期至 {date}",
 
-  // Desktop & Web membership (Trial badge, renewal banner, upgrade CTAs, referral growth card)
+  // Desktop & Web membership (upgrade CTAs, referral growth card)
   "desktop.membership.checking": "正在查询会员…",
   "desktop.membership.failed": "会员状态获取失败",
   "desktop.membership.refresh": "刷新会员状态",
@@ -320,9 +319,6 @@ const zh = {
   "desktop.membership.subscribeAction": "开通会员",
   "desktop.membership.upgradeYearlyAction": "升级年度",
   "desktop.membership.expiresOn": "{date}到期",
-  "desktop.membership.trialBadge": "7 天免费试用 · 剩余 {days} 天",
-  "desktop.membership.trialExpiringBanner": "免费试用仅剩 {days} 天，开通正式会员可继续无缝使用官方跨网中继网关",
-  "desktop.membership.activateOfficialPlan": "开通正式会员",
   "desktop.membership.referralTitle": "邀请好友 · 双方各得 14 / 30 天",
   "desktop.membership.referralDesc": "分享专属链接给好友，好友首次开通月度会员双方各得 14 天，开通年度会员双方各得 30 天。",
   "desktop.membership.referralStats": "已邀请 {invited} 人 · 已获赠 {rewarded} 次 · 累计 +{days} 天",
@@ -550,8 +546,7 @@ const en: Record<I18nKey, string> = {
   "mobile.membership.refresh": "Refresh Status",
   "mobile.membership.refreshing": "Refreshing…",
   "mobile.membership.freeAccount": "Standard Account",
-  "mobile.membership.freeHint": "Official cross-network relay requires active iTool account access (new verified accounts include a 7-day free trial). Manage your account from LinkShell on your computer, or connect directly over local Wi-Fi or a self-hosted gateway.",
-  "mobile.membership.trialBadge": "7-day trial · {days}d left",
+  "mobile.membership.freeHint": "Official cross-network relay requires active iTool account access. Manage your account from LinkShell on your computer, or connect directly over local Wi-Fi or a self-hosted gateway.",
   "mobile.membership.validUntil": "LinkShell active until {date}",
 
   // Desktop & Web membership strings
@@ -562,9 +557,6 @@ const en: Record<I18nKey, string> = {
   "desktop.membership.subscribeAction": "Subscribe",
   "desktop.membership.upgradeYearlyAction": "Go Yearly",
   "desktop.membership.expiresOn": "Expires {date}",
-  "desktop.membership.trialBadge": "7-day free trial · {days}d left",
-  "desktop.membership.trialExpiringBanner": "{days} day(s) left in your free trial — subscribe to keep official cross-network gateway access active",
-  "desktop.membership.activateOfficialPlan": "Activate Membership",
   "desktop.membership.referralTitle": "Invite Friends · Both Get 14 / 30 Days",
   "desktop.membership.referralDesc": "Share your invite link — when a friend subscribes, both of you receive +14 days (Monthly) or +30 days (Yearly).",
   "desktop.membership.referralStats": "Invited {invited} · Rewarded {rewarded} · Earned +{days} days",
@@ -788,8 +780,7 @@ const ja: Record<I18nKey, string> = {
   "mobile.membership.refresh": "状態を更新",
   "mobile.membership.refreshing": "更新中…",
   "mobile.membership.freeAccount": "スタンダードアカウント",
-  "mobile.membership.freeHint": "公式リレーゲートウェイの利用には有効な iTool アカウント権限が必要です（新規確認済みアカウントは7日間無料体験対象）。PC 版 LinkShell でアカウントを管理するとここに自動反映されます。同一 Wi-Fi 内の LAN 直接接続やセルフホストも利用可能です。",
-  "mobile.membership.trialBadge": "7日間トライアル · 残り {days} 日",
+  "mobile.membership.freeHint": "公式リレーゲートウェイの利用には有効な iTool アカウント権限が必要です。PC 版 LinkShell でアカウントを管理するとここに自動反映されます。同一 Wi-Fi 内の LAN 直接接続やセルフホストも利用可能です。",
   "mobile.membership.validUntil": "LinkShell 有効期限：{date}",
 
   // Desktop & Web membership strings
@@ -800,9 +791,6 @@ const ja: Record<I18nKey, string> = {
   "desktop.membership.subscribeAction": "プラン登録",
   "desktop.membership.upgradeYearlyAction": "年額プランへ",
   "desktop.membership.expiresOn": "{date} まで有効",
-  "desktop.membership.trialBadge": "7日間無料トライアル · 残り {days} 日",
-  "desktop.membership.trialExpiringBanner": "無料トライアルは残り {days} 日です。公式リレーゲートウェイを継続利用するにはメンバーシップを有効化してください",
-  "desktop.membership.activateOfficialPlan": "メンバーシップを有効化",
   "desktop.membership.referralTitle": "友だち招待 · お互いに 14 / 30 日間プレゼント",
   "desktop.membership.referralDesc": "招待リンクから友だちが初回登録すると、月額なら双方に +14 日、年額なら双方に +30 日が付与されます。",
   "desktop.membership.referralStats": "招待 {invited} 人 · 特典成立 {rewarded} 回 · 獲得 +{days} 日",

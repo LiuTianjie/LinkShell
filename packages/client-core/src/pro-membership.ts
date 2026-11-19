@@ -14,10 +14,6 @@ export interface ProMembership {
   tier?: MembershipTier;
   /** When LinkShell's entitlement ends; absent when `plan` is "free". */
   expiresAt?: string;
-  /** True when the active entitlement comes from the 7-day sign-up trial rather than a paid order. */
-  isTrial?: boolean;
-  /** When the 7-day sign-up trial ends (ISO 8601), when reported by the backend. */
-  trialEndsAt?: string;
   /** Whole days remaining until `expiresAt` relative to `server_time` (at least 1 while active). */
   daysRemaining?: number;
 }
@@ -47,7 +43,6 @@ export interface ReferralOptions extends ProMembershipOptions {
 }
 
 export const LINKSHELL_PRODUCT = "linkshell";
-export const TRIAL_DAYS = 7;
 export const REFERRAL_MONTHLY_DAYS = 14;
 export const REFERRAL_YEARLY_DAYS = 30;
 
@@ -116,8 +111,6 @@ export class MembershipError extends Error {
 }
 
 export interface MembershipTierLabelOptions {
-  isTrial?: boolean;
-  daysRemaining?: number;
   locale?: Locale;
 }
 
@@ -126,19 +119,6 @@ export function membershipTierLabel(
   opts?: MembershipTierLabelOptions,
 ): string {
   const locale: Locale = opts?.locale ?? "zh";
-  if (opts?.isTrial) {
-    const days = typeof opts.daysRemaining === "number" && Number.isFinite(opts.daysRemaining)
-      ? Math.max(0, Math.ceil(opts.daysRemaining))
-      : undefined;
-    if (locale === "en") {
-      return days !== undefined ? `7-day free trial · ${days}d left` : "7-day free trial";
-    }
-    if (locale === "ja") {
-      return days !== undefined ? `7日間無料トライアル · 残り ${days} 日` : "7日間無料トライアル";
-    }
-    return days !== undefined ? `7 天免费试用 · 剩余 ${days} 天` : "7 天免费试用";
-  }
-
   if (locale === "en") {
     return "LinkShell Membership";
   }
@@ -179,19 +159,12 @@ export function membershipFromEntitlement(value: unknown): ProMembership {
 
   const tier: MembershipTier = body.tier === "yearly" ? "yearly" : "monthly";
   const daysRemaining = Math.max(1, Math.ceil((until - nowMs) / 86_400_000));
-  const result: ProMembership = {
+  return {
     plan: "pro",
     tier,
     expiresAt: body.valid_until as string,
     daysRemaining,
   };
-  if (typeof body.is_trial === "boolean") {
-    result.isTrial = body.is_trial;
-  }
-  if (typeof body.trial_ends_at === "string" && Number.isFinite(timestamp(body.trial_ends_at))) {
-    result.trialEndsAt = body.trial_ends_at;
-  }
-  return result;
 }
 
 export function referralShareUrl(code: string, locale?: Locale): string {

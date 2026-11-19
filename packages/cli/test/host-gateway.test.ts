@@ -106,7 +106,8 @@ describe("host gateway choice", () => {
       }),
     ).toBe("keep-awake smart (idle) · AC power 100%");
 
-    expect(describeGateway({ status: "off", devices: [] })).toContain("7-day free trial");
+    expect(describeGateway({ status: "off", devices: [] })).toContain("linkshell login for official gateway");
+    expect(describeGateway({ status: "off", devices: [] })).not.toMatch(/7-day|trial/i);
     expect(describeGateway({ status: "off", devices: [] })).toContain("--lan");
   });
 });

@@ -75,8 +75,6 @@ export interface DesktopAccount {
   plan?: string;
   planExpiresAt?: string;
   tier?: string | null;
-  isTrial?: boolean;
-  trialEndsAt?: string;
   daysRemaining?: number;
 }
 
@@ -138,7 +136,6 @@ export type Membership =
       kind: "pro";
       expiresAt: Date;
       tier: "monthly" | "yearly";
-      isTrial?: boolean;
       daysRemaining?: number;
     };
 
@@ -167,7 +164,7 @@ export function membershipOf(
 ): Membership {
   if (account?.state !== "signed-in") return { kind: "signed-out" };
   if (account.plan === "free") return { kind: "free" };
-  const rawExpiry = account.planExpiresAt ?? account.trialEndsAt;
+  const rawExpiry = account.planExpiresAt;
   if (account.plan !== "pro" || !rawExpiry) return { kind: "unknown" };
   const expiresAt = new Date(rawExpiry);
   if (Number.isNaN(expiresAt.getTime())) return { kind: "unknown" };
@@ -177,7 +174,6 @@ export function membershipOf(
     kind: "pro",
     expiresAt,
     tier: account.tier === "yearly" ? "yearly" : "monthly",
-    isTrial: Boolean(account.isTrial),
     daysRemaining:
       typeof account.daysRemaining === "number" ? account.daysRemaining : computedDays,
   };

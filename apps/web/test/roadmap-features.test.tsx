@@ -20,66 +20,65 @@ afterEach(() => {
   setWebLocalePreference("zh");
 });
 
-describe("Web localization & Trial/Referral growth UI", () => {
-  it("renders 7-day trial badge, <=2 day renewal banner, and locale-aware checkout URLs across zh/en/ja", () => {
+describe("Web localization & Membership/Referral growth UI", () => {
+  it("renders standard membership labels, expiry, and locale-aware checkout URLs across zh/en/ja without trial copy", () => {
     const noop = () => {};
-    const twoDaysLater = new Date(Date.now() + 36 * 60 * 60 * 1000).toISOString();
-    const fiveDaysLater = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
+    const validUntil = "2027-05-01T00:00:00.000Z";
 
     setWebLocalePreference("zh");
-    const zhExpiring = renderToStaticMarkup(
+    const zhMonthly = renderToStaticMarkup(
       createElement(MembershipStatus, {
         membership: {
           plan: "pro",
           tier: "monthly",
-          isTrial: true,
-          trialEndsAt: twoDaysLater,
-          expiresAt: twoDaysLater,
+          expiresAt: validUntil,
         },
         loading: false,
         disabled: false,
         onRefresh: noop,
       }),
     );
-    expect(zhExpiring).toContain("7 天免费试用");
-    expect(zhExpiring).toContain("开通正式会员");
-    expect(zhExpiring).toContain(`href="${itoolMembershipUrl("zh")}"`);
+    expect(zhMonthly).toContain("LinkShell 会员");
+    expect(zhMonthly).toContain("查看全产品年包");
+    expect(zhMonthly).toContain(`href="${itoolYearlyUpgradeUrl("zh").replace(/&/g, "&amp;")}"`);
+    expect(zhMonthly).not.toMatch(/7 天免费试用|免费试用/);
 
-    const zhHealthyTrial = renderToStaticMarkup(
+    const zhFree = renderToStaticMarkup(
       createElement(MembershipStatus, {
-        membership: {
-          plan: "pro",
-          tier: "monthly",
-          isTrial: true,
-          trialEndsAt: fiveDaysLater,
-          expiresAt: fiveDaysLater,
-        },
+        membership: { plan: "free" },
         loading: false,
         disabled: false,
         onRefresh: noop,
       }),
     );
-    expect(zhHealthyTrial).toContain("7 天免费试用");
-    expect(zhHealthyTrial).not.toContain("免费试用仅剩");
+    expect(zhFree).toContain(`href="${itoolMembershipUrl("zh")}"`);
+    expect(zhFree).not.toMatch(/7 天免费试用|免费试用/);
 
     setWebLocalePreference("en");
-    const enTrial = renderToStaticMarkup(
+    const enYearly = renderToStaticMarkup(
       createElement(MembershipStatus, {
         membership: {
           plan: "pro",
-          tier: "monthly",
-          isTrial: true,
-          trialEndsAt: twoDaysLater,
-          expiresAt: twoDaysLater,
+          tier: "yearly",
+          expiresAt: validUntil,
         },
         loading: false,
         disabled: false,
         onRefresh: noop,
       }),
     );
-    expect(enTrial).toContain("7-day free trial");
-    expect(enTrial).toContain("Activate Membership");
-    expect(enTrial).toContain(`href="${itoolMembershipUrl("en")}"`);
+    expect(enYearly).toContain("LinkShell Membership");
+    expect(enYearly).not.toMatch(/7-day|trial/i);
+
+    const enFree = renderToStaticMarkup(
+      createElement(MembershipStatus, {
+        membership: { plan: "free" },
+        loading: false,
+        disabled: false,
+        onRefresh: noop,
+      }),
+    );
+    expect(enFree).toContain(`href="${itoolMembershipUrl("en")}"`);
 
     setWebLocalePreference("ja");
     const jaMonthly = renderToStaticMarkup(
@@ -87,7 +86,7 @@ describe("Web localization & Trial/Referral growth UI", () => {
         membership: {
           plan: "pro",
           tier: "monthly",
-          expiresAt: "2027-05-01T00:00:00.000Z",
+          expiresAt: validUntil,
         },
         loading: false,
         disabled: false,
@@ -114,7 +113,7 @@ describe("Web localization & Trial/Referral growth UI", () => {
     expect(referralMarkup).toContain("+44");
   });
 
-  it("models trial accounts and remaining days in desktop management", () => {
+  it("models active accounts and remaining days in desktop management", () => {
     const now = Date.parse("2026-11-12T00:00:00.000Z");
     const tomorrow = "2026-11-13T12:00:00.000Z";
     const status = membershipOf(
@@ -123,14 +122,12 @@ describe("Web localization & Trial/Referral growth UI", () => {
         plan: "pro",
         tier: "monthly",
         planExpiresAt: tomorrow,
-        isTrial: true,
-        trialEndsAt: tomorrow,
       },
       now,
     );
     expect(status.kind).toBe("pro");
     if (status.kind === "pro") {
-      expect(status.isTrial).toBe(true);
+      expect(status.tier).toBe("monthly");
       expect(status.daysRemaining).toBe(2);
     }
   });

@@ -53,10 +53,6 @@ struct WatchMembershipView: View {
             Text(account.membershipLoading ? "正在查询…" : "账户状态未确认").font(.caption)
           case .free:
             Label("基础账户", systemImage: "person.crop.circle")
-          case .trial(let expiry, let days):
-            Label("7 天免费试用 · 剩余 \(days) 天", systemImage: "clock.badge.checkmark")
-            Text("有效期至 \(expiry.formatted(date: .abbreviated, time: .omitted))")
-              .font(.caption).foregroundStyle(.secondary)
           case .pro(let expiry, let yearly):
             Label(yearly ? "iTool 年度会员" : "iTool 月度会员", systemImage: "checkmark.seal.fill")
             Text("有效期至 \(expiry.formatted(date: .abbreviated, time: .omitted))")

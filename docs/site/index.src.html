@@ -902,7 +902,7 @@
     <section class="back">
       <div class="wrap">
         <h2><span lang="zh">回到桌前，<span class="nb">按任意键，</span><span class="nb">接着来。</span></span><span lang="en">Back at your desk? <span class="nb">Press any key.</span> <span class="nb">Carry on.</span></span></h2>
-        <p><span lang="zh">全部功能免费。新账号送 7 天官方网关，也可以一条命令自建一个。</span><span lang="en">Every feature is free. New accounts get 7 days of the official gateway, or run your own with one command.</span></p>
+        <p><span lang="zh">全部功能免费。可以一条命令自建网关，或用 iTool 会员直接连官方网关。</span><span lang="en">Every feature is free. Run your own gateway with one command, or use the official gateway with an iTool membership.</span></p>
         <div class="btns">
           <a class="btn btn-p" href="https://apps.apple.com/cn/app/linkshell/id6761547516"><span lang="zh">iPhone 下载</span><span lang="en">Get it for iPhone</span></a>
           <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/latest">Android APK</a>
@@ -963,10 +963,10 @@
         <p><span lang="zh">host 用你登录 shell 的环境变量启动 Agent，所以 PATH、代理、API key 这些和在终端里一样。会话和历史保存在 <code>~/.linkshell</code>，重启电脑不需要重新配对。</span><span lang="en">The host starts agents with your login shell's environment, so PATH, proxies and API keys match your terminal. Sessions and history live in <code>~/.linkshell</code>; restarting the computer doesn't need a new pairing.</span></p>
 
         <h2 id="d-connect"><span lang="zh">连接手机</span><span lang="en">Connect a phone</span></h2>
-        <h3><span lang="zh">官方网关（含 7 天免费试用）</span><span lang="en">Official gateway (7-day free trial included)</span></h3>
+        <h3><span lang="zh">官方网关（iTool 会员）</span><span lang="en">Official gateway (iTool membership)</span></h3>
         <pre><code><span class="pr">$ </span>linkshell login
 <span class="pr">$ </span>linkshell host stop &amp;&amp; linkshell host --daemon</code></pre>
-        <p><span lang="zh">新账号注册即享 7 天官方网关免费试用（无需绑卡）。在 App 里用同一个账号登录，电脑会自动出现在「电脑」页，不需要扫码；邀请好友开通月度/年度，双方各得 14 / 30 天会员。<a href="pricing/">了解 iTool 会员与试用</a>。</span><span lang="en">New accounts automatically include a 7-day free trial of the official gateway (no credit card required). Sign in to the app with the same account and the computer shows up under Computers, no QR code needed; invite a friend and both get 14 / 30 days. <a href="pricing/">About the free trial &amp; iTool membership</a>.</span></p>
+        <p><span lang="zh">开通 iTool 会员后，在 App 里用同一个账号登录，电脑会自动出现在「电脑」页，不需要扫码；邀请好友开通月度/年度，双方各得 14 / 30 天会员。<a href="pricing/">了解 iTool 会员与价格</a>。</span><span lang="en">With an iTool membership, sign in to the app with the same account and the computer shows up under Computers, no QR code needed; invite a friend and both get 14 / 30 days. <a href="pricing/">About the iTool membership</a>.</span></p>
         <h3><span lang="zh">自建网关：配对</span><span lang="en">Your own gateway: pairing</span></h3>
         <pre><code><span class="pr">$ </span>linkshell host --gateway wss://gw.example.com --daemon
 <span class="pr">$ </span>linkshell pair</code></pre>
@@ -1076,7 +1076,7 @@
     <div class="wrap pricing">
       <div class="text">
         <h1><span lang="zh">官方网关，按需购买。</span><span lang="en">Your gateway. Your choice.</span></h1>
-        <p class="lead"><span lang="zh">LinkShell 全部功能可通过自建网关免费使用。购买 LinkShell 单品会员即可使用官方网关；也可选择全产品年包。新账号享 7 天试用，无需绑卡。</span><span lang="en">Every LinkShell feature is free with a self-hosted gateway. Get LinkShell membership for the official gateway, or choose the all-products bundle. New accounts get a 7-day trial, with no card required.</span></p>
+        <p class="lead"><span lang="zh">LinkShell 全部功能可通过自建网关免费使用。购买 LinkShell 单品会员即可使用官方网关；也可选择全产品年包。</span><span lang="en">Every LinkShell feature is free with a self-hosted gateway. Get LinkShell membership for the official gateway, or choose the all-products bundle.</span></p>
       </div>
       <div data-itool-store="linkshell"><a href="https://www.itool.tech/pro?product=linkshell">¥49 / year · ¥9.9 / month · Purchase</a></div>
       <script src="https://www.itool.tech/purchase.js" defer></script>
@@ -1241,8 +1241,8 @@
           </div>
           <div class="step">
             <h3><span lang="zh">连接手机</span><span lang="en">Connect your phone</span><span lang="ja">スマホをつなぐ</span></h3>
-            <p><span lang="zh">官方网关：新账号注册即享 7 天免费试用（无需绑卡），电脑和 App 登录同一账号，电脑自动出现。自建网关：配对一次，扫码即可。</span><span lang="en">Official gateway: new accounts include a 7-day free trial on sign-up (no card required) — sign in on the computer and in the app with the same account, and the computer just appears. Own gateway: pair once with a QR code.</span><span lang="ja">公式ゲートウェイ：新規アカウントは 7 日間無料トライアル付き（カード不要）。パソコンとアプリで同じアカウントにログインすると、パソコンが自動で表示されます。自前のゲートウェイ：QR コードで一度ペアリングするだけです。</span></p>
-            <pre><code><span class="cm"># iTool (7-day free trial)</span>
+            <p><span lang="zh">官方网关：开通 iTool 会员后，电脑和 App 登录同一账号，电脑自动出现。自建网关：配对一次，扫码即可。</span><span lang="en">Official gateway: with an iTool membership, sign in on the computer and in the app with the same account, and the computer just appears. Own gateway: pair once with a QR code.</span><span lang="ja">公式ゲートウェイ：iTool メンバーシップを有効にし、パソコンとアプリで同じアカウントにログインすると、パソコンが自動で表示されます。自前のゲートウェイ：QR コードで一度ペアリングするだけです。</span></p>
+            <pre><code><span class="cm"># iTool</span>
 <span class="pr">$ </span>linkshell login
 <span class="cm"># <span lang="zh">自建网关</span><span lang="en">your own gateway</span><span lang="ja">自前のゲートウェイ</span></span>
 <span class="pr">$ </span>docker run -d -p 8787:8787 -v linkshell-gateway:/data nickname4th/linkshell-gateway
@@ -1277,14 +1277,13 @@
         <div class="price">¥9.9<small><span lang="zh">/月起</span><span lang="en">/mo</span><span lang="ja">/月から</span></small></div>
         <p class="per"><span lang="zh">国际信用卡 US$3.19/月 · US$26.49/年</span><span lang="en">US$3.19/mo or US$26.49/yr by international card</span><span lang="ja">海外カード US$3.19/月・US$26.49/年</span></p>
         <ul>
-          <li><span lang="zh"><b>注册即享 7 天免费试用（无需绑卡）</b></span><span lang="en"><b>7-day free trial on sign-up (no card required)</b></span><span lang="ja"><b>新規登録で 7 日間無料トライアル（カード不要）</b></span></li>
           <li><span lang="zh">官方网关，同账号登录即可连接，免扫码、免部署</span><span lang="en">The official gateway: one account, no server or QR codes</span><span lang="ja">公式ゲートウェイ：同じアカウントでログインするだけ（サーバー・QR 不要）</span></li>
           <li><span lang="zh">邀请好友开通，双方各得 14 / 30 天会员</span><span lang="en">Invite a friend: both get 14 / 30 days</span><span lang="ja">友だち招待で双方に 14 / 30 日間プレゼント</span></li>
           <li><span lang="zh">年度 ¥99（US$26.49）：含全部 iTool 产品</span><span lang="en">Yearly (¥99 / US$26.49): every iTool product</span><span lang="ja">年額 ¥99（US$26.49）：全 iTool 製品</span></li>
         </ul>
-        <a lang="zh" href="https://www.itool.tech/zh/pro?from=linkshell" target="_blank" rel="noopener noreferrer" class="btn btn-p">免费试用 7 天 / 开通会员 ↗</a>
-        <a lang="en" href="https://www.itool.tech/en/pro?from=linkshell" target="_blank" rel="noopener noreferrer" class="btn btn-p">Start 7-day free trial ↗</a>
-        <a lang="ja" href="https://www.itool.tech/en/pro?from=linkshell" target="_blank" rel="noopener noreferrer" class="btn btn-p">7 日間無料トライアルを始める ↗</a>
+        <a lang="zh" href="https://www.itool.tech/zh/pro?from=linkshell" target="_blank" rel="noopener noreferrer" class="btn btn-p">开通会员 ↗</a>
+        <a lang="en" href="https://www.itool.tech/en/pro?from=linkshell" target="_blank" rel="noopener noreferrer" class="btn btn-p">Get iTool membership ↗</a>
+        <a lang="ja" href="https://www.itool.tech/en/pro?from=linkshell" target="_blank" rel="noopener noreferrer" class="btn btn-p">メンバーシップに登録 ↗</a>
       </section>
       </div>
       </div>
@@ -1302,7 +1301,7 @@
         <h3><span lang="zh">Android 能用吗？</span><span lang="en">Does it work on Android?</span><span lang="ja">Android でも使えますか？</span></h3>
         <p><span lang="zh">能。Android 版 APK 在 GitHub Releases 下载；浏览器里也有网页版。</span><span lang="en">Yes. The Android APK is on GitHub Releases, and there is a browser client too.</span><span lang="ja">はい。Android 版の APK は GitHub Releases から入手できます。ブラウザ版もあります。</span></p>
         <h3><span lang="zh">要多少钱？</span><span lang="en">What does it cost?</span><span lang="ja">料金はかかりますか？</span></h3>
-        <p><span lang="zh">自建网关（一条命令或 Docker）就能免费使用全部功能。想免部署用官方网关，新账号注册即享 7 天免费试用（无需绑卡）；之后可开通 LinkShell 单品会员（¥9.9/月、¥49/年，或 US$3.19/月、US$13.49/年，均已含税），或全产品年包（¥99 / US$26.49 每年），邀请好友首次开通双方各得 14 / 30 天。</span><span lang="en">Every feature is free with your own gateway (one command or Docker). For the hosted official gateway, new accounts include a 7-day free trial (no card required); after that, iTool membership is $3.19/mo or $26.49/yr by international card via Creem (¥9.9/mo or ¥99/yr via Alipay), and inviting a friend gives both of you 14 or 30 days.</span><span lang="ja">ゲートウェイを自分で立てれば（コマンド 1 つか Docker）、全機能を無料で使えます。公式ゲートウェイは新規登録で 7 日間無料トライアル（カード不要）がつき、その後は iTool メンバーシップ（海外カード US$3.19/月・US$26.49/年、Alipay ¥9.9/月・¥99/年）で利用できます。友だち招待で双方に 14 / 30 日間が付与されます。</span></p>
+        <p><span lang="zh">自建网关（一条命令或 Docker）就能免费使用全部功能。想免部署用官方网关，可开通 LinkShell 单品会员（¥9.9/月、¥49/年，或 US$3.19/月、US$13.49/年，均已含税），或全产品年包（¥99 / US$26.49 每年），邀请好友首次开通双方各得 14 / 30 天。</span><span lang="en">Every feature is free with your own gateway (one command or Docker). For the hosted official gateway, iTool membership is $3.19/mo or $13.49/yr for LinkShell, or $26.49/yr for all products by international card via Creem (¥9.9/mo, ¥49/yr, or ¥99/yr via Alipay, tax included), and inviting a friend gives both of you 14 or 30 days.</span><span lang="ja">ゲートウェイを自分で立てれば（コマンド 1 つか Docker）、全機能を無料で使えます。公式ゲートウェイは iTool メンバーシップ（海外カード US$3.19/月・US$13.49/年・全製品 US$26.49/年、Alipay ¥9.9/月・¥49/年・全製品 ¥99/年）で利用できます。友だち招待で双方に 14 / 30 日間が付与されます。</span></p>
       </section>
     </div>
 
@@ -1450,8 +1449,8 @@
           </div>
           <div class="step">
             <h3><span lang="zh">连接手机</span><span lang="en">Connect your phone</span><span lang="ja">スマホをつなぐ</span></h3>
-            <p><span lang="zh">官方网关：新账号注册即享 7 天免费试用（无需绑卡），电脑和 App 登录同一账号，电脑自动出现。自建网关：配对一次，扫码即可。</span><span lang="en">Official gateway: new accounts include a 7-day free trial on sign-up (no card required) — sign in on the computer and in the app with the same account, and the computer just appears. Own gateway: pair once with a QR code.</span><span lang="ja">公式ゲートウェイ：新規アカウントは 7 日間無料トライアル付き（カード不要）。パソコンとアプリで同じアカウントにログインすると、パソコンが自動で表示されます。自前のゲートウェイ：QR コードで一度ペアリングするだけです。</span></p>
-            <pre><code><span class="cm"># iTool (7-day free trial)</span>
+            <p><span lang="zh">官方网关：开通 iTool 会员后，电脑和 App 登录同一账号，电脑自动出现。自建网关：配对一次，扫码即可。</span><span lang="en">Official gateway: with an iTool membership, sign in on the computer and in the app with the same account, and the computer just appears. Own gateway: pair once with a QR code.</span><span lang="ja">公式ゲートウェイ：iTool メンバーシップを有効にし、パソコンとアプリで同じアカウントにログインすると、パソコンが自動で表示されます。自前のゲートウェイ：QR コードで一度ペアリングするだけです。</span></p>
+            <pre><code><span class="cm"># iTool</span>
 <span class="pr">$ </span>linkshell login
 <span class="cm"># <span lang="zh">自建网关</span><span lang="en">your own gateway</span><span lang="ja">自前のゲートウェイ</span></span>
 <span class="pr">$ </span>docker run -d -p 8787:8787 -v linkshell-gateway:/data nickname4th/linkshell-gateway
@@ -1486,14 +1485,13 @@
         <div class="price">¥9.9<small><span lang="zh">/月起</span><span lang="en">/mo</span><span lang="ja">/月から</span></small></div>
         <p class="per"><span lang="zh">国际信用卡 US$3.19/月 · US$26.49/年</span><span lang="en">US$3.19/mo or US$26.49/yr by international card</span><span lang="ja">海外カード US$3.19/月・US$26.49/年</span></p>
         <ul>
-          <li><span lang="zh"><b>注册即享 7 天免费试用（无需绑卡）</b></span><span lang="en"><b>7-day free trial on sign-up (no card required)</b></span><span lang="ja"><b>新規登録で 7 日間無料トライアル（カード不要）</b></span></li>
           <li><span lang="zh">官方网关，同账号登录即可连接，免扫码、免部署</span><span lang="en">The official gateway: one account, no server or QR codes</span><span lang="ja">公式ゲートウェイ：同じアカウントでログインするだけ（サーバー・QR 不要）</span></li>
           <li><span lang="zh">邀请好友开通，双方各得 14 / 30 天会员</span><span lang="en">Invite a friend: both get 14 / 30 days</span><span lang="ja">友だち招待で双方に 14 / 30 日間プレゼント</span></li>
           <li><span lang="zh">年度 ¥99（US$26.49）：含全部 iTool 产品</span><span lang="en">Yearly (¥99 / US$26.49): every iTool product</span><span lang="ja">年額 ¥99（US$26.49）：全 iTool 製品</span></li>
         </ul>
-        <a lang="zh" href="https://www.itool.tech/zh/pro?from=linkshell" target="_blank" rel="noopener noreferrer" class="btn btn-p">免费试用 7 天 / 开通会员 ↗</a>
-        <a lang="en" href="https://www.itool.tech/en/pro?from=linkshell" target="_blank" rel="noopener noreferrer" class="btn btn-p">Start 7-day free trial ↗</a>
-        <a lang="ja" href="https://www.itool.tech/en/pro?from=linkshell" target="_blank" rel="noopener noreferrer" class="btn btn-p">7 日間無料トライアルを始める ↗</a>
+        <a lang="zh" href="https://www.itool.tech/zh/pro?from=linkshell" target="_blank" rel="noopener noreferrer" class="btn btn-p">开通会员 ↗</a>
+        <a lang="en" href="https://www.itool.tech/en/pro?from=linkshell" target="_blank" rel="noopener noreferrer" class="btn btn-p">Get iTool membership ↗</a>
+        <a lang="ja" href="https://www.itool.tech/en/pro?from=linkshell" target="_blank" rel="noopener noreferrer" class="btn btn-p">メンバーシップに登録 ↗</a>
       </section>
       </div>
       </div>
@@ -1511,7 +1509,7 @@
         <h3><span lang="zh">不打开 App 能批准请求吗？</span><span lang="en">Can I approve a request without opening the app?</span><span lang="ja">アプリを開かずにリクエストを承認できますか？</span></h3>
         <p><span lang="zh">能。iPhone 锁屏的实时活动带「拒绝」和「允许」按钮（iOS 17 及以上），Apple Watch 上也能回复请求（watchOS 10 及以上）。</span><span lang="en">Yes. The Live Activity on the iPhone Lock Screen carries Deny and Allow (iOS 17 or later), and Apple Watch can answer requests too (watchOS 10 or later).</span><span lang="ja">はい。iPhone のロック画面のライブアクティビティに「拒否」「許可」ボタンが出ます（iOS 17 以降）。Apple Watch からもリクエストに応答できます（watchOS 10 以降）。</span></p>
         <h3><span lang="zh">要多少钱？</span><span lang="en">What does it cost?</span><span lang="ja">料金はかかりますか？</span></h3>
-        <p><span lang="zh">自建网关（一条命令或 Docker）就能免费使用全部功能。想免部署用官方网关，新账号注册即享 7 天免费试用（无需绑卡）；之后可开通 LinkShell 单品会员（¥9.9/月、¥49/年，或 US$3.19/月、US$13.49/年，均已含税），或全产品年包（¥99 / US$26.49 每年），邀请好友首次开通双方各得 14 / 30 天。</span><span lang="en">Every feature is free with your own gateway (one command or Docker). For the hosted official gateway, new accounts include a 7-day free trial (no card required); after that, iTool membership is $3.19/mo or $26.49/yr by international card via Creem (¥9.9/mo or ¥99/yr via Alipay), and inviting a friend gives both of you 14 or 30 days.</span><span lang="ja">ゲートウェイを自分で立てれば（コマンド 1 つか Docker）、全機能を無料で使えます。公式ゲートウェイは新規登録で 7 日間無料トライアル（カード不要）がつき、その後は iTool メンバーシップ（海外カード US$3.19/月・US$26.49/年、Alipay ¥9.9/月・¥99/年）で利用できます。友だち招待で双方に 14 / 30 日間が付与されます。</span></p>
+        <p><span lang="zh">自建网关（一条命令或 Docker）就能免费使用全部功能。想免部署用官方网关，可开通 LinkShell 单品会员（¥9.9/月、¥49/年，或 US$3.19/月、US$13.49/年，均已含税），或全产品年包（¥99 / US$26.49 每年），邀请好友首次开通双方各得 14 / 30 天。</span><span lang="en">Every feature is free with your own gateway (one command or Docker). For the hosted official gateway, iTool membership is $3.19/mo or $13.49/yr for LinkShell, or $26.49/yr for all products by international card via Creem (¥9.9/mo, ¥49/yr, or ¥99/yr via Alipay, tax included), and inviting a friend gives both of you 14 or 30 days.</span><span lang="ja">ゲートウェイを自分で立てれば（コマンド 1 つか Docker）、全機能を無料で使えます。公式ゲートウェイは iTool メンバーシップ（海外カード US$3.19/月・US$13.49/年・全製品 US$26.49/年、Alipay ¥9.9/月・¥49/年・全製品 ¥99/年）で利用できます。友だち招待で双方に 14 / 30 日間が付与されます。</span></p>
       </section>
     </div>
 

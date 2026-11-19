@@ -22,54 +22,33 @@ export interface MobileMembershipPresentation {
   headline: string;
   subtitle: string;
   freeHint?: string;
-  isTrial: boolean;
-}
-
-export function computeTrialDaysRemaining(membership: ProMembership, nowMs = Date.now()): number | undefined {
-  if (typeof membership.daysRemaining === "number" && Number.isFinite(membership.daysRemaining)) {
-    return Math.max(1, Math.ceil(membership.daysRemaining));
-  }
-  const rawEnd = membership.trialEndsAt ?? membership.expiresAt;
-  if (!rawEnd) return undefined;
-  const until = Date.parse(rawEnd);
-  if (!Number.isFinite(until)) return undefined;
-  return Math.max(1, Math.ceil((until - nowMs) / 86_400_000));
 }
 
 export function formatMobileMembershipState(
   membership: ProMembership | undefined,
   loading: boolean,
   locale: Locale,
-  nowMs = Date.now(),
 ): MobileMembershipPresentation {
   const pro = membership?.plan === "pro";
   if (pro && membership) {
-    const isTrial = membership.isTrial === true;
-    const daysRemaining = isTrial ? computeTrialDaysRemaining(membership, nowMs) : undefined;
-    const headline = membershipTierLabel(membership.tier, {
-      isTrial,
-      daysRemaining,
-      locale,
-    });
+    const headline = membershipTierLabel(membership.tier, { locale });
     const subtitle = membership.expiresAt
       ? translateKey(locale, "mobile.membership.validUntil", {
           date: new Date(membership.expiresAt).toLocaleDateString(dateLocaleTag(locale)),
         })
       : translateKey(locale, "mobile.membership.title");
-    return { headline, subtitle, isTrial };
+    return { headline, subtitle };
   }
   if (membership?.plan === "free") {
     return {
       headline: translateKey(locale, "mobile.membership.title"),
       subtitle: translateKey(locale, "mobile.membership.freeAccount"),
       freeHint: translateKey(locale, "mobile.membership.freeHint"),
-      isTrial: false,
     };
   }
   return {
     headline: translateKey(locale, "mobile.membership.title"),
     subtitle: translateKey(locale, loading ? "mobile.membership.loading" : "mobile.membership.unavailable"),
-    isTrial: false,
   };
 }
 
@@ -142,8 +121,8 @@ export function AccountMembership({ userId, embedded = false }: { userId: string
             }}
           >
             <Icon
-              sf={presentation.isTrial ? "clock.badge.checkmark" : "sparkles"}
-              md={presentation.isTrial ? "schedule" : "auto_awesome"}
+              sf="sparkles"
+              md="auto_awesome"
               size={15}
               color={colors.secondaryLabel}
               weight="medium"
@@ -202,7 +181,7 @@ export function AccountMembership({ userId, embedded = false }: { userId: string
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
           {/* Status is informational only, using neutral fill styling. */}
           <View style={{ width: 30, height: 30, borderRadius: radius.control, borderCurve: "continuous", backgroundColor: colors.fill, alignItems: "center", justifyContent: "center" }}>
-            <Icon sf={presentation.isTrial ? "clock.badge.checkmark" : "sparkles"} md={presentation.isTrial ? "schedule" : "auto_awesome"} size={16} color={colors.label} />
+            <Icon sf="sparkles" md="auto_awesome" size={16} color={colors.label} />
           </View>
           <View style={{ flex: 1, gap: 3 }}>
             <Text style={[type.headline, { color: colors.label }]}>{presentation.headline}</Text>

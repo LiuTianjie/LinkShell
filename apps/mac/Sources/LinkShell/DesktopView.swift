@@ -438,18 +438,6 @@ struct DesktopView: View {
             .disabled(model.busy || model.preview).help("刷新会员状态").accessibilityLabel("刷新会员状态")
         }
       }.font(.system(size: 12))
-      if model.trialExpiringSoon, let days = model.trialDaysRemaining {
-        HStack(spacing: 8) {
-          Text("免费试用还剩 \(days) 天，续费后远程会话与后台值守不会中断。")
-            .font(.system(size: 12)).foregroundStyle(DesktopStyle.waiting)
-          Spacer(minLength: 8)
-          Button("立即续费") { model.openMembershipPage() }
-            .buttonStyle(DesktopButtonStyle(.secondary, compact: true))
-            .disabled(model.busy || model.preview)
-        }
-        .padding(.horizontal, 10).padding(.vertical, 8)
-        .background(DesktopStyle.raised, in: RoundedRectangle(cornerRadius: DesktopStyle.smallRadius, style: .continuous))
-      }
       if case .pro(_, .monthly) = model.membership {
         // Product access does not tell us how many other products this account owns.
         HStack(spacing: 4) {

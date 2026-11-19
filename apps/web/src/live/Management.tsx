@@ -545,7 +545,6 @@ function Membership({ state }: { state: ManagementState }) {
   const t = useT();
   const membership = membershipOf(state.snapshot?.account);
   const upgradeCopy = MONTHLY_UPGRADE_COPY[locale] ?? MONTHLY_UPGRADE_COPY.en;
-  const trialExpiring = membership.kind === "pro" && membership.isTrial && (membership.daysRemaining ?? 99) <= 2;
   return (
     <>
       <SettingRow
@@ -564,8 +563,6 @@ function Membership({ state }: { state: ManagementState }) {
         {membership.kind === "pro" ? (
           <Badge variant="secondary">
             {membershipTierLabel(membership.tier, {
-              isTrial: membership.isTrial,
-              daysRemaining: membership.daysRemaining,
               locale,
             })}
           </Badge>
@@ -583,15 +580,7 @@ function Membership({ state }: { state: ManagementState }) {
             </Tooltip>
           )}
       </SettingRow>
-      {trialExpiring && (
-        <SettingRow
-          title={t("desktop.membership.trialExpiringBanner", { days: membership.daysRemaining ?? 0 })}
-          onClick={() => openMembershipPage(locale)}
-        >
-          <span className="text-link">{t("desktop.membership.activateOfficialPlan")}</span>
-        </SettingRow>
-      )}
-      {membership.kind === "pro" && !membership.isTrial && membership.tier === "monthly" && (
+      {membership.kind === "pro" && membership.tier === "monthly" && (
         // Offer the all-products bundle without inferring the account's other entitlements.
         <SettingRow title={upgradeCopy.unlocked} onClick={() => openYearlyUpgradePage(locale)}>
           <span className="text-link">{upgradeCopy.action}</span>

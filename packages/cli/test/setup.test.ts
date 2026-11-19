@@ -23,7 +23,7 @@ vi.mock("../src/commands/screen.js", () => ({
 const { runSetup } = await import("../src/commands/setup.js");
 
 describe("linkshell setup", () => {
-  it("highlights the 7-day free trial (no card needed) alongside LAN and self-hosted options", async () => {
+  it("lists official gateway sign-in alongside LAN and self-hosted options without trial copy", async () => {
     let output = "";
     const origStdinTty = process.stdin.isTTY;
     const origStdoutTty = process.stdout.isTTY;
@@ -35,8 +35,8 @@ describe("linkshell setup", () => {
     });
     try {
       await runSetup("0.10.99");
-      expect(output).toContain("7-day free trial");
-      expect(output).toContain("no card needed");
+      expect(output).toContain("linkshell login");
+      expect(output).not.toMatch(/7-day|trial/i);
       expect(output).toContain("linkshell host --lan");
       expect(output).toContain("linkshell pair");
     } finally {

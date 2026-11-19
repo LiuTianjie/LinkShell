@@ -148,7 +148,7 @@ describe("membership revalidation during outages", () => {
     expect(check).toHaveBeenCalledTimes(3);
   });
 
-  it("provides locale-neutral URLs, bilingual 7-day free trial hints, and localized helpers", async () => {
+  it("provides locale-neutral URLs, bilingual membership hints, and localized helpers without trial copy", async () => {
     expect(MEMBERSHIP_URL).toBe("https://www.itool.tech/pro?from=linkshell");
     expect(membershipUrl()).toBe("https://www.itool.tech/pro?from=linkshell");
     expect(membershipUrl("zh")).toBe("https://www.itool.tech/zh/pro?from=linkshell");
@@ -160,14 +160,18 @@ describe("membership revalidation during outages", () => {
     const admit = requirePro(async () => ({ status: "inactive" }), () => {});
     const anonMessage = await admit({ role: "machine" });
     expect(anonMessage).toContain("linkshell login");
-    expect(anonMessage).toContain("7 天免费试用");
-    expect(anonMessage).toContain("7-day free trial");
+    expect(anonMessage).toContain("官方网关需要登录账号");
+    expect(anonMessage).toContain("Official gateway requires sign-in");
+    expect(anonMessage).not.toMatch(/7\s*天|7-day|トライアル|trial/i);
 
     const lapsedMessage = await admit({ role: "machine", userId: "lapsed-user" });
     expect(lapsedMessage).toContain(MEMBERSHIP_URL);
     expect(lapsedMessage).toContain("需要 iTool 会员");
-    expect(lapsedMessage).toContain("7-day free trial");
+    expect(lapsedMessage).toContain("Official gateway requires an iTool membership");
+    expect(lapsedMessage).not.toMatch(/7\s*天|7-day|トライアル|trial/i);
 
-    expect(admissionDenialMessage("membership_required", "ja")).toContain("7 日間無料トライアル");
+    const jaMessage = admissionDenialMessage("membership_required", "ja");
+    expect(jaMessage).toContain("iTool メンバーシップが必要");
+    expect(jaMessage).not.toMatch(/7\s*日間|トライアル|trial/i);
   });
 });

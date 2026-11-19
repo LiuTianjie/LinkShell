@@ -76,44 +76,29 @@ describe("entitlement mapping", () => {
     });
   });
 
-  it("parses 7-day trial fields (is_trial, trial_ends_at) and computes remaining days accurately", () => {
-    const trialEnds = "2026-10-26T10:00:00.000Z";
-    const trial = {
+  it("parses active entitlements including legacy trial fields as active pro access", () => {
+    const legacyTrialEnds = "2026-10-26T10:00:00.000Z";
+    const legacyTrial = {
       ...entitlement,
       tier: "yearly",
-      valid_until: trialEnds,
-      yearly_until: trialEnds,
+      valid_until: legacyTrialEnds,
+      yearly_until: legacyTrialEnds,
       is_trial: true,
-      trial_ends_at: trialEnds,
+      trial_ends_at: legacyTrialEnds,
     };
-    expect(membershipFromEntitlement(trial)).toEqual({
+    expect(membershipFromEntitlement(legacyTrial)).toEqual({
       plan: "pro",
       tier: "yearly",
-      expiresAt: trialEnds,
-      isTrial: true,
-      trialEndsAt: trialEnds,
+      expiresAt: legacyTrialEnds,
       daysRemaining: 7,
     });
 
-    // 36 hours left -> rounds up to 2 days remaining
     const twoDaysLeft = {
-      ...trial,
+      ...legacyTrial,
       valid_until: "2026-10-20T22:00:00.000Z",
       trial_ends_at: "2026-10-20T22:00:00.000Z",
     };
     expect(membershipFromEntitlement(twoDaysLeft).daysRemaining).toBe(2);
-
-    // Paid user after trial ended has isTrial: false
-    const paidAfterTrial = {
-      ...entitlement,
-      is_trial: false,
-      trial_ends_at: "2026-10-10T10:00:00.000Z",
-    };
-    expect(membershipFromEntitlement(paidAfterTrial)).toMatchObject({
-      plan: "pro",
-      isTrial: false,
-      trialEndsAt: "2026-10-10T10:00:00.000Z",
-    });
   });
 
   it.each([
@@ -149,9 +134,6 @@ describe("entitlement mapping", () => {
     expect(membershipTierLabel("yearly")).toBe("LinkShell 会员");
     expect(membershipTierLabel("monthly", { locale: "en" })).toBe("LinkShell Membership");
     expect(membershipTierLabel("yearly", { locale: "ja" })).toBe("LinkShell メンバーシップ");
-    expect(membershipTierLabel("yearly", { isTrial: true, daysRemaining: 5, locale: "zh" })).toBe("7 天免费试用 · 剩余 5 天");
-    expect(membershipTierLabel("yearly", { isTrial: true, daysRemaining: 5, locale: "en" })).toBe("7-day free trial · 5d left");
-    expect(membershipTierLabel("yearly", { isTrial: true, daysRemaining: 5, locale: "ja" })).toBe("7日間無料トライアル · 残り 5 日");
 
     expect(ITOOL_MEMBERSHIP_URL).toBe("https://www.itool.tech/zh/pro?product=linkshell");
     expect(ITOOL_YEARLY_UPGRADE_URL).toBe("https://www.itool.tech/zh/pro?product=bundle&checkout=yearly");
