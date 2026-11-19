@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { accountMembership } from "../src/live/account";
+import { accountClient, accountMembership } from "../src/live/account";
 
 const mocks = vi.hoisted(() => ({
   getSession: vi.fn(),
@@ -7,14 +7,6 @@ const mocks = vi.hoisted(() => ({
   fetchProMembership: vi.fn(),
 }));
 
-vi.mock("@supabase/supabase-js", () => ({
-  createClient: () => ({
-    auth: {
-      getSession: mocks.getSession,
-      refreshSession: mocks.refreshSession,
-    },
-  }),
-}));
 vi.mock("@linkshell/client-core", () => ({
   fetchProMembership: mocks.fetchProMembership,
 }));
@@ -65,6 +57,8 @@ beforeEach(() => {
   vi.resetAllMocks();
   vi.spyOn(Date, "now").mockReturnValue(now);
   vi.stubGlobal("window", { __LINKSHELL_CONFIG__: { account: accountConfig } });
+  vi.spyOn(accountClient().auth, "getSession").mockImplementation(mocks.getSession);
+  vi.spyOn(accountClient().auth, "refreshSession").mockImplementation(mocks.refreshSession);
 });
 afterEach(() => {
   vi.restoreAllMocks();

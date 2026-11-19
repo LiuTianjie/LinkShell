@@ -14,7 +14,6 @@
   "dependencies": {
     "@linkshell/client-core": "workspace:*",
     "@linkshell/wire": "workspace:*",
-    "@supabase/supabase-js": "2.117.3",
     "@xterm/addon-fit": "0.11.0",
     "@xterm/xterm": "6.0.0",
     "class-variance-authority": "^0.7.1",

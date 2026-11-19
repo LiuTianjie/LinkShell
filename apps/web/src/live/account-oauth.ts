@@ -1,4 +1,4 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { WebAccountAuth } from "./account";
 
 const CALLBACK_PARAM = "linkshell-auth-callback";
 const POPUP_REQUEST_KEY = "linkshell.web.oauth.popup.v1";
@@ -31,7 +31,7 @@ function panel(target: Window, message: string) {
 
 /** Call inside the click handler, before awaiting any connection or authentication work. */
 export async function signInWithAccountOAuth(
-  auth: SupabaseClient["auth"],
+  auth: WebAccountAuth,
   provider: "github" | "google",
   options: { signal: AbortSignal; onExchanging?: () => void },
 ): Promise<void> {
