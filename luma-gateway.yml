@@ -26,9 +26,8 @@ env:
   # Connections arrive through the edge, so the limit per address is a limit on everyone at once:
   # high enough that all of them reconnecting after a deploy get back in.
   WS_CONNECT_RATE_LIMIT_MAX: "600"
-  SUPABASE_URL: ${SUPABASE_URL}
-  SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
-  SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+  ITOOL_CORE_URL: https://api.itool.tech
+  ITOOL_CORE_BILLING_KEY: ${ITOOL_CORE_BILLING_KEY}
   # The coturn on tecent (deploy/turn/): its shared secret and its stun:/turn: addresses, lent to computers for
   # screen video that finds no direct path.
   TURN_SECRET: ${TURN_SECRET}

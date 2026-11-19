@@ -6,8 +6,9 @@ import { turnOptionsFromEnv } from "./turn.js";
 // The gateway as a process (the Docker image runs this), configured by environment:
 //   PORT                          listen port (8787)
 //   RELAY_DATA_PATH               SQLite file with pairings and keys (./data/relay.db); keep it on a volume
-//   SUPABASE_URL + SUPABASE_ANON_KEY   turn accounts on
-//   AUTH_REQUIRED=true            computers need an active Pro account (with SUPABASE_SERVICE_ROLE_KEY)
+//   ITOOL_CORE_URL                unified iTool account backend (e.g. https://api.itool.tech)
+//   AUTH_REQUIRED=true            computers need an active Pro account (with ITOOL_CORE_BILLING_KEY)
+//   SUPABASE_URL + SUPABASE_ANON_KEY + SUPABASE_SERVICE_ROLE_KEY   legacy fallback for self-hosted deployments
 //   MEMBERSHIP_REVALIDATION_ENABLED=true  opt in to ongoing membership checks (off by default)
 //   MEMBERSHIP_FAILURE_GRACE_SECONDS     outage grace when enabled (3600; minimum 300)
 //   TURN_SECRET + TURN_URLS       lend computers a TURN server for video with no direct path: coturn's static-auth-secret,
@@ -26,10 +27,13 @@ function log(level: LogLevel, message: string): void {
 
 const port = Number(process.env.PORT ?? 8787);
 const databasePath = process.env.RELAY_DATA_PATH ?? "./data/relay.db";
-const supabase = {
-  url: process.env.SUPABASE_URL ?? "",
-  anonKey: process.env.SUPABASE_ANON_KEY ?? "",
-  serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
+const accountUrl = (process.env.ITOOL_CORE_URL ?? process.env.SUPABASE_URL ?? "").trim().replace(/\/+$/, "");
+const account = {
+  url: accountUrl,
+  anonKey: process.env.ITOOL_CORE_URL
+    ? (process.env.ITOOL_CORE_ANON_KEY ?? "itool-core")
+    : (process.env.SUPABASE_ANON_KEY ?? ""),
+  serviceRoleKey: process.env.ITOOL_CORE_BILLING_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
 };
 const version = packageVersion();
 const turn = turnOptionsFromEnv(process.env);
@@ -42,14 +46,14 @@ const gateway = await startGateway({
   databasePath,
   version,
   web: {
-    account: supabase.url && supabase.anonKey ? { url: supabase.url, anonKey: supabase.anonKey } : undefined,
+    account: account.url && account.anonKey ? { url: account.url, anonKey: account.anonKey } : undefined,
     previewOrigin: process.env.WEB_PREVIEW_ORIGIN,
   },
   log: (message) => log("info", `[relay] ${message}`),
-  verifyToken: supabase.url && supabase.anonKey ? supabaseVerifier(supabase.url, supabase.anonKey) : undefined,
+  verifyToken: account.url && account.anonKey ? supabaseVerifier(account.url, account.anonKey) : undefined,
   admit:
     process.env.AUTH_REQUIRED === "true"
-      ? requirePro(supabaseSubscriptions(supabase), (message) => log("warn", `[relay] ${message}`), { enforceGrace: revalidateMembership, graceMs: membershipGraceMs })
+      ? requirePro(supabaseSubscriptions(account), (message) => log("warn", `[relay] ${message}`), { enforceGrace: revalidateMembership, graceMs: membershipGraceMs })
       : undefined,
   admissionCheckMs: revalidateMembership ? 5 * 60_000 : undefined,
   turn,
