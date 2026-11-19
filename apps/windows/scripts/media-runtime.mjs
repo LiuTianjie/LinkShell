@@ -6,23 +6,23 @@ import { spawnSync } from 'node:child_process';
 
 // A shared LGPL build: no GPL encoders, and the libraries remain replaceable.
 export const mediaRelease = {
-  tag: 'autobuild-2026-11-02-12-51',
-  name: 'ffmpeg-n8.1.3-32-g760d10603e-win64-lgpl-shared-8.1',
-  sha256: '424ee1ebefd41bda90247db6a08d510d11e14a20ca19ecc168a50d4e63eb7fee',
-  asset: 701751325,
+  tag: 'autobuild-2026-11-18-12-39',
+  name: 'ffmpeg-n8.1.3-36-ge22a4510c9-win64-lgpl-shared-8.1',
+  sha256: '13a795e5620236ca4c304b580f0155130bdcecd87bf5e9f66f84b59d98783668',
+  asset: 763357000,
 };
 const app = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export async function ensureMedia() {
   const cache = join(app, 'build', 'media-cache');
   mkdirSync(cache, { recursive: true });
   const zip = join(cache, `${mediaRelease.name}.zip`);
-  const url = `https://github.com/BtbN/FFmpeg-Builds/releases/download/${mediaRelease.tag}/${mediaRelease.name}.zip`;
+  const url = `https://github.com/FFmpeg-Builds/FFmpeg-Builds/releases/download/${mediaRelease.tag}/${mediaRelease.name}.zip`;
   if (!existsSync(zip)) {
     console.log('Downloading the Windows hardware video runtime...');
     // Some networks reset github.com release downloads; the official asset API reaches the same file.
     let response;
     try { response = await fetch(url); }
-    catch { response = await fetch(`https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/assets/${mediaRelease.asset}`, { headers: { Accept: 'application/octet-stream' } }); }
+    catch { response = await fetch(`https://api.github.com/repos/FFmpeg-Builds/FFmpeg-Builds/releases/assets/${mediaRelease.asset}`, { headers: { Accept: 'application/octet-stream' } }); }
     if (!response.ok) throw new Error(`Media runtime download failed: ${response.status}`);
     const data = Buffer.from(await response.arrayBuffer());
     if (createHash('sha256').update(data).digest('hex') !== mediaRelease.sha256) throw new Error('Media runtime checksum mismatch');
@@ -48,7 +48,7 @@ export async function ensureMedia() {
   }
   const gpl = join(cache, 'COPYING.GPLv3');
   if (!existsSync(gpl)) {
-    const response = await fetch('https://api.github.com/repos/FFmpeg/FFmpeg/contents/COPYING.GPLv3?ref=760d10603e');
+    const response = await fetch('https://api.github.com/repos/FFmpeg/FFmpeg/contents/COPYING.GPLv3?ref=e22a4510c9');
     if (!response.ok) throw new Error('Cannot retrieve the GPL text incorporated by LGPLv3');
     const data = await response.json();
     const license = Buffer.from(data.content || '', 'base64').toString('utf8');
@@ -56,7 +56,7 @@ export async function ensureMedia() {
     writeFileSync(gpl, license);
   }
   cpSync(gpl, join(target, 'COPYING.GPLv3'));
-  writeFileSync(join(target, 'LINKSHELL-MEDIA-NOTICE.txt'), `FFmpeg shared LGPL build, unmodified.\nUpstream: https://ffmpeg.org/\nBuild and corresponding source instructions: https://github.com/BtbN/FFmpeg-Builds/tree/${mediaRelease.tag}\nBinary: ${url}\nSHA256: ${mediaRelease.sha256}\nFFmpeg source revision: 760d10603e (release/8.1).\nThe shared libraries may be replaced by the user. LinkShell invokes ffmpeg as a separate process.\n`);
+  writeFileSync(join(target, 'LINKSHELL-MEDIA-NOTICE.txt'), `FFmpeg shared LGPL build, unmodified.\nUpstream: https://ffmpeg.org/\nBuild and corresponding source instructions: https://github.com/FFmpeg-Builds/FFmpeg-Builds/tree/${mediaRelease.tag}\nBinary: ${url}\nSHA256: ${mediaRelease.sha256}\nFFmpeg source revision: e22a4510c9 (release/8.1).\nThe shared libraries may be replaced by the user. LinkShell invokes ffmpeg as a separate process.\n`);
   return target;
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) console.log(await ensureMedia());
