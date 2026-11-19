@@ -191,7 +191,7 @@ describe("refreshing through the itool.tech proxy", () => {
     process.env.LINKSHELL_TOKEN_PROXY = "off";
     auth.saveAuth(tokens(Date.now() - 1));
     const fetch = vi.fn(async (url: string) => {
-      expect(url).toContain("supabase.co");
+      expect(url).toContain("api.itool.tech");
       return Response.json({ access_token: "access-direct", refresh_token: "refresh-direct", expires_in: 3600, user: { id: "u1" } });
     });
     vi.stubGlobal("fetch", fetch);

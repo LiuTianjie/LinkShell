@@ -45,9 +45,8 @@ export function isLoggedIn(): boolean {
   return auth !== null && auth.accessToken.length > 0;
 }
 
-const SUPABASE_URL = "https://mkbeusztkzffnzjdwmqk.supabase.co";
-const SUPABASE_ANON_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1rYmV1c3p0a3pmZm56amR3bXFrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU5Nzc0NzgsImV4cCI6MjA4MTU1MzQ3OH0.2wlT6q6687Z5rpEYsdp01IQpNNl_XWv0IAfBgwPyDP0";
+const SUPABASE_URL = "https://api.itool.tech";
+const SUPABASE_ANON_KEY = "itool-core";
 
 export { SUPABASE_URL, SUPABASE_ANON_KEY };
 

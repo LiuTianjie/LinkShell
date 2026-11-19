@@ -15,7 +15,7 @@ const auth = await import("../src/auth.js");
 afterAll(() => rmSync(home, { recursive: true, force: true }));
 
 const PROXY = "https://www.itool.tech/api/linkshell/auth";
-const SUPABASE = "https://mkbeusztkzffnzjdwmqk.supabase.co";
+const SUPABASE = "https://api.itool.tech";
 const realFetch = globalThis.fetch;
 const existing = { accessToken: "existing", refreshToken: "existing-refresh", userId: "existing-user", expiresAt: Date.now() + 3_600_000 };
 const session = (access = "access-new") => ({
