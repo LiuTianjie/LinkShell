@@ -51,8 +51,8 @@ public enum DesktopScreenBridge {
 }
 
 /// Clips `DesktopScreenSurface` inside Electron's content view while punching rounded transparent
-/// cutouts (`CAShapeLayer` even-odd mask) and passing pointer events through to Chromium whenever
-/// HTML Top-Layer popovers or dialogs are open.
+/// cutouts (`CAShapeLayer` boolean-subtracted mask) and passing pointer events through to Chromium
+/// whenever HTML Top-Layer popovers or dialogs are open.
 public final class DesktopScreenClipView: NSView {
   public override var isFlipped: Bool { true }
 
@@ -92,22 +92,22 @@ public final class DesktopScreenClipView: NSView {
       layer?.mask = nil
       return
     }
-    let path = CGMutablePath()
-    path.addRect(bounds)
+    // Boolean subtraction keeps overlapping cutouts (e.g. a popover and an open `<select>` picker)
+    // transparent instead of inverting their intersection back to opaque as `.evenOdd` would.
+    var maskPath: CGPath = CGPath(rect: bounds, transform: nil)
     for hole in mapped {
-      if hole.radius > 0 {
-        path.addRoundedRect(in: hole.rect, cornerWidth: hole.radius, cornerHeight: hole.radius)
-      } else {
-        path.addRect(hole.rect)
-      }
+      let holePath = hole.radius > 0
+        ? CGPath(roundedRect: hole.rect, cornerWidth: hole.radius, cornerHeight: hole.radius, transform: nil)
+        : CGPath(rect: hole.rect, transform: nil)
+      maskPath = maskPath.subtracting(holePath)
     }
     CATransaction.begin()
     CATransaction.setDisableActions(true)
     let mask = (layer?.mask as? CAShapeLayer) ?? CAShapeLayer()
     mask.frame = bounds
-    mask.fillRule = .evenOdd
+    mask.fillRule = .nonZero
     mask.fillColor = NSColor.white.cgColor
-    mask.path = path
+    mask.path = maskPath
     if layer?.mask !== mask {
       layer?.mask = mask
     }

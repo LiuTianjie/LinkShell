@@ -2,8 +2,8 @@ import { useCallback, useEffect, useRef, useState, type JSX } from "react";
 import { DESKTOP_NATIVE_SCREEN_EVENT } from "../../bridge/desktop-bridge";
 import {
   getOpenOverlayRects,
-  hasOpenSelectPicker,
   hasOpenOverlay,
+  hasUnmeasuredOpenSelectPicker,
   subscribeOpenOverlay,
   useHasOpenOverlay,
 } from "../../bridge/top-layer-registry";
@@ -40,10 +40,10 @@ function errorMessageOf(reason: unknown): string {
 
 /**
  * macOS Native Metal Stage (`DesktopScreenSurface` / AppKit `ScreenClip` + `CAMetalLayer`).
- * Subscribes to `TopLayerRegistry` (`useHasOpenOverlay`): every open `<dialog>`, `[popover]`
- * or `[data-native-overlay]` is cut out of the Metal layer (`holes`) so it shows and takes its
- * clicks while the picture stays live around it; an open `<select>` picker, which has no box to
- * cut, collapses the rect to `0×0` until it closes.
+ * Subscribes to `TopLayerRegistry` (`useHasOpenOverlay`): every open `<dialog>`, `[popover]`,
+ * `[data-native-overlay]`, or measured customizable `<select>` picker (`::picker(select)`) is cut
+ * out of the Metal layer (`holes`) so it shows and takes its clicks while the picture stays live
+ * around it; an unmeasurable open `<select>` picker collapses the rect to `0×0` until it closes.
  */
 export function NativeMetalStage({
   link,
@@ -140,10 +140,10 @@ export function NativeMetalStage({
     (overlayOpen: boolean) => {
       const id = sessionIdRef.current;
       if (!id) return;
-      const rect = hasOpenSelectPicker()
+      const holes = getOpenOverlayRects();
+      const rect = hasUnmeasuredOpenSelectPicker()
         ? { x: 0, y: 0, width: 0, height: 0 }
         : computeStageRect(overlayOpen);
-      const holes = getOpenOverlayRects();
       const payload = { rect, holes, overlayOpen };
       const serialized = JSON.stringify(payload);
       if (serialized === lastLayoutJsonRef.current) return;

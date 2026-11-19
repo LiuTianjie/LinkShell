@@ -905,6 +905,223 @@ describe("Slice 2B-4: Fusion Launchpad & Unified Remote Screen", () => {
     expect(afterCloseLayouts.at(-1)?.holes).toEqual([]);
   });
 
+  it("cuts out a measured customizable <select> picker extending below the quality popover and collapses Metal if unmeasurable", async () => {
+    const remoteMac = makeMockComputer(
+      "wss://gateway.itool.tech#mac-select-cutout",
+      "darwin",
+      "Studio Mac",
+    );
+    const mockConn = makeMockConnection(remoteMac);
+    engine.state.setState({
+      computers: [remoteMac],
+      connection: mockConn,
+    });
+    routerStore.getState().openScreen(remoteMac.key);
+    installPreloadBridge("darwin");
+
+    let pacingOpen = false;
+    let measurablePicker = true;
+
+    const origGetBcr = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+      function (this: HTMLElement) {
+        if (this.classList?.contains("ls-screen-stage-viewport")) {
+          return {
+            x: 40,
+            y: 46,
+            left: 40,
+            top: 46,
+            right: 1240,
+            bottom: 726,
+            width: 1200,
+            height: 680,
+            toJSON: () => ({}),
+          } as DOMRect;
+        }
+        if (
+          this.classList?.contains("ls-remote-popover-panel") &&
+          this.getAttribute("data-state") === "open"
+        ) {
+          return {
+            x: 910,
+            y: 48,
+            left: 910,
+            top: 48,
+            right: 1210,
+            bottom: 420,
+            width: 300,
+            height: 372,
+            toJSON: () => ({}),
+          } as DOMRect;
+        }
+        if (this.tagName === "SELECT" && this.classList.contains("ls-select")) {
+          return {
+            x: 923,
+            y: 379,
+            left: 923,
+            top: 379,
+            right: 1197,
+            bottom: 407,
+            width: 274,
+            height: 28,
+            toJSON: () => ({}),
+          } as DOMRect;
+        }
+        if (this.tagName === "OPTION" && pacingOpen && measurablePicker) {
+          return {
+            x: 928,
+            y: 418,
+            left: 928,
+            top: 418,
+            right: 1192,
+            bottom: 448,
+            width: 264,
+            height: 30,
+            toJSON: () => ({}),
+          } as DOMRect;
+        }
+        return origGetBcr.call(this);
+      },
+    );
+
+    const origGetComputedStyle = window.getComputedStyle.bind(window);
+    vi.spyOn(window, "getComputedStyle").mockImplementation(
+      (el: Element, pseudo?: string | null) => {
+        if (pseudo === "::picker(select)" && el.tagName === "SELECT" && pacingOpen && measurablePicker) {
+          return {
+            display: "block",
+            boxSizing: "border-box",
+            width: "274px",
+            height: "74px",
+            paddingTop: "4px",
+            paddingBottom: "4px",
+            paddingLeft: "4px",
+            paddingRight: "4px",
+            borderTopWidth: "1px",
+            borderBottomWidth: "1px",
+            borderLeftWidth: "1px",
+            borderRightWidth: "1px",
+            marginTop: "6px",
+            marginBottom: "6px",
+            borderTopLeftRadius: "10px",
+          } as unknown as CSSStyleDeclaration;
+        }
+        return origGetComputedStyle(el, pseudo ?? undefined);
+      },
+    );
+
+    await act(async () => {
+      root.render(
+        <DialogProvider>
+          <RemoteScreenWorkspace computerKey={remoteMac.key} />
+        </DialogProvider>,
+      );
+      await Promise.resolve();
+    });
+
+    const qualityTrigger = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="画面与编码设置"]',
+    );
+    await act(async () => {
+      qualityTrigger?.click();
+      await Promise.resolve();
+    });
+
+    const selects = Array.from(container.querySelectorAll("select"));
+    const pacingSelect = selects.find((sel) =>
+      Array.from(sel.options).some((opt) => opt.value === "smooth"),
+    );
+    expect(pacingSelect).toBeDefined();
+
+    const origMatches = pacingSelect!.matches.bind(pacingSelect);
+    vi.spyOn(pacingSelect!, "matches").mockImplementation((selector: string) => {
+      if (selector === ":open") return pacingOpen;
+      return origMatches(selector);
+    });
+    const origQueryAll = document.querySelectorAll.bind(document);
+    vi.spyOn(document, "querySelectorAll").mockImplementation((selector: string) => {
+      if (selector === "select:open") {
+        return (pacingOpen ? [pacingSelect!] : []) as unknown as NodeListOf<Element>;
+      }
+      return origQueryAll(selector);
+    });
+    const origInnerWidth = window.innerWidth;
+    const origInnerHeight = window.innerHeight;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1280 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 800 });
+
+    try {
+      // 1) Open the bottom pacing `<select>` via pointer/click (Chromium fires NO `toggle` event):
+      //    `NativeMetalStage` stays live and cuts out BOTH the popover AND the picker extending below it!
+      await act(async () => {
+        pacingOpen = true;
+        pacingSelect!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        await Promise.resolve();
+      });
+
+      const openPickerLayout = postedMessages
+        .filter((m) => m.action === "screen" && m.type === "layout")
+        .at(-1);
+      expect(openPickerLayout?.rect).toEqual({
+        x: 40,
+        y: 46,
+        width: 1200,
+        height: 680,
+      });
+      expect(openPickerLayout?.overlayOpen).toBe(true);
+      expect(openPickerLayout?.holes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ x: 910, y: 48, width: 300, height: 372 }),
+          expect.objectContaining({
+            x: 923,
+            y: 413,
+            width: 274,
+            height: 74,
+            radius: 10,
+          }),
+        ]),
+      );
+
+      // 2) Close `<select>` via Escape/keyup -> picker hole is removed immediately!
+      await act(async () => {
+        pacingOpen = false;
+        document.dispatchEvent(new KeyboardEvent("keyup", { key: "Escape", bubbles: true }));
+        await Promise.resolve();
+      });
+
+      const closedPickerLayout = postedMessages
+        .filter((m) => m.action === "screen" && m.type === "layout")
+        .at(-1);
+      expect(closedPickerLayout?.holes).toEqual([
+        expect.objectContaining({ x: 910, y: 48, width: 300, height: 372 }),
+      ]);
+
+      // 3) If a `<select>` picker cannot be measured (non-`base-select` OS popup), collapse Metal to 0x0!
+      await act(async () => {
+        measurablePicker = false;
+        pacingOpen = true;
+        pacingSelect!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        await Promise.resolve();
+      });
+
+      const unmeasuredLayout = postedMessages
+        .filter((m) => m.action === "screen" && m.type === "layout")
+        .at(-1);
+      expect(unmeasuredLayout?.rect).toEqual({ x: 0, y: 0, width: 0, height: 0 });
+
+      // Clean up open state
+      await act(async () => {
+        pacingOpen = false;
+        document.dispatchEvent(new KeyboardEvent("keyup", { key: "Escape", bubbles: true }));
+        qualityTrigger?.click();
+        await Promise.resolve();
+      });
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: origInnerWidth });
+      Object.defineProperty(window, "innerHeight", { configurable: true, value: origInnerHeight });
+    }
+  });
+
   it("toggles RemoteScreenWorkspace fullscreen cleanly via both the HUD button and Escape key on macOS Metal and WebRTC stages", async () => {
     const remoteWin = makeMockComputer(
       "wss://gateway.itool.tech#win-fullscreen",

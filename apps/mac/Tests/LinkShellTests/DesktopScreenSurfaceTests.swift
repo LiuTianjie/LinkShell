@@ -294,6 +294,28 @@ final class DesktopScreenSurfaceTests: XCTestCase {
       XCTAssertTrue(clip.hitTest(handlePointInHost) === overlay.handle)
       overlay.detach()
 
+      // Overlapping & nested holes (e.g. popover + an open `<select>` picker extending below it,
+      // or a picker fully inside the popover) must all stay transparent without `.evenOdd` inversion.
+      let pickerBelowPopoverCSS = DesktopScreenHole(rect: CGRect(x: 713, y: 298, width: 194, height: 90), radius: 10)
+      let nestedPickerCSS = DesktopScreenHole(rect: CGRect(x: 713, y: 90, width: 194, height: 80), radius: 10)
+      clip.applyCutouts([holeCSS, pickerBelowPopoverCSS, nestedPickerCSS], in: host)
+      host.layoutSubtreeIfNeeded()
+      if let rep = clip.bitmapImageRepForCachingDisplay(in: clip.bounds) {
+        clip.cacheDisplay(in: clip.bounds, to: rep)
+        // Nested hole center: CSS (810, 130) -> clip (570, 88)
+        let nestedAlpha = rep.colorAt(x: 570, y: 88)?.alphaComponent ?? 1
+        // Overlap between popover (y=48..308) and picker (y=298..388): CSS (810, 303) -> clip (570, 261)
+        let overlapAlpha = rep.colorAt(x: 570, y: 261)?.alphaComponent ?? 1
+        // Picker below popover: CSS (810, 360) -> clip (570, 318)
+        let belowPopoverAlpha = rep.colorAt(x: 570, y: 318)?.alphaComponent ?? 1
+        // Outside all holes: CSS (810, 600) -> clip (570, 558)
+        let outsideAlpha = rep.colorAt(x: 570, y: 558)?.alphaComponent ?? 0
+        XCTAssertLessThan(nestedAlpha, 0.05, "Nested cutout inside popover must stay transparent")
+        XCTAssertLessThan(overlapAlpha, 0.05, "Overlap between popover and select picker must stay transparent")
+        XCTAssertLessThan(belowPopoverAlpha, 0.05, "Select picker extending below popover must be cut out transparent")
+        XCTAssertGreaterThan(outsideAlpha, 0.95, "Stage outside all cutouts must stay opaque")
+      }
+
       // Clearing cutouts removes the mask cleanly.
       clip.overlayOpen = false
       clip.applyCutouts([], in: host)
