@@ -163,8 +163,8 @@ def url(lang: str, view: str) -> str:
 
 
 def rel(lang: str, view: str) -> str:
-    """The page's address against the site's root (the pages' <base>)."""
-    return LANGS[lang]["prefix"] + VIEWS[view] or "./"
+    """The page's root-relative address (safe even when crawlers ignore <base>)."""
+    return "/" + LANGS[lang]["prefix"] + VIEWS[view]
 
 
 def others(lang: str, view: str) -> list:
@@ -409,8 +409,8 @@ def head(lang: str, view: str, page: str) -> str:
         # The film's still is the largest thing painted: fetch the one <picture> will choose first.
         tall = "assets/promo/film-vertical.jpg" if lang == "zh" else "assets/promo/film-en-vertical.jpg"
         lines += [
-            f'<link rel="preload" as="image" href="{FILM[lang]["still"]}" media="(min-width: 701px)" fetchpriority="high" />',
-            f'<link rel="preload" as="image" href="{tall}" media="(max-width: 700px)" fetchpriority="high" />',
+            f'<link rel="preload" as="image" href="/{FILM[lang]["still"]}" media="(min-width: 701px)" fetchpriority="high" />',
+            f'<link rel="preload" as="image" href="/{tall}" media="(max-width: 700px)" fetchpriority="high" />',
         ]
     data = json.dumps(structured_data(lang, view, page), ensure_ascii=False, indent=2).replace("</", "<\\/")
     lines.append('<script type="application/ld+json">\n' + data + "\n</script>")
@@ -439,14 +439,21 @@ def build(source: str, lang: str, view: str) -> str:
     page = pick_attributes(page, lang)
     page = page.replace('aria-label="Toggle light / dark"', f'aria-label="{THEME_LABEL[lang]}"')
     if lang != "zh":
-        # English stills (Japanese pages have none of their own), and links that stay in this
-        # language, or in English where a view has no Japanese.
+        # English stills (Japanese pages have none of their own).
         page = re.sub(r'(src|srcset)="([^"]*)" data-en="([^"]*)"', r'\1="\3"', page)
-        targets = {path or "./": name for name, path in VIEWS.items()}
-        pattern = "|".join(re.escape(path) for path in sorted(targets, key=len, reverse=True))
-        page = re.sub(r'href="(%s)' % pattern, lambda m: 'href="' + LANGS[written_in(lang, targets[m.group(1)])]["prefix"] + ("" if m.group(1) == "./" else m.group(1)), page)
     else:
         page = re.sub(r' data-en="[^"]*"', "", page)
+    # Rewrite all internal page links to root-relative paths (/docs/, /en/docs/, ...) so
+    # crawlers that ignore <base> cannot walk into recursive paths like /docs/claude-code/docs/...
+    targets = {path or "./": name for name, path in VIEWS.items()}
+    pattern = "|".join(re.escape(path) for path in sorted(targets, key=len, reverse=True))
+    page = re.sub(
+        r'href="(%s)' % pattern,
+        lambda m: 'href="/' + LANGS[written_in(lang, targets[m.group(1)])]["prefix"] + ("" if m.group(1) == "./" else m.group(1)),
+        page,
+    )
+    page = page.replace('href="assets/', 'href="/assets/')
+    page = page.replace('href="site.webmanifest"', 'href="/site.webmanifest"')
     # Every page links the other of Chinese and English (a Japanese page: English); a view with
     # Japanese links its third language too, a switch that gives way on narrow screens.
     other = "en" if lang == "zh" else "zh"
@@ -474,7 +481,7 @@ def build(source: str, lang: str, view: str) -> str:
         page,
     )
     if depth:
-        page = replace_one(r'<meta charset="UTF-8" />', f'<meta charset="UTF-8" />\n  <base href="{"../" * depth}" />', page)
+        page = replace_one(r'<meta charset="UTF-8" />', '<meta charset="UTF-8" />\n  <base href="/" />', page)
     page = replace_one(r"  <!-- seo:start.*?<!-- seo:end -->\n", head(lang, view, page), page, re.S)
     # GitHub Pages keeps publishing docs/site for install.sh and the desktop update feeds but cannot
     # send a 301, so a page opened there moves the visitor to the site's own host.
@@ -492,10 +499,10 @@ NOT_FOUND = """<!doctype html>
   <meta name="robots" content="noindex" />
   <meta name="theme-color" content="#09090b" />
   <base href="/" />
-  <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png" />
-  <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/assets/apple-touch-icon.png" />
   <style>
-    /* Served for any missing address, at any depth: everything is against <base>. */
+    /* Served for any missing address, at any depth: all links stay root-relative. */
     :root { color-scheme: dark; }
     body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #09090b; color: #f4f4f5;
       font: 17px/1.6 -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", sans-serif; }
@@ -511,16 +518,16 @@ NOT_FOUND = """<!doctype html>
 </head>
 <body>
   <main>
-    <img src="assets/icon-192.png" alt="" width="48" height="48" />
+    <img src="/assets/icon-192.png" alt="" width="48" height="48" />
     <h1>页面不存在 <span lang="en">· Page not found</span></h1>
     <p>这个地址没有内容，可能已经移动。</p>
     <p lang="en">Nothing lives at this address; it may have moved.</p>
     <nav>
-      <a class="primary" href="./">LinkShell 首页</a>
-      <a href="docs/">文档</a>
-      <a href="pricing/">定价</a>
-      <a href="en/" lang="en">English</a>
-      <a href="en/docs/" lang="en">Docs</a>
+      <a class="primary" href="/">LinkShell 首页</a>
+      <a href="/docs/">文档</a>
+      <a href="/pricing/">定价</a>
+      <a href="/en/" lang="en">English</a>
+      <a href="/en/docs/" lang="en">Docs</a>
     </nav>
   </main>
 </body>

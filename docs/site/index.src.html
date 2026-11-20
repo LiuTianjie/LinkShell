@@ -1666,8 +1666,8 @@
       if (![...pages].some((p) => p.dataset.page === page)) {
         // Japanese has the landing pages only; the rest is read in English.
         const ja = document.documentElement.dataset.lang === 'ja' && page !== 'claude-code' && page !== 'codex';
-        const path = (ja ? 'en/' : document.documentElement.dataset.prefix || '') + (page === 'home' ? '' : page + '/');
-        location.replace(new URL(path, document.baseURI).href + (location.hash.startsWith('#d-') ? location.hash : ''));
+        const path = '/' + (ja ? 'en/' : document.documentElement.dataset.prefix || '') + (page === 'home' ? '' : page + '/');
+        location.replace(new URL(path, location.origin).href + (location.hash.startsWith('#d-') ? location.hash : ''));
         return false;
       }
       pages.forEach((p) => p.classList.toggle('visible', p.dataset.page === page));
