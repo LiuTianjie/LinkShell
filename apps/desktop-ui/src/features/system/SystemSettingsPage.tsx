@@ -362,6 +362,7 @@ export function SystemSettingsPage() {
                   <PermissionStatusControl
                     known={permissions.known}
                     granted={permissions.recording}
+                    permission="recording"
                   />
                 </div>
               </div>
@@ -378,6 +379,7 @@ export function SystemSettingsPage() {
                   <PermissionStatusControl
                     known={permissions.known}
                     granted={permissions.control}
+                    permission="control"
                   />
                 </div>
               </div>
@@ -484,9 +486,11 @@ export function SystemSettingsPage() {
 function PermissionStatusControl({
   known,
   granted,
+  permission,
 }: {
   known: boolean;
   granted: boolean;
+  permission: "recording" | "control";
 }) {
   const { ts } = useSystemI18n();
   if (!known) {
@@ -504,7 +508,7 @@ function PermissionStatusControl({
       <Badge tone="waiting" dot="waiting">
         {ts("settings.permMissing")}
       </Badge>
-      <Button size="sm" variant="secondary" onClick={openSetup}>
+      <Button size="sm" variant="secondary" onClick={() => openSetup(permission)}>
         {ts("overview.authorizeBtn")}
       </Button>
     </>

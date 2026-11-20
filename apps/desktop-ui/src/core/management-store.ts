@@ -1261,8 +1261,8 @@ export async function setDesktopSetting<
   }
 }
 
-export function openSetup(): void {
-  void desktopInvoke("openSetup").catch((error: unknown) => reportDesktopError(error));
+export function openSetup(permission?: "recording" | "control"): void {
+  void desktopInvoke("openSetup", permission ? { permission } : {}).catch((error: unknown) => reportDesktopError(error));
 }
 
 export function openLoginItems(): void {

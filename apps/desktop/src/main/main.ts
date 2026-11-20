@@ -778,7 +778,7 @@ async function handle(method: string, params: Record<string, unknown>): Promise<
       else { mkdirSync(runtime.home, { recursive: true }); writeFileSync(screenDisabled(), "disabled\n"); }
       return { sharing: params.enabled === true };
     }
-    case "openSetup": return openSetup();
+    case "openSetup": return openSetup(params);
     case "loginItem": return nativeModule?.loginItem() ?? { enabled: windowsLoginItem() ?? app.getLoginItemSettings().openAtLogin, approval: false };
     case "setLoginItem": {
       const enabled = params.enabled === true;
@@ -938,12 +938,20 @@ async function openPath(params: Record<string, unknown>): Promise<{ ok: boolean 
   return { ok: true };
 }
 
-function openSetup() {
+function openSetup(params?: Record<string, unknown>) {
   if (WINDOWS) throw new Error("Windows 不需要单独授权屏幕录制和控制");
   const helper = runtime.bundle;
   if (!helper) throw new Error("开发模式下请从 apps/mac 构建的 LinkShell.app 打开权限引导");
-  // The system opens it, so the permissions it shows are LinkShell's, not this process's.
-  spawn("/usr/bin/open", ["-n", "-a", helper, "--args", "--setup"], { stdio: "ignore", detached: true }).unref();
+  const requested = params?.permission;
+  let target: "recording" | "control";
+  if (requested === "recording" || requested === "control") {
+    target = requested;
+  } else {
+    const current = nativeModule?.permissions();
+    target = current && current.recording && !current.control ? "control" : "recording";
+  }
+  // Open System Settings directly with the floating drag-and-drop card (no intermediate dialog).
+  spawn("/usr/bin/open", ["-n", "-a", helper, "--args", "--guide-permission", target], { stdio: "ignore", detached: true }).unref();
   return {};
 }
 

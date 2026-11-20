@@ -620,7 +620,11 @@ export function SystemOverviewPage({
                   <Badge tone="waiting" dot="waiting">
                     {ts("settings.permMissing")}
                   </Badge>
-                  <Button size="sm" variant="secondary" onClick={openSetup}>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => openSetup(!permissions.recording ? "recording" : "control")}
+                  >
                     {ts("overview.authorizeBtn")}
                   </Button>
                 </>

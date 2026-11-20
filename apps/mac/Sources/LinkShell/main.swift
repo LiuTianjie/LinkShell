@@ -62,6 +62,9 @@ if Launch.has("--desktop-media") { DesktopMedia.run() }
 // Fusion lab (experimental): see FusionRemote / FusionLocal.
 if Launch.has("--fusion-remote") { FusionRemote.run() }
 if Launch.has("--fusion-local") { FusionLocal.run() }
+if let permission = Launch.value(after: "--guide-permission") {
+  PermissionGuideRunner.run(permission)
+}
 // Opened with nothing by the system (launchd is its parent), not started by a host as its child.
 if Launch.has("--setup") {
   Setup.run()

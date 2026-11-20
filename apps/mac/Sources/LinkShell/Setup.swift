@@ -140,6 +140,12 @@ final class Setup: NSObject, NSApplicationDelegate {
     true
   }
 
+  func applicationWillTerminate(_ notification: Notification) {
+    Task { @MainActor in
+      PermissionDragGuide.shared.dismiss(animated: false)
+    }
+  }
+
   @objc private func comeForward() {
     face.comeForward()
   }
@@ -187,16 +193,35 @@ final class Setup: NSObject, NSApplicationDelegate {
   private func farewell() {
     leaving = true
     timers.forEach { $0.invalidate() }
+    Task { @MainActor in
+      PermissionDragGuide.shared.dismiss(animated: true)
+    }
     Timer.scheduledTimer(withTimeInterval: Setup.farewell, repeats: false) { [face] _ in face.window.close() }
   }
 
-  /// A row's button. The first press for a permission has the system make its own request,
-  /// which is what puts LinkShell in the list; every press opens System Settings at the list.
+  /// A row's button: opens System Settings at the permission's list and anchors the floating
+  /// drag-and-drop card to System Settings so the user can drag LinkShell straight into the list.
   private func openSettings(for permission: Permission) {
-    let first = pressed.insert(permission).inserted
+    _ = pressed.insert(permission)
     if pretend == nil {
-      if first { Permissions.request(permission) }
-      NSWorkspace.shared.open(Permissions.settings(permission))
+      let kind: DragPermissionKind = permission == .recording ? .screenRecording : .accessibility
+      Task { @MainActor [weak self] in
+        PermissionDragGuide.shared.openAndGuide(
+          kind: kind,
+          appName: "LinkShell",
+          checkGranted: {
+            switch permission {
+            case .control:
+              return Permissions.trusted()
+            case .recording:
+              return await Task.detached(priority: .userInitiated) { Permissions.recording() }.value
+            }
+          },
+          onGranted: { [weak self] in
+            self?.check()
+          }
+        )
+      }
     }
     face.show(granted, pressed: pressed)
     stepAside()
