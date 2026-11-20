@@ -53,18 +53,22 @@ import {
   type SourcedConfigOption,
 } from "./mapper.js";
 
-/** Permission modes whose point is not to be asked (Claude's bypass, Gemini's and Qwen's yolo). */
-const NO_ASK_MODES = new Set(["bypassPermissions", "yolo"]);
+/** Permission modes whose point is not to be asked (Claude's bypass, Gemini's and Qwen's yolo, TRAE's bypass_permissions). */
+const NO_ASK_MODES = new Set(["bypassPermissions", "bypass_permissions", "yolo"]);
 
-export interface AcpAgentSpec {
-  id: string;
-  label: string;
-  tier: AgentTier;
-  /** How to start the agent as an ACP server. */
+export interface AcpLaunchCandidate {
   command: string;
   args: string[];
   /** Detects the install; defaults to `<command> --version`. */
   version?: { command: string; args: string[] };
+}
+
+export interface AcpAgentSpec extends AcpLaunchCandidate {
+  id: string;
+  label: string;
+  tier: AgentTier;
+  /** Fallback binaries/flags tried in order when the primary command is not installed. */
+  alternatives?: AcpLaunchCandidate[];
   env?: Record<string, string>;
   authStatus?: (env: NodeJS.ProcessEnv) => Promise<AgentAuth>;
   /** Non-interactive ACP method that reuses the agent's own saved login. */
@@ -208,6 +212,8 @@ export class AcpDriver implements AgentDriver {
   private readonly discoveredDirectories = new Map<string, string[]>();
   /** The models the agent gave its latest session here (see listModels); read from the host's record once. */
   private reportedModels?: MethodResult<"agents.models">;
+  /** The launch candidate found by `detectVersion` (primary spec by default). */
+  private resolvedLaunch?: AcpLaunchCandidate;
 
   constructor(
     protected readonly spec: AcpAgentSpec,
@@ -333,7 +339,8 @@ export class AcpDriver implements AgentDriver {
     if (!method || (method.type && !["agent", "terminal"].includes(method.type))) throw RpcError.app("invalid_params", "请选择可用的登录方式");
     if (method.type === "terminal") {
       if (!this.host?.loginTerminal || ["http", "websocket"].includes(this.spec.transport ?? "")) throw RpcError.app("not_supported", "这个连接不支持终端登录");
-      const launch = await this.host.loginTerminal(this.id, { command: this.spec.command, args: [...this.spec.args, ...(method.args ?? [])], env: { ...this.spec.env, ...method.env } });
+      const target = this.resolvedLaunch ?? this.spec;
+      const launch = await this.host.loginTerminal(this.id, { command: target.command, args: [...target.args, ...(method.args ?? [])], env: { ...this.spec.env, ...method.env } });
       void launch.exited.then((code) => {
         if (this.stopped) return;
         this.signedOut = code === 0 ? { state: "ok" } : { state: "missing", hint: "终端登录未成功，请重试" };
@@ -741,15 +748,23 @@ export class AcpDriver implements AgentDriver {
   protected async detectVersion(): Promise<string | undefined> {
     if (this.spec.transport === "http" || this.spec.transport === "websocket") return "remote";
     if (this.spec.transport === "stdio") return "";
-    const probe = this.spec.version ?? { command: this.spec.command, args: ["--version"] };
-    try {
-      const { stdout, stderr } = await probeAgent(probe.command, probe.args, { env: this.env, timeout: 15_000 });
-      const text = `${stdout}\n${stderr}`.trim();
-      // "GitHub Copilot CLI 1.0.22." → "1.0.22"
-      return text.match(/\d+\.\d+(?:\.\d+)?(?:-[\w.]+)?/)?.[0]?.replace(/[.-]+$/, "") ?? "";
-    } catch {
-      return undefined;
+    const candidates: AcpLaunchCandidate[] = [
+      { command: this.spec.command, args: this.spec.args, version: this.spec.version },
+      ...(this.spec.alternatives ?? []),
+    ];
+    for (const candidate of candidates) {
+      const probe = candidate.version ?? { command: candidate.command, args: ["--version"] };
+      try {
+        const { stdout, stderr } = await probeAgent(probe.command, probe.args, { env: this.env, timeout: 15_000 });
+        this.resolvedLaunch = candidate;
+        const text = `${stdout}\n${stderr}`.trim();
+        // "GitHub Copilot CLI 1.0.22." → "1.0.22"
+        return text.match(/\d+\.\d+(?:\.\d+)?(?:-[\w.]+)?/)?.[0]?.replace(/[.-]+$/, "") ?? "";
+      } catch {
+        // Try the next installed binary alias if any.
+      }
     }
+    return undefined;
   }
 
   private booting?: Promise<void>;
@@ -783,9 +798,10 @@ export class AcpDriver implements AgentDriver {
       const value = this.env[name];
       if (value) headers[key] = value;
     }
+    const launch = this.resolvedLaunch ?? this.spec;
     const connection = new AcpConnection({
-      command: this.spec.command,
-      args: this.spec.args,
+      command: launch.command,
+      args: launch.args,
       env: this.env,
       protocolVersion: settings.protocolVersion,
       experimental: settings.experimental,
@@ -1297,7 +1313,8 @@ export class AcpDriver implements AgentDriver {
     const agentAuth = error instanceof RpcError && error.code === -32000 && !error.appCode;
     const message = error instanceof Error ? error.message : String(error);
     if (!agentAuth && !/auth(entication)? required|not (logged|signed) in/i.test(message)) return error;
-    const hint = `${this.label} 未登录：在电脑终端运行 ${this.spec.command} 并登录`;
+    const launch = this.resolvedLaunch ?? this.spec;
+    const hint = `${this.label} 未登录：在电脑终端运行 ${launch.command} 并登录`;
     this.signedOut = { state: "missing", hint };
     return RpcError.app("not_logged_in", `${hint}，然后再试。`);
   }

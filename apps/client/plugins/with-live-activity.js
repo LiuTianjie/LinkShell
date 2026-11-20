@@ -63,6 +63,18 @@ struct ActivityAgent: Identifiable {
     case "copilot": return "Copilot"
     case "grok": return "Grok"
     case "opencode": return "OpenCode"
+    case "cline": return "Cline"
+    case "kilo": return "Kilo"
+    case "qwen": return "Qwen"
+    case "kimi": return "Kimi"
+    case "codebuddy": return "CodeBuddy"
+    case "qoder": return "Qoder"
+    case "minimax": return "MiniMax"
+    case "trae": return "TRAE"
+    case "deepseek": return "DeepSeek"
+    case "glm": return "GLM"
+    case "iflow": return "iFlow"
+    case "comate": return "Comate"
     case "terminal": return "终端"
     default: return id.isEmpty ? "Agent" : id.capitalized
     }
@@ -85,6 +97,18 @@ struct ActivityAgent: Identifiable {
     case "antigravity": return Color(red: 0.26, green: 0.52, blue: 0.96)
     case "cursor": return Color(red: 0.13, green: 0.77, blue: 0.69)
     case "gemini": return Color(red: 0.31, green: 0.55, blue: 0.97)
+    case "cline": return Color(red: 0.45, green: 0.48, blue: 0.56)
+    case "kilo": return Color(red: 0.91, green: 0.88, blue: 0.28)
+    case "qwen": return Color(red: 0.03, green: 0.18, blue: 1.00)
+    case "kimi": return Color(red: 0.09, green: 0.51, blue: 1.00)
+    case "codebuddy": return Color(red: 0.42, green: 0.30, blue: 1.00)
+    case "qoder": return Color(red: 0.39, green: 0.45, blue: 0.55)
+    case "minimax": return Color(red: 0.89, green: 0.09, blue: 0.49)
+    case "trae": return Color(red: 0.20, green: 0.94, blue: 0.55)
+    case "deepseek": return Color(red: 0.30, green: 0.42, blue: 1.00)
+    case "glm": return Color(red: 0.22, green: 0.35, blue: 1.00)
+    case "iflow": return Color(red: 1.00, green: 0.38, blue: 0.01)
+    case "comate": return Color(red: 0.14, green: 0.64, blue: 0.98)
     case "terminal": return Color(red: 0.20, green: 0.78, blue: 0.35)
     default: return Color(red: 0.39, green: 0.40, blue: 0.95)
     }

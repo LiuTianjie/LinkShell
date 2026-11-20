@@ -76,10 +76,19 @@ async function withRegistryPath(env: NodeJS.ProcessEnv): Promise<NodeJS.ProcessE
     read("HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment"),
     read("HKCU\\Environment"),
   ]);
-  if (!machine.length && !user.length) return env;
+  const home = env.USERPROFILE || env.HOME || homedir();
+  const localAppData = env.LOCALAPPDATA || join(home, "AppData", "Local");
+  const extras = [
+    join(home, ".local", "bin"),
+    join(home, ".qoder", "bin"),
+    join(home, ".trae", "bin"),
+    join(home, ".kimi", "bin"),
+    join(localAppData, "codebuddy", "bin"),
+  ].filter((dir) => existsSync(dir));
+  if (!machine.length && !user.length && !extras.length) return env;
   const name = Object.keys(env).find((key) => key.toLowerCase() === "path") ?? "Path";
   const seen = new Set<string>();
-  const entries = [...machine, ...user, ...(env[name] ?? "").split(";")].filter((entry) => {
+  const entries = [...machine, ...user, ...(env[name] ?? "").split(";"), ...extras].filter((entry) => {
     const key = entry.trim().replace(/[\\/]+$/, "").toLowerCase();
     if (!key || seen.has(key)) return false;
     seen.add(key);
@@ -104,6 +113,8 @@ export function withCommonPaths(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     "/opt/homebrew/bin", "/usr/local/bin",
     join(home, ".local/bin"), join(home, ".npm-global/bin"), join(home, ".bun/bin"),
     join(home, ".volta/bin"), join(home, "Library/pnpm"), join(home, ".cargo/bin"),
+    join(home, ".qoder/bin"), join(home, ".codebuddy/bin"), join(home, ".trae/bin"),
+    join(home, ".kimi/bin"), join(home, ".opencode/bin"),
     "/usr/bin", "/bin", "/usr/sbin", "/sbin",
   ].filter((dir) => !present.includes(dir) && existsSync(dir));
   return common.length ? { ...env, PATH: [...present, ...common].join(delimiter) } : env;

@@ -375,6 +375,18 @@ describe("AgentMark & SubagentGlyph parity and scoped SVG <defs>", () => {
     expect(normalizeAgentMarkKey("Claude-Code")).toBe("claude");
     expect(normalizeAgentMarkKey("gemini-cli")).toBe("gemini");
     expect(normalizeAgentMarkKey("github-copilot")).toBe("copilot");
+    expect(normalizeAgentMarkKey("cline")).toBe("cline");
+    expect(normalizeAgentMarkKey("kilocode")).toBe("kilo");
+    expect(normalizeAgentMarkKey("qwen-code")).toBe("qwen");
+    expect(normalizeAgentMarkKey("kimi-code")).toBe("kimi");
+    expect(normalizeAgentMarkKey("codebuddy-code")).toBe("codebuddy");
+    expect(normalizeAgentMarkKey("qodercli")).toBe("qoder");
+    expect(normalizeAgentMarkKey("mcode")).toBe("minimax");
+    expect(normalizeAgentMarkKey("traecli")).toBe("trae");
+    expect(normalizeAgentMarkKey("dsh")).toBe("deepseek");
+    expect(normalizeAgentMarkKey("glm-acp-agent")).toBe("glm");
+    expect(normalizeAgentMarkKey("iflow-cli")).toBe("iflow");
+    expect(normalizeAgentMarkKey("comate-acp")).toBe("comate");
 
     const agents = [
       "claude",
@@ -383,9 +395,21 @@ describe("AgentMark & SubagentGlyph parity and scoped SVG <defs>", () => {
       "gemini",
       "cursor",
       "opencode",
+      "cline",
+      "kilo",
       "copilot",
       "grok",
       "antigravity",
+      "qwen",
+      "kimi",
+      "codebuddy",
+      "qoder",
+      "minimax",
+      "trae",
+      "deepseek",
+      "glm",
+      "iflow",
+      "comate",
       "custom-acp-runner",
     ];
     for (const agent of agents) {
@@ -399,17 +423,19 @@ describe("AgentMark & SubagentGlyph parity and scoped SVG <defs>", () => {
     }
 
     // Two gradient-bearing marks mounted side-by-side must never share identical <linearGradient id="...">
-    const sideBySide = renderToStaticMarkup(
-      createElement(
-        "div",
-        null,
-        createElement(AgentMark, { agent: "codex" }),
-        createElement(AgentMark, { agent: "codex" }),
-      ),
-    );
-    const ids = [...sideBySide.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]);
-    expect(ids.length).toBeGreaterThanOrEqual(4);
-    expect(new Set(ids).size).toBe(ids.length);
+    for (const gradientAgent of ["codex", "minimax", "comate"]) {
+      const sideBySide = renderToStaticMarkup(
+        createElement(
+          "div",
+          null,
+          createElement(AgentMark, { agent: gradientAgent }),
+          createElement(AgentMark, { agent: gradientAgent }),
+        ),
+      );
+      const ids = [...sideBySide.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]);
+      expect(ids.length, gradientAgent).toBeGreaterThanOrEqual(4);
+      expect(new Set(ids).size, gradientAgent).toBe(ids.length);
+    }
   });
 
   it("matches iOS FNV-1a subagent glyph hashing and scopes <defs> per mounted instance", () => {

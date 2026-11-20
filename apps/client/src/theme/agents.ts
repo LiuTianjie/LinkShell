@@ -1,10 +1,14 @@
-import type { AgentTier } from "@linkshell/wire";
+import type { AgentInfo, AgentTier } from "@linkshell/wire";
 
 export interface AgentLook {
   name: string;
   short: string;
   /** Command that signs the agent in, shown when auth is missing. */
   login?: string;
+  /** Suggested one-line install command shown in the supported-agents catalog. */
+  install?: string;
+  /** Visual grouping in the supported-agents catalog. */
+  group?: "domestic" | "global";
 }
 
 const looks: Record<string, AgentLook> = {
@@ -12,38 +16,136 @@ const looks: Record<string, AgentLook> = {
     name: "Codex",
     short: "Codex",
     login: "codex login",
+    install: "npm i -g @openai/codex",
+    group: "global",
   },
   claude: {
     name: "Claude Code",
     short: "Claude",
     login: "claude /login",
+    install: "npm i -g @anthropic-ai/claude-code",
+    group: "global",
   },
   gemini: {
     name: "Gemini CLI",
     short: "Gemini",
     login: "gemini",
+    install: "npm i -g @google/gemini-cli",
+    group: "global",
   },
   antigravity: {
     name: "Google Antigravity",
     short: "Antigravity",
     login: "agy-acp",
+    group: "global",
   },
   copilot: {
     name: "GitHub Copilot",
     short: "Copilot",
     login: "copilot login",
+    install: "npm i -g @github/copilot",
+    group: "global",
   },
   grok: {
     name: "Grok",
     short: "Grok",
+    install: "npm i -g @xai-official/grok",
+    group: "global",
   },
   opencode: {
     name: "OpenCode",
     short: "OpenCode",
+    install: "brew install opencode",
+    group: "global",
   },
   cursor: {
     name: "Cursor",
     short: "Cursor",
+    group: "global",
+  },
+  cline: {
+    name: "Cline",
+    short: "Cline",
+    login: "cline",
+    install: "npm i -g cline",
+    group: "global",
+  },
+  kilo: {
+    name: "Kilo Code",
+    short: "Kilo",
+    login: "kilo",
+    install: "npm i -g @kilocode/cli",
+    group: "global",
+  },
+  qwen: {
+    name: "Qwen Code",
+    short: "Qwen",
+    login: "qwen",
+    install: "npm i -g @qwen-code/qwen-code",
+    group: "domestic",
+  },
+  kimi: {
+    name: "Kimi Code",
+    short: "Kimi",
+    login: "kimi /login",
+    install: "npm i -g @moonshot-ai/kimi-code",
+    group: "domestic",
+  },
+  codebuddy: {
+    name: "CodeBuddy",
+    short: "CodeBuddy",
+    login: "codebuddy",
+    install: "npm i -g @tencent-ai/codebuddy-code",
+    group: "domestic",
+  },
+  qoder: {
+    name: "Qoder",
+    short: "Qoder",
+    login: "qodercli login",
+    install: "npm i -g @qoder-ai/qodercli",
+    group: "domestic",
+  },
+  minimax: {
+    name: "MiniMax Code",
+    short: "MiniMax",
+    login: "mcode login",
+    install: "npm i -g @minimax-ai/code",
+    group: "domestic",
+  },
+  trae: {
+    name: "TRAE",
+    short: "TRAE",
+    login: "traecli",
+    install: "traecli acp serve",
+    group: "domestic",
+  },
+  deepseek: {
+    name: "DeepSeek",
+    short: "DeepSeek",
+    login: "dsh",
+    install: "npm i -g @deepseek-ai/dsh",
+    group: "domestic",
+  },
+  glm: {
+    name: "GLM",
+    short: "GLM",
+    login: "glm-acp-agent --setup",
+    install: "npm i -g glm-acp-agent",
+    group: "domestic",
+  },
+  iflow: {
+    name: "iFlow",
+    short: "iFlow",
+    login: "iflow",
+    install: "npm i -g @iflow-ai/iflow-cli",
+    group: "domestic",
+  },
+  comate: {
+    name: "Comate",
+    short: "Comate",
+    login: "comate-acp --login",
+    install: "npm i -g comate-acp @comate/comatecli",
+    group: "domestic",
   },
 };
 
@@ -55,6 +157,16 @@ export function agentLook(id: string, label?: string): AgentLook {
     name,
     short: name,
   };
+}
+
+/** Concise capability tags shown alongside an installed agent's tier. */
+export function agentCapabilityTags(agent: Pick<AgentInfo, "capabilities">, locale: "zh" | "en" | "ja" = "zh"): string[] {
+  const tags: string[] = [];
+  if (agent.capabilities.steer) tags.push(locale === "en" ? "Steer" : locale === "ja" ? "割り込み" : "支持插话");
+  if (agent.capabilities.images) tags.push(locale === "en" ? "Images" : locale === "ja" ? "画像" : "图片");
+  if (agent.capabilities.fork) tags.push(locale === "en" ? "Fork" : locale === "ja" ? "分岐" : "分叉");
+  if (agent.capabilities.acp) tags.push("ACP");
+  return tags;
 }
 
 export const tierCopy: Record<AgentTier, { label: string; line: string; detail: string }> = {

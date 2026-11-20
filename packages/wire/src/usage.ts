@@ -93,7 +93,26 @@ const MODEL_PRICING_RULES: ReadonlyArray<{ match: RegExp; pricing: ModelPricingP
   { match: /gemini/i, pricing: { input: 1.25, output: 10, cacheRead: 0.3125, cacheWrite: 1.25 } },
   // xAI Grok & DeepSeek
   { match: /grok/i, pricing: { input: 3, output: 15, cacheRead: 0.75, cacheWrite: 3 } },
+  { match: /deepseek[-_.]?(?:reasoner|r1)/i, pricing: { input: 0.55, output: 2.19, cacheRead: 0.14, cacheWrite: 0.55 } },
   { match: /deepseek/i, pricing: { input: 0.27, output: 1.1, cacheRead: 0.07, cacheWrite: 0.27 } },
+  // Alibaba Qwen
+  { match: /qwen.*coder/i, pricing: { input: 0.3, output: 1.5, cacheRead: 0.06, cacheWrite: 0.3 } },
+  { match: /qwen.*max/i, pricing: { input: 1.6, output: 6.4, cacheRead: 0.32, cacheWrite: 1.6 } },
+  { match: /qwen.*(?:turbo|flash)/i, pricing: { input: 0.05, output: 0.2, cacheRead: 0.01, cacheWrite: 0.05 } },
+  { match: /qwen/i, pricing: { input: 0.4, output: 1.2, cacheRead: 0.08, cacheWrite: 0.4 } },
+  // Moonshot Kimi
+  { match: /kimi|moonshot/i, pricing: { input: 0.6, output: 2.5, cacheRead: 0.15, cacheWrite: 0.6 } },
+  // Zhipu GLM
+  { match: /glm.*flash/i, pricing: { input: 0.1, output: 0.4, cacheRead: 0.02, cacheWrite: 0.1 } },
+  { match: /glm/i, pricing: { input: 0.6, output: 2.2, cacheRead: 0.12, cacheWrite: 0.6 } },
+  // MiniMax
+  { match: /minimax|abab/i, pricing: { input: 0.3, output: 1.2, cacheRead: 0.03, cacheWrite: 0.3 } },
+  // ByteDance Doubao / Seed
+  { match: /doubao|seed[-_.]?code/i, pricing: { input: 0.3, output: 1.2, cacheRead: 0.06, cacheWrite: 0.3 } },
+  // Tencent Hunyuan
+  { match: /hunyuan/i, pricing: { input: 0.5, output: 2, cacheRead: 0.1, cacheWrite: 0.5 } },
+  // Baidu Ernie / Wenxin
+  { match: /ernie|wenxin/i, pricing: { input: 0.4, output: 1.6, cacheRead: 0.08, cacheWrite: 0.4 } },
 ];
 
 const DEFAULT_PRICING_PER_MILLION: ModelPricingPerMillion = {

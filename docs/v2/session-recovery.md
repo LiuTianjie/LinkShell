@@ -65,7 +65,7 @@ LinkShell 的 v2 架构、Codex app-server 的 v2 API、网关的 `/v2/connect` 
 
 ## Agent 用量统计
 
-`usage.summary` 的 Agent 列表来自 Host 注册表，包含 Codex、Claude、Gemini、Antigravity、Copilot、Grok、OpenCode、Cursor 和自定义 ACP Agent。桌面端与手机端共用此列表、时间筛选和按 Agent / 模型的汇总。
+`usage.summary` 的 Agent 列表来自 Host 注册表，包含 Codex、Claude、Gemini、Antigravity、Copilot、Grok、OpenCode、Cursor、Cline、Kilo Code、主流国产 ACP Agent（Qwen Code、Kimi Code、CodeBuddy、Qoder、MiniMax Code、TRAE、DeepSeek、GLM、iFlow、Comate）和自定义 ACP Agent。桌面端与手机端共用此列表、时间筛选和按 Agent / 模型的汇总。
 
 - Codex / Claude 读取原生日志（含归档、子代理）；继续按累计计数差值或消息 ID 去重。
 - 其他 Agent 统计 Host 持久化的、带 accounting 标记的用量事件。ACP 1 从 prompt 结果收集，ACP 2 从完成工作的 idle 状态收集；不把上下文占用 `usedTokens` 当成消耗。

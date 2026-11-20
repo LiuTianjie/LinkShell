@@ -118,7 +118,8 @@ Linux 上可以看屏幕但不能控制，需要 `ffmpeg` 和 X11 显示环境�
 | --- | --- | --- |
 | **Codex** | 多端同步 | `linkshell codex` 打开的终端和手机同时在线，任何一端都能发消息、打断、审批 |
 | **Claude Code** | 接力 | 电脑上用 Claude 自己的界面；手机发消息即接管，电脑按任意键收回 |
-| **Gemini CLI、GitHub Copilot、OpenCode、Cursor、Grok** | 远程会话 | 通过 [Agent Client Protocol](https://agentclientprotocol.com) 在手机上新建、继续会话：实时输出、审批、模式和模型 |
+| **Gemini CLI、Google Antigravity、GitHub Copilot、OpenCode、Cursor、Grok、Cline、Kilo Code** | 远程会话 | 通过 [Agent Client Protocol](https://agentclientprotocol.com) 在手机上新建、继续会话：实时输出、审批、模式和模型 |
+| **Qwen Code、Kimi Code、CodeBuddy、Qoder、MiniMax Code、TRAE、DeepSeek、GLM、iFlow、Comate** | 远程会话 | 内置主流国产编码 Agent 的 ACP 接入（`qwen --acp`、`kimi acp`、`codebuddy --acp`、`qodercli --acp`、`mcode acp`、`traecli acp serve`、`dsh --profile acp`、`glm-acp-agent`、`iflow --experimental-acp`、`comate-acp`），同时支持自定义 ACP 连接 |
 | **任何命令行工具** | 终端 | 在电脑上开终端，手机上看和输入 |
 
 Codex 可以用 ChatGPT 登录、API Key 或自定义服务商（包括 CC Switch 管理的配置）。在 Claude 桌面 App 里打开的会话，手机上也能跟进和继续，但桌面 App 要重启后才显示手机上做的内容；想来回接力，用 `linkshell claude` 启动。

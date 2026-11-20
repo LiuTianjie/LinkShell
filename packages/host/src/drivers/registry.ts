@@ -19,6 +19,52 @@ export const ACP_AGENTS: AcpAgentSpec[] = [
   { id: "grok", label: "Grok", tier: "remote", command: "grok", args: ["agent", "stdio"], discover: true, cachedAuthMethod: "cached_token" },
   { id: "opencode", label: "OpenCode", tier: "remote", command: "opencode", args: ["acp"] },
   { id: "cursor", label: "Cursor", tier: "remote", command: "cursor-agent", args: ["acp"] },
+  // Open-source multi-model ACP CLIs widely used with Chinese and international models.
+  { id: "cline", label: "Cline", tier: "remote", command: "cline", args: ["--acp"] },
+  { id: "kilo", label: "Kilo Code", tier: "remote", command: "kilo", args: ["acp"] },
+  // Mainstream Chinese coding agents speaking ACP over stdio.
+  { id: "qwen", label: "Qwen Code", tier: "remote", command: "qwen", args: ["--acp"] },
+  { id: "kimi", label: "Kimi Code", tier: "remote", command: "kimi", args: ["acp"] },
+  {
+    id: "codebuddy",
+    label: "CodeBuddy",
+    tier: "remote",
+    command: "codebuddy",
+    args: ["--acp"],
+    alternatives: [{ command: "codebuddy-code", args: ["--acp"] }],
+  },
+  {
+    id: "qoder",
+    label: "Qoder",
+    tier: "remote",
+    command: "qodercli",
+    args: ["--acp"],
+    alternatives: [
+      { command: "qoder", args: ["--acp"] },
+      { command: "qoder", args: ["acp"] },
+    ],
+  },
+  {
+    id: "minimax",
+    label: "MiniMax Code",
+    tier: "remote",
+    command: "mcode",
+    args: ["acp"],
+    alternatives: [{ command: "code-acp", args: ["acp"] }],
+  },
+  {
+    id: "trae",
+    label: "TRAE",
+    tier: "remote",
+    command: "traecli",
+    args: ["acp", "serve"],
+    alternatives: [{ command: "trae-cli", args: ["acp", "serve"] }],
+  },
+  { id: "deepseek", label: "DeepSeek", tier: "remote", command: "dsh", args: ["--profile", "acp"] },
+  // glm-acp-agent enters the ACP stdio loop for unknown flags (including --version); --help exits 0 immediately.
+  { id: "glm", label: "GLM", tier: "remote", command: "glm-acp-agent", args: [], version: { command: "glm-acp-agent", args: ["--help"] } },
+  { id: "iflow", label: "iFlow", tier: "remote", command: "iflow", args: ["--experimental-acp"] },
+  { id: "comate", label: "Comate", tier: "remote", command: "comate-acp", args: [] },
 ];
 
 export interface DefaultDriverOptions {

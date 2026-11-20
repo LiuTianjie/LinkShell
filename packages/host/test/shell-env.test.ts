@@ -85,11 +85,14 @@ describe("withCommonPaths", () => {
     const home = mkdtempSync(join(tmpdir(), "linkshell-home-"));
     try {
       const local = join(home, ".local/bin");
+      const qoder = join(home, ".qoder/bin");
       mkdirSync(local, { recursive: true });
+      mkdirSync(qoder, { recursive: true });
       const env = withCommonPaths({ HOME: home, PATH: ["/mine", "/usr/bin"].join(delimiter) });
       const path = env.PATH!.split(delimiter);
       expect(path.slice(0, 2)).toEqual(["/mine", "/usr/bin"]);
       expect(path).toContain(local);
+      expect(path).toContain(qoder);
       expect(path).not.toContain(join(home, ".bun/bin"));
       expect(path.filter((entry) => entry === "/usr/bin")).toHaveLength(1);
     } finally {

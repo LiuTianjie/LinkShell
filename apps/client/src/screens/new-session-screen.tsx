@@ -21,7 +21,7 @@ import { haptics } from "@/lib/haptics";
 import { describeActionError } from "@/lib/locale";
 import { BranchTag } from "@/components/branch-tag";
 import { branchLabel, branchOf, useGitInfo } from "@/lib/worktree";
-import { agentLook, tierCopy } from "@/theme/agents";
+import { agentCapabilityTags, agentLook, tierCopy } from "@/theme/agents";
 import { SheetHeader } from "@/components/sheet-header";
 import { AgentInteractions } from "./acp-screen";
 import { colors } from "@/theme/colors";
@@ -59,7 +59,8 @@ function ChoiceCard({
       accessibilityLabel={note ? `${label}，${note}` : label}
       accessibilityState={{ selected, disabled }}
       style={{
-        width: 78,
+        minWidth: 78,
+        paddingHorizontal: 8,
         alignItems: "center",
         gap: 7,
         paddingVertical: 11,
@@ -97,7 +98,7 @@ function Label({ children }: { children: string }) {
 
 export function NewSessionScreen() {
   const insets = usePageInsets();
-  const params = useLocalSearchParams<{ cwd?: string }>();
+  const params = useLocalSearchParams<{ cwd?: string; agent?: string }>();
   const machine = useClient((state) => state.machine);
   const projects = useClient((state) => state.projects);
   const online = useClient((state) => state.status === "online");
@@ -106,7 +107,9 @@ export function NewSessionScreen() {
   const agents = useMemo(() => (machine?.agents ?? []).filter((agent) => agent.installed && agent.tier !== "terminal"), [machine]);
   const remembered = sessionPreferences.read(machine?.machineId);
   const [agentPick, setAgentPick] = useState<{ machineId?: string; agent: string }>();
-  const preferredAgent = agentPick?.machineId === machine?.machineId ? agentPick?.agent ?? remembered.agent ?? lastAgent() : remembered.agent ?? lastAgent();
+  const preferredAgent = agentPick?.machineId === machine?.machineId
+    ? agentPick?.agent ?? params.agent ?? remembered.agent ?? lastAgent()
+    : params.agent ?? remembered.agent ?? lastAgent();
   const agentId = preferredAgent === TERMINAL ? TERMINAL : (agents.find((a) => a.id === preferredAgent && usable(a)) ?? agents.find(usable))?.id;
   const setAgentId = (agent: string) => { setAgentPick({ machineId: machine?.machineId, agent }); sessionPreferences.remember(machine?.machineId, agent); };
   const terminal = agentId === TERMINAL;
@@ -301,9 +304,33 @@ export function NewSessionScreen() {
             </Text>
           ) : null}
           {!terminal && selectedAgent ? (
-            <Text style={[type.footnote, { color: colors.secondaryLabel, paddingHorizontal: 4 }]}>
-              {tierCopy[selectedAgent.tier].label} · {tierCopy[selectedAgent.tier].line}
-            </Text>
+            <View style={{ gap: 6, paddingHorizontal: 4 }}>
+              <Text style={[type.footnote, { color: colors.secondaryLabel }]}>
+                {tierCopy[selectedAgent.tier].label} · {tierCopy[selectedAgent.tier].line}
+              </Text>
+              {(() => {
+                const tags = agentCapabilityTags(selectedAgent);
+                if (!tags.length) return null;
+                return (
+                  <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+                    {tags.map((tag) => (
+                      <View
+                        key={tag}
+                        style={{
+                          paddingHorizontal: 8,
+                          paddingVertical: 2,
+                          borderRadius: radius.chip,
+                          borderCurve: "continuous",
+                          backgroundColor: colors.fill,
+                        }}
+                      >
+                        <Text style={[type.caption, { color: colors.secondaryLabel, fontWeight: "500" }]}>{tag}</Text>
+                      </View>
+                    ))}
+                  </View>
+                );
+              })()}
+            </View>
           ) : null}
         </View>
 

@@ -118,7 +118,8 @@ The gateway also serves a browser client at its root URL, with the same pairing 
 | --- | --- | --- |
 | **Codex** | Shared | `linkshell codex` and the phone are live at once; either side can send, interrupt and approve |
 | **Claude Code** | Handoff | Claude's own UI at your desk; a message from the phone takes over, any key at the computer takes it back |
-| **Gemini CLI, GitHub Copilot, OpenCode, Cursor, Grok** | Remote | Start and continue sessions from the phone over the [Agent Client Protocol](https://agentclientprotocol.com): live output, approvals, modes and models |
+| **Gemini CLI, Google Antigravity, GitHub Copilot, OpenCode, Cursor, Grok, Cline, Kilo Code** | Remote | Start and continue sessions from the phone over the [Agent Client Protocol](https://agentclientprotocol.com): live output, approvals, modes and models |
+| **Qwen Code, Kimi Code, CodeBuddy, Qoder, MiniMax Code, TRAE, DeepSeek, GLM, iFlow, Comate** | Remote | Built-in ACP support for mainstream Chinese coding agents (`qwen --acp`, `kimi acp`, `codebuddy --acp`, `qodercli --acp`, `mcode acp`, `traecli acp serve`, `dsh --profile acp`, `glm-acp-agent`, `iflow --experimental-acp`, `comate-acp`), plus custom ACP connections |
 | **Any CLI** | Terminal | A terminal on the computer, viewed and typed into from the phone |
 
 Codex works with ChatGPT sign-in, an API key or a custom provider (including one managed by CC Switch). A Claude session opened in the Claude desktop app can be followed and continued from the phone, but the desktop app only shows what the phone did after a restart; use `linkshell claude` to hand a session back and forth.
