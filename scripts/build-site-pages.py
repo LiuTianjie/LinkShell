@@ -561,6 +561,11 @@ def page_images(page: str, lang: str) -> list:
 
 def main() -> None:
     source = (SITE / "index.src.html").read_text(encoding="utf-8")
+    mobile = json.loads((SITE / "mobile-release.json").read_text(encoding="utf-8"))
+    version = mobile["version"]
+    if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+        raise SystemExit("invalid mobile release version")
+    source = source.replace("{{ANDROID_APK}}", f"{GITHUB}/releases/download/v{version}/LinkShell-{version}.apk")
     sitemap = SITE / "sitemap.xml"
     previous = dict(re.findall(r"<loc>([^<]*)</loc>.*?<lastmod>([^<]*)</lastmod>", sitemap.read_text(encoding="utf-8"), re.S)) if sitemap.exists() else {}
     today = datetime.date.today().isoformat()
