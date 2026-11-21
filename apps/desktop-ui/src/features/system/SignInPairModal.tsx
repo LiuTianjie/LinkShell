@@ -18,6 +18,14 @@ import {
   type DesktopSignInMethod,
   type DesktopSignInRequest,
 } from "../../core";
+import {
+  getLanHosts,
+  isElectronRuntime,
+  onLanHosts,
+  startLanDiscovery,
+  stopLanDiscovery,
+  type LanHostEntry,
+} from "../../bridge/desktop-bridge";
 import { DesktopIcon } from "../../icons";
 import {
   AlertDialog,
@@ -28,6 +36,7 @@ import {
   DialogHeader,
   DialogTitle,
   Field,
+  IconButton,
   Input,
   PairingCodeInput,
   Tab,
@@ -78,8 +87,11 @@ export function SignInPairModal(props: {
   const [pairError, setPairError] = useState<{
     code?: string;
     gateway?: string;
+    lan?: string;
   }>({});
   const [pairingBusy, setPairingBusy] = useState(false);
+  const [lanHosts, setLanHosts] = useState<LanHostEntry[]>([]);
+  const [lanRefreshing, setLanRefreshing] = useState(false);
 
   useEffect(() => {
     if (!open) {
@@ -98,6 +110,51 @@ export function SignInPairModal(props: {
     // Reset initial tab whenever modal opens.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initialTab]);
+
+  useEffect(() => {
+    if (!open || tab !== "pair") return undefined;
+    let alive = true;
+    const unsub = onLanHosts((hosts) => {
+      if (alive) setLanHosts(hosts);
+    });
+    void startLanDiscovery()
+      .then((hosts) => {
+        if (alive && hosts.length > 0) setLanHosts(hosts);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+      unsub();
+      void stopLanDiscovery();
+    };
+  }, [open, tab]);
+
+  const handleRefreshLan = () => {
+    setLanRefreshing(true);
+    setPairError((prev) => ({ ...prev, lan: undefined }));
+    void startLanDiscovery()
+      .then((hosts) => (hosts.length > 0 ? hosts : getLanHosts()))
+      .then((hosts) => {
+        setLanHosts(hosts);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        setLanRefreshing(false);
+      });
+  };
+
+  const handleConnectLanHost = (host: LanHostEntry) => {
+    if (pairingBusy || engineState.locked) return;
+    setPairError({});
+    try {
+      engine.connectLanHost(host);
+      onOpenChange(false);
+    } catch (err) {
+      setPairError({
+        lan: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
 
   const waitingOnBrowser =
     pendingMethod !== undefined && pendingMethod !== "password";
@@ -394,6 +451,90 @@ export function SignInPairModal(props: {
                 {pairingBusy ? ts("pair.submittingBtn") : ts("pair.submitBtn")}
               </Button>
             </form>
+
+            {isElectronRuntime() || lanHosts.length > 0 ? (
+              <div className="ls-system-card" aria-label={ts("pair.lanTitle")}>
+                <div className="ls-system-row">
+                  <div className="ls-system-row__copy">
+                    <span className="ls-system-row__title">
+                      <DesktopIcon name="wifi-lan" size="sm" />
+                      {ts("pair.lanTitle")}
+                    </span>
+                    <span className="ls-system-row__detail">
+                      {ts("pair.lanDesc")}
+                    </span>
+                  </div>
+                  <div className="ls-system-row__controls">
+                    <IconButton
+                      size="icon-sm"
+                      icon={lanRefreshing ? "spinner" : "refresh"}
+                      label={ts("pair.lanRefresh")}
+                      disabled={lanRefreshing}
+                      onClick={handleRefreshLan}
+                    />
+                  </div>
+                </div>
+
+                {lanHosts.length === 0 ? (
+                  <div className="ls-system-row">
+                    <span className="ls-system-row__detail">
+                      {ts("pair.lanSearching")}
+                    </span>
+                  </div>
+                ) : (
+                  lanHosts.map((host) => {
+                    const isLocal =
+                      engineState.localComputer?.machine.id === host.machineId ||
+                      engineState.localComputer?.relayId === host.machineId;
+                    const isCurrentOnline =
+                      !isLocal &&
+                      engineState.connection?.computer.machine.id === host.machineId &&
+                      engineState.connection.computer.machine.online;
+                    const addressLabel =
+                      host.addresses[0] && host.port > 0
+                        ? `${host.addresses[0]}:${host.port}`
+                        : host.host || host.instanceName;
+                    return (
+                      <div key={host.instanceName} className="ls-system-row">
+                        <div className="ls-system-row__copy">
+                          <span className="ls-system-row__title">
+                            {host.name || host.host || addressLabel}
+                          </span>
+                          <span className="ls-system-row__detail">
+                            {`${addressLabel} · ${host.fingerprint.slice(0, 8)}`}
+                          </span>
+                        </div>
+                        <div className="ls-system-row__controls">
+                          {isLocal ? (
+                            <Badge>{ts("pair.lanLocal")}</Badge>
+                          ) : isCurrentOnline ? (
+                            <Badge tone="ok" dot="ok">
+                              {ts("pair.lanConnected")}
+                            </Badge>
+                          ) : (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="secondary"
+                              disabled={pairingBusy || engineState.locked}
+                              onClick={() => handleConnectLanHost(host)}
+                            >
+                              {ts("pair.lanConnect")}
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+
+                {pairError.lan ? (
+                  <p role="alert" className="ls-field__error">
+                    {pairError.lan}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
 
             <p className="ls-signin-local-note">{ts("pair.e2eeFoot")}</p>
           </div>

@@ -9,6 +9,7 @@ public class LinkScreenModule: Module {
       Prop("url") { (view: LinkScreenView, value: String) in view.setURL(value) }
       Prop("maxFps") { (view: LinkScreenView, value: Int) in view.setMaxFps(value) }
       Prop("active", true) { (view: LinkScreenView, value: Bool) in view.setActive(value) }
+      Prop("audio", false) { (view: LinkScreenView, value: Bool) in view.setAudio(value) }
     }
   }
 }
@@ -22,6 +23,9 @@ final class LinkScreenView: ExpoView {
   private var url = ""
   private var maxFps = 120
   private var active = true
+  private var audio = false
+  private var audioAvailable = false
+  private var lastPictureSize: CGSize?
   private var applicationActive = true
   private var supportsConfiguration = false
   private var supportsPause = false
@@ -67,8 +71,16 @@ final class LinkScreenView: ExpoView {
     controls.expectedURL = URL(string: value)
     controlsReady = false
     pictureRect = nil
+    audioAvailable = false
+    lastPictureSize = nil
     attachmentStarted = CACurrentMediaTime()
     attachControls()
+  }
+
+  func setAudio(_ value: Bool) {
+    guard audio != value else { return }
+    audio = value
+    connection?.setAudio(value)
   }
 
   func setMaxFps(_ value: Int) {
@@ -161,17 +173,41 @@ final class LinkScreenView: ExpoView {
     renderer.externalContentRect = pictureRect
     renderer.showsPointer = false
     insertSubview(renderer, at: 0)
-    guard let connection = ScreenConnection(url: url, maxFps: receiverRate, renderer: renderer, metrics: metrics) else {
+    guard let connection = ScreenConnection(url: url, maxFps: receiverRate, renderer: renderer, metrics: metrics, audio: audio) else {
       renderer.removeFromSuperview(); self.renderer = nil
       onState(["state": "failed", "message": "屏幕地址无效，请重新连接"])
       return
     }
     self.connection = connection
+    connection.onAudioAvailable = { [weak self, weak connection] available in
+      DispatchQueue.main.async {
+        guard let self, let connection, self.connection === connection, self.audioAvailable != available else { return }
+        self.audioAvailable = available
+        if self.active, let size = self.lastPictureSize {
+          self.onState([
+            "state": "ready",
+            "width": size.width,
+            "height": size.height,
+            "maxFps": self.receiverRate,
+            "audioAvailable": available,
+          ])
+        }
+      }
+    }
     renderer.onPicture = { [weak self, weak connection] size in
       guard let self, let connection, self.connection === connection else { return }
       connection.pictureArrived()
+      self.lastPictureSize = size
       self.controls.call("picture", ["width": size.width, "height": size.height])
-      if self.active { self.onState(["state": "ready", "width": size.width, "height": size.height, "maxFps": self.receiverRate]) }
+      if self.active {
+        self.onState([
+          "state": "ready",
+          "width": size.width,
+          "height": size.height,
+          "maxFps": self.receiverRate,
+          "audioAvailable": self.audioAvailable,
+        ])
+      }
     }
     renderer.onFailure = { [weak self, weak connection] message in
       guard let self, let connection, self.connection === connection else { return }
@@ -211,6 +247,7 @@ final class LinkScreenView: ExpoView {
   private func disconnect() {
     connection?.stop(); connection = nil
     supportsConfiguration = false; supportsPause = false
+    audioAvailable = false; lastPictureSize = nil
     renderer?.stop(); renderer?.removeFromSuperview(); renderer = nil
   }
 
@@ -236,6 +273,7 @@ final class LinkScreenView: ExpoView {
       guard let signal = message["message"] as? [String: Any] else { return }
       switch signal["t"] as? String {
       case "screen.configure": connection?.configure(signal, maxFps: receiverRate)
+      case "audio": if let enabled = signal["enabled"] as? Bool { setAudio(enabled) }
       case "control": if active && applicationActive { connection?.requestControl(signal) }
       case "prompt": if active && applicationActive { connection?.input(signal) }
       case "activity": if active && applicationActive { connection?.activity() }

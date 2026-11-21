@@ -27,7 +27,6 @@ import {
 import { contentBlockSchema, sessionConfigOptionSchema, sessionEventSchema, sessionNoticeSchema } from "./updates.js";
 import { sideChatSchema } from "./side.js";
 import { mcpMethods } from "./rpc-mcp.js";
-import { lsaMethods } from "./lsa.js";
 
 // ── JSON-RPC 2.0 framing ─────────────────────────────────────────────
 
@@ -84,7 +83,7 @@ export const RPC_APP_ERROR = -32000;
  * 4: smart keep-awake & battery telemetry (`machine.keepAwake`), real git working-tree
  *    diff/revert (`git.diff`, `git.revertFile`), fast `@file` search (`fs.projectFiles`),
  *    clipboard & screen privacy (`clipboard.*`, `screen.privacy`), push-to-start wakeup
- *    (`liveActivities.registerPushToStart`), and LSA Phase 1 steward RPCs (`lsa.*`).
+ *    (`liveActivities.registerPushToStart`), and file management (`fs.rename`, `fs.delete`).
  */
 export const HOST_PROTOCOL = 4;
 
@@ -710,6 +709,16 @@ const coreMethods = {
     params: z.object({ parent: z.string().min(1), name: z.string().min(1).max(255) }),
     result: z.object({ path: z.string() }),
   },
+  /** Renames or moves a file or directory from `from` to `to`. */
+  "fs.rename": {
+    params: z.object({ from: z.string().min(1), to: z.string().min(1), overwrite: z.boolean().optional() }),
+    result: z.object({ path: z.string() }),
+  },
+  /** Deletes a file or directory (requires `recursive: true` for non-empty directories). */
+  "fs.delete": {
+    params: z.object({ path: z.string().min(1), recursive: z.boolean().optional() }),
+    result: z.object({ deleted: z.boolean() }),
+  },
   /** Directories under the home directory whose name contains `query`, projects first. */
   "fs.search": {
     params: z.object({ query: z.string().min(1).max(200), limit: z.number().int().min(1).max(200).default(60) }),
@@ -898,11 +907,10 @@ const coreMethods = {
   },
 } as const;
 
-export const methods: typeof coreMethods & typeof acpMethods & typeof mcpMethods & typeof lsaMethods = {
+export const methods: typeof coreMethods & typeof acpMethods & typeof mcpMethods = {
   ...coreMethods,
   ...acpMethods,
   ...mcpMethods,
-  ...lsaMethods,
 };
 
 export type MethodName = keyof typeof methods;

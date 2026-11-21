@@ -3,10 +3,12 @@ import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { performance } from "node:perf_hooks";
+import { createInterface } from "node:readline";
+import { encodeScreenAudioPacket, SCREEN_AUDIO_CODEC_PCM16 } from "@linkshell/wire";
 import { RTCPeerConnection, RTCRtpCodecParameters, RtpHeader, RtpPacket, useH264, useSdesMid, useAbsSendTime, type RTCDataChannel } from "werift";
 import { inputEvent, type VideoOffer, type VideoSignal, type VideoConfiguration, type VideoConfigured } from "./input.js";
 import { H264_MIME, H264AccessUnits, ScreenInputOrder, h264Nals, h264Payloads } from "./screen-h264.js";
-import { noteWindowsVideo, windowsHelper, windowsVideoEnv } from "./windows-screen.js";
+import { configureWindowsCapture, noteWindowsVideo, windowsHelper, windowsVideoEnv } from "./windows-screen.js";
 
 export interface ScreenVideoSession {
   id: string;
@@ -18,6 +20,7 @@ export interface ScreenVideoSession {
   configure?(configuration: VideoConfiguration): Promise<VideoConfigured>;
   pause?(hidden: boolean): void;
   cursor?(x: number, y: number): boolean;
+  setAudio?(enabled: boolean): void;
 }
 
 export function windowsMedia(): string | undefined {
@@ -76,6 +79,54 @@ export function weriftIceServers(servers: VideoOffer["iceServers"]): { urls: str
     .map(urls => ({ urls, ...(server.username && server.credential ? { username: server.username, credential: server.credential } : {}) })));
 }
 
+/** Length-and-timestamp-prefixed 48 kHz stereo PCM16 frames from `LinkShell.Screen.exe --audio`. */
+export class WindowsAudioSplitter {
+  private readonly header = Buffer.alloc(8);
+  private headerBytes = 0;
+  private frame?: Buffer;
+  private frameBytes = 0;
+  private timestampMs = 0;
+
+  push(chunk: Buffer, emit: (frame: { timestampMs: number; payload: Buffer }) => void): void {
+    let offset = 0;
+    while (offset < chunk.length) {
+      if (!this.frame) {
+        const copied = chunk.copy(this.header, this.headerBytes, offset, offset + 8 - this.headerBytes);
+        this.headerBytes += copied; offset += copied;
+        if (this.headerBytes < 8) return;
+        const size = this.header.readUInt32LE(0);
+        if (size < 4 || size > 65536 || (size & 3) !== 0) throw new Error("Invalid Windows audio frame length");
+        this.timestampMs = this.header.readUInt32LE(4);
+        this.frame = Buffer.allocUnsafe(size); this.frameBytes = 0; this.headerBytes = 0;
+      }
+      const copied = chunk.copy(this.frame, this.frameBytes, offset, offset + this.frame.length - this.frameBytes);
+      this.frameBytes += copied; offset += copied;
+      if (this.frameBytes < this.frame.length) return;
+      const frame = this.frame;
+      this.frame = undefined;
+      emit({ timestampMs: this.timestampMs, payload: frame });
+    }
+  }
+}
+
+export interface WindowsCursorShape {
+  id: string;
+  png: string;
+  w: number;
+  h: number;
+  hotX: number;
+  hotY: number;
+  scale: number;
+  displayW: number;
+  displayH: number;
+}
+
+export interface WindowsVideoDeps {
+  helper?: () => string | undefined;
+  media?: () => string | undefined;
+  spawn?: typeof spawn;
+}
+
 /** Same SDP and input protocol as the Mac helper; media leaves through DTLS-SRTP, never the gateway. */
 export class WindowsVideoSession implements ScreenVideoSession {
   readonly id = `windows-video-${randomBytes(6).toString("hex")}`;
@@ -84,6 +135,14 @@ export class WindowsVideoSession implements ScreenVideoSession {
   private readonly channels = new Map<string, RTCDataChannel>();
   private readonly order = new ScreenInputOrder();
   private child?: ChildProcess;
+  private shapeChild?: ChildProcess;
+  private audioChild?: ChildProcess;
+  private readonly shapes = new Map<string, WindowsCursorShape>();
+  private readonly shapesSent = new Set<string>();
+  private lastShapeId?: string;
+  private audioEnabled: boolean;
+  private audioSeq = 0;
+  private started = false;
   private closed = false;
   private hidden = false;
   private sending = false;
@@ -128,7 +187,9 @@ export class WindowsVideoSession implements ScreenVideoSession {
   constructor(
     private readonly request: VideoOffer,
     private readonly events: { tell(message: object): void; input(message: unknown): void; lost(): void; log(message: string): void; path?(relayed: boolean): void },
+    private readonly deps: WindowsVideoDeps = {},
   ) {
+    this.audioEnabled = request.audio === true;
     this.pc = new RTCPeerConnection({
       iceServers: weriftIceServers(request.iceServers),
       bundlePolicy: "max-bundle",
@@ -161,10 +222,16 @@ export class WindowsVideoSession implements ScreenVideoSession {
         this.unsteady = setTimeout(() => { if (!this.connected) this.fail("video connection lost"); }, 5000);
       } else if (state === "failed" || state === "closed") this.fail("video connection lost");
     });
-    for (const label of ["input", "pointer", "cursor", "shape"]) {
-      const lossy = label === "pointer" || label === "cursor";
+    for (const label of ["input", "pointer", "cursor", "shape", "audio"]) {
+      const lossy = label === "pointer" || label === "cursor" || label === "audio";
       const channel = this.pc.createDataChannel(label, lossy ? { ordered: false, maxRetransmits: 0 } : { ordered: true });
       this.channels.set(label, channel);
+      if (label === "shape") {
+        channel.stateChanged.subscribe(state => {
+          if (state === "open" && !this.closed && !this.hidden && this.lastShapeId) this.sendShape(this.lastShapeId);
+        });
+        continue;
+      }
       if (label !== "input" && label !== "pointer") continue;
       channel.onMessage.subscribe(data => {
         if (this.closed || this.hidden || typeof data !== "string" || data.length > 32_000) return;
@@ -179,10 +246,17 @@ export class WindowsVideoSession implements ScreenVideoSession {
     this.timeout = setTimeout(() => { if (!this.connected) this.fail("video negotiation timed out"); }, 30_000);
   }
 
+  private resolveHelper(): string | undefined { return (this.deps.helper ?? windowsHelper)(); }
+  private resolveMedia(): string | undefined { return (this.deps.media ?? windowsMedia)(); }
+  private spawnProcess(): typeof spawn { return this.deps.spawn ?? spawn; }
+
   async offer(): Promise<void> {
-    if (!windowsMedia() || !windowsHelper()) throw new Error("Windows video runtime is missing");
+    if (!this.resolveMedia() || !this.resolveHelper()) throw new Error("Windows video runtime is missing");
+    this.started = true;
     // Warm the encoder during ICE, so a connected receiver need not wait for hardware startup.
     this.captureSerial = this.captureSerial.then(() => this.startCapture()).catch(error => this.fail(String(error)));
+    this.startShapeCapture();
+    if (this.audioEnabled) this.startAudioCapture();
     // Do not start the receiver's four-second first-frame deadline while probing a driver.
     await this.warming;
     if (this.closed) return;
@@ -210,11 +284,24 @@ export class WindowsVideoSession implements ScreenVideoSession {
     catch { return false; }
   }
 
+  setAudio(enabled: boolean): void {
+    if (this.closed || this.audioEnabled === enabled) return;
+    this.audioEnabled = enabled;
+    if (!enabled) {
+      this.stopAudioCapture();
+      return;
+    }
+    if (this.started && !this.hidden) this.startAudioCapture();
+  }
+
   pause(hidden: boolean): void {
     if (this.hidden === hidden || this.closed) return;
     this.hidden = hidden;
     this.needsKey = true;
     if (hidden) this.release();
+    if (this.shapeChild) configureWindowsCapture(this.shapeChild, { t: "pause", value: hidden ? 1 : 0 });
+    if (hidden) this.stopAudioCapture();
+    else if (this.started && this.audioEnabled) this.startAudioCapture();
     this.captureSerial = this.captureSerial.then(async () => { await this.stopCapture(); if (!this.hidden && !this.closed) this.startCapture(); }).catch(error => this.fail(String(error)));
   }
 
@@ -226,8 +313,10 @@ export class WindowsVideoSession implements ScreenVideoSession {
 
   private startCapture(): void {
     if (this.closed || this.hidden) return;
+    const helper = this.resolveHelper(), media = this.resolveMedia();
+    if (!helper || !media) return;
     const profile = this.profile();
-    const child = spawn(windowsHelper()!, ["--video", String(this.request.screen), String(profile.width), String(profile.fps), String(profile.bitrate), windowsMedia()!], {
+    const child = this.spawnProcess()(helper, ["--video", String(this.request.screen), String(profile.width), String(profile.fps), String(profile.bitrate), media], {
       windowsHide: true, stdio: ["pipe", "pipe", "pipe"], env: windowsVideoEnv(),
     });
     this.child = child;
@@ -354,15 +443,131 @@ export class WindowsVideoSession implements ScreenVideoSession {
     this.captureSerial = this.captureSerial.then(async () => { await this.stopCapture(); this.startCapture(); }).catch(error => this.fail(String(error)));
   }
 
-  private stopCapture(): Promise<void> {
-    this.pending = [];
-    const child = this.child; this.child = undefined;
+  private stopChild(child: ChildProcess | undefined): Promise<void> {
     if (!child || child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
     return new Promise(resolve => {
-      const timer = setTimeout(() => child.kill("SIGKILL"), 1500);
+      const timer = setTimeout(() => { try { child.kill("SIGKILL"); } catch { } }, 1500);
+      timer.unref?.();
       child.once("close", () => { clearTimeout(timer); resolve(); });
       child.stdin?.end();
     });
+  }
+
+  private stopCapture(): Promise<void> {
+    this.pending = [];
+    const child = this.child; this.child = undefined;
+    return this.stopChild(child);
+  }
+
+  private startShapeCapture(): void {
+    if (this.closed || this.shapeChild) return;
+    const helper = this.resolveHelper();
+    if (!helper) return;
+    const child = this.spawnProcess()(helper, ["--shape", String(this.request.screen)], {
+      windowsHide: true, stdio: ["pipe", "pipe", "ignore"],
+    });
+    this.shapeChild = child;
+    child.stdin?.on("error", () => {});
+    if (this.hidden) configureWindowsCapture(child, { t: "pause", value: 1 });
+    if (child.stdout) {
+      createInterface({ input: child.stdout }).on("line", line => {
+        if (this.shapeChild !== child || this.closed || line.length > 1_500_000) return;
+        let message: Record<string, unknown>;
+        try { message = JSON.parse(line) as Record<string, unknown>; } catch { return; }
+        if (message.t !== "shape" || typeof message.id !== "string" || !message.id || message.id.length > 64) return;
+        if (typeof message.png === "string" && message.png.length > 0 && message.png.length <= 1_400_000) {
+          const w = Number(message.w), h = Number(message.h), hotX = Number(message.hotX), hotY = Number(message.hotY);
+          const scale = Number(message.scale), displayW = Number(message.displayW), displayH = Number(message.displayH);
+          if (w > 0 && h > 0 && w <= 256 && h <= 256 && Number.isFinite(hotX) && Number.isFinite(hotY) && Number.isFinite(displayW) && Number.isFinite(displayH)) {
+            if (this.shapes.size >= 64) this.shapes.clear();
+            this.shapes.set(message.id, {
+              id: message.id, png: message.png, w, h, hotX, hotY,
+              scale: scale >= 1 && scale <= 4 ? scale : 1,
+              displayW, displayH,
+            });
+          }
+        }
+        this.lastShapeId = message.id;
+        this.sendShape(message.id);
+      });
+    }
+    child.on("error", () => { if (this.shapeChild === child) this.shapeChild = undefined; });
+    child.on("exit", () => { if (this.shapeChild === child) this.shapeChild = undefined; });
+  }
+
+  private stopShapeCapture(): void {
+    const child = this.shapeChild; this.shapeChild = undefined;
+    void this.stopChild(child);
+  }
+
+  private sendShape(id: string): void {
+    const channel = this.channels.get("shape");
+    if (!channel || channel.readyState !== "open" || this.closed || this.hidden) return;
+    if (!this.shapesSent.has(id)) {
+      const shape = this.shapes.get(id);
+      if (!shape) return;
+      try {
+        channel.send(JSON.stringify({ t: "shape", ...shape }));
+        this.shapesSent.add(id);
+      } catch { /* Shape send failure will retry on next change or reconnect. */ }
+      return;
+    }
+    try { channel.send(JSON.stringify({ t: "shape", id })); }
+    catch { /* Ignore transient DataChannel errors. */ }
+  }
+
+  private startAudioCapture(): void {
+    if (this.closed || this.hidden || !this.audioEnabled || this.audioChild) return;
+    const helper = this.resolveHelper();
+    if (!helper) return;
+    const child = this.spawnProcess()(helper, ["--audio"], {
+      windowsHide: true, stdio: ["pipe", "pipe", "pipe"],
+    });
+    this.audioChild = child;
+    const splitter = new WindowsAudioSplitter();
+    child.stdin?.on("error", () => {});
+    child.stdout?.on("data", (chunk: Buffer) => {
+      if (this.audioChild !== child || this.closed) return;
+      try {
+        splitter.push(chunk, ({ timestampMs, payload }) => this.sendAudio(timestampMs, payload));
+      } catch (error) {
+        this.events.log(`[screen] Windows audio stream error: ${error instanceof Error ? error.message : String(error)}`);
+        this.stopAudioCapture();
+      }
+    });
+    let errors = "";
+    child.stderr?.on("data", (chunk: Buffer) => { errors = (errors + chunk.toString()).slice(-1000); });
+    child.on("error", error => {
+      if (this.audioChild === child) this.audioChild = undefined;
+      this.events.log(`[screen] Windows audio unavailable: ${error.message}`);
+    });
+    child.on("exit", code => {
+      if (this.audioChild === child) {
+        this.audioChild = undefined;
+        if (code && !this.closed && this.audioEnabled && !this.hidden) {
+          this.events.log(`[screen] Windows audio exited ${code}: ${errors.trim()}`);
+        }
+      }
+    });
+  }
+
+  private stopAudioCapture(): void {
+    const child = this.audioChild; this.audioChild = undefined;
+    void this.stopChild(child);
+  }
+
+  private sendAudio(timestampMs: number, payload: Buffer): void {
+    const channel = this.channels.get("audio");
+    if (this.closed || this.hidden || !this.audioEnabled || !this.connected || !channel || channel.readyState !== "open") return;
+    if (channel.bufferedAmount > 64 * 1024) return;
+    const packet = encodeScreenAudioPacket({
+      codec: SCREEN_AUDIO_CODEC_PCM16,
+      seq: this.audioSeq++ & 0xffff,
+      timestampMs,
+      payload,
+    });
+    try { channel.send(Buffer.from(packet.buffer, packet.byteOffset, packet.byteLength)); }
+    catch { /* Lossy audio channel drop is non-fatal. */ }
   }
 
   private release(): void {
@@ -384,6 +589,8 @@ export class WindowsVideoSession implements ScreenVideoSession {
     this.warmed();
     clearInterval(this.monitor); clearTimeout(this.timeout); clearTimeout(this.unsteady);
     this.release();
+    this.stopShapeCapture();
+    this.stopAudioCapture();
     void this.stopCapture();
     void this.pc.close().catch(() => {});
   }

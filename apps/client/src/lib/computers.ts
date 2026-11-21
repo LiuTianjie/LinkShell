@@ -7,6 +7,30 @@ import { useAccount } from "./account";
 import { deviceIdentity } from "./identity";
 import { DEFAULT_HOST_URL } from "./settings";
 import { createSocket } from "./socket";
+import {
+  annotateComputersWithLan,
+  bindLanHostsSink,
+  matchLanHostToComputer,
+  normalizeDiscoveredLanHosts,
+  type DiscoveredLanHost,
+  type LanMatchReason,
+} from "./lan-discovery";
+
+export type { DiscoveredLanHost, LanMatchReason };
+export {
+  annotateComputersWithLan,
+  findUnmatchedLanHosts,
+  isLanDiscoveryAvailable,
+  lanHostDisplayName,
+  lanHostFingerprint,
+  lanHostMachineFallbackFingerprint,
+  lanHostUrl,
+  matchLanHostToComputer,
+  mergeDiscoveredLanHosts,
+  refreshLanDiscovery,
+  resolveLanReachabilityHint,
+  useLanDiscovery,
+} from "./lan-discovery";
 
 // Every computer this phone can reach: ones paired through a gateway, ones on
 // the signed-in account (no pairing needed), and hosts on the LAN reached
@@ -16,8 +40,28 @@ import { createSocket } from "./socket";
 export const DEFAULT_GATEWAY = process.env.EXPO_PUBLIC_LINKSHELL_GATEWAY ?? "wss://gateway.itool.tech";
 
 export type Computer =
-  | { key: string; kind: "relay"; gateway: string; machine: MachineEntry; lanUrl?: string; lanE2ee?: boolean }
-  | { key: string; kind: "direct"; url: string; name: string; machine?: PublicIdentity; fallbackGateway?: string };
+  | {
+      key: string;
+      kind: "relay";
+      gateway: string;
+      machine: MachineEntry;
+      lanUrl?: string;
+      lanE2ee?: boolean;
+      lanReachable?: boolean;
+      lanDiscoveredUrl?: string;
+      lanMatchedBy?: LanMatchReason;
+    }
+  | {
+      key: string;
+      kind: "direct";
+      url: string;
+      name: string;
+      machine?: PublicIdentity;
+      fallbackGateway?: string;
+      lanReachable?: boolean;
+      lanDiscoveredUrl?: string;
+      lanMatchedBy?: LanMatchReason;
+    };
 
 interface Saved {
   relay: { gateway: string; machine: Omit<MachineEntry, "online"> }[];
@@ -195,16 +239,20 @@ interface ComputersState {
   saved: Saved;
   /** Live entries per gateway, from machines.list: paired and account machines. */
   live: Record<string, MachineEntry[]>;
+  /** Live computers discovered on the local Wi-Fi network via native mDNS. */
+  lanHosts: DiscoveredLanHost[];
   relayStatus: Record<string, RelayStatus>;
   discovery: Record<string, DiscoveryStatus>;
   select(key: string): void;
   addPaired(gateway: string, machine: MachineEntry): string;
   addDirect(url: string, name: string, options?: { machine?: PublicIdentity; fallbackGateway?: string }): string;
   setLanUrl(keyOrMachineId: string, lanUrl: string | undefined, options?: { e2ee?: boolean }): void;
+  setLanHosts(hosts: DiscoveredLanHost[]): void;
   discoverLanHost(host: {
     url: string;
     name?: string;
     machineId?: string;
+    fingerprint?: string;
     machine?: PublicIdentity;
     e2ee?: boolean;
   }): string;
@@ -221,6 +269,7 @@ interface ComputersState {
 export const useComputers = create<ComputersState>((set, get) => ({
   saved: load(),
   live: {},
+  lanHosts: [],
   relayStatus: {},
   discovery: {},
   select(key) {
@@ -280,18 +329,52 @@ export const useComputers = create<ComputersState>((set, get) => ({
     persist(saved);
     set({ saved });
   },
+  setLanHosts(hosts) {
+    const normalized = normalizeDiscoveredLanHosts(hosts);
+    set((state) => {
+      const prev = state.lanHosts;
+      if (
+        prev.length === normalized.length &&
+        prev.every(
+          (item, index) =>
+            item.name === normalized[index]?.name &&
+            item.host === normalized[index]?.host &&
+            item.port === normalized[index]?.port &&
+            item.machineId === normalized[index]?.machineId &&
+            item.fingerprint === normalized[index]?.fingerprint &&
+            item.displayName === normalized[index]?.displayName,
+        )
+      ) {
+        return state;
+      }
+      return { lanHosts: normalized };
+    });
+  },
   discoverLanHost(host) {
     const normalized = normalizeLanUrl(host.url);
     if (!normalized) return "";
     const state = get();
     const all = listComputers(state);
+    let parsedHost: string;
+    let parsedPort: number;
+    try {
+      const parsed = new URL(normalized);
+      parsedHost = parsed.hostname;
+      parsedPort = Number(parsed.port || "7878");
+    } catch {
+      return "";
+    }
+    const probe: DiscoveredLanHost = {
+      name: host.name?.trim() || parsedHost,
+      host: parsedHost,
+      port: parsedPort,
+      machineId: host.machineId ?? host.machine?.id,
+      fingerprint: host.fingerprint,
+      displayName: host.name,
+    };
     const matchingRelay = all.find(
       (item): item is Extract<Computer, { kind: "relay" }> =>
-        item.kind === "relay" &&
-        Boolean(
-          (host.machineId && item.machine.id === host.machineId) ||
-            (host.machine && item.machine.id === host.machine.id && item.machine.signKey === host.machine.signKey),
-        ),
+        item.kind === "relay" && Boolean(matchLanHostToComputer(probe, item)),
     );
     if (matchingRelay) {
       get().setLanUrl(matchingRelay.key, normalized, { e2ee: host.e2ee });
@@ -426,8 +509,10 @@ export function useComputerDiscovery(): DiscoveryStatus {
   });
 }
 
-/** All computers, merged: saved paired ones (with live status), account ones, and direct hosts. */
-export function listComputers(state: Pick<ComputersState, "saved" | "live">): Computer[] {
+/** All computers, merged: saved paired ones (with live status), account ones, direct hosts, and optional LAN reachability hints. */
+export function listComputers(
+  state: Pick<ComputersState, "saved" | "live"> & { lanHosts?: readonly DiscoveredLanHost[] },
+): Computer[] {
   const out: Computer[] = [];
   const seen = new Set<string>();
   for (const entry of state.saved.relay) {
@@ -463,11 +548,14 @@ export function listComputers(state: Pick<ComputersState, "saved" | "live">): Co
       ...(entry.fallbackGateway ? { fallbackGateway: entry.fallbackGateway } : {}),
     });
   }
-  return out;
+  if (!state.lanHosts?.length) return out;
+  return annotateComputersWithLan(out, state.lanHosts);
 }
 
 /** The selected computer, or the best default: an online one, else the first. */
-export function selectedComputer(state: Pick<ComputersState, "saved" | "live">): Computer | undefined {
+export function selectedComputer(
+  state: Pick<ComputersState, "saved" | "live"> & { lanHosts?: readonly DiscoveredLanHost[] },
+): Computer | undefined {
   const all = listComputers(state);
   return (
     all.find((computer) => computer.key === state.saved.selected) ??
@@ -475,6 +563,8 @@ export function selectedComputer(state: Pick<ComputersState, "saved" | "live">):
     all[0]
   );
 }
+
+bindLanHostsSink((hosts) => useComputers.getState().setLanHosts(hosts));
 
 /** Store only display metadata; the paired signing key and selected connection stay intact. */
 export function updateComputerName(computer: Computer, name: string, namingConfigured?: boolean): void {

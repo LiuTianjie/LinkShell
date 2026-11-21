@@ -17,6 +17,13 @@ describe("browser screen negotiation", () => {
     expect(screenQuery("token", 0, { ...view, codec: "h264" }, [{ mimeType: "video/H265" }])).not.toContain("codec=");
   });
 
+  it("appends audio=1 only when screen audio is requested or supported", () => {
+    const view = screenPreferences(() => undefined);
+    expect(screenQuery("token", 0, view, [])).not.toContain("audio=");
+    expect(screenQuery("token", 0, view, [], { audio: false })).not.toContain("audio=");
+    expect(screenQuery("token", 0, view, [], { audio: true })).toContain("audio=1");
+  });
+
   it("keeps explicit preferences and rejects invalid stored values", () => {
     const values: Record<string, string> = { "linkshell.screen.width": "1280", "linkshell.screen.maxFps": "30", "linkshell.screen.codec": "h264", "linkshell.screen.mode": "touch" };
     expect(screenPreferences((key) => values[key])).toEqual({ width: "1280", maxFps: "30", codec: "h264", mode: "touch" });

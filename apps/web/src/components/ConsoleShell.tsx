@@ -17,18 +17,16 @@ import {
   computerNames,
 } from "../live/computer-names";
 import { readLocal, saveLocal } from "../live/storage";
-import { isDesktop } from "../live/desktop";
 import {
-  desktopShortcuts,
   keysBelongToContent,
   matchesShortcut,
-  sendDesktopCommand,
+  sendWorkspaceCommand,
   shortcutText,
-  useDesktopCommand,
-} from "../live/desktop-commands";
+  useWorkspaceCommand,
+  workspaceShortcuts,
+} from "../live/workspace-commands";
 import { LanguageDropdown, useT } from "../live/i18n";
 import { CommandCenter } from "./CommandCenter";
-import { DesktopShell } from "./DesktopShell";
 import { Icon, type IconName } from "../icons";
 import { Choice } from "./Choice";
 import { Button } from "./ui/button";
@@ -188,11 +186,7 @@ export interface ConsoleShellProps {
   children: ReactNode;
 }
 
-export function ConsoleShell(props: ConsoleShellProps) {
-  return isDesktop ? <DesktopShell {...props} /> : <WebConsoleShell {...props} />;
-}
-
-function WebConsoleShell({
+export function ConsoleShell({
   view,
   navigate,
   connect,
@@ -218,7 +212,7 @@ function WebConsoleShell({
     document.documentElement.dataset.theme = resolvedTheme;
     saveLocal("theme", theme);
   }, [resolvedTheme, theme]);
-  useDesktopCommand((command) => {
+  useWorkspaceCommand((command) => {
     if (command.command === "palette") setPalette(true);
   });
   useEffect(() => {
@@ -234,12 +228,12 @@ function WebConsoleShell({
         !event.altKey &&
         !event.shiftKey &&
         (event.code === "KeyK" || event.key.toLowerCase() === "k");
-      if (matchesShortcut(event, desktopShortcuts.palette) || nonAppleCtrlK) {
+      if (matchesShortcut(event, workspaceShortcuts.palette) || nonAppleCtrlK) {
         event.preventDefault();
         setPalette((open) => !open);
-      } else if (matchesShortcut(event, desktopShortcuts.newSession)) {
+      } else if (matchesShortcut(event, workspaceShortcuts.newSession)) {
         event.preventDefault();
-        sendDesktopCommand({ command: "new-session" });
+        sendWorkspaceCommand({ command: "new-session" });
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -311,7 +305,7 @@ function WebConsoleShell({
                     <Search />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>搜索与命令 {shortcutText(desktopShortcuts.palette)}</TooltipContent>
+                <TooltipContent>搜索与命令 {shortcutText(workspaceShortcuts.palette)}</TooltipContent>
               </Tooltip>
               <LanguageDropdown />
               <Tooltip>

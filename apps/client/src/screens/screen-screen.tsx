@@ -35,7 +35,25 @@ import { type } from "@/theme/type";
 export function ScreenScreen() {
   const { computer } = useConnection();
   const linkStatus = useConnectionStatus();
-  const { viewer, failure, preparing, generation, display, mode, playback, attach, detach, present: publishPresentation, inject, focus, selectDisplay, retry } = useScreenSession();
+  const {
+    viewer,
+    failure,
+    preparing,
+    generation,
+    display,
+    mode,
+    playback,
+    audio,
+    audioAvailable,
+    attach,
+    detach,
+    present: publishPresentation,
+    inject,
+    focus,
+    selectDisplay,
+    toggleAudio,
+    retry,
+  } = useScreenSession();
   const owner = useRef({}).current;
   const focusGeneration = useRef(0);
   const routeActive = useRef(false);
@@ -111,7 +129,7 @@ export function ScreenScreen() {
         nativePicture: playback === "native",
         // This app starts a new viewer for a new pacing choice (`pacing` in the address).
         canPace: true,
-        relayFallback: Platform.OS === "ios" && !relayOnly,
+        relayFallback: !relayOnly,
         clear: null,
         // Whether the keyboard is on the screen: the system tells the app, and a page only its field's focus,
         // which a phone leaves standing when it takes the keyboard away.
@@ -231,20 +249,42 @@ export function ScreenScreen() {
         }}
       />
       {/* The header's buttons keep the header: they go with it. */}
-      {!fullscreen && (viewer?.displays.length ?? 0) > 1 ? (
+      {!fullscreen && viewer && (audioAvailable || viewer.displays.length > 1) ? (
         <HeaderActions
           actions={[
-            ...((viewer?.displays.length ?? 0) > 1 ? [{
-              kind: "menu" as const,
-              key: "display",
-              icon: { sf: "rectangle.on.rectangle" as const, md: "screenshot_monitor" as const },
-              label: "切换屏幕",
-              items: viewer!.displays.map((entry) => ({
-                title: entry.index === display ? `${entry.name} ✓` : entry.name,
-                icon: { sf: "display" as const, md: "desktop_windows" as const },
-                onPress: () => selectDisplay(entry.index),
-              })),
-            }] : []),
+            ...(audioAvailable
+              ? [
+                  {
+                    kind: "button" as const,
+                    key: "audio",
+                    icon: {
+                      sf: (audio ? "speaker.wave.2.fill" : "speaker.slash") as "speaker.wave.2.fill" | "speaker.slash",
+                      md: (audio ? "volume_up" : "volume_off") as "volume_up" | "volume_off",
+                    },
+                    label: audio ? "静音" : "声音",
+                    live: audio,
+                    onPress: () => {
+                      haptics.selection();
+                      toggleAudio();
+                    },
+                  },
+                ]
+              : []),
+            ...(viewer.displays.length > 1
+              ? [
+                  {
+                    kind: "menu" as const,
+                    key: "display",
+                    icon: { sf: "rectangle.on.rectangle" as const, md: "screenshot_monitor" as const },
+                    label: "切换屏幕",
+                    items: viewer.displays.map((entry) => ({
+                      title: entry.index === display ? `${entry.name} ✓` : entry.name,
+                      icon: { sf: "display" as const, md: "desktop_windows" as const },
+                      onPress: () => selectDisplay(entry.index),
+                    })),
+                  },
+                ]
+              : []),
           ]}
         />
       ) : null}

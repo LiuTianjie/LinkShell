@@ -31,8 +31,6 @@ import {
   EmptyMedia,
 } from "@/components/ui/empty";
 import { CircleAlert } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { isDesktop } from "./desktop";
 
 export const Runtime = createContext<Connection | null>(null);
 // A socket can be online before this conversation's backlog has been restored.
@@ -83,14 +81,100 @@ export const stateLabel = (state: string) =>
     budgetLimited: "预算已用完",
     unknown: "未知",
   })[state] ?? state;
-/** sm = list rows (18px), md = headings (24px). The size lives here so no row can crowd its title. */
-function isLightTile(hex: string): boolean {
-  const value = Number.parseInt(hex.replace("#", "").slice(0, 6), 16);
-  if (Number.isNaN(value)) return false;
-  const [r, g, b] = [(value >> 16) & 255, (value >> 8) & 255, value & 255];
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 160;
+const AGENT_KEY_ALIASES: Record<string, string> = {
+  claude: "claude",
+  "claude-code": "claude",
+  anthropic: "claude",
+  codex: "codex",
+  "codex-cli": "codex",
+  openai: "codex",
+  gemini: "gemini",
+  "gemini-cli": "gemini",
+  google: "gemini",
+  cursor: "cursor",
+  "cursor-agent": "cursor",
+  opencode: "opencode",
+  cline: "cline",
+  kilo: "kilo",
+  kilocode: "kilo",
+  "kilo-code": "kilo",
+  copilot: "copilot",
+  "github-copilot": "copilot",
+  grok: "grok",
+  xai: "grok",
+  antigravity: "antigravity",
+  agy: "antigravity",
+  qwen: "qwen",
+  "qwen-code": "qwen",
+  kimi: "kimi",
+  "kimi-code": "kimi",
+  moonshot: "kimi",
+  codebuddy: "codebuddy",
+  "codebuddy-code": "codebuddy",
+  cbc: "codebuddy",
+  qoder: "qoder",
+  qodercli: "qoder",
+  minimax: "minimax",
+  "minimax-code": "minimax",
+  mcode: "minimax",
+  "code-acp": "minimax",
+  trae: "trae",
+  traecli: "trae",
+  "trae-cli": "trae",
+  deepseek: "deepseek",
+  "deepseek-harness": "deepseek",
+  dsh: "deepseek",
+  glm: "glm",
+  "glm-acp-agent": "glm",
+  zhipu: "glm",
+  zai: "glm",
+  iflow: "iflow",
+  "iflow-cli": "iflow",
+  comate: "comate",
+  "comate-acp": "comate",
+  zulu: "comate",
+};
+
+const AGENT_LABELS: Record<string, string> = {
+  codex: "Codex",
+  claude: "Claude Code",
+  gemini: "Gemini",
+  antigravity: "Antigravity",
+  copilot: "Copilot",
+  grok: "Grok",
+  opencode: "OpenCode",
+  cursor: "Cursor",
+  cline: "Cline",
+  kilo: "Kilo Code",
+  qwen: "Qwen Code",
+  kimi: "Kimi Code",
+  codebuddy: "CodeBuddy",
+  qoder: "Qoder",
+  minimax: "MiniMax Code",
+  trae: "TRAE",
+  deepseek: "DeepSeek",
+  glm: "GLM",
+  iflow: "iFlow",
+  comate: "Comate",
+};
+
+export function normalizeAgentKey(agent: string): string {
+  const cleaned = agent.trim().toLowerCase();
+  return AGENT_KEY_ALIASES[cleaned] ?? cleaned;
 }
 
+export function agentLabel(agent: string, knownLabel?: string): string {
+  const custom = knownLabel?.trim();
+  if (custom) return custom;
+  const normalized = normalizeAgentKey(agent);
+  return AGENT_LABELS[normalized] ?? (agent.trim() || "Agent");
+}
+
+function agentMarkSrc(svg: string, inkColor: string): string {
+  return `data:image/svg+xml,${encodeURIComponent(svg.replaceAll("currentColor", inkColor))}`;
+}
+
+/** sm = list rows (18px), md = headings (24px). The size lives here so no row can crowd its title. */
 export function AgentMark({
   agent,
   size = "sm",
@@ -98,41 +182,49 @@ export function AgentMark({
   agent: string;
   size?: "sm" | "md";
 }) {
-  const mark = agentMarks[agent.toLowerCase()];
-  if (isDesktop && mark) {
-    // The desktop draws every agent the same way: the bare mark, no tile.
-    // A one-colour mark takes the label's ink of each theme (a picture can't read CSS colour, so
-    // both are drawn and the theme shows one); a full mark loses the white ground it was drawn on.
-    const glyph = (ink: string) => {
-      let svg = mark.svg.replaceAll("currentColor", ink);
-      if (mark.full) svg = svg.replaceAll('fill="#fff"', 'fill="none"').replaceAll("#1E1E2E", ink);
-      return `data:image/svg+xml,${encodeURIComponent(svg)}`;
-    };
-    return (
-      <span data-size={size} className={`agent-mark agent-glyph ${agent.toLowerCase()}`}>
-        <img className="agent-glyph-light" src={glyph("#1a1c1f")} alt={agent} />
-        <img className="agent-glyph-dark" src={glyph("#dfdfdf")} alt="" aria-hidden />
-      </span>
-    );
-  }
+  const normalized = normalizeAgentKey(agent);
+  const mark = agentMarks[normalized];
+  const label = agentLabel(agent);
+  const style = mark?.bg
+    ? ({
+        "--agent-mark-bg-light": mark.bg.light,
+        "--agent-mark-bg-dark": mark.bg.dark,
+        boxShadow: "none",
+      } as CSSProperties)
+    : undefined;
+  const lightInk = mark?.fg?.light ?? "#333";
+  const darkInk = mark?.fg?.dark;
+  const dualTone = Boolean(mark && darkInk && darkInk !== lightInk);
   return (
     <span
       data-size={size}
-      className={`agent-mark ${agent.toLowerCase()} ${mark?.full ? "full-mark" : ""}`}
-      // The glyph is drawn in its light-scheme colour, so it needs its own tile: a white
-      // Copilot or Grok mark on the page's light inset would not be seen.
-      // A light tile (Claude's cream) would be the brightest thing on a dark page: the desktop's dark
-      // theme swaps it for the mark's own dark tile, which keeps the glyph's colour readable.
-      style={mark?.bg ? { background: mark.bg.light, boxShadow: "none", ...(isLightTile(mark.bg.light) ? { "--agent-mark-dark": mark.bg.dark } : {}) } as CSSProperties : undefined}
-      data-light-tile={mark?.bg && isLightTile(mark.bg.light) ? "" : undefined}
+      data-agent={normalized}
+      className={`agent-mark ${normalized} ${mark?.full ? "full-mark" : ""}`}
+      style={style}
     >
       {mark ? (
-        <img
-          src={`data:image/svg+xml,${encodeURIComponent(mark.svg.replaceAll("currentColor", mark.fg?.light ?? "#333"))}`}
-          alt={agent}
-        />
+        dualTone ? (
+          <>
+            <img
+              className="agent-mark-light"
+              src={agentMarkSrc(mark.svg, lightInk)}
+              alt={label}
+            />
+            <img
+              className="agent-mark-dark"
+              src={agentMarkSrc(mark.svg, darkInk!)}
+              alt=""
+              aria-hidden="true"
+            />
+          </>
+        ) : (
+          <img
+            src={agentMarkSrc(mark.svg, lightInk)}
+            alt={label}
+          />
+        )
       ) : (
-        agent.slice(0, 1).toUpperCase()
+        (agent.trim().slice(0, 1) || "A").toUpperCase()
       )}
     </span>
   );
@@ -188,9 +280,7 @@ export function EmptyState({
 }
 /** "Load earlier": on the desktop a 28 px secondary button under the list; on the web a full-width row. */
 export function LoadMore(props: { disabled?: boolean; onClick: () => void; children: ReactNode }) {
-  return isDesktop
-    ? <Button variant="secondary" size="sm" className="list-more-button" {...props} />
-    : <button type="button" className="list-row-more" {...props} />;
+  return <button type="button" className="list-row-more" {...props} />;
 }
 export function Modal({
   title,

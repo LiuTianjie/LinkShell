@@ -15,7 +15,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { useIsMobile } from "@/hooks/use-mobile";
-import type { CSSProperties, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { AsyncQuestions } from "./AsyncQuestions";
 import { composerHeightRef } from "./composer-height";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -30,7 +30,6 @@ import {
   EmptyMedia,
 } from "@/components/ui/empty";
 import { useDialogs } from "@/components/Dialogs";
-import { ColumnResizer } from "@/components/ColumnResizer";
 import { confirmAndDeleteSession } from "./session-actions";
 import {
   DropdownMenu,
@@ -51,12 +50,9 @@ import {
 } from "react";
 import {
   LoaderCircle,
-  PanelRight,
   MessageSquare,
   MessagesSquare,
   Square,
-  Plus,
-  X,
   Target,
   Plug,
   Blocks,
@@ -72,16 +68,13 @@ import {
   ListTree,
   ChevronUp,
   ChevronDown,
-  ExternalLink,
-  FolderOpen,
-  Code2,
   Globe,
   Monitor,
   Sparkles,
+  X,
 } from "lucide-react";
 import { reconnectLabel, reconnectOf, shownQueue, userMessageView } from "@linkshell/client-core";
-import type { ContentBlock, SessionSummary, ToolDetail } from "@linkshell/wire";
-import type { TimelineItem } from "@linkshell/client-core";
+import type { SessionSummary } from "@linkshell/wire";
 import {
   parseCommand,
   sessionCommands,
@@ -94,7 +87,7 @@ import {
   ErrorNotice,
   Modal,
   SessionReady,
-  baseName,
+  agentLabel,
   titleOf,
   useActions,
   useClient,
@@ -113,13 +106,10 @@ import { Changes, Commands, Goal, Settings, Tasks } from "./Panels";
 import { SessionPortPreview } from "./Ports";
 import { Side } from "./Side";
 import { Terminal, Terminals } from "./Terminal";
-import { readLocal, saveLocal } from "./storage";
 import { finishComposerSend } from "./composer-draft";
 import { ComputerPreview } from "./Video";
-import { McpAppView, appTabId, type AppTab } from "./McpApp";
-import { DESKTOP_LOCAL, isDesktop, isElectronDesktop, isWindowsDesktop } from "./desktop";
 import { sessionNeedsAttention, waitingLabel } from "./session-list";
-import { desktopShortcuts, keysBelongToContent, matchesShortcut, shortcutText, useDesktopCommand } from "./desktop-commands";
+import { keysBelongToContent, useWorkspaceCommand } from "./workspace-commands";
 import { useT } from "./i18n";
 
 export { atFileMention };
@@ -136,36 +126,8 @@ type Panel =
   | "apps"
   | "preview"
   | "terminal"
-  | AppPanel
   | null;
-/** An MCP App's tab (`appTabId`). */
-type AppPanel = `app:${string}`;
-const isAppPanel = (panel: Panel): panel is AppPanel => !!panel?.startsWith("app:");
-type AppCall = Extract<TimelineItem, { kind: "tool" }> & {
-  detail: Extract<ToolDetail, { type: "mcp" }> & { app: NonNullable<Extract<ToolDetail, { type: "mcp" }>["app"]> };
-};
-const isAppCall = (item: TimelineItem): item is AppCall => item.kind === "tool" && item.detail?.type === "mcp" && !!item.detail.app;
-const callDone = (call: AppCall) => call.status === "completed" || call.status === "failed";
-/** What the page is told came back: Codex's raw result, or the failure as one. */
-function appResult(call: AppCall): unknown {
-  if (!callDone(call)) return undefined;
-  if (call.status === "failed") return { content: [{ type: "text", text: call.output || "调用失败" }], structuredContent: { error: call.output || "调用失败" }, isError: true };
-  return call.rawOutput ?? { content: [] };
-}
-const appInput = (call: AppCall) =>
-  call.rawInput && typeof call.rawInput === "object" && !Array.isArray(call.rawInput) ? (call.rawInput as Record<string, unknown>) : {};
-
-// The desktop inspector's tools beside a conversation: what changed, the
-// files, a terminal and the computer's preview. Tasks join while the session has some running
-// or done; settings, goal, side, MCP and apps are opened from elsewhere (the composer's chips,
-// the ••• menu) and show as a tab only while open.
-const inspectorTabs: { id: Exclude<Panel, null | "commands">; title: string }[] = [
-  { id: "changes", title: "变更" },
-  { id: "files", title: "文件" },
-  { id: "terminal", title: "终端" },
-  { id: "preview", title: "预览" },
-];
-const panelTitles: Record<Exclude<Panel, null | "commands" | AppPanel>, string> = {
+const panelTitles: Record<Exclude<Panel, null | "commands">, string> = {
   settings: "会话设置",
   changes: "变更",
   files: "文件",
@@ -193,9 +155,7 @@ export function Session({
   const actions = useActions();
   const job = useJob();
   const sendJob = useJob();
-  const openPathJob = useJob();
   const view = useClient((state) => state.views[session.id]);
-  const hasTasks = useClient((state) => Object.keys(state.tasks[session.id] ?? {}).length > 0 || Object.keys(state.workflows[session.id] ?? {}).length > 0);
   const ready = useClient((state) => state.ready[session.id]);
   const online = useClient((state) => state.status === "online");
   const canInteract = online && !!ready;
@@ -203,8 +163,6 @@ export function Session({
   const agent = useClient((state) =>
     state.machine?.agents.find((agent) => agent.id === session.agent),
   );
-  // (Hosts before the flag had pages for Codex only.)
-  const hasApps = agent?.capabilities.mcpApps ?? session.agent === "codex";
   const queueing = useClient((state) => state.queueing[session.id]);
   const notices = useClient((state) => state.notices[session.id]);
   const commands = useMemo(
@@ -245,22 +203,7 @@ export function Session({
     [dialogs, panel],
   );
   const [terminal, setTerminal] = useState<string>();
-  const [terminals, commitTerminals] = useState(false);
-  // On the desktop the terminal is an inspector tab beside the conversation, not a dialog over it.
-  const setTerminals = (open: boolean) => {
-    if (isDesktop) { if (open) void setPanel("terminal"); }
-    else commitTerminals(open);
-  };
-  const [inspectorWidth, commitInspectorWidth] = useState(() => readLocal("desktopInspectorWidth", 440));
-  const widthSave = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const setInspectorWidth = useCallback((width: number) => {
-    commitInspectorWidth(width);
-    // A drag reports every frame; the preference is written once it settles.
-    clearTimeout(widthSave.current);
-    widthSave.current = setTimeout(() => {
-      try { saveLocal("desktopInspectorWidth", width); } catch { /* A preference, not state. */ }
-    }, 400);
-  }, []);
+  const [terminals, setTerminals] = useState(false);
   const lastPanel = useRef<Exclude<Panel, null | "commands">>("changes");
   useEffect(() => {
     if (panel && panel !== "commands") lastPanel.current = panel;
@@ -284,110 +227,17 @@ export function Session({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view?.turnActive, online, session.cwd]);
 
-  const canOpenLocalPath =
-    isElectronDesktop && connection.computer?.key === DESKTOP_LOCAL && Boolean(session.cwd);
-  const openLocalPath = (app: "default" | "cursor" | "vscode" | "zed" | "terminal") => {
-    if (!online || !session.cwd) return;
-    void openPathJob.run(async () => {
-      await link.call("desktop.openPath", { path: session.cwd, app });
-    });
-  };
-
-  // MCP Apps (Codex): a tool's own page in the inspector. The agent's call to such a tool opens it
-  // there by itself; the inspector's + menu opens one by hand.
-  const [apps, setApps] = useState<AppTab[]>([]);
-  const appCalls = useMemo(() => (isDesktop ? (view?.items ?? []).filter(isAppCall) : []), [view?.items]);
-  const seenCalls = useRef<Set<string>>(undefined);
-  // Calls whose app was closed by hand: they don't open it again.
-  const closedCalls = useRef(new Set<string>());
-  useEffect(() => {
-    if (!appCalls.length && !seenCalls.current) return;
-    // What was already done when the session opened is history: it opens nothing.
-    seenCalls.current ??= new Set(appCalls.filter(callDone).map((call) => call.id));
-    const seen = seenCalls.current;
-    let next = apps;
-    let open: AppPanel | undefined;
-    for (const call of appCalls) {
-      const { server, tool, app } = call.detail;
-      const id = appTabId(server, app.resourceUri) as AppPanel;
-      const fresh = !seen.has(call.id);
-      seen.add(call.id);
-      const shown = { callId: call.id, input: appInput(call), result: appResult(call) };
-      const index = next.findIndex((tab) => tab.id === id);
-      if (index >= 0) {
-        const tab = next[index];
-        // A later call moves the open app to it; the shown call's result updates it when it lands.
-        const moves = fresh || tab.callId === call.id;
-        const changed = tab.callId !== shown.callId || JSON.stringify(tab.result) !== JSON.stringify(shown.result);
-        if (moves && changed) next = next.map((entry, at) => (at === index ? { ...entry, ...shown, launched: false } : entry));
-      } else if (fresh && !callDone(call) && app.displayMode !== "inline" && !closedCalls.current.has(call.id)) {
-        next = [...next, { id, server, tool, title: server, resourceUri: app.resourceUri, connector: app.connector, ...shown }];
-        open = id;
-      }
-    }
-    if (next !== apps) setApps(next);
-    if (open) void setPanel(open);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appCalls]);
-  const appCatalog = useLoad(
-    () => (isDesktop && hasApps ? connection.link.call("mcp.apps", { sessionId: session.id }).then((result) => result.apps) : Promise.resolve([])),
-    [connection.link, session.id, hasApps],
-  );
-  const appTitle = (tab: AppTab) =>
-    appCatalog.value?.find((entry) => entry.server === tab.server && entry.resourceUri === tab.resourceUri)?.title ?? tab.title;
-  const launchApp = (entry: { server: string; tool: string; title: string; resourceUri: string; connector?: string }) => {
-    const id = appTabId(entry.server, entry.resourceUri) as AppPanel;
-    if (!apps.some((tab) => tab.id === id)) setApps((list) => [...list, { id, server: entry.server, tool: entry.tool, title: entry.title, resourceUri: entry.resourceUri, connector: entry.connector, launched: true }]);
-    void setPanel(id);
-  };
-  /** A call's page, from its row in the conversation: open again, or for the first time (inline apps). */
   // Mail from another of the agent's sessions names it by the app's own id (the Claude app's local_…).
   const findSession = (appId: string) => {
     const sender = Object.values(connection.store.getState().sessions).find((candidate) => candidate.appId === appId);
     return sender && { title: titleOf(sender), open: () => navigate(sender.id) };
   };
-  const openAppCall = (callId: string) => {
-    const call = appCalls.find((entry) => entry.id === callId);
-    if (!call) return;
-    const { server, tool, app } = call.detail;
-    const id = appTabId(server, app.resourceUri) as AppPanel;
-    const shown = { callId: call.id, input: appInput(call), result: appResult(call), launched: false };
-    closedCalls.current.delete(call.id);
-    setApps((list) => list.some((tab) => tab.id === id)
-      ? list.map((tab) => (tab.id === id ? { ...tab, ...shown } : tab))
-      : [...list, { id, server, tool, title: server, resourceUri: app.resourceUri, connector: app.connector, ...shown }]);
-    void setPanel(id);
-  };
-  const closeApp = (id: string) => {
-    const tab = apps.find((entry) => entry.id === id);
-    if (tab?.callId) closedCalls.current.add(tab.callId);
-    const rest = apps.filter((entry) => entry.id !== id);
-    setApps(rest);
-    if (panel === id) {
-      const fallback = isAppPanel(lastPanel.current) ? undefined : lastPanel.current;
-      void setPanel((rest.at(-1)?.id as AppPanel | undefined) ?? fallback ?? null);
-    }
-  };
-  const sayFromApp = async (content: ContentBlock[]) => {
-    if (!content.length) return;
-    if ((await actions.send(session.id, content)) === "failed") throw new Error("消息发送失败，请重试");
-  };
-  useDesktopCommand((command) => {
+  useWorkspaceCommand((command) => {
     if (!active) return;
     if (command.command === "inspector") {
       if (command.panel) void setPanel(command.panel);
       else toggleInspector();
     }
-  });
-  useEffect(() => {
-    if (!isDesktop || !active) return;
-    const keys = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || keysBelongToContent()) return;
-      if (matchesShortcut(event, desktopShortcuts.toggleInspector)) { event.preventDefault(); toggleInspector(); }
-      else if (matchesShortcut(event, desktopShortcuts.terminal)) { event.preventDefault(); toggleInspector("terminal"); }
-    };
-    window.addEventListener("keydown", keys);
-    return () => window.removeEventListener("keydown", keys);
   });
   const [forkAt, setForkAt] = useState<string | null>();
   const [newWorktree, setNewWorktree] = useState(false);
@@ -648,29 +498,19 @@ export function Session({
   const top = (
     <>
         <div className="session-heading">
-          <div className={isDesktop ? "session-heading-context" : undefined}>
-            <div className={isDesktop ? "session-heading-copy" : undefined}>
+          <div>
+            <div>
               <div className="session-title">
                 <h1 title={titleOf(session)}>{titleOf(session)}</h1>
-                {/* On the desktop the state shows in the sidebar and the conversation's own working line. */}
-                {!isDesktop && (sessionNeedsAttention(session)
+                {sessionNeedsAttention(session)
                   ? <Badge state="waiting" label={waitingLabel(session)} />
-                  : <Badge state={session.state} />)}
+                  : <Badge state={session.state} />}
               </div>
               <div className="session-subtitle">
-                <AgentMark agent={session.agent} size={isDesktop ? "sm" : "md"} />
-                <span>{isDesktop ? agent?.label ?? session.agent : session.agent}</span>
-                <span className="separator">{isDesktop ? "·" : "/"}</span>
-                {isDesktop ? (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span tabIndex={0} className="session-directory" aria-label={`工作目录：${session.cwd}`}>
-                        {baseName(session.cwd) || session.cwd}
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent className="max-w-sm break-all">{session.cwd}</TooltipContent>
-                  </Tooltip>
-                ) : <span title={session.cwd}>{session.cwd}</span>}
+                <AgentMark agent={session.agent} size="md" />
+                <span>{agentLabel(session.agent, agent?.label)}</span>
+                <span className="separator">/</span>
+                <span title={session.cwd}>{session.cwd}</span>
                 {branchLabel && (
                   <span className="branch-chip" title={session.worktree ? `Worktree 分支：${branchLabel}` : `Git 分支：${branchLabel}`}>
                     <GitBranch className="size-3 shrink-0" aria-hidden />
@@ -691,115 +531,6 @@ export function Session({
             </div>
           </div>
           <div className="session-actions">
-            {canOpenLocalPath && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="xs"
-                    className="session-open-in"
-                    disabled={!online || openPathJob.busy}
-                    aria-label="打开方式"
-                  >
-                    <ExternalLink data-icon="inline-start" />
-                    <span>打开方式</span>
-                    <ChevronDown data-icon="inline-end" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-44">
-                  <DropdownMenuLabel>在外部应用中打开</DropdownMenuLabel>
-                  <DropdownMenuGroup>
-                    <DropdownMenuItem onSelect={() => openLocalPath("cursor")}>
-                      <Code2 />Cursor
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onSelect={() => openLocalPath("vscode")}>
-                      <Code2 />VS Code
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onSelect={() => openLocalPath("zed")}>
-                      <Code2 />Zed
-                    </DropdownMenuItem>
-                  </DropdownMenuGroup>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuGroup>
-                    <DropdownMenuItem onSelect={() => openLocalPath("terminal")}>
-                      <SquareTerminal />终端
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onSelect={() => openLocalPath("default")}>
-                      <FolderOpen />{isWindowsDesktop ? "资源管理器" : "Finder"}
-                    </DropdownMenuItem>
-                  </DropdownMenuGroup>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
-            {isDesktop && agent?.tier === "handoff" && (
-              // Who holds the session, in its title row: one pill that takes it over or gives it back.
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="secondary"
-                    size="xs"
-                    className="session-handoff"
-                    disabled={!canInteract || job.busy}
-                    onClick={() =>
-                      void job.run(() =>
-                        session.driver === "remote" ? actions.release(session.id) : actions.takeover(session.id),
-                      )
-                    }
-                  >
-                    {session.driver === "remote" ? "交回电脑" : "接管"}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  当前由{session.driver === "desktop" ? "电脑端" : session.driver === "remote" ? "这里" : "空闲会话"}控制
-                </TooltipContent>
-              </Tooltip>
-            )}
-            {isDesktop ? (
-              <>
-                {/* Once the inspector is open beside the session, its own tab bar shows 变更/终端. */}
-                {(!panel || panel === "commands") && (
-                  <div className="session-quick-tools">
-                    {([
-                      ["changes", "branch", "变更"],
-                      ["terminal", "terminal", `终端 · ${shortcutText(desktopShortcuts.terminal)}`],
-                    ] as const).map(([id, icon, label]) => (
-                      <Tooltip key={id}>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            aria-label={label}
-                            onClick={() => toggleInspector(id)}
-                          >
-                            <Icon name={icon} />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>{label}</TooltipContent>
-                      </Tooltip>
-                    ))}
-                    <span className="session-actions-divider" aria-hidden />
-                  </div>
-                )}
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      aria-label="检查器"
-                      aria-pressed={!!panel && panel !== "commands"}
-                      data-active={(!!panel && panel !== "commands") || undefined}
-                      onClick={() => toggleInspector()}
-                    >
-                      <PanelRight />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    {panel && panel !== "commands" ? "收起检查器" : "检查器"} · {shortcutText(desktopShortcuts.toggleInspector)}
-                  </TooltipContent>
-                </Tooltip>
-              </>
-            ) : (
-              <>
                 <Button
                   variant="ghost"
                   size="sm"
@@ -867,8 +598,6 @@ export function Session({
                   </TooltipTrigger>
                   <TooltipContent>模型与权限</TooltipContent>
                 </Tooltip>
-              </>
-            )}
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
@@ -957,22 +686,6 @@ export function Session({
                 <TooltipContent>更多会话操作</TooltipContent>
               </Tooltip>
               <DropdownMenuContent align="end" className="w-56">
-                {isDesktop && (
-                  <>
-                    <DropdownMenuGroup>
-                      <DropdownMenuItem onSelect={() => void setPanel("settings")}>
-                        <Icon name="settings" />会话设置
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onSelect={() => void setPanel("commands")}>
-                        <Icon name="terminal" />会话命令
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onSelect={() => void setPanel("tasks")}>
-                        <Icon name="server" />后台任务
-                      </DropdownMenuItem>
-                    </DropdownMenuGroup>
-                    <DropdownMenuSeparator />
-                  </>
-                )}
                 <DropdownMenuGroup>
                   {agent?.capabilities.side && (
                     <DropdownMenuItem disabled={!canInteract} onSelect={() => void setPanel("side")}>
@@ -994,12 +707,9 @@ export function Session({
                       <Blocks />应用与连接器
                     </DropdownMenuItem>
                   )}
-                  {/* The desktop's title row already has the terminal, one click away. */}
-                  {!isDesktop && (
-                    <DropdownMenuItem onSelect={() => setTerminals(true)}>
-                      <SquareTerminal />终端
-                    </DropdownMenuItem>
-                  )}
+                  <DropdownMenuItem onSelect={() => setTerminals(true)}>
+                    <SquareTerminal />终端
+                  </DropdownMenuItem>
                 </DropdownMenuGroup>
                 <DropdownMenuSeparator />
                 <DropdownMenuGroup>
@@ -1039,7 +749,7 @@ export function Session({
             </DropdownMenu>
           </div>
         </div>
-        {agent?.tier === "handoff" && !isDesktop && (
+        {agent?.tier === "handoff" && (
           <div className="handoff-bar">
             <span>
               当前由
@@ -1073,9 +783,7 @@ export function Session({
             {showRecovery && (
               <div className="conversation-recovery" role="status" data-offline={!online || undefined}>
                 <span>
-                  {isDesktop
-                    ? online ? "正在同步最新消息" : "连接已断开，历史和草稿已保留"
-                    : online ? "正在同步最新消息，已载入的历史仍可阅读。" : "连接已断开，历史和草稿已保留。"}
+                  {online ? "正在同步最新消息，已载入的历史仍可阅读。" : "连接已断开，历史和草稿已保留。"}
                 </span>
                 <Button variant="link" size="sm" onClick={retrySession}>
                   {online ? "重新加载" : "重新连接"}
@@ -1260,7 +968,7 @@ export function Session({
                 }
               />
             )}
-            {!isDesktop && terminal && !terminals && (
+            {terminal && !terminals && (
               <div className="inline-terminal">
                 <div className="browser-toolbar">
                   <span>终端</span>
@@ -1276,7 +984,7 @@ export function Session({
               </div>
             )}
             <div className="composer-wrap" ref={captureComposerWrap}>
-              <ErrorNotice error={job.error ?? openPathJob.error} />
+              <ErrorNotice error={job.error} />
               <ErrorNotice error={sendJob.error} />
               <ErrorNotice error={attachmentError} />
               {sendJob.busy && (
@@ -1387,9 +1095,7 @@ export function Session({
                 placeholder={
                   !online
                     ? "连接已断开，可以继续编辑草稿…"
-                    : showComposerCaption && isDesktop
-                      ? "正在同步会话，完成后可发送…"
-                      : t("composer.placeholder")
+                    : t("composer.placeholder")
                 }
                 layoutKey={panel}
                 commands={commands}
@@ -1589,8 +1295,7 @@ export function Session({
                   ? "Enter 加入队列，⌘/Ctrl Enter 立即发送"
                   : "Enter 发送，Shift Enter 换行，/ 打开命令"}
               </span>
-              {/* On the desktop the composer floats over the conversation: a line under it would lift it while the session syncs. */}
-              {showComposerCaption && !isDesktop && (
+              {showComposerCaption && (
                 <div className="composer-caption">
                   <span>{online ? "同步完成后可发送" : "连接已断开，草稿已保留"}</span>
                 </div>
@@ -1600,57 +1305,17 @@ export function Session({
   );
   return (
     <SessionReady.Provider value={!!ready}>
-    <TimelineNavigation.Provider value={{ cwd: session.cwd, open: handleFile, openApp: isDesktop ? openAppCall : undefined, findSession }}>
+    <TimelineNavigation.Provider value={{ cwd: session.cwd, open: handleFile, findSession }}>
       <div className="session-page live-session">
-        {!isDesktop && top}
-        <div
-          className={`session-layout ${panel && panel !== "commands" ? "with-panel" : ""}`}
-          style={isDesktop ? ({ "--inspector-width": `${inspectorWidth}px` } as CSSProperties) : undefined}
-        >
-          {isDesktop ? (
-            <div className="session-main">
-              {top}
-              {column}
-            </div>
-          ) : column}
+        {top}
+        <div className={`session-layout ${panel && panel !== "commands" ? "with-panel" : ""}`}>
+          {column}
           {panel && panel !== "commands" && (
             <ConversationPanel
               close={() => setPanel(null)}
-              title={isAppPanel(panel) ? (apps.find((tab) => tab.id === panel)?.title ?? "应用") : panelTitles[panel]}
-              panel={panel}
-              choose={(next) => void (next === "files" ? changeFile() : setPanel(next))}
-              width={inspectorWidth}
-              resize={setInspectorWidth}
-              hasTasks={hasTasks}
-              apps={apps.map((tab) => ({ id: tab.id as AppPanel, title: appTitle(tab) }))}
-              closeApp={closeApp}
-              launcher={hasApps ? (
-                <DropdownMenu onOpenChange={(open) => { if (open && appCatalog.error) appCatalog.reload(); }}>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon" className="inspector-add" aria-label="打开插件" title="打开插件">
-                      <Plus />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="inspector-add-menu">
-                    <DropdownMenuLabel>插件和 MCP</DropdownMenuLabel>
-                    {appCatalog.loading && !appCatalog.value && <DropdownMenuItem disabled>正在读取…</DropdownMenuItem>}
-                    {appCatalog.error && <DropdownMenuItem disabled>{appCatalog.error}</DropdownMenuItem>}
-                    {appCatalog.value && !appCatalog.value.length && <DropdownMenuItem disabled>没有可以在会话中打开的插件</DropdownMenuItem>}
-                    {appCatalog.value?.map((entry) => (
-                      <DropdownMenuItem key={`${entry.server}\n${entry.resourceUri}`} disabled={!canInteract} onSelect={() => launchApp(entry)}>
-                        {entry.title}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              ) : undefined}
+              title={panelTitles[panel]}
             >
               <div className="side-panel-content" data-panel={panel}>
-                {apps.map((tab) => (
-                  <ErrorBoundary key={tab.id} resetKey={`${session.id}:${tab.id}`}>
-                    <McpAppView sessionId={session.id} tab={{ ...tab, title: appTitle(tab) }} hidden={panel !== tab.id} say={sayFromApp} />
-                  </ErrorBoundary>
-                ))}
                 <ErrorBoundary resetKey={`${session.id}:${panel}`}>
                   {panel === "settings" && (
                     <Settings session={session} view={view} />
@@ -1659,7 +1324,6 @@ export function Session({
                     <Changes
                       view={view}
                       session={session}
-                      inspectorWidth={isDesktop ? inspectorWidth : undefined}
                       onCommitted={sessionGit.reload}
                     />
                   )}
@@ -1678,6 +1342,12 @@ export function Session({
                           line={fileLine}
                           path={file}
                           onDirtyChange={onFileDirtyChange}
+                          onRenamed={(nextPath) => setFile(nextPath)}
+                          onDeleted={() => {
+                            fileDirty.current = false;
+                            setFile(undefined);
+                            setFileLine(undefined);
+                          }}
                         />
                       </>
                     ) : (
@@ -1690,14 +1360,11 @@ export function Session({
                     <Tasks
                       session={session}
                       onFile={handleFile}
-                      onTerminal={(id) => {
-                        setTerminal(id);
-                        if (isDesktop) void setPanel("terminal");
-                      }}
+                      onTerminal={(id) => setTerminal(id)}
                     />
                   )}
                   {panel === "goal" && <Goal session={session} view={view} />}
-                  {panel === "side" && <Side session={session} label={agent?.label ?? session.agent} />}
+                  {panel === "side" && <Side session={session} label={agentLabel(session.agent, agent?.label)} />}
                   {panel === "terminal" && (
                     <Terminals
                       cwd={session.cwd}
@@ -1737,7 +1404,7 @@ export function Session({
                   {(panel === "mcp" || panel === "apps") && (
                     <>
                       <p className="muted">
-                        由电脑上的 {session.agent}{" "}
+                        由电脑上的 {agentLabel(session.agent, agent?.label)}{" "}
                         提供。完整结果、授权请求和错误同时显示在会话中。
                       </p>
                       <Button
@@ -1833,40 +1500,18 @@ function ConversationPanel({
   title,
   close,
   children,
-  panel,
-  choose,
-  width,
-  resize,
-  hasTasks,
-  apps = [],
-  closeApp,
-  launcher,
 }: {
   title: string;
   close: () => void;
   children: ReactNode;
-  panel?: Exclude<Panel, null | "commands">;
-  choose?: (panel: Exclude<Panel, null | "commands">) => void;
-  width?: number;
-  resize?: (width: number) => void;
-  /** The session has background tasks or sub-agents: their tab is shown. */
-  hasTasks?: boolean;
-  /** Open MCP Apps: a tab each, after the tools, closed with their ×. */
-  apps?: { id: AppPanel; title: string }[];
-  closeApp?: (id: AppPanel) => void;
-  /** What the tab row's + offers (the new-tab menu). */
-  launcher?: ReactNode;
 }) {
-  // Desktop CSS turns the same inspector into an overlay. Keep its file/editor state mounted
-  // while the window crosses that breakpoint; swapping it for a Sheet discards unsaved work.
-  const compact = useIsMobile(991) && !isDesktop;
+  const compact = useIsMobile(991);
   const panelElement = useRef<HTMLElement>(null);
   useLayoutEffect(() => {
     if (compact) return;
     const element = panelElement.current;
     const previous = document.activeElement;
-    // The desktop inspector takes focus itself; a focus ring on its first tab reads as a selection.
-    (isDesktop ? element : element?.querySelector("button") ?? element)?.focus({
+    (element?.querySelector("button") ?? element)?.focus({
       preventScroll: true,
     });
     return () => {
@@ -1916,67 +1561,10 @@ function ConversationPanel({
         }
       }}
     >
-      {isDesktop && panel && choose ? (
-        <>
-          {resize && width && (
-            <ColumnResizer
-              className="inspector-resizer"
-              label="调整检查器宽度"
-              width={width}
-              clamp={(value) => {
-                const available = panelElement.current?.parentElement?.clientWidth ?? window.innerWidth;
-                const maximum = window.innerWidth <= 1100 ? available - 40 : Math.min(window.innerWidth * 0.62, available - 360);
-                return Math.round(Math.min(Math.max(value, 320), Math.max(320, maximum)));
-              }}
-              side="start"
-              target=".session-layout"
-              column=".live-side-panel"
-              variable="--inspector-width"
-              resize={resize}
-              initial={440}
-            />
-          )}
-          <div className="inspector-tabs" role="tablist" aria-label="检查器">
-            {(() => {
-              const tabs = [...inspectorTabs, ...(hasTasks ? [{ id: "tasks" as const, title: "任务" }] : [])];
-              const open = tabs.some((tab) => tab.id === panel) || apps.some((app) => app.id === panel) ? undefined : { id: panel, title };
-              return [...tabs, ...(open ? [open] : [])].map((tab) => (
-                <button
-                  type="button"
-                  role="tab"
-                  key={tab.id}
-                  aria-selected={tab.id === panel}
-                  data-active={tab.id === panel || undefined}
-                  data-transient={tab === open || undefined}
-                  onClick={() => choose(tab.id)}
-                >
-                  {tab.title}
-                </button>
-              ));
-            })()}
-            {apps.map((app) => (
-              <span className="inspector-app-tab" key={app.id} data-active={app.id === panel || undefined}>
-                <button type="button" role="tab" aria-selected={app.id === panel} title={app.title} onClick={() => choose(app.id)}>
-                  <span>{app.title}</span>
-                </button>
-                {closeApp && (
-                  <button type="button" className="inspector-app-close" aria-label={`关闭 ${app.title}`} title={`关闭 ${app.title}`} onClick={() => closeApp(app.id)}>
-                    <X />
-                  </button>
-                )}
-              </span>
-            ))}
-            {launcher}
-            <span className="inspector-tabs-spacer" />
-            {closeButton}
-          </div>
-        </>
-      ) : (
-        <div className="browser-toolbar">
-          <strong>{title}</strong>
-          {closeButton}
-        </div>
-      )}
+      <div className="browser-toolbar">
+        <strong>{title}</strong>
+        {closeButton}
+      </div>
       {children}
     </aside>
   );

@@ -166,6 +166,38 @@ hostCmd
     process.stderr.write(await daemon.stopDaemonAndWait("host") ? "  LinkShell host stopped\n" : "  LinkShell host is not running\n");
   });
 
+hostCmd
+  .command("install-service")
+  .description("Install LinkShell host as an OS user service (auto-start on login)")
+  .option("--dry-run", "Print the generated service config and commands without applying them")
+  .option("--gateway <url>", "Set LINKSHELL_GATEWAY for the service ('off' to disable, 'default' to clear)")
+  .action(async (options: { dryRun?: boolean; gateway?: string }, command: Command) => {
+    const { runInstallService } = await import("./commands/service.js");
+    const merged = command.optsWithGlobals<{ gateway?: string }>();
+    await runInstallService({
+      dryRun: options.dryRun === true,
+      gateway: options.gateway ?? merged.gateway,
+    });
+  });
+
+hostCmd
+  .command("uninstall-service")
+  .description("Uninstall the LinkShell host OS user service")
+  .option("--dry-run", "Print the file removal and commands without applying them")
+  .action(async (options: { dryRun?: boolean }) => {
+    const { runUninstallService } = await import("./commands/service.js");
+    await runUninstallService({ dryRun: options.dryRun === true });
+  });
+
+hostCmd
+  .command("service-status")
+  .description("Show the LinkShell host OS user service status")
+  .option("--json", "Output service status as JSON")
+  .action(async (options: { json?: boolean }) => {
+    const { runServiceStatus } = await import("./commands/service.js");
+    await runServiceStatus({ json: options.json === true });
+  });
+
 program
   .command("pair")
   .description("Pair a phone with this computer through the gateway (shows a QR code)")

@@ -149,3 +149,17 @@ export function saveScreenShortcuts(shortcuts: ScreenShortcut[]): void {
     // As above: the viewer then has only the shortcuts it comes with.
   }
 }
+
+const SCREEN_AUDIO_KEY = "screen.audio";
+
+export function loadScreenAudio(): boolean {
+  return read(SCREEN_AUDIO_KEY) === "1";
+}
+
+export function saveScreenAudio(enabled: boolean): void {
+  try {
+    Storage.setItemSync(SCREEN_AUDIO_KEY, enabled ? "1" : "0");
+  } catch {
+    // Default back to muted if storage write fails.
+  }
+}

@@ -1,10 +1,12 @@
 import { LegendList } from "@legendapp/list/react-native";
 import type { DirectoryEntry } from "@linkshell/wire";
 import { router, Stack, useLocalSearchParams } from "expo-router";
-import { memo, useEffect, useState } from "react";
-import { Platform, StyleSheet, View } from "react-native";
+import { useIsFocused } from "expo-router/react-navigation";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { Alert, Platform, StyleSheet, View } from "react-native";
 import { Text } from "@/components/fixed-text";
 import { useAppWindowDimensions as useWindowDimensions } from "@/lib/window-dimensions";
+import { OwnedFloatingMenu, type FloatingMenuHandle } from "@/components/app-menu";
 import { ScrollableState } from "@/components/scrollable-state";
 import { BranchTag } from "@/components/branch-tag";
 import { HeaderActions, useHeaderTitleWidth } from "@/components/header-actions";
@@ -12,6 +14,8 @@ import { Icon, type IconProps } from "@/components/icon";
 import { PressableFeedback } from "@/components/pressable-feedback";
 import { positionOf, type RowPosition } from "@/components/session-row";
 import { EmptyState, LoadingState, LockedComputer, unreachable, WaitingForComputer } from "@/components/state-views";
+import { TextPromptModal } from "@/components/text-prompt-modal";
+import { deleteConfirmCopy, isSameOrChildPath, renameTargetPath, rewritePathPrefix } from "@/lib/file-actions";
 import { describeActionError } from "@/lib/locale";
 import { useClient, useConnection } from "@/lib/client";
 import { baseName, fileSize, shortPath } from "@/lib/format";
@@ -50,29 +54,68 @@ function fileGlyph(name: string): Glyph {
   return { sf: "doc", md: "draft" };
 }
 
-const Row = memo(function Row({ entry, position, onPress, selected }: { entry: DirectoryEntry; position: RowPosition; selected?: boolean; onPress: (entry: DirectoryEntry) => void }) {
+const Row = memo(function Row({
+  entry,
+  position,
+  onPress,
+  onRename,
+  onDelete,
+  selected,
+}: {
+  entry: DirectoryEntry;
+  position: RowPosition;
+  selected?: boolean;
+  onPress: (entry: DirectoryEntry) => void;
+  onRename: (entry: DirectoryEntry) => void;
+  onDelete: (entry: DirectoryEntry) => void;
+}) {
+  const menu = useRef<FloatingMenuHandle>(null);
   const top = position === "first" || position === "only";
   const bottom = position === "last" || position === "only";
   const glyph: Glyph = entry.file ? fileGlyph(entry.name) : { sf: "folder.fill", md: "folder" };
   return (
-    <PressableFeedback
-      onPress={() => onPress(entry)}
-      accessibilityRole="button"
-      accessibilityState={{ selected }}
-      accessibilityLabel={entry.file ? `文件 ${entry.name}` : `文件夹 ${entry.name}`}
-      style={{
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 12,
-        paddingLeft: 14,
-        backgroundColor: selected ? colors.accentSoft : colors.card,
-        borderTopLeftRadius: top ? radius.card : 0,
-        borderTopRightRadius: top ? radius.card : 0,
-        borderBottomLeftRadius: bottom ? radius.card : 0,
-        borderBottomRightRadius: bottom ? radius.card : 0,
-        borderCurve: "continuous",
+    <OwnedFloatingMenu
+      handle={menu}
+      title={entry.name}
+      actions={[
+        { id: "rename", title: "重命名", image: "square.and.pencil" },
+        { id: "delete", title: "删除", image: "trash", attributes: { destructive: true } },
+      ]}
+      onPressAction={({ nativeEvent }) => {
+        if (nativeEvent.event === "rename") onRename(entry);
+        else if (nativeEvent.event === "delete") onDelete(entry);
       }}
     >
+      <PressableFeedback
+        onPress={() => onPress(entry)}
+        onLongPress={() => {
+          haptics.selection();
+          menu.current?.open();
+        }}
+        accessibilityRole="button"
+        accessibilityState={{ selected }}
+        accessibilityLabel={entry.file ? `文件 ${entry.name}` : `文件夹 ${entry.name}`}
+        accessibilityActions={[
+          { name: "rename", label: "重命名" },
+          { name: "delete", label: "删除" },
+        ]}
+        onAccessibilityAction={(event) => {
+          if (event.nativeEvent.actionName === "rename") onRename(entry);
+          else if (event.nativeEvent.actionName === "delete") onDelete(entry);
+        }}
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 12,
+          paddingLeft: 14,
+          backgroundColor: selected ? colors.accentSoft : colors.card,
+          borderTopLeftRadius: top ? radius.card : 0,
+          borderTopRightRadius: top ? radius.card : 0,
+          borderBottomLeftRadius: bottom ? radius.card : 0,
+          borderBottomRightRadius: bottom ? radius.card : 0,
+          borderCurve: "continuous",
+        }}
+      >
         <View style={{ width: 24, alignItems: "center" }}>
           <Icon {...glyph} size={entry.file ? 18 : 20} color={entry.file ? colors.secondaryLabel : colors.accent} />
         </View>
@@ -100,7 +143,8 @@ const Row = memo(function Row({ entry, position, onPress, selected }: { entry: D
             <Icon sf="chevron.right" md="chevron_right" size={11} color={colors.tertiaryLabel} weight="semibold" />
           )}
         </View>
-    </PressableFeedback>
+      </PressableFeedback>
+    </OwnedFloatingMenu>
   );
 });
 
@@ -146,6 +190,22 @@ export function FilesScreen() {
   const [listing, setListing] = useState<Listing | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [round, setRound] = useState(0);
+  const [renameTarget, setRenameTarget] = useState<DirectoryEntry | null>(null);
+  const [mutating, setMutating] = useState(false);
+  const focused = useIsFocused();
+  const leftFocusRef = useRef(false);
+
+  // Refresh cleanly when navigating back from a child file screen (e.g. after rename/delete).
+  useEffect(() => {
+    if (!focused) {
+      leftFocusRef.current = true;
+      return;
+    }
+    if (leftFocusRef.current) {
+      leftFocusRef.current = false;
+      setRound((value) => value + 1);
+    }
+  }, [focused]);
 
   // (Again) whenever the computer comes back, and on "刷新".
   useEffect(() => {
@@ -173,6 +233,62 @@ export function FilesScreen() {
     }
     else router.push({ pathname: "/files", params: { path: entry.path } });
   };
+
+  const handleRenameSubmit = useCallback(
+    async (nextName: string) => {
+      if (!renameTarget) return;
+      const targetResult = renameTargetPath(renameTarget.path, nextName);
+      if (!targetResult.ok) {
+        Alert.alert("重命名失败", targetResult.error);
+        return;
+      }
+      setMutating(true);
+      try {
+        const result = await link.call("fs.rename", { from: renameTarget.path, to: targetResult.path }, 20_000);
+        haptics.success();
+        const oldPath = renameTarget.path;
+        setRenameTarget(null);
+        setSelected((current) => (current ? rewritePathPrefix(current, oldPath, result.path) : current));
+        setRound((value) => value + 1);
+      } catch (reason: unknown) {
+        haptics.error();
+        Alert.alert("重命名失败", describeActionError(reason));
+      } finally {
+        setMutating(false);
+      }
+    },
+    [link, renameTarget],
+  );
+
+  const handleDeleteEntry = useCallback(
+    (entry: DirectoryEntry) => {
+      const copy = deleteConfirmCopy({ name: entry.name, isFile: Boolean(entry.file) });
+      Alert.alert(copy.title, copy.message, [
+        { text: "取消", style: "cancel" },
+        {
+          text: "删除",
+          style: "destructive",
+          onPress: () => {
+            void (async () => {
+              setMutating(true);
+              try {
+                await link.call("fs.delete", { path: entry.path, recursive: !entry.file }, 20_000);
+                haptics.success();
+                setSelected((current) => (isSameOrChildPath(current, entry.path) ? null : current));
+                setRound((value) => value + 1);
+              } catch (reason: unknown) {
+                haptics.error();
+                Alert.alert("删除失败", describeActionError(reason));
+              } finally {
+                setMutating(false);
+              }
+            })();
+          },
+        },
+      ]);
+    },
+    [link],
+  );
 
   return (
     <>
@@ -206,7 +322,19 @@ export function FilesScreen() {
       <LegendList<DirectoryEntry>
         data={error ? [] : entries}
         keyExtractor={(entry) => entry.path}
-        renderItem={({ item, index }) => <Row entry={item} position={positionOf(index, entries.length)} onPress={open} selected={selected === item.path} />}
+        renderItem={({ item, index }) => (
+          <Row
+            entry={item}
+            position={positionOf(index, entries.length)}
+            onPress={open}
+            onRename={(entry) => {
+              haptics.selection();
+              setRenameTarget(entry);
+            }}
+            onDelete={handleDeleteEntry}
+            selected={selected === item.path}
+          />
+        )}
         estimatedItemSize={46}
         ListHeaderComponent={branch ? (
           // A tag like the terminal's directory: the folder's branch, said once above its files.
@@ -243,11 +371,44 @@ export function FilesScreen() {
       />
       </ContentPane>
       <View style={{ flex: 1, minWidth: 0, display: wide || selected ? "flex" : "none", backgroundColor: colors.plain }}>
-        {selected ? <FileContent key={selected} path={selected} embedded backLabel={wide && showList ? "收起文件列表" : "显示文件列表"} onBack={() => wide ? setCollapsed((value) => !value) : setSelected(null)} /> : (
+        {selected ? (
+          <FileContent
+            key={selected}
+            path={selected}
+            embedded
+            backLabel={wide && showList ? "收起文件列表" : "显示文件列表"}
+            onBack={() => (wide ? setCollapsed((value) => !value) : setSelected(null))}
+            onRenamed={(fromPath, toPath) => {
+              setSelected((current) => (current ? rewritePathPrefix(current, fromPath, toPath) : current));
+              setRound((value) => value + 1);
+            }}
+            onDeleted={(deletedPath) => {
+              setSelected((current) => (isSameOrChildPath(current, deletedPath) ? null : current));
+              setRound((value) => value + 1);
+            }}
+          />
+        ) : (
           <ScrollableState><EmptyState icon={{ sf: "doc.text.magnifyingglass", md: "find_in_page" }} title="选择文件以预览" message="在左侧浏览目录，在这里查看代码、文档和图片。" /></ScrollableState>
         )}
       </View>
       </View>
+      <TextPromptModal
+        visible={renameTarget !== null}
+        title={renameTarget?.file ? "重命名文件" : "重命名文件夹"}
+        initialValue={renameTarget?.name ?? ""}
+        placeholder={renameTarget?.file ? "输入新文件名" : "输入新文件夹名"}
+        confirmLabel="重命名"
+        busy={mutating}
+        validate={(value) => {
+          if (!renameTarget) return null;
+          const check = renameTargetPath(renameTarget.path, value);
+          return check.ok ? null : check.error;
+        }}
+        onCancel={() => {
+          if (!mutating) setRenameTarget(null);
+        }}
+        onConfirm={handleRenameSubmit}
+      />
     </>
   );
 }

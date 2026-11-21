@@ -52,7 +52,6 @@ import { optionDescription, sessionConfigLabel, valueDescription, valueName } fr
 import { useLocale, useT } from "./i18n";
 
 const KNOWN_CATEGORIES = new Set(["mode", "model", "effort"]);
-import { isDesktop } from "./desktop";
 import {
   ChevronRight,
   Columns2,
@@ -1039,8 +1038,7 @@ export function Tasks({
   }>();
   return (
     <section className="tasks-panel">
-      {/* The desktop's inspector tab already names it. */}
-      {!isDesktop && <h3>后台任务、子 Agent 与工作流</h3>}
+      <h3>后台任务、子 Agent 与工作流</h3>
       <LoadState {...loaded} />
       {loaded.error && (
         <Button
@@ -1085,8 +1083,8 @@ export function Tasks({
             </Button>
             {task.state === "running" && (
               <Button
-                variant={isDesktop ? "secondary" : "link"}
-                size={isDesktop ? "xs" : "sm"}
+                variant="link"
+                size="sm"
                 className="task-stop"
                 aria-label="停止任务"
                 disabled={!online || job.busy}
@@ -1097,7 +1095,7 @@ export function Tasks({
                   })
                 }
               >
-                {isDesktop ? "停止" : "停止任务"}
+                停止任务
               </Button>
             )}
             {selected?.kind === "task" && selected.id === task.id && (
@@ -1223,10 +1221,10 @@ function TaskOutput({
   return (
     <div className="task-output">
       <div className="browser-toolbar">
-        <strong>{isDesktop ? "输出" : "任务输出"}</strong>
+        <strong>任务输出</strong>
         <Button
-          variant={isDesktop ? "ghost" : "link"}
-          size={isDesktop ? "icon-sm" : "sm"}
+          variant="link"
+          size="sm"
           title="刷新输出"
           aria-label="刷新输出"
           disabled={!online || output.loading}
@@ -1235,7 +1233,7 @@ function TaskOutput({
             output.reload();
           }}
         >
-          {isDesktop ? <RefreshCw className={output.loading ? "animate-spin" : undefined} /> : "刷新"}
+          刷新
         </Button>
       </div>
       <LoadState
@@ -1244,8 +1242,8 @@ function TaskOutput({
       />
       {!!current?.start && (
         <Button
-          variant={isDesktop ? "ghost" : "link"}
-          size={isDesktop ? "xs" : "sm"}
+          variant="link"
+          size="sm"
           className="task-output-earlier"
           disabled={!online || job.busy}
           onClick={() => {

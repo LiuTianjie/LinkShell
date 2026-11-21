@@ -304,6 +304,12 @@ public func linkshellNativeInit(_ env: napi_env?, _ exports: napi_value?) -> nap
     else { return throwError(env, "screenStart: invalid arguments") }
     NativeScreen.current?.stop(); NativeScreen.current = nil
     let host = Unmanaged<NSView>.fromOpaque(pointer).takeUnretainedValue()
+    let audioMuted = (DesktopScreenBridge.boolean(message["audioMuted"]))
+      ?? (DesktopScreenBridge.boolean(message["audio"]).map { !$0 })
+      ?? false
+    if let capture = DesktopScreenBridge.boolean(message["systemShortcutCapture"]) {
+      NativeScreen.desiredSystemShortcutCapture = capture
+    }
     do {
       NativeScreen.current = try NativeScreen(
         host: host,
@@ -314,6 +320,8 @@ public func linkshellNativeInit(_ env: napi_env?, _ exports: napi_value?) -> nap
         overlayOpen: DesktopScreenBridge.boolean(message["overlayOpen"]) == true,
         smooth: DesktopScreenBridge.boolean(message["smooth"]) == true,
         fullScreen: DesktopScreenBridge.boolean(message["fullscreen"]) == true,
+        audioMuted: audioMuted,
+        systemShortcutCapture: NativeScreen.desiredSystemShortcutCapture,
         callback: callback
       )
     }
@@ -342,6 +350,15 @@ public func linkshellNativeInit(_ env: napi_env?, _ exports: napi_value?) -> nap
     let enabled = bool(env, argv[0]) ?? false
     MainActor.assumeIsolated { ImmersivePresentation.shared.set(enabled) }
     return undefined(env)
+  }
+  define(env, exports, "setSystemShortcutCapture") { env, info in
+    let argv = arguments(env, info, 1)
+    let enabled = bool(env, argv[0]) ?? false
+    NativeScreen.desiredSystemShortcutCapture = enabled
+    let active = NativeScreen.current?.setSystemShortcutCapture(enabled) ?? false
+    var result: napi_value?
+    _ = napi_get_boolean(env, active, &result)
+    return result
   }
   return exports
 }

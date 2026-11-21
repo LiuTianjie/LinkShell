@@ -9,6 +9,12 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
   var onMessage: (([String: Any]) -> Void)?
   var onFailure: ((String) -> Void)?
   var onStats: (([String: Any]) -> Void)?
+  var onAudioAvailable: ((Bool) -> Void)?
+
+  private let audioPlayer: ScreenAudioPlayer
+  private var audioEnabled: Bool
+  private var audioAvailable = false
+  private var audioSyncPending = false
   private let queue = DispatchQueue(label: "linkshell.screen.connection", qos: .userInteractive)
   private let renderer: ScreenMetalView
   private let metrics: ScreenMetrics
@@ -45,13 +51,14 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
   private static let playoutDelayURI = "http://www.webrtc.org/experiments/rtp-hdrext/playout-delay"
   private static let initialize: Void = { RTCInitializeSSL() }()
 
-  init?(url: String, maxFps: Int, renderer: ScreenMetalView, metrics: ScreenMetrics) {
+  init?(url: String, maxFps: Int, renderer: ScreenMetalView, metrics: ScreenMetrics, audio: Bool = false) {
     guard var target = URLComponents(string: url), target.scheme == "http", target.host == "127.0.0.1", target.port != nil else { return nil }
     target.scheme = "ws"
     target.path = "/stream"
     target.fragment = nil
-    target.queryItems = (target.queryItems ?? []).filter { !["video", "maxFps", "diagnostics", "codec", "turn"].contains($0.name) }
+    target.queryItems = (target.queryItems ?? []).filter { !["video", "maxFps", "diagnostics", "codec", "turn", "audio"].contains($0.name) }
       + [URLQueryItem(name: "video", value: "1"), URLQueryItem(name: "maxFps", value: String(maxFps)), URLQueryItem(name: "diagnostics", value: metrics.enabled ? "1" : "0"),
+         URLQueryItem(name: "audio", value: audio ? "1" : "0"),
          // This receiver passes a TURN server's login on to WebRTC: the host may give it one.
          URLQueryItem(name: "turn", value: "1")]
       // The same picture in fewer bits; a host or Mac app that doesn't know it sends H.264.
@@ -60,6 +67,8 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
     // The viewer's choice (`pacing=smooth` in the page's address): even pacing over the lowest latency.
     smooth = target.queryItems?.contains { $0.name == "pacing" && $0.value == "smooth" } == true
     self.url = address; self.maxFps = maxFps; self.renderer = renderer; self.metrics = metrics
+    self.audioEnabled = audio
+    self.audioPlayer = ScreenAudioPlayer(muted: !audio)
     super.init()
   }
 
@@ -81,6 +90,10 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
         case .ready:
           self.ready = true
           if self.controlRequested { self.signal(self.controlMessage) }
+          if self.audioSyncPending {
+            self.audioSyncPending = false
+            self.signal(["t": "audio", "enabled": self.audioEnabled])
+          }
           self.flushConfiguration()
           self.receive()
         case .failed: self.fail("屏幕连接失败")
@@ -102,10 +115,28 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
   func pictureArrived() { queue.async { self.receivedPicture = true } }
   func requestStats() { queue.async { self.report(requested: true) } }
 
+  func setAudio(_ enabled: Bool) {
+    queue.async {
+      guard !self.closed else { return }
+      let changed = self.audioEnabled != enabled
+      self.audioEnabled = enabled
+      self.audioPlayer.setMuted(!(enabled && self.session.active))
+      if self.ready {
+        if changed || self.audioSyncPending {
+          self.audioSyncPending = false
+          self.signal(["t": "audio", "enabled": enabled])
+        }
+      } else if changed {
+        self.audioSyncPending = true
+      }
+    }
+  }
+
   func setActive(_ active: Bool) {
     queue.async {
       guard !self.closed, self.session.active != active else { return }
       self.session.setActive(active)
+      self.audioPlayer.setMuted(!(active && self.audioEnabled))
       if !active {
         self.trusted = false
         self.controlRequested = false
@@ -178,6 +209,8 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
   private func close() {
     guard !closed else { return }
     closed = true
+    audioAvailable = false
+    audioPlayer.stop()
     timer?.cancel(); timer = nil
     track?.remove(renderer); track = nil
     for channel in channels.values { channel.delegate = nil }
@@ -408,11 +441,21 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
       }
     }
   }
+  private func updateAudioAvailabilityIfNeeded() {
+    let available = channels["audio"]?.readyState == .open
+    guard available != audioAvailable else { return }
+    audioAvailable = available
+    onAudioAvailable?(available)
+  }
+
   func peerConnection(_ peerConnection: RTCPeerConnection, didOpen dataChannel: RTCDataChannel) {
     queue.async {
       guard !self.closed, self.peer === peerConnection else { return }
       self.channels[dataChannel.label] = dataChannel
       dataChannel.delegate = self
+      if dataChannel.label == "audio" {
+        self.updateAudioAvailabilityIfNeeded()
+      }
     }
   }
   func peerConnection(_ peerConnection: RTCPeerConnection, didChange stateChanged: RTCSignalingState) {}
@@ -421,8 +464,28 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
   func peerConnectionShouldNegotiate(_ peerConnection: RTCPeerConnection) {}
   func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCIceGatheringState) {}
   func peerConnection(_ peerConnection: RTCPeerConnection, didRemove candidates: [RTCIceCandidate]) {}
-  func dataChannelDidChangeState(_ dataChannel: RTCDataChannel) {}
+  func dataChannelDidChangeState(_ dataChannel: RTCDataChannel) {
+    guard dataChannel.label == "audio" else { return }
+    queue.async {
+      guard !self.closed, self.channels[dataChannel.label] === dataChannel else { return }
+      self.updateAudioAvailabilityIfNeeded()
+    }
+  }
   func dataChannel(_ dataChannel: RTCDataChannel, didReceiveMessageWith buffer: RTCDataBuffer) {
+    if dataChannel.label == "audio" {
+      guard buffer.isBinary,
+            buffer.data.count >= ScreenAudioConstants.headerBytes,
+            buffer.data.count <= ScreenAudioConstants.maxPacketBytes else { return }
+      let data = buffer.data
+      queue.async {
+        guard !self.closed,
+              self.session.active,
+              self.audioEnabled,
+              self.channels["audio"] === dataChannel else { return }
+        self.audioPlayer.enqueue(data)
+      }
+      return
+    }
     guard !buffer.isBinary, buffer.data.count <= 256_000 else { return }
     let data = buffer.data
     queue.async {

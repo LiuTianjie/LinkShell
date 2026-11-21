@@ -155,10 +155,28 @@ namespace LinkShell.Windows {
         /// <summary>A fused app's window is the foreground window: what is copied now is copied in it.</summary>
         static volatile bool FusedInFront;
         const int MaxClipboardBytes = 8 << 20;
+        const long MaxFileClipboardBytes = 50L << 20;
+
+        static List<string> FilterClipboardFiles(System.Collections.IEnumerable rawPaths) {
+            var files = new List<string>();
+            long totalBytes = 0;
+            foreach (object item in rawPaths) {
+                string path = Convert.ToString(item);
+                if (String.IsNullOrEmpty(path)) continue;
+                try {
+                    if (!File.Exists(path)) continue;
+                    long len = new FileInfo(path).Length;
+                    if (len < 0 || totalBytes + len > MaxFileClipboardBytes || files.Count >= 256) return new List<string>();
+                    totalBytes += len;
+                    files.Add(path);
+                } catch { }
+            }
+            return files;
+        }
 
         /// <summary>
-        /// What a fused app copied, to the host: text and a picture (as PNG). Each change once, and
-        /// only one made while a fused window is in front; a change made elsewhere waits until one is.
+        /// What a fused app copied, to the host: file paths, text, or a picture (as PNG). Each change
+        /// once, and only one made while a fused window is in front; a change made elsewhere waits until one is.
         /// </summary>
         static void ClipboardTick() {
             uint now = GetClipboardSequenceNumber();
@@ -167,6 +185,16 @@ namespace LinkShell.Windows {
             try {
                 // Password managers mark what must not be read by clipboard watchers.
                 if (System.Windows.Forms.Clipboard.ContainsData("ExcludeClipboardContentFromMonitorProcessing")) return;
+                if (System.Windows.Forms.Clipboard.ContainsFileDropList()) {
+                    var dropList = System.Windows.Forms.Clipboard.GetFileDropList();
+                    if (dropList != null && dropList.Count > 0) {
+                        var files = FilterClipboardFiles(dropList);
+                        if (files.Count > 0) {
+                            Write(new { t = "clip", files = files.ToArray() });
+                            return;
+                        }
+                    }
+                }
                 string text = System.Windows.Forms.Clipboard.ContainsText() ? System.Windows.Forms.Clipboard.GetText() : "";
                 int size = Encoding.UTF8.GetByteCount(text);
                 if (size > MaxClipboardBytes) return;
@@ -191,6 +219,20 @@ namespace LinkShell.Windows {
         }
 
         static void SetClipboard(Dictionary<string, object> c) {
+            object rawFiles;
+            if (c.TryGetValue("files", out rawFiles) && rawFiles != null) {
+                var files = FilterClipboardFiles((System.Collections.IEnumerable)rawFiles);
+                if (files.Count > 0) {
+                    var list = new System.Collections.Specialized.StringCollection();
+                    foreach (string path in files) list.Add(path);
+                    for (int attempt = 0; attempt < 5; attempt++) {
+                        try { System.Windows.Forms.Clipboard.SetFileDropList(list); break; }
+                        catch (ExternalException) { if (attempt == 4) throw; Thread.Sleep(100); }
+                    }
+                    ClipSeen = GetClipboardSequenceNumber();
+                }
+                return;
+            }
             string text = Str(c, "text"), png = Str(c, "png");
             var data = new System.Windows.Forms.DataObject();
             MemoryStream stream = null, copy = null;
@@ -239,8 +281,11 @@ namespace LinkShell.Windows {
             reader.Start();
             WriteMonitors();
             string last = null;
+            string lastShapeId = null;
+            var sentShapes = new HashSet<string>();
             var monitorsAt = Stopwatch.StartNew();
             var scannedAt = Stopwatch.StartNew();
+            var shapeAt = Stopwatch.StartNew();
             bool scanned = false;
             while (!ended) {
                 Dictionary<string, object> command;
@@ -260,8 +305,24 @@ namespace LinkShell.Windows {
                     EnsureDesktop();
                     var list = Json.Serialize(FusionWindowsJson());
                     if (list != last) { lock (OutputLock) { Console.Out.WriteLine("{\"t\":\"windows\",\"windows\":" + list + "}"); Console.Out.Flush(); } last = list; }
+                    if (idle || !FusedInFront) {
+                        lastShapeId = null;
+                    } else if (shapeAt.ElapsedMilliseconds >= 200) {
+                        shapeAt.Restart();
+                        POINT cursorPt;
+                        var screenBounds = GetCursorPos(out cursorPt)
+                            ? System.Windows.Forms.Screen.FromPoint(new Point(cursorPt.X, cursorPt.Y)).Bounds
+                            : System.Windows.Forms.Screen.PrimaryScreen.Bounds;
+                        double scale = Math.Max(1.0, Math.Min(4.0, MonitorScale(new Point(screenBounds.Left + screenBounds.Width / 2, screenBounds.Top + screenBounds.Height / 2))));
+                        var shape = CaptureCursorShape(scale);
+                        if (shape != null && shape.Id != lastShapeId) {
+                            lastShapeId = shape.Id;
+                            Write(ShapeMessage(shape, screenBounds, scale, sentShapes.Add(shape.Id)));
+                        }
+                    }
                 } catch (InvalidOperationException) {
                     // Locked or on the secure desktop: nothing can be captured or typed until it is back.
+                    lastShapeId = null;
                     if (last != "[]") { Write(new { t = "windows", windows = new object[0] }); last = "[]"; }
                 } catch (Exception error) {
                     // One window that can't be read must not end the helper and every session's windows with it.

@@ -12,7 +12,6 @@ import {
   answeredMap,
   timelineItemSearchText,
 } from "./Timeline";
-import { isDesktop } from "./desktop";
 
 /** A folded-steps row with a stable toggle, so it is memoizable like the message entries. */
 const StepsRow = memo(function StepsRow({
@@ -421,14 +420,14 @@ export function Conversation({
       <div className="conversation-jump" data-hidden={isAtBottom || undefined} aria-hidden={isAtBottom || undefined}>
         <Button
           variant="outline"
-          size={isDesktop ? "icon" : "sm"}
+          size="sm"
           tabIndex={isAtBottom ? -1 : undefined}
           aria-label="回到最新消息"
           title="回到最新消息"
           onClick={() => void scrollToBottom("smooth")}
         >
           <ArrowDown data-icon="inline-start" />
-          {!isDesktop && "回到最新消息"}
+          回到最新消息
         </Button>
       </div>
     </div>

@@ -33,6 +33,8 @@ export interface RemoteStageStatus {
   controlling: boolean;
   controlRequested: boolean;
   canControl: boolean;
+  audioAvailable?: boolean;
+  audioMuted?: boolean;
   taken?: boolean;
   idle?: boolean;
   error?: string;
@@ -54,10 +56,12 @@ export interface SharedStageProps {
   pacingChoice: ScreenPacingChoice;
   transportMode: ScreenTransportMode;
   controlWanted: boolean;
+  audioEnabled?: boolean;
   remotePlatform?: string;
   revision: number;
   onDisplayChange: (display: number) => void;
   onExitFullScreen: () => void;
   onStatusChange: (status: RemoteStageStatus) => void;
   onFallback?: (reason: string) => void;
+  onRegisterAudioUnlock?: (unlock: (() => void) | undefined) => void;
 }

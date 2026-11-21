@@ -5,7 +5,6 @@ import { useShallow } from "zustand/react/shallow";
 import { createStore } from "zustand/vanilla";
 import { Choice } from "@/components/Choice";
 import { engine, type Computer, type Connection } from "./engine";
-import { useDesktopVisibility } from "./desktop-visibility";
 import { readLocal, saveLocal } from "./storage";
 import { crossComputerProjects, type CrossComputerProject } from "./cross-computer-projects";
 
@@ -90,7 +89,6 @@ export function useProjectConnection(computer: Computer) {
   const online = computer.machine.online;
   const ready = useStore(engine.state, (state) => state.ready && !state.locked);
   const account = useStore(engine.state, (state) => state.accountUserId);
-  const shellVisible = useDesktopVisibility();
   const [pageVisible, setPageVisible] = useState(() => !document.hidden);
   const [retained, setRetained] = useState<{ key: string; account?: string; connection?: Connection; error?: string }>();
   useEffect(() => {
@@ -99,7 +97,7 @@ export function useProjectConnection(computer: Computer) {
     return () => document.removeEventListener("visibilitychange", changed);
   }, []);
   useEffect(() => {
-    if (!ready || !online || !shellVisible || !pageVisible) return;
+    if (!ready || !online || !pageVisible) return;
     const current = engine.state.getState().computers.find((entry) => entry.key === key);
     if (!current) return;
     try {
@@ -109,6 +107,6 @@ export function useProjectConnection(computer: Computer) {
     } catch (error) {
       setRetained({ key, account, error: error instanceof Error ? error.message : String(error) });
     }
-  }, [key, account, online, ready, shellVisible, pageVisible]);
+  }, [key, account, online, ready, pageVisible]);
   return retained?.key === key && retained.account === account && ready ? retained : undefined;
 }

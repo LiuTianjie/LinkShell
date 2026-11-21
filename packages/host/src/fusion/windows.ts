@@ -1,8 +1,44 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { statSync } from "node:fs";
 import { createInterface } from "node:readline";
+import { FUSION_MAX_FILE_CLIPBOARD, type FusionFeature } from "@linkshell/wire";
 import { noteWindowsVideo, windowsHelper, windowsVideoEnv } from "../windows-screen.js";
 import { windowsMedia } from "../windows-video.js";
 import { processSource, type FusionAppInfo, type FusionClip, type FusionMonitor, type FusionPlatform, type FusionVideoSource, type FusionWindowInfo, type InputTarget } from "./platform.js";
+
+export interface FusionCursorShape {
+  id: string;
+  png?: string;
+  w?: number;
+  h?: number;
+  hotX?: number;
+  hotY?: number;
+  scale?: number;
+  displayW?: number;
+  displayH?: number;
+}
+
+const MAX_CLIPBOARD_FILES = 256;
+
+export function normalizeClipFiles(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  const files: string[] = [];
+  let totalBytes = 0;
+  for (const item of raw) {
+    if (typeof item !== "string" || !item) continue;
+    try {
+      const stat = statSync(item);
+      if (!stat.isFile()) continue;
+      totalBytes += stat.size;
+      if (totalBytes > FUSION_MAX_FILE_CLIPBOARD) return undefined;
+    } catch {
+      // Allow symbolic paths when files live on another machine or in mocked tests; Windows C# validates File.Exists.
+    }
+    files.push(item);
+    if (files.length > MAX_CLIPBOARD_FILES) return undefined;
+  }
+  return files.length > 0 ? files : undefined;
+}
 
 /**
  * Windows' half of a Fusion remote (docs/v2/fusion.md §8.2): `LinkShell.Screen.exe --fusion`
@@ -12,11 +48,15 @@ import { processSource, type FusionAppInfo, type FusionClip, type FusionMonitor,
  */
 export class WindowsFusionPlatform implements FusionPlatform {
   readonly platform = "windows" as const;
+  readonly features: readonly FusionFeature[] = ["clipboard", "file-clipboard"];
   private child?: ChildProcess;
   private monitorList: FusionMonitor[] = [{ index: 0, rect: { x: 0, y: 0, w: 1920, h: 1080 }, scale: 1 }];
   private listener?: (windows: FusionWindowInfo[]) => void;
   private latest: FusionWindowInfo[] = [];
   private clipListener?: (clip: FusionClip) => void;
+  private shapeListener?: (shape: FusionCursorShape) => void;
+  private readonly shapes = new Map<string, FusionCursorShape>();
+  private latestShape?: FusionCursorShape;
   private respawns = 0;
   private readonly fused = new Set<string>();
   private readonly replies = new Map<number, (message: Record<string, unknown>) => void>();
@@ -77,7 +117,33 @@ export class WindowsFusionPlatform implements FusionPlatform {
     if (message.t === "clip") {
       const text = typeof message.text === "string" && message.text ? message.text : undefined;
       const png = typeof message.png === "string" && message.png ? Buffer.from(message.png, "base64") : undefined;
-      if (text || png) this.clipListener?.({ ...(text ? { text } : {}), ...(png ? { png } : {}) });
+      const files = normalizeClipFiles(message.files);
+      if (text || png || files?.length) {
+        this.clipListener?.({ ...(text ? { text } : {}), ...(png ? { png } : {}), ...(files?.length ? { files } : {}) });
+      }
+    }
+    if (message.t === "shape" && typeof message.id === "string" && message.id && message.id.length <= 64) {
+      if (typeof message.png === "string" && message.png.length > 0 && message.png.length <= 1_400_000) {
+        const w = Number(message.w), h = Number(message.h), hotX = Number(message.hotX), hotY = Number(message.hotY);
+        const scale = Number(message.scale), displayW = Number(message.displayW), displayH = Number(message.displayH);
+        if (w > 0 && h > 0 && w <= 256 && h <= 256 && Number.isFinite(hotX) && Number.isFinite(hotY) && Number.isFinite(displayW) && Number.isFinite(displayH)) {
+          if (this.shapes.size >= 64) this.shapes.clear();
+          const full: FusionCursorShape = {
+            id: message.id, png: message.png, w, h, hotX, hotY,
+            scale: scale >= 1 && scale <= 4 ? scale : 1,
+            displayW, displayH,
+          };
+          this.shapes.set(message.id, full);
+          this.latestShape = full;
+          this.shapeListener?.(full);
+        }
+      } else {
+        const known = this.shapes.get(message.id);
+        if (known) {
+          this.latestShape = known;
+          this.shapeListener?.({ id: message.id });
+        }
+      }
     }
     if (message.t === "monitors" && Array.isArray(message.monitors)) {
       this.monitorList = message.monitors.map((m) => {
@@ -123,9 +189,24 @@ export class WindowsFusionPlatform implements FusionPlatform {
 
   watchClipboard(onClip: (clip: FusionClip) => void): void { this.clipListener = onClip; }
 
+  watchShape(onShape: (shape: FusionCursorShape) => void): void {
+    this.shapeListener = onShape;
+    if (this.latestShape) onShape(this.latestShape);
+  }
+
+  shape(id: string): FusionCursorShape | undefined { return this.shapes.get(id); }
+
   setClipboard(clip: FusionClip): void {
+    const files = normalizeClipFiles(clip.files);
+    if (clip.files?.length && !files?.length && !clip.text && !clip.png) return;
+    if (!clip.text && !clip.png && !files?.length) return;
     // `t` first: the helper lets a line this long through only when it starts as a clipboard.
-    this.write({ t: "clip", ...(clip.text ? { text: clip.text } : {}), ...(clip.png ? { png: clip.png.toString("base64") } : {}) });
+    this.write({
+      t: "clip",
+      ...(clip.text ? { text: clip.text } : {}),
+      ...(clip.png ? { png: clip.png.toString("base64") } : {}),
+      ...(files?.length ? { files } : {}),
+    });
   }
 
   quit(app: string, force: boolean): void { this.write({ t: "quit", app, force }); }
@@ -155,6 +236,7 @@ export class WindowsFusionPlatform implements FusionPlatform {
   stop(): void {
     this.listener = undefined;
     this.clipListener = undefined;
+    this.shapeListener = undefined;
     const child = this.child;
     this.child = undefined;
     child?.stdin?.end();

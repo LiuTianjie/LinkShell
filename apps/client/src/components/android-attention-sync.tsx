@@ -1,11 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
-import { liveActivityDetailLink } from "@linkshell/wire";
 import { Platform } from "react-native";
-import {
-  buildLiveActivitySnapshot,
-  wakeupNoticeSchema,
-  type WakeupNotice,
-} from "@linkshell/wire";
+import { wakeupNoticeSchema, type WakeupNotice } from "@linkshell/wire";
+import { liveActivityDetailLink } from "@linkshell/wire";
 import {
   cancelNativeAndroidStatusNotification,
   syncNativeAndroidStatusNotification,
@@ -13,7 +9,7 @@ import {
 import { useClient, useConnection, useConnectionStatus } from "@/lib/client";
 import { useComputers } from "@/lib/computers";
 import { useLocale } from "@/lib/locale";
-import { mergeLiveViewsIntoSessions } from "@/lib/session-attention";
+import { buildAndroidStatusPayload, mergeLiveViewsIntoSessions } from "@/lib/session-attention";
 import { useTerminals } from "@/lib/terminals";
 
 function displayComputerName(computer: ReturnType<typeof useConnection>["computer"], fallback: string): string {
@@ -67,16 +63,16 @@ export function AndroidAttentionSync() {
       computer,
       pick({ zh: "电脑", en: "Computer", ja: "コンピュータ" }),
     );
-    const snapshot = buildLiveActivitySnapshot(
+    const payload = buildAndroidStatusPayload({
       computerName,
+      computerKey: computer.key,
       sessions,
       terminals,
-      status === "online",
-      computer.key,
+      online: status === "online",
       goals,
-    );
+    });
 
-    if (!snapshot.active) {
+    if (!payload.active) {
       if (lastSignatureRef.current !== "off") {
         lastSignatureRef.current = "off";
         void cancelNativeAndroidStatusNotification();
@@ -84,20 +80,6 @@ export function AndroidAttentionSync() {
       return;
     }
 
-    const urgent =
-      snapshot.phase === "waiting_for_approval" ||
-      snapshot.phase === "waiting_for_input" ||
-      snapshot.phase === "failed";
-    const ongoing = snapshot.phase === "running" || snapshot.phase === "starting";
-    const payload = {
-      active: true,
-      title: snapshot.title || computerName,
-      subtitle: snapshot.subtitle || "",
-      computerName,
-      deepLink: snapshot.deepLink || "linkshell:///",
-      urgent,
-      ongoing,
-    };
     const signature = JSON.stringify(payload);
     if (signature === lastSignatureRef.current) return;
     lastSignatureRef.current = signature;
@@ -124,6 +106,8 @@ export function AndroidAttentionSync() {
             : notice.eventType === "error"
               ? pick({ zh: "会话执行遇到错误", en: "A session encountered an error", ja: "セッションでエラーが発生しました" })
               : pick({ zh: "本轮任务已完成", en: "Agent turn completed", ja: "タスクが完了しました" });
+      const deepLink = liveActivityDetailLink(computer.key, "session", notice.sessionId);
+      const needsFollowUp = notice.eventType === "approval" || notice.eventType === "question";
       void syncNativeAndroidStatusNotification({
         active: true,
         title: computerName,
@@ -131,9 +115,20 @@ export function AndroidAttentionSync() {
         computerName,
         // Through the computer it came from: tapped after switching computers, a bare session
         // link would look the id up on whichever one is selected now.
-        deepLink: liveActivityDetailLink(computer.key, "session", notice.sessionId),
+        deepLink,
         urgent: notice.eventType !== "completed",
-        ongoing: false,
+        ongoing: needsFollowUp,
+        foregroundService: needsFollowUp,
+        actions: [
+          {
+            id: `open:${notice.sessionId}`,
+            label: "查看",
+            kind: "open",
+            computerKey: computer.key,
+            sessionId: notice.sessionId,
+            deepLink,
+          },
+        ],
       });
     });
   }, [computer, link, pick]);

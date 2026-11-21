@@ -30,7 +30,6 @@ import { Check, CircleAlert, CircleDashed, CircleHelp, CircleMinus, Copy, GitFor
 import Markdown, { defaultUrlTransform, type Components } from "react-markdown";
 import { markdownBlocks, useSmoothText } from "./smooth-text";
 import { diffLines, diffStat, hunks, parsePatch, type DiffLine } from "./line-diff";
-import { isDesktop } from "./desktop";
 import { grammarForPath, useHighlight, type HighlightToken } from "./highlight";
 import { fileTarget } from "./file-target";
 import { messageTime } from "./session-time";
@@ -400,7 +399,7 @@ function CodeBlock({ children }: { children: ReactNode }) {
         <span>{language ?? "代码"}</span>
         <Button
           variant="ghost"
-          size={isDesktop ? "icon-sm" : "sm"}
+          size="sm"
           className="code-copy"
           disabled={job.busy}
           aria-label={copied ? "代码已复制" : "复制代码"}
@@ -419,7 +418,7 @@ function CodeBlock({ children }: { children: ReactNode }) {
           ) : (
             <Copy data-icon="inline-start" />
           )}
-          {!isDesktop && (copied ? "已复制" : "复制")}
+          {copied ? "已复制" : "复制"}
         </Button>
       </div>
       <pre

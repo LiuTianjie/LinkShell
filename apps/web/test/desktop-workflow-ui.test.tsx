@@ -17,20 +17,16 @@ vi.hoisted(() => {
       "window",
       Object.assign(new EventTarget(), {
         location: loc,
-        __LINKSHELL_CONFIG__: { desktop: true },
+        __LINKSHELL_CONFIG__: {},
       }),
     );
   }
 });
 
 import { diffLines } from "@linkshell/client-core";
-import type { ProjectSummary, SessionSummary } from "@linkshell/wire";
+import type { SessionSummary } from "@linkshell/wire";
 import { buildCommandSessionEntries } from "../src/components/CommandCenter";
 import { Dialogs } from "../src/components/Dialogs";
-import {
-  orderedComputerSessionTargets,
-  stepSessionTarget,
-} from "../src/components/DesktopShell";
 import { Runtime } from "../src/live/common";
 import {
   LARGE_PASTE_CHARS,
@@ -68,29 +64,6 @@ function makeComputer(key: string, name: string): Computer {
     },
   } as unknown as Computer;
 }
-
-describe("Logical session stepping (⌘⇧[ / ⌘⇧])", () => {
-  it("walks project groups and parent->child families without duplicating active sessions", () => {
-    const projects: ProjectSummary[] = [
-      { cwd: "/work/alpha", name: "alpha" } as ProjectSummary,
-      { cwd: "/work/beta", name: "beta" } as ProjectSummary,
-    ];
-    const sessions: SessionSummary[] = [
-      makeSession({ id: "a-1", cwd: "/work/alpha", state: "running", createdAt: 300, updatedAt: 500 }),
-      makeSession({ id: "a-2", cwd: "/work/alpha", state: "idle", createdAt: 200, updatedAt: 200 }),
-      makeSession({ id: "b-1", cwd: "/work/beta", state: "waiting", createdAt: 400, updatedAt: 600 }),
-    ];
-
-    const targets = orderedComputerSessionTargets("desktop:local", projects, sessions);
-    expect(targets.map((entry) => entry.sessionId)).toEqual(["b-1", "a-1", "a-2"]);
-
-    // Stepping forward from b-1 -> a-1 -> a-2 -> wraps cleanly back to b-1 (never jumps back into 活跃会话).
-    expect(stepSessionTarget(targets, { computerKey: "desktop:local", sessionId: "b-1" }, 1)?.sessionId).toBe("a-1");
-    expect(stepSessionTarget(targets, { computerKey: "desktop:local", sessionId: "a-1" }, 1)?.sessionId).toBe("a-2");
-    expect(stepSessionTarget(targets, { computerKey: "desktop:local", sessionId: "a-2" }, 1)?.sessionId).toBe("b-1");
-    expect(stepSessionTarget(targets, { computerKey: "desktop:local", sessionId: "b-1" }, -1)?.sessionId).toBe("a-2");
-  });
-});
 
 describe("Multi-computer CommandCenter session indexing", () => {
   it("indexes non-archived sessions across all connected computers with cwd and preview metadata", () => {
@@ -275,22 +248,16 @@ describe("Split diff view, search highlighting & Worktree actions", () => {
 });
 
 describe("Visual system & performance CSS rules", () => {
-  it("keeps conversation.css and desktop-session.css inside @layer components with explicit textarea sizing and no 10px/half-px fonts", () => {
+  it("keeps conversation.css inside @layer components with explicit textarea sizing and no 10px/half-px fonts", () => {
     const conversationCss = readFileSync(new URL("../src/styles/conversation.css", import.meta.url), "utf8");
-    const desktopSessionCss = readFileSync(new URL("../src/styles/desktop-session.css", import.meta.url), "utf8");
 
     expect(conversationCss).toContain("@layer components");
-    expect(desktopSessionCss).toContain("@layer components");
     expect(conversationCss).toContain("content-visibility: auto;");
     expect(conversationCss).toContain("contain-intrinsic-size: auto none auto 120px;");
     expect(conversationCss).toContain("field-sizing: content;");
     expect(conversationCss).toContain("width: 100%;");
     expect(conversationCss).toContain("height: auto;");
-    expect(desktopSessionCss).toContain("width: 100%; height: auto;");
-
-    for (const css of [conversationCss, desktopSessionCss]) {
-      expect(css).not.toMatch(/font-size:\s*10px\b/);
-      expect(css).not.toMatch(/font-size:\s*\d+\.5px\b/);
-    }
+    expect(conversationCss).not.toMatch(/font-size:\s*10px\b/);
+    expect(conversationCss).not.toMatch(/font-size:\s*\d+\.5px\b/);
   });
 });

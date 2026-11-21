@@ -11,6 +11,21 @@ export type DesktopFlushHandler = () =>
   | Promise<DesktopFlushResult>
   | DesktopFlushResult;
 
+export interface LanHostEntry {
+  instanceName: string;
+  machineId: string;
+  fingerprint: string;
+  name?: string;
+  protocolVersion?: number;
+  host?: string;
+  addresses: string[];
+  port: number;
+  hostPort?: number;
+  srvPort?: number;
+  lastSeen: number;
+  ttl: number;
+}
+
 export interface ElectronPreloadBridge {
   readonly shell: "electron";
   readonly platform: string;
@@ -18,6 +33,10 @@ export interface ElectronPreloadBridge {
   visible?(): boolean;
   postMessage(message: Record<string, unknown>): void;
   setFlush?(fn: (() => Promise<DesktopFlushResult>) | null): void;
+  setSystemShortcutCapture?(enabled: boolean): Promise<boolean>;
+  startLanDiscovery?(): Promise<LanHostEntry[]>;
+  stopLanDiscovery?(): Promise<void>;
+  getLanHosts?(): Promise<LanHostEntry[]>;
 }
 
 export interface LinkShellRuntimeConfig {
@@ -59,6 +78,8 @@ export const DESKTOP_FUSION_TUNNEL_EVENT = "linkshell-fusion-tunnel";
 export const DESKTOP_ACCOUNT_EVENT = "linkshell-desktop-account";
 export const DESKTOP_ERROR_EVENT = "linkshell-desktop-error";
 export const DESKTOP_HOST_EVENT = "linkshell-desktop-host";
+export const DESKTOP_LAN_HOSTS_EVENT = "linkshell-desktop-lan-hosts";
+export const DESKTOP_SHORTCUT_CAPTURE_EVENT = "linkshell-desktop-shortcut-capture";
 
 function getPreloadBridge(): ElectronPreloadBridge | undefined {
   return typeof window !== "undefined" ? window.linkshellDesktop : undefined;
@@ -531,4 +552,57 @@ export function setDesktopScreenKeys(captured: boolean): void {
 
 export function revealOnDesktop(path: string): Promise<unknown> {
   return desktopInvoke("reveal", { path }, 15_000);
+}
+
+export async function setSystemShortcutCapture(enabled: boolean): Promise<boolean> {
+  const bridge = getPreloadBridge();
+  if (!bridge) return false;
+  if (typeof bridge.setSystemShortcutCapture === "function") {
+    return bridge.setSystemShortcutCapture(enabled).then(Boolean, () => false);
+  }
+  return desktopInvoke<boolean>("setSystemShortcutCapture", { enabled }, 3_000)
+    .then(Boolean)
+    .catch(() => false);
+}
+
+export async function startLanDiscovery(): Promise<LanHostEntry[]> {
+  const bridge = getPreloadBridge();
+  if (!bridge) return [];
+  if (typeof bridge.startLanDiscovery === "function") {
+    return bridge.startLanDiscovery().catch(() => []);
+  }
+  return desktopInvoke<LanHostEntry[]>("startLanDiscovery", {}, 5_000).catch(() => []);
+}
+
+export async function stopLanDiscovery(): Promise<void> {
+  const bridge = getPreloadBridge();
+  if (!bridge) return;
+  if (typeof bridge.stopLanDiscovery === "function") {
+    await bridge.stopLanDiscovery().catch(() => undefined);
+    return;
+  }
+  await desktopInvoke("stopLanDiscovery", {}, 3_000).catch(() => undefined);
+}
+
+export async function getLanHosts(): Promise<LanHostEntry[]> {
+  const bridge = getPreloadBridge();
+  if (!bridge) return [];
+  if (typeof bridge.getLanHosts === "function") {
+    return bridge.getLanHosts().catch(() => []);
+  }
+  return desktopInvoke<LanHostEntry[]>("getLanHosts", {}, 3_000).catch(() => []);
+}
+
+export function onLanHosts(listener: (hosts: LanHostEntry[]) => void): () => void {
+  if (typeof window === "undefined") return () => {};
+  const handler = (event: Event) => {
+    const detail = (event as CustomEvent<unknown>).detail;
+    if (Array.isArray(detail)) {
+      listener(detail as LanHostEntry[]);
+    }
+  };
+  window.addEventListener(DESKTOP_LAN_HOSTS_EVENT, handler);
+  return () => {
+    window.removeEventListener(DESKTOP_LAN_HOSTS_EVENT, handler);
+  };
 }

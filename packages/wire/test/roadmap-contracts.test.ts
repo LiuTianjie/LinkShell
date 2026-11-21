@@ -5,7 +5,6 @@ import {
   HOST_PROTOCOL,
   isMethodName,
   liveActivityPushToStartSchema,
-  lsaMethods,
   machineMetricsSchema,
   machineMetricsSnapshotSchema,
   methods,
@@ -167,7 +166,7 @@ describe("liveActivities.registerPushToStart & zero-plaintext wakeupNoticeSchema
   });
 });
 
-describe("new host RPC methods & LSA Phase 1 contracts", () => {
+describe("new host RPC methods", () => {
   it("registers all roadmap RPC methods in methods map", () => {
     const expectedMethods = [
       "liveActivities.registerPushToStart",
@@ -175,23 +174,18 @@ describe("new host RPC methods & LSA Phase 1 contracts", () => {
       "git.diff",
       "git.revertFile",
       "fs.projectFiles",
+      "fs.rename",
+      "fs.delete",
       "clipboard.read",
       "clipboard.write",
       "screen.privacy",
-      "lsa.status",
-      "lsa.tasks",
-      "lsa.dispatch",
-      "lsa.steer",
-      "lsa.decide",
-      "lsa.memories",
-      "lsa.followups",
     ] as const;
     for (const name of expectedMethods) {
       expect(isMethodName(name)).toBe(true);
     }
   });
 
-  it("validates git.diff, git.revertFile, fs.projectFiles, clipboard.*, and screen.privacy schemas", () => {
+  it("validates git.diff, git.revertFile, fs.projectFiles, fs.rename, fs.delete, clipboard.*, and screen.privacy schemas", () => {
     expect(methods["machine.keepAwake"].params.parse({ mode: "smart" })).toEqual({ mode: "smart" });
     expect(methods["machine.keepAwake"].result.parse({ mode: "smart", active: false })).toEqual({ mode: "smart", active: false });
 
@@ -239,59 +233,18 @@ describe("new host RPC methods & LSA Phase 1 contracts", () => {
     expect(
       methods["screen.privacy"].result.parse({ curtain: true, lockOnDisconnect: true, supported: true }),
     ).toEqual({ curtain: true, lockOnDisconnect: true, supported: true });
-  });
 
-  it("validates LSA Phase 1 schemas (status, tasks, dispatch, steer, decide, memories, followups)", () => {
-    const status = lsaMethods["lsa.status"].result.parse({
-      enabled: true,
-      controllerEpoch: 3,
-      generation: 1,
-      activeTasks: 1,
-      waitingDecisionTasks: 0,
-      dueFollowups: 1,
-      requiresYearlyTier: true,
-      candidates: [{ cwd: "/Users/dev/app", name: "app", score: 0.95, reason: "recent_session" }],
+    expect(methods["fs.rename"].params.parse({ from: "/a.txt", to: "/b.txt", overwrite: true })).toEqual({
+      from: "/a.txt",
+      to: "/b.txt",
+      overwrite: true,
     });
-    expect(status.requiresYearlyTier).toBe(true);
-
-    const dispatched = lsaMethods["lsa.dispatch"].params.parse({
-      goal: "Fix OAuth redirect loop and run tests",
-      cwd: "/Users/dev/app",
-      worktree: true,
-      acceptanceChecks: ["pnpm test passes", "no TS errors"],
+    expect(methods["fs.rename"].result.parse({ path: "/b.txt" })).toEqual({ path: "/b.txt" });
+    expect(methods["fs.delete"].params.parse({ path: "/b.txt", recursive: false })).toEqual({
+      path: "/b.txt",
+      recursive: false,
     });
-    expect(dispatched.acceptanceChecks).toHaveLength(2);
-
-    const task = {
-      id: "lsa-task-1",
-      title: "Fix OAuth redirect",
-      goal: dispatched.goal,
-      status: "waiting_decision" as const,
-      cwd: "/Users/dev/app",
-      worktree: true,
-      agent: "codex",
-      sessionId: "codex:th-1",
-      controllerEpoch: 3,
-      acceptanceChecks: ["pnpm test passes"],
-      summary: "All 14 tests passed",
-      createdAt: 1_760_000_000_000,
-      updatedAt: 1_760_000_060_000,
-    };
-    expect(lsaMethods["lsa.tasks"].result.parse({ tasks: [task] }).tasks[0]?.status).toBe("waiting_decision");
-    expect(lsaMethods["lsa.decide"].params.parse({ taskId: task.id, decision: "accept" }).decision).toBe("accept");
-    expect(lsaMethods["lsa.steer"].params.parse({ taskId: task.id, instruction: "Also add regression test" }).taskId).toBe(task.id);
-
-    expect(
-      lsaMethods["lsa.memories"].result.parse({
-        memories: [{ key: "deploy-rule", content: "Never skip docker build", tags: ["ops"], updatedAt: 1_760_000_000_000 }],
-      }).memories[0]?.key,
-    ).toBe("deploy-rule");
-
-    expect(
-      lsaMethods["lsa.followups"].result.parse({
-        followups: [{ id: "fu-1", taskId: task.id, dueAt: 1_760_086_400_000, note: "Verify prod metrics", done: false }],
-      }).followups[0]?.done,
-    ).toBe(false);
+    expect(methods["fs.delete"].result.parse({ deleted: true })).toEqual({ deleted: true });
   });
 
   it("validates sessions.get, pagination beforeId, chunked fs.upload, git.commit, desktop.openPath, and undeliverable channel", () => {

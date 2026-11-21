@@ -24,19 +24,27 @@ public class LinkLayoutModule: Module {
   private var pushToStartTask: Task<Void, Never>?
   private var activityStateTasks: [String: Task<Void, Never>] = [:]
   private var activityActionObserver: NSObjectProtocol?
+  private var localNotificationObserver: NSObjectProtocol?
   private var watchCommandObserver: NSObjectProtocol?
   private var watchStatusObserver: NSObjectProtocol?
+  private var lanDiscovery: LanDiscoveryIOS?
   private var pushRegistrationBackgroundTask: UIBackgroundTaskIdentifier = .invalid
   private lazy var speechSynthesizer = AVSpeechSynthesizer()
 
   public func definition() -> ModuleDefinition {
     Name("LinkLayout")
-    Events("onSpeechResult", "onSpeechLevel", "onSpeechError", "onLiveActivityAction", "onLiveActivityPushToken", "onLiveActivityPushToStartToken", "onWatchCommand", "onWatchStatus")
+    Events("onSpeechResult", "onSpeechLevel", "onSpeechError", "onLiveActivityAction", "onLiveActivityPushToken", "onLiveActivityPushToStartToken", "onNotificationAction", "onLanHosts", "onWatchCommand", "onWatchStatus")
     OnCreate { [weak self] in
       WatchSessionBridge.shared.start()
-      Task { @MainActor [weak self] in self?.observeExistingActivities() }
+      Task { @MainActor [weak self] in
+        LocalApprovalNotifications.shared.install()
+        self?.observeExistingActivities()
+      }
       self?.activityActionObserver = NotificationCenter.default.addObserver(forName: LiveActivityActionQueue.notification, object: nil, queue: .main) { [weak self] notification in
         if let id = notification.userInfo?["id"] as? String { self?.sendEvent("onLiveActivityAction", ["id": id]) }
+      }
+      self?.localNotificationObserver = NotificationCenter.default.addObserver(forName: LocalNotificationActionQueue.notification, object: nil, queue: .main) { [weak self] notification in
+        if let id = notification.userInfo?["id"] as? String { self?.sendEvent("onNotificationAction", ["id": id]) }
       }
       self?.watchCommandObserver = NotificationCenter.default.addObserver(forName: WatchCommandQueue.notification, object: nil, queue: .main) { [weak self] notification in
         if let id = notification.userInfo?["id"] as? String { self?.sendEvent("onWatchCommand", ["id": id]) }
@@ -46,6 +54,8 @@ public class LinkLayoutModule: Module {
       }
     }
     OnDestroy { [weak self] in
+      self?.lanDiscovery?.stop()
+      self?.lanDiscovery = nil
       if let self {
         Task { @MainActor in
           self.pushToStartTask?.cancel()
@@ -61,6 +71,7 @@ public class LinkLayoutModule: Module {
         }
       }
       if let observer = self?.activityActionObserver { NotificationCenter.default.removeObserver(observer) }
+      if let observer = self?.localNotificationObserver { NotificationCenter.default.removeObserver(observer) }
       if let observer = self?.watchCommandObserver { NotificationCenter.default.removeObserver(observer) }
       if let observer = self?.watchStatusObserver { NotificationCenter.default.removeObserver(observer) }
     }
@@ -224,6 +235,48 @@ public class LinkLayoutModule: Module {
 
     AsyncFunction("completeWatchCommand") { (id: String, ok: Bool, message: String?) in
       WatchCommandQueue.complete(id, ok: ok, message: message)
+    }.runOnQueue(.main)
+
+    AsyncFunction("pendingNotificationActionId") { () -> String? in
+      LocalNotificationActionQueue.shared.pendingId()
+    }.runOnQueue(.main)
+
+    AsyncFunction("consumeNotificationAction") { (id: String) -> [String: Any]? in
+      LocalNotificationActionQueue.shared.consume(id: id)
+    }.runOnQueue(.main)
+
+    AsyncFunction("syncLocalApprovalNotification") { (payload: [String: Any], promise: Promise) in
+      LocalApprovalNotifications.shared.sync(payload: payload) { ok in
+        promise.resolve(ok)
+      }
+    }
+
+    AsyncFunction("cancelLocalApprovalNotification") { (id: String) in
+      LocalApprovalNotifications.shared.cancel(id: id)
+    }
+
+    AsyncFunction("startLanDiscovery") { [weak self] () -> Bool in
+      guard let self else { return false }
+      let discovery: LanDiscoveryIOS
+      if let existing = self.lanDiscovery {
+        discovery = existing
+      } else {
+        let created = LanDiscoveryIOS()
+        created.onHostsChanged = { [weak self] hosts in
+          self?.sendEvent("onLanHosts", ["hosts": hosts])
+        }
+        self.lanDiscovery = created
+        discovery = created
+      }
+      return discovery.start()
+    }.runOnQueue(.main)
+
+    AsyncFunction("stopLanDiscovery") { [weak self] in
+      self?.lanDiscovery?.stop()
+    }.runOnQueue(.main)
+
+    AsyncFunction("getLanHosts") { [weak self] () -> [[String: Any]] in
+      self?.lanDiscovery?.currentHosts() ?? []
     }.runOnQueue(.main)
 
     View(LinkLayoutView.self) {

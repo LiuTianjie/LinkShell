@@ -9,6 +9,9 @@ import { connect, type TLSSocket } from "node:tls";
 export const FUSION_PSK_IDENTITY = "linkshell-fusion-v1";
 export const FUSION_PSK_LABEL = "linkshell-fusion-psk-v1";
 export const FUSION_MAX_FRAME = 16 << 20;
+export const FUSION_MAX_FILE_CLIPBOARD = 50 << 20;
+export const FUSION_FILE_CLIPBOARD_CHUNK_BYTES = 512 << 10;
+export const FUSION_MAX_FILE_CLIPBOARD_FILES = 256;
 /**
  * Pre-shared-key suites, best first. Electron's BoringSSL (the desktop app on Windows) has no
  * PSK-AES-GCM, so the ones every end has lead; the ECDHE ones add forward secrecy. Checked on

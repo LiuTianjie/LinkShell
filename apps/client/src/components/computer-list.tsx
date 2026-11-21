@@ -19,8 +19,9 @@ export function ComputerList({ onSelect, background = colors.sheet }: { onSelect
   const names = useComputerNames((state) => state.names);
   const saved = useComputers((state) => state.saved);
   const live = useComputers((state) => state.live);
+  const lanHosts = useComputers((state) => state.lanHosts);
   const relayStatus = useComputers((state) => state.relayStatus);
-  const computers = useMemo(() => listComputers({ saved, live }), [saved, live]);
+  const computers = useMemo(() => listComputers({ saved, live, lanHosts }), [saved, live, lanHosts]);
   const { computer: current } = useConnection();
   const status = useClient((state) => state.status);
   const machine = useClient((state) => state.machine);
@@ -38,6 +39,10 @@ export function ComputerList({ onSelect, background = colors.sheet }: { onSelect
           : selected ? "未连接" : computer.kind === "direct" ? "局域网连接"
           : gateway !== "online" ? "状态待确认" : "离线";
         const platform = selected ? machine?.platform : computer.kind === "relay" ? computer.machine.platform : undefined;
+        const lanHint =
+          computer.lanReachable && computer.lanDiscoveredUrl
+            ? `局域网可达 · ${computer.lanDiscoveredUrl.replace(/^wss?:\/\//, "")}`
+            : undefined;
         return (
           <View key={computer.key}>
             {index > 0 ? <View style={{ marginLeft: 52, height: StyleSheet.hairlineWidth, backgroundColor: colors.separator }} /> : null}
@@ -60,7 +65,7 @@ export function ComputerList({ onSelect, background = colors.sheet }: { onSelect
                   {locked ? <Icon sf="lock.fill" md="lock" size={12} color={colors.tertiaryLabel} /> : null}
                 </View>
                 <Text numberOfLines={2} style={[type.subhead, { color: colors.secondaryLabel }]}>
-                  {[platform ? platforms[platform] : undefined, stateLabel].filter(Boolean).join(" · ")}
+                  {[platform ? platforms[platform] : undefined, stateLabel, lanHint].filter(Boolean).join(" · ")}
                 </Text>
               </View>
               {/* The one in use is ticked, the way a system picker marks its choice. */}

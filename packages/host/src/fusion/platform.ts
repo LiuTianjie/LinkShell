@@ -41,8 +41,8 @@ export interface FusionVideoSource {
   stop(): void;
 }
 
-/** What was copied: text, and a picture as PNG. */
-export interface FusionClip { text?: string; png?: Buffer }
+/** What was copied: text, a picture as PNG, or local file paths. */
+export interface FusionClip { text?: string; png?: Buffer; files?: string[] }
 
 export type InputTarget = { window: number } | { monitor: number };
 

@@ -59,6 +59,8 @@ export const INSPECTOR_OPEN_PORT_EVENT = "linkshell-inspector-open-port";
 export const INSPECTOR_FOCUS_FILE_SEARCH_EVENT = "linkshell-inspector-focus-file-search";
 /** A file was written from the viewer: lists showing its folder have a stale size and time. */
 export const INSPECTOR_FILE_SAVED_EVENT = "linkshell-inspector-file-saved";
+/** Files or folders were renamed or deleted: explorer trees and search lists refresh. */
+export const INSPECTOR_FILES_CHANGED_EVENT = "linkshell-inspector-files-changed";
 
 export function inspectorScopeKey(
   computerKey: string,
@@ -442,6 +444,135 @@ function basenameOfFile(filePath: string): string {
   if (!cleaned) return filePath;
   const parts = cleaned.split(/[\\/]/);
   return parts[parts.length - 1] || cleaned;
+}
+
+function normalizeComparePath(p: string): string {
+  const clean = p.replace(/\\/g, "/");
+  return clean.length > 1 ? clean.replace(/\/+$/, "") : clean;
+}
+
+export function isSameOrDescendantPath(candidate: string, target: string): boolean {
+  const cand = normalizeComparePath(candidate);
+  const tgt = normalizeComparePath(target);
+  if (!cand || !tgt) return false;
+  if (cand === tgt) return true;
+  const prefix = tgt === "/" ? "/" : `${tgt}/`;
+  return cand.startsWith(prefix);
+}
+
+export function rebaseRenamedPath(
+  candidate: string,
+  oldTarget: string,
+  newTarget: string,
+): string {
+  const normCand = normalizeComparePath(candidate);
+  const normOld = normalizeComparePath(oldTarget);
+  if (normCand === normOld) return newTarget;
+  const oldPrefix = normOld === "/" ? "/" : `${normOld}/`;
+  if (!normCand.startsWith(oldPrefix)) return candidate;
+  const rel = candidate.replace(/\\/g, "/").slice(oldPrefix.length);
+  const useBackslash = newTarget.includes("\\") && !newTarget.includes("/");
+  const trimmedNew = newTarget.replace(/[\\/]+$/, "");
+  return `${trimmedNew}${useBackslash ? "\\" : "/"}${useBackslash ? rel.replace(/\//g, "\\") : rel}`;
+}
+
+export function findDirtyFileTabsForPath(
+  computerKey: string,
+  targetPath: string,
+): InspectorTabItem[] {
+  const prefix = `${computerKey || "default"}::`;
+  const state = inspectorTabsStore.getState();
+  const dirtyTabs: InspectorTabItem[] = [];
+  for (const [scopeKey, scope] of Object.entries(state.byScope)) {
+    if (!scopeKey.startsWith(prefix)) continue;
+    for (const tab of scope.tabs) {
+      if (tab.kind !== "file" || !tab.path) continue;
+      if (!isSameOrDescendantPath(tab.path, targetPath)) continue;
+      if (isTabDirty(scopeKey, tab.id)) {
+        dirtyTabs.push(tab);
+      }
+    }
+  }
+  return dirtyTabs;
+}
+
+export function retargetOpenTabsAfterRename(
+  computerKey: string,
+  oldPath: string,
+  newPath: string,
+): void {
+  const prefix = `${computerKey || "default"}::`;
+  inspectorTabsStore.setState((state) => {
+    let changed = false;
+    const nextByScope = { ...state.byScope };
+    const nextDrafts = { ...state.drafts };
+
+    for (const [scopeKey, scope] of Object.entries(state.byScope)) {
+      if (!scopeKey.startsWith(prefix)) continue;
+      let scopeChanged = false;
+      let nextActiveId = scope.activeId;
+      const nextTabs: InspectorTabItem[] = [];
+
+      for (const tab of scope.tabs) {
+        if (tab.kind !== "file" || !tab.path || !isSameOrDescendantPath(tab.path, oldPath)) {
+          nextTabs.push(tab);
+          continue;
+        }
+        scopeChanged = true;
+        changed = true;
+        const updatedPath = rebaseRenamedPath(tab.path, oldPath, newPath);
+        const updatedId = `file:${updatedPath}`;
+        let updatedSpec = updatedPath;
+        if (tab.lineSpec && tab.lineSpec.startsWith(tab.path)) {
+          updatedSpec = `${updatedPath}${tab.lineSpec.slice(tab.path.length)}`;
+        }
+        if (scope.activeId === tab.id) {
+          nextActiveId = updatedId;
+        }
+        delete nextDrafts[draftKey(scopeKey, tab.id)];
+        delete nextDrafts[draftKey(scopeKey, updatedId)];
+        nextTabs.push({
+          ...tab,
+          id: updatedId,
+          path: updatedPath,
+          lineSpec: updatedSpec,
+          title: basenameOfFile(updatedPath),
+          reloadNonce: (tab.reloadNonce ?? 0) + 1,
+        });
+      }
+
+      if (scopeChanged) {
+        nextByScope[scopeKey] = {
+          tabs: nextTabs,
+          activeId: nextActiveId,
+        };
+      }
+    }
+
+    return changed ? { byScope: nextByScope, drafts: nextDrafts } : state;
+  });
+}
+
+export function closeOpenTabsForDeletedPath(
+  computerKey: string,
+  targetPath: string,
+): void {
+  const prefix = `${computerKey || "default"}::`;
+  const state = inspectorTabsStore.getState();
+  const toClose: Array<{ sessionId: string | undefined; tabId: string }> = [];
+  for (const [scopeKey, scope] of Object.entries(state.byScope)) {
+    if (!scopeKey.startsWith(prefix)) continue;
+    const rawSession = scopeKey.slice(prefix.length);
+    const sessionId = rawSession || undefined;
+    for (const tab of scope.tabs) {
+      if (tab.kind === "file" && tab.path && isSameOrDescendantPath(tab.path, targetPath)) {
+        toClose.push({ sessionId, tabId: tab.id });
+      }
+    }
+  }
+  for (const item of toClose) {
+    closeInspectorTab(computerKey || "default", item.sessionId, item.tabId);
+  }
 }
 
 export function openFileTabInInspector(

@@ -2,12 +2,10 @@ import { useCallback, useSyncExternalStore } from "react";
 import { Languages } from "lucide-react";
 import {
   LOCALE_LABELS,
-  LOCALE_STORAGE_KEY,
   dateLocaleTag,
   defaultLocaleStore,
   getLocale,
   getLocalePreference,
-  isLocalePreference,
   setLocalePreference,
   subscribeLocale,
   t as translate,
@@ -27,22 +25,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { isDesktop, readDesktopStorage, saveDesktopStorage } from "./desktop";
 
 if (typeof window === "undefined") {
   // Server/Node rendering defaults to zh unless explicitly switched via setLocalePreference.
   defaultLocaleStore.setSystemLocale("zh");
 } else {
-  if (isDesktop) {
-    try {
-      const saved = readDesktopStorage<string | undefined>(LOCALE_STORAGE_KEY, undefined);
-      if (saved && isLocalePreference(saved)) {
-        defaultLocaleStore.setPreference(saved);
-      }
-    } catch {
-      // Desktop bootstrap may not be ready yet; browser storage fallback still applies.
-    }
-  }
   const syncDocument = (locale: Locale) => {
     try {
       document.documentElement.lang = dateLocaleTag(locale);
@@ -59,16 +46,12 @@ if (typeof window === "undefined") {
   subscribeLocale((locale) => syncDocument(locale));
 }
 
+export function isLocalePreference(value: string): value is LocalePreference {
+  return value === "system" || value === "zh" || value === "en" || value === "ja";
+}
+
 export function setWebLocalePreference(preference: LocalePreference): Locale {
-  const resolved = setLocalePreference(preference);
-  if (isDesktop) {
-    try {
-      void saveDesktopStorage(LOCALE_STORAGE_KEY, preference);
-    } catch {
-      // Keep in-memory locale active even if persistence fails.
-    }
-  }
-  return resolved;
+  return setLocalePreference(preference);
 }
 
 export function useLocale(): Locale {

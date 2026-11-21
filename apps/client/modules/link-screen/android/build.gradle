@@ -1,0 +1,32 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.linkscreen'
+version = '1.0.0'
+
+android {
+  namespace "expo.modules.linkscreen"
+  defaultConfig {
+    versionCode 1
+    versionName "1.0.0"
+  }
+}
+
+repositories {
+  maven {
+    url "https://github.com/jitsi/jitsi-maven-repository/raw/master/releases"
+  }
+}
+
+dependencies {
+  if (rootProject.findProject(':react-native-webrtc') != null) {
+    implementation project(':react-native-webrtc')
+  } else {
+    implementation 'org.jitsi:webrtc:124.+'
+  }
+  implementation 'com.squareup.okhttp3:okhttp:4.9.2'
+  def webkitVersion = rootProject.ext.has('webkitVersion') ? rootProject.ext.get('webkitVersion') : '1.12.1'
+  implementation "androidx.webkit:webkit:${webkitVersion}"
+}

@@ -218,18 +218,26 @@
 .resource-entry-list:empty {
     display: none;
   }
+.resource-entry-row {
+    display: flex;
+    align-items: stretch;
+    border-bottom: 1px solid var(--separator);
+  }
+.resource-entry-row[data-current="true"] {
+    background: var(--sidebarAccent);
+  }
 .resource-entry {
     display: flex;
     align-items: center;
     gap: 10px;
-    width: 100%;
+    flex: 1;
+    min-width: 0;
     height: 42px;
     min-height: 42px;
     padding: 0 12px;
     justify-content: flex-start;
     text-align: left;
     border-radius: 0;
-    border-bottom: 1px solid var(--separator);
   }
 .resource-entry:has(.resource-entry-path) {
     height: 54px;
@@ -237,6 +245,24 @@
   }
 .resource-entry[aria-current] {
     background: var(--sidebarAccent);
+  }
+.resource-entry-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding-right: 6px;
+    flex-shrink: 0;
+  }
+.resource-entry-actions > button {
+    color: var(--tertiaryLabel);
+  }
+.resource-entry-actions > button:hover,
+.resource-entry-actions > button:focus-visible {
+    color: var(--label);
+  }
+.resource-entry-actions > button[data-action="delete"]:hover,
+.resource-entry-actions > button[data-action="delete"]:focus-visible {
+    color: var(--destructive);
   }
 .resource-entry > svg {
     color: var(--secondaryLabel);

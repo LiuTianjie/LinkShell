@@ -12,9 +12,6 @@ import {
   Trash2,
 } from "lucide-react";
 import { useDialogs } from "@/components/Dialogs";
-import { DESKTOP_LOCAL, isWindowsDesktop } from "./desktop";
-import { RemoteScreen } from "./RemoteScreen";
-import { ScreenConnectionLoading } from "./ScreenConnectionLoading";
 import { useT } from "./i18n";
 import { useEffect, useState } from "react";
 import { useStore } from "zustand";
@@ -238,7 +235,7 @@ function ComputerRow({
             {selected && <Badge variant="secondary">当前</Badge>}
             <ComputerName computer={computer} iconOnly />
           </div>
-          <span title={`${computer.machine.name} · ${computer.machine.id}`}>{computer.key === DESKTOP_LOCAL ? "本机" : computerIdentity(computer)}</span>
+          <span title={`${computer.machine.name} · ${computer.machine.id}`}>{computerIdentity(computer)}</span>
         </div>
       </header>
       {computer.machine.online && (
@@ -256,21 +253,19 @@ function ComputerRow({
         {!computer.machine.online ? (
           <div className="screen-idle screen-idle-offline" role="status">
             <span className="computer-offline-label" title="电脑开机并运行 LinkShell 后即可连接">离线</span>
-            {computer.key !== DESKTOP_LOCAL && (
-              <div className="screen-idle-actions">
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="computer-row-hover-action"
-                  aria-label={`移除 ${name}`}
-                  title="移除这台电脑"
-                  disabled={forgetting}
-                  onClick={forget}
-                >
-                  <Trash2 />
-                </Button>
-              </div>
-            )}
+            <div className="screen-idle-actions">
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="computer-row-hover-action"
+                aria-label={`移除 ${name}`}
+                title="移除这台电脑"
+                disabled={forgetting}
+                onClick={forget}
+              >
+                <Trash2 />
+              </Button>
+            </div>
           </div>
         ) : connection && watching ? (
           <Runtime value={connection}>
@@ -373,33 +368,6 @@ function ConnectedScreen({
   );
 }
 
-/** The desktop window's remote screen, once the computer's connection is up. */
-function RemoteScreenConnection({ name, active, back, retry }: { name: string; active: boolean; back: () => void; retry: () => void }) {
-  const status = useClient((state) => state.status);
-  const statusDetail = useClient((state) => state.statusDetail);
-  if (status === "online") return <RemoteScreen title={name} active={active} back={back} />;
-  return (
-    <div className="remote-screen remote-screen-waiting">
-      <div className="remote-screen-bar">
-        <div className="remote-screen-title">
-          <Button variant="ghost" size="icon" aria-label="返回我的电脑" title="返回我的电脑" onClick={back}><ArrowLeft /></Button>
-          <strong>{name}</strong>
-        </div>
-      </div>
-      <div className="remote-screen-stage">
-        <div className="remote-screen-overlay">
-          <ScreenConnectionLoading
-            preparing={false}
-            slow={status === "stopped"}
-            error={status === "stopped" ? statusDetail ?? "连接已断开" : undefined}
-            retry={retry}
-          />
-        </div>
-      </div>
-    </div>
-  );
-}
-
 /** Takes a computer off the list: its pairing, or, for one that signed in to the account, the account. */
 function useForget(computer: Computer | undefined, done?: () => void) {
   const dialogs = useDialogs();
@@ -460,14 +428,14 @@ export function ScreenDetail({
   active?: boolean;
 }) {
   const computer = useStore(engine.state, (state) =>
-    computerAtKey(state.computers, computerKey, state.localComputer),
+    computerAtKey(state.computers, computerKey),
   );
   const ready = useStore(engine.state, (state) => state.ready);
   const names = useStore(computerNames.store);
   const { connection, error, retry } = useScreenConnection(computer, computerKey);
   const { forget, forgetting } = useForget(computer, back);
   const selectedKey = useStore(engine.state, (state) => state.connection &&
-    computerAtKey(state.computers, state.connection.computer.key, state.localComputer)?.key,
+    computerAtKey(state.computers, state.connection.computer.key)?.key,
   );
   useEffect(() => {
     if (!active || !computer?.machine.online || selectedKey === computer.key) return;
@@ -478,15 +446,6 @@ export function ScreenDetail({
     }
   }, [active, computer, selectedKey]);
   const name = computer ? computerName(computer, names) : "远程桌面";
-  // The desktop window gives the screen the whole panel: its own bar is the page's title row.
-  if (isWindowsDesktop && ready && computer?.machine.online && connection && !error)
-    return (
-      <div className="screen-detail-page remote-screen-page">
-        <Runtime value={connection}>
-          <RemoteScreenConnection name={name} active={active} back={back} retry={retry} />
-        </Runtime>
-      </div>
-    );
   return (
     <div className="screen-detail-page">
       <header className="flex items-center justify-between gap-3">
@@ -527,17 +486,15 @@ export function ScreenDetail({
           title="电脑已离线"
           description="电脑开机并运行 LinkShell 后即可连接。"
         >
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={() => engine.reconnect()}>
-              刷新连接
-            </Button>
-            {computer.key !== DESKTOP_LOCAL && (
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => engine.reconnect()}>
+                刷新连接
+              </Button>
               <Button variant="ghost" disabled={forgetting} onClick={forget}>
                 <Trash2 data-icon="inline-start" />
                 移除这台电脑
               </Button>
-            )}
-          </div>
+            </div>
         </EmptyState>
       ) : error ? (
         <EmptyState title="暂时无法连接">

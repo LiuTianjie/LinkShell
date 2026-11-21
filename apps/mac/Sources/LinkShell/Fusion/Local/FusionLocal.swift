@@ -165,6 +165,14 @@ final class FusionLocal: NSObject, NSApplicationDelegate {
   let uiIconCacheDir: URL
   var lastStatusText = "正在初始化融合会话…"
   let stubQueue = DispatchQueue(label: "com.bd.linkshell.fusion.stubgen", qos: .utility)
+  lazy var fileClipboardSender = FusionFileClipboardSender { [weak self] message in
+    DispatchQueue.main.async { [weak self] in self?.wire?.send(message) }
+  }
+  lazy var fileClipboardReceiver = FusionFileClipboardReceiver { [weak self] urls in
+    guard let self, self.clipboard.armed else { return }
+    let count = FusionFileClipboard.writePasteboardFiles(urls, to: NSPasteboard.general)
+    self.clipboard.didWrite(changeCount: count)
+  }
 
   init(
     host: String,
@@ -406,8 +414,22 @@ extension FusionLocal {
     let pasteboard = NSPasteboard.general
     let types = (pasteboard.types ?? []).map(\.rawValue)
     let count = pasteboard.changeCount
-    // Cheap check first: the contents (up to 8 MB) are read only when something changed.
+    // Cheap check first: the contents are read only when something changed.
     guard clipboard.isUnseen(changeCount: count) else { return }
+    if remoteFeatures.contains("file-clipboard") {
+      let selection = FusionFileClipboard.readPasteboardFiles(pasteboard)
+      if selection.containsFileURLs {
+        guard clipboard.shouldSend(
+          changeCount: count,
+          types: types,
+          bytes: selection.files.isEmpty ? -1 : selection.totalBytes,
+          maxBytes: FusionProtocol.maxFileClipboard,
+          allowEmpty: true
+        ) else { return }
+        fileClipboardSender.send(files: selection.files)
+        return
+      }
+    }
     let item = FusionClipboardItem.read(pasteboard)
     guard clipboard.shouldSend(changeCount: count, types: types, bytes: item.bytes) else { return }
     wire?.send(item.message)
@@ -614,6 +636,8 @@ extension FusionLocal {
       }
     case "clip":
       receiveRemoteClipboard(m)
+    case "clip.file.start", "clip.file.chunk", "clip.file.end":
+      if clipboard.armed { fileClipboardReceiver.handle(m) }
     case "menu":
       if let bundle = m["app"] as? String {
         var forward = m
@@ -823,12 +847,14 @@ extension FusionLocal {
 
   func closed(reason: String = "closed") {
     connected = false
+    fileClipboardSender.cancel()
     media?.stop()
     media = nil
     // A drop after a session was running is likely a blip: the windows stay, and the desktop
     // brings a new token (`activate`) to resume with (docs/v2/fusion.md §4.3).
     // A failed attempt to resume (unreachable, refused) keeps waiting too: the desktop tries again.
     if !stopping, welcomed || suspended, sessionID != nil, reason != "proto", reason != "token" {
+      fileClipboardReceiver.cancelPending()
       welcomed = false
       outputs.values.forEach { $0.receivedPicture = false; $0.controlEnabled = false }
       updateStatus("与 \(hostLabel) 的连接中断，正在重新连接…")
@@ -848,6 +874,7 @@ extension FusionLocal {
       return
     }
     writeExitStatus(reason: reason == "proto" ? "proto" : (stopping ? "stopped" : reason))
+    fileClipboardReceiver.cleanupAll()
     outputs.removeAll()
     windows.removeAll()
     lastWindowSEI.removeAll()

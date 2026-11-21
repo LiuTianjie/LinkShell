@@ -125,12 +125,12 @@ public struct FusionClipboardGuard {
   public func isUnseen(changeCount: Int) -> Bool { armed && changeCount != seen }
 
   /// Whether the pasteboard's current contents should be sent to the other Mac.
-  public mutating func shouldSend(changeCount: Int, types: [String], bytes: Int) -> Bool {
+  public mutating func shouldSend(changeCount: Int, types: [String], bytes: Int, maxBytes: Int = FusionClipboardGuard.maxBytes, allowEmpty: Bool = false) -> Bool {
     guard armed, changeCount != seen else { return false }
     seen = changeCount
     if changeCount == written { return false }
     if types.contains(where: { Self.concealedTypes.contains($0) }) { return false }
-    return bytes > 0 && bytes <= Self.maxBytes
+    return (allowEmpty ? bytes >= 0 : bytes > 0) && bytes <= maxBytes
   }
 
   /// Marks the current contents as already known, so arming does not send what was copied before.

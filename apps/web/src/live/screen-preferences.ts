@@ -52,6 +52,7 @@ export function screenQuery(
   display: number,
   view: ScreenPreferences,
   codecs: readonly { mimeType: string }[],
+  options?: { audio?: boolean },
 ): string {
   const query = new URLSearchParams({
     token,
@@ -65,5 +66,6 @@ export function screenQuery(
     codecs.some((codec) => codec.mimeType.toLowerCase() === "video/h265")
   )
     query.set("codec", "hevc");
+  if (options?.audio) query.set("audio", "1");
   return `?${query}`;
 }

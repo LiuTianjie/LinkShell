@@ -9,6 +9,7 @@ Pod::Spec.new do |s|
   s.source = { git: '' }
   s.static_framework = true
   s.dependency 'ExpoModulesCore'
+  s.frameworks = 'Network', 'UserNotifications'
   s.source_files = '**/*.swift'
   xcconfig = { 'DEFINES_MODULE' => 'YES' }
   # Older Xcode installations can still build the ordinary adaptive layout.

@@ -20,9 +20,6 @@ import { deployment, validateGateway, type Source } from "../config";
 import { ErrorNotice, Modal, useJob } from "./common";
 import { Scan } from "./Scan";
 import { AccountSummary, ReferralCard } from "./AccountMembership";
-import { desktopLogout, isDesktop, openDesktopManagement } from "./desktop";
-import { SignIn } from "./SignIn";
-import { useDesktopSignIn } from "./desktop-sign-in";
 
 export function Connect({ close }: { close: () => void }) {
   const state = useStore(engine.state);
@@ -44,10 +41,6 @@ export function Connect({ close }: { close: () => void }) {
   const [oauthStage, setOAuthStage] = useState<"waiting" | "exchanging">();
   useEffect(() => () => oauth.current?.abort(), []);
   const blocked = job.busy || state.locked;
-  const signIn = useDesktopSignIn(async () => {
-    await engine.connectAccount();
-    close();
-  });
   const pairingLink = decodePairingLink(pairing);
 
   function updatePairing(value: string) {
@@ -58,44 +51,7 @@ export function Connect({ close }: { close: () => void }) {
     job.clear();
   }
 
-  const accountForm = isDesktop ? (
-    state.accountUserId ? (
-      <div className="connect-signed-in">
-        <div className="connect-account-box">
-          <AccountSummary
-            email={state.account}
-            userId={state.accountUserId}
-            disabled={job.busy}
-            onSignOut={() => void job.run(desktopLogout)}
-          />
-        </div>
-        <ReferralCard userId={state.accountUserId} disabled={job.busy} reserveSpace />
-        <div className="connect-panel-actions">
-          <Button
-            className="connect-submit w-full"
-            disabled={blocked}
-            onClick={() =>
-              void job.run(async () => {
-                await engine.connectAccount();
-                close();
-              })
-            }
-          >
-            {job.busy && <LoaderCircle data-icon="inline-start" className="animate-spin" />}
-            刷新电脑列表
-          </Button>
-          <p className="connect-panel-foot">
-            在另一台电脑运行 <code>linkshell login</code> 登录同一账号即可自动显示
-          </p>
-        </div>
-      </div>
-    ) : (
-      <SignIn
-        {...signIn}
-        disabled={blocked}
-      />
-    )
-  ) : state.account ? (
+  const accountForm = state.account ? (
     <div className="connect-signed-in min-w-0">
       <div className="connect-account-box">
         <AccountSummary
@@ -407,14 +363,6 @@ export function Connect({ close }: { close: () => void }) {
       close={close}
       className="connect-dialog"
     >
-      {/* The local computer needs no account; say something only when it is unreachable. */}
-      {isDesktop && state.localError && (
-        <p className="connect-local" data-error>
-          <span>{state.localError}</span>
-          <button type="button" className="connect-local-link" onClick={openDesktopManagement}>本机服务</button>
-          <button type="button" className="connect-local-link" disabled={job.busy} onClick={() => void job.run(() => engine.refreshLocal())}>重新检测</button>
-        </p>
-      )}
       {state.locked && (
         <Alert>
           <AlertTitle>连接正在另一个标签页中使用</AlertTitle>

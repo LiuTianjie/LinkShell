@@ -13,6 +13,7 @@ import {
 import { setRemoteKeysCaptured } from "../bridge/shortcuts";
 import { hasOpenOverlay } from "../bridge/top-layer-registry";
 import { STORAGE_KEYS, readLocal, saveLocal, subscribeStorageReady } from "./storage";
+import { ScreenAudioPlayer } from "./screen-audio";
 import { openWebSocket } from "./transport";
 
 export { DESKTOP_FULLSCREEN_EVENT };
@@ -430,6 +431,8 @@ export interface NativeScreenStatus {
   control?: boolean;
   controlRequested?: boolean;
   controlError?: string;
+  audioAvailable?: boolean;
+  audioMuted?: boolean;
   displayFps?: number;
   pacing?: "smooth" | "immediate";
   exitFullScreen?: boolean;
@@ -493,6 +496,7 @@ export function nativeScreenQuery(
   maxFps: string,
   hevc = false,
   match?: string,
+  audio = false,
 ): string {
   const query = new URLSearchParams({
     token,
@@ -504,6 +508,7 @@ export function nativeScreenQuery(
   });
   if (hevc) query.set("codec", "hevc");
   if (match) query.set("match", match);
+  if (audio) query.set("audio", "1");
   return `/stream?${query}`;
 }
 
@@ -815,6 +820,8 @@ export interface ReceiverOptions {
   target: Omit<ScreenTarget, "paused">;
   active: boolean;
   control: boolean;
+  audio?: boolean;
+  audioPlayer?: ScreenAudioPlayer;
   hevc: boolean;
   /** `viewerScreenMatch()`, when the computer should show its desktop at this screen's resolution. */
   match?: string;
@@ -875,6 +882,8 @@ export class ScreenReceiver {
   private target: Omit<ScreenTarget, "paused">;
   private active: boolean;
   private controlWanted: boolean;
+  private audioEnabled: boolean;
+  private readonly audioPlayer: ScreenAudioPlayer;
   private closed = false;
   private socket?: StreamSocket;
   private socketOpen = false;
@@ -927,6 +936,9 @@ export class ScreenReceiver {
     this.target = options.target;
     this.active = options.active;
     this.controlWanted = options.control;
+    this.audioEnabled = Boolean(options.audio);
+    this.audioPlayer = options.audioPlayer ?? new ScreenAudioPlayer();
+    if (this.audioEnabled) this.audioPlayer.setEnabled(true);
     this.context = options.canvas.getContext("2d");
     this.state = {
       phase: "starting",
@@ -1022,6 +1034,7 @@ export class ScreenReceiver {
     if (this.options.hevc) query.set("codec", "hevc");
     if (this.options.match) query.set("match", this.options.match);
     if (this.options.relayed) query.set("q", "low");
+    if (this.audioEnabled) query.set("audio", "1");
     try {
       const socket = await openWebSocket(
         this.options.streams,
@@ -1031,6 +1044,9 @@ export class ScreenReceiver {
           open: () => {
             this.socketOpen = true;
             for (const message of this.outgoing.splice(0)) this.socket?.send(message);
+            if (this.audioEnabled) {
+              this.sendSocket({ t: "audio", enabled: true });
+            }
             this.later(CAPABILITIES_WAIT_MS, () => {
               if (!this.gate.capabilitiesKnown) {
                 this.gate.assumeLegacy();
@@ -1057,10 +1073,28 @@ export class ScreenReceiver {
     }
   }
 
+  /** Synchronously prepares/resumes AudioContext on user gesture. */
+  unlockAudio(): void {
+    this.audioPlayer.unlock();
+  }
+
+  /** Enables or mutes remote screen audio and notifies the Host stream socket. */
+  setAudio(enabled: boolean): void {
+    const next = Boolean(enabled);
+    if (this.closed) return;
+    const changed = this.audioEnabled !== next;
+    this.audioEnabled = next;
+    this.audioPlayer.setEnabled(next);
+    if (changed) {
+      this.sendSocket({ t: "audio", enabled: next });
+    }
+  }
+
   stop(): void {
     if (this.closed) return;
     this.releaseAll();
     this.closed = true;
+    this.audioPlayer.dispose();
     for (const timer of this.timers) clearTimeout(timer);
     this.timers.clear();
     if (this.statsTimer !== undefined) clearInterval(this.statsTimer);
@@ -1346,14 +1380,19 @@ export class ScreenReceiver {
     };
     pc.ondatachannel = ({ channel }) => {
       if (
-        !["input", "pointer", "cursor", "shape"].includes(channel.label) ||
+        !["input", "pointer", "cursor", "shape", "audio"].includes(channel.label) ||
         this.channels[channel.label]
       ) {
         channel.close();
         return;
       }
       this.channels[channel.label] = channel;
-      if (channel.label === "cursor" || channel.label === "shape") {
+      if (channel.label === "audio") {
+        channel.binaryType = "arraybuffer";
+        channel.onmessage = (event) => {
+          if (this.pc === pc) this.audioPlayer.handleMessage(event.data);
+        };
+      } else if (channel.label === "cursor" || channel.label === "shape") {
         channel.onmessage = (event) => {
           if (
             this.pc !== pc ||

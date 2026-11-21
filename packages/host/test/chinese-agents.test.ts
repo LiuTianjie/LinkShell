@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { AcpDriver, type AcpAgentSpec } from "../src/drivers/acp/driver.js";
-import { ACP_AGENTS, remoteDriver } from "../src/drivers/registry.js";
+import { ACP_AGENTS, defaultDrivers, remoteDriver } from "../src/drivers/registry.js";
 import { startHost, type RunningHost } from "../src/host.js";
 import { connectHost } from "../src/rpc/client.js";
 
@@ -77,6 +77,35 @@ describe("mainstream Chinese ACP agents registry", () => {
     });
     expect(byId.get("iflow")).toMatchObject({ command: "iflow", args: ["--experimental-acp"] });
     expect(byId.get("comate")).toMatchObject({ command: "comate-acp", args: [] });
+  });
+
+  it("resolves defaultDrivers() metadata and ACP capabilities for all 10 Chinese agents plus cline and kilo", async () => {
+    const drivers = defaultDrivers({
+      hostVersion: "test",
+      codexSocket: join(tmpdir(), "codex-unused.sock"),
+      env: { PATH: "" },
+    });
+    const noopHost = {
+      discovered: () => {},
+      missing: () => {},
+      sessionInvalid: () => {},
+      update: () => {},
+      replay: () => {},
+      summary: () => {},
+      interaction: () => {},
+      agentChanged: () => {},
+    };
+    const byId = new Map(drivers.map((driver) => [driver.id, driver]));
+    for (const id of [...CHINESE_AGENT_IDS, "cline", "kilo"]) {
+      const driver = byId.get(id);
+      expect(driver, `defaultDrivers() missing ${id}`).toBeDefined();
+      expect(driver!.tier).toBe("remote");
+      expect(driver!.label.length).toBeGreaterThan(0);
+      expect(driver!.capabilities.acp).toBe(true);
+      const status = await driver!.start(noopHost);
+      expect(status.installed).toBe(false);
+      await driver!.stop();
+    }
   });
 
   it("prevents custom ACP agents from shadowing built-in Chinese agent IDs", () => {

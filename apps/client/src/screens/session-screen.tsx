@@ -35,6 +35,7 @@ import {
 import { quoteForSide } from "@/lib/side-quote";
 import { LinkBase } from "@/lib/links";
 import { describeActionError, useLocale } from "@/lib/locale";
+import { isMcpAppsCapable } from "@/lib/mcp-app";
 import { useActions, useClient, useConnection, useConnectionStatus, useSessionSubscription } from "@/lib/client";
 import { sessionTitle } from "@/lib/describe";
 import { baseName } from "@/lib/format";
@@ -342,6 +343,28 @@ export function SessionContent({
     return () => subscription.remove();
   }, []);
   const git = useGitInfo(summary?.cwd, gitRefresh);
+  const [mcpAppsCount, setMcpAppsCount] = useState(0);
+  const mcpCapable = isMcpAppsCapable(agentInfo?.capabilities.mcpApps, summary?.agent);
+  useEffect(() => {
+    if (!online || !ready || !mcpCapable || !id) {
+      setMcpAppsCount(0);
+      return;
+    }
+    let cancelled = false;
+    void link
+      .call("mcp.apps", { sessionId: id }, 15_000)
+      .then((res) => {
+        if (!cancelled) setMcpAppsCount(Array.isArray(res?.apps) ? res.apps.length : 0);
+      })
+      .catch(() => {
+        if (!cancelled) setMcpAppsCount(0);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, link, mcpCapable, online, ready, turnRunning]);
+  const showMcpEntry = online && (mcpAppsCount > 0 || agentInfo?.capabilities.mcpApps === true);
+  const hasMcpToolbar = mcpAppsCount > 0 && !toolbarActions.some((action) => action.key === "mcp");
   const [forking, setForking] = useState(false);
   const fork = (itemId: string | undefined, worktree: boolean) => {
     if (forking) return;
@@ -565,7 +588,7 @@ export function SessionContent({
                             branch={branch}
                             ownBranch={!!summary.worktree}
                             live={turnActive}
-                            actions={(started ? 1 : 0) + (hasSubagents ? 1 : 0) + (changeCount > 0 ? 1 : 0) + 1}
+                            actions={(started ? 1 : 0) + (hasSubagents ? 1 : 0) + (changeCount > 0 ? 1 : 0) + (hasMcpToolbar ? 1 : 0) + 1}
                           />
                         ),
                 }}
@@ -595,6 +618,17 @@ export function SessionContent({
                           icon: { sf: "plus.forwardslash.minus", md: "difference" } as const,
                           label: `${t("nav.changes")} (${changeCount})`,
                           onPress: openChanges,
+                        },
+                      ]
+                    : []),
+                  ...(hasMcpToolbar
+                    ? [
+                        {
+                          kind: "button" as const,
+                          key: "mcp",
+                          icon: { sf: "puzzlepiece.extension", md: "extension" } as const,
+                          label: pick({ zh: `MCP 应用 (${mcpAppsCount})`, en: `MCP Apps (${mcpAppsCount})`, ja: `MCP アプリ (${mcpAppsCount})` }),
+                          onPress: () => router.push({ pathname: "/session/[id]/mcp", params: { id } }),
                         },
                       ]
                     : []),
@@ -747,6 +781,18 @@ export function SessionContent({
                         icon: { sf: "folder", md: "folder_open" },
                         onPress: () => router.push({ pathname: "/files", params: { path: summary.cwd } }),
                       },
+                      ...(showMcpEntry
+                        ? [
+                            {
+                              section: "look",
+                              title: mcpAppsCount > 0
+                                ? pick({ zh: `MCP 应用（${mcpAppsCount}）`, en: `MCP Apps (${mcpAppsCount})`, ja: `MCP アプリ (${mcpAppsCount})` })
+                                : pick({ zh: "MCP 应用", en: "MCP Apps", ja: "MCP アプリ" }),
+                              icon: { sf: "puzzlepiece.extension", md: "extension" } as const,
+                              onPress: () => router.push({ pathname: "/session/[id]/mcp", params: { id } }),
+                            },
+                          ]
+                        : []),
                       {
                         section: "keep",
                         title: t("session.rename"),

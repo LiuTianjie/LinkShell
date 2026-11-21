@@ -31,6 +31,7 @@ import type { ScreenDisplayInfo, SharedStageProps } from "./stage-types";
 
 interface LiveNativeSession {
   apply(next: NativeScreenTarget): void;
+  setAudio(enabled: boolean): void;
 }
 
 function errorMessageOf(reason: unknown): string {
@@ -57,6 +58,7 @@ export function NativeMetalStage({
   matchResolution,
   pacingChoice,
   controlWanted,
+  audioEnabled = false,
   revision,
   onDisplayChange,
   onExitFullScreen,
@@ -86,6 +88,8 @@ export function NativeMetalStage({
   const smooth = pacingChoice === "smooth";
   const smoothRef = useRef(smooth);
   smoothRef.current = smooth;
+  const audioEnabledRef = useRef(audioEnabled);
+  audioEnabledRef.current = audioEnabled;
 
   const desiredTargetRef = useRef<NativeScreenTarget>({
     display,
@@ -188,6 +192,13 @@ export function NativeMetalStage({
       });
     }
   }, [controlWanted]);
+
+  // Forward audio mute/unmute to native Metal receiver and Host stream socket.
+  useEffect(() => {
+    if (sessionIdRef.current) {
+      liveSessionRef.current?.setAudio(audioEnabled);
+    }
+  }, [audioEnabled]);
 
   // Reset retry counter when manual revision increments.
   useEffect(() => {
@@ -369,6 +380,11 @@ export function NativeMetalStage({
         }
         if (diff.any) sendConfigure(next);
       },
+      setAudio(enabled) {
+        if (!alive) return;
+        postNativeScreen(id, "audio", { muted: !enabled, enabled });
+        sendSignal({ t: "audio", enabled });
+      },
     };
     liveSessionRef.current = sessionHandle;
 
@@ -430,6 +446,7 @@ export function NativeMetalStage({
         overlayOpen: initialOverlayOpen,
         smooth: smoothRef.current,
         fullscreen: callbacksRef.current.fullscreen,
+        audioMuted: !audioEnabledRef.current,
       })
     ) {
       fail("原生屏幕组件不可用");
@@ -462,6 +479,7 @@ export function NativeMetalStage({
               startTarget.maxFps,
               codecChoice === "auto",
               matchResolution ? viewerScreenMatch() : undefined,
+              audioEnabledRef.current,
             ),
             {
               open: () => {
@@ -586,6 +604,8 @@ export function NativeMetalStage({
       controlling: nativeStatus.control === true,
       controlRequested: nativeStatus.controlRequested === true,
       canControl: isLive,
+      audioAvailable: nativeStatus.audioAvailable,
+      audioMuted: nativeStatus.audioMuted,
       taken: error === SCREEN_TAKEN,
       idle: error === SCREEN_IDLE,
       error: error ?? nativeStatus.controlError,

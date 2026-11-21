@@ -20,7 +20,12 @@ import {
   type Identity,
   type RelaySocket,
 } from "@linkshell/wire";
-import { desktopHostWsUrl, desktopPlatform, isElectronDesktop } from "../bridge/desktop-bridge";
+import {
+  desktopHostWsUrl,
+  desktopPlatform,
+  isElectronDesktop,
+  type LanHostEntry,
+} from "../bridge/desktop-bridge";
 import {
   ComputerConnections,
   SessionSubscriptions,
@@ -247,7 +252,9 @@ export class DesktopEngine {
       void this.refreshDesktop();
     }
 
-    for (const item of this.paired) this.relay(item.gateway);
+    for (const item of this.paired) {
+      if (item.gateway !== "direct") this.relay(item.gateway);
+    }
     if (savedSource === "official") {
       await this.connectAccount();
     } else if (savedGateway) {
@@ -652,7 +659,11 @@ export class DesktopEngine {
     if (!this.identity) throw new Error("设备身份尚未就绪");
     const identity = this.identity;
     const local = computer.key === DESKTOP_LOCAL && computer.gateway === DESKTOP_LOCAL;
-    const relay = local ? undefined : this.relay(computer.gateway);
+    const directUrl =
+      !local && computer.gateway === "direct" && computer.key.startsWith("direct:")
+        ? computer.key.slice("direct:".length)
+        : undefined;
+    const relay = local || directUrl ? undefined : this.relay(computer.gateway);
     const tokenKey = STORAGE_KEYS.accessToken(computer.key);
     const link = new HostLink({
       url: computer.key,
@@ -661,6 +672,9 @@ export class DesktopEngine {
           const wsUrl = desktopHostWsUrl();
           if (!wsUrl) throw new Error("桌面连接已失效，请重新打开窗口");
           return new WebSocket(wsUrl) as unknown as SocketLike;
+        }
+        if (directUrl) {
+          return new WebSocket(directUrl) as unknown as SocketLike;
         }
         return new TunnelSocket(relay!, identity, computer.machine);
       },
@@ -686,6 +700,25 @@ export class DesktopEngine {
     streams.stop();
     const connection: Connection = { computer, link, store, streams, sessions };
     const unsubscribe = store.subscribe((state, previous) => {
+      if (directUrl && state.status !== previous.status) {
+        const directOnline = state.status === "online";
+        if (connection.computer.machine.online !== directOnline) {
+          const updatedDirect = {
+            ...connection.computer,
+            machine: { ...connection.computer.machine, online: directOnline },
+          };
+          connection.computer = updatedDirect;
+          this.state.setState((current) => ({
+            computers: current.computers.map((item) =>
+              item.key === computer.key ? updatedDirect : item,
+            ),
+            connection:
+              current.connection?.computer.key === computer.key
+                ? { ...current.connection, computer: updatedDirect }
+                : current.connection,
+          }));
+        }
+      }
       if (state.machine === previous.machine) return;
       if (state.machine?.naming) {
         computerNames.sync(computer, state.machine);
@@ -758,13 +791,88 @@ export class DesktopEngine {
     return computer;
   }
 
+  /** Connects directly in 1 click to an mDNS-discovered LAN machine (or selects an existing online match). */
+  connectLanHost(host: LanHostEntry): Computer {
+    const currentState = this.state.getState();
+    const local = currentState.localComputer;
+    if (
+      local &&
+      (local.machine.id === host.machineId ||
+        (local.relayId && local.relayId === host.machineId))
+    ) {
+      this.select(local);
+      return local;
+    }
+
+    const existing = currentState.computers.find(
+      (item) => item.machine.id === host.machineId,
+    );
+    if (existing && existing.gateway !== "direct" && existing.machine.online) {
+      this.select(existing);
+      return existing;
+    }
+
+    const address = host.addresses[0];
+    const port = host.hostPort ?? (host.port > 0 ? host.port : host.srvPort);
+    if (!address || !port || port <= 0) {
+      if (existing) {
+        this.select(existing);
+        return existing;
+      }
+      throw new Error("该局域网主机未公布直连端口，请通过 6 位配对码或二维码连接");
+    }
+
+    const hostPart = address.includes(":") ? `[${address}]` : address;
+    const wsUrl = `ws://${hostPart}:${port}`;
+    const directKey = `direct:${wsUrl}`;
+    const computer: Computer = {
+      key: directKey,
+      gateway: "direct",
+      machine: {
+        id: host.machineId,
+        name: host.name || host.host || address,
+        namingConfigured: Boolean(host.name),
+        signKey: host.fingerprint || host.machineId,
+        boxKey: "",
+        online: true,
+        via: "paired",
+      },
+    };
+    this.paired = [
+      ...this.paired.filter(
+        (item) =>
+          item.key !== directKey &&
+          !(item.gateway === "direct" && item.machine.id === host.machineId),
+      ),
+      computer,
+    ];
+    saveLocal(STORAGE_KEYS.paired, this.paired);
+    this.state.setState((state) => ({
+      computers: this.mergeComputers(
+        [
+          ...state.computers.filter(
+            (item) =>
+              item.key !== directKey &&
+              !(item.gateway === "direct" && item.machine.id === host.machineId),
+          ),
+          computer,
+        ],
+        state.localComputer,
+      ),
+    }));
+    this.select(computer);
+    return computer;
+  }
+
   async forget(computer: Computer): Promise<void> {
     if (computer.key === DESKTOP_LOCAL) {
       throw new Error("本机无需配对，请在本机管理中查看或停止服务");
     }
-    await this.relay(computer.gateway).request("machines.forget", {
-      machineId: computer.machine.id,
-    });
+    if (computer.gateway !== "direct") {
+      await this.relay(computer.gateway).request("machines.forget", {
+        machineId: computer.machine.id,
+      });
+    }
     this.paired = this.paired.filter((item) => item.key !== computer.key);
     saveLocal(STORAGE_KEYS.paired, this.paired);
     saveLocal(STORAGE_KEYS.accessToken(computer.key), undefined);

@@ -11,7 +11,9 @@ import { ClientProvider } from "@/lib/client";
 import { ScreenSessionProvider } from "@/lib/screen-session";
 import { AndroidAttentionSync } from "@/components/android-attention-sync";
 import { IOSAttentionSync } from "@/components/ios-attention-sync";
+import { LanDiscoverySync } from "@/components/lan-discovery-sync";
 import { LiveActivityActionNavigation } from "@/components/live-activity-action-navigation";
+import { NotificationActionSync } from "@/components/notification-action-sync";
 import { ShortcutUrlHandler } from "@/components/shortcut-url-handler";
 import { useLocale } from "@/lib/locale";
 import { colors, palette } from "@/theme/colors";
@@ -40,6 +42,8 @@ export default function RootLayout() {
             {Platform.OS === "ios" ? <IOSAttentionSync /> : null}
             {Platform.OS === "ios" ? <LiveActivityActionNavigation /> : null}
             {Platform.OS === "android" ? <AndroidAttentionSync /> : null}
+            <LanDiscoverySync />
+            <NotificationActionSync />
             <ShortcutUrlHandler />
             {/* Android's literal theme colors must reach memoized rows and native
                 views too; rebuild the tree when the system appearance changes. */}
@@ -58,6 +62,10 @@ export default function RootLayout() {
                 <Stack.Screen
                   name="session/[id]/changes"
                   options={{ title: t("nav.changes"), headerTransparent: Platform.OS === "ios", headerShadowVisible: false }}
+                />
+                <Stack.Screen
+                  name="session/[id]/mcp"
+                  options={{ title: pick({ zh: "MCP 应用", en: "MCP Apps", ja: "MCP アプリ" }) }}
                 />
                 <Stack.Screen
                   name="session/[id]/agent/[call]"

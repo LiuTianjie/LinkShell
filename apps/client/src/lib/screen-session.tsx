@@ -1,24 +1,44 @@
 import { createContext, use, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { describeActionError } from "@/lib/locale";
-import { AppState, Platform, View } from "react-native";
+import { AppState, View } from "react-native";
 import Animated from "react-native-reanimated";
 import { WebView, type WebViewMessageEvent } from "react-native-webview";
 import type { HostLink } from "@linkshell/client-core";
 import { NativeScreenPane } from "@/components/native-screen-pane";
 import { ScreenConnectionLoading } from "@/components/screen-connection-loading";
-import { nativeScreenAvailable } from "../../modules/link-screen";
+import { nativeScreenAvailable, type ScreenState } from "../../modules/link-screen";
 import { useAccount } from "./account";
 import { useClient, useConnection, useStreamPath } from "./client";
 import { forwardPort, type Forward } from "./preview";
 import { ScreenSessionLease, ScreenSessionPauseWatchdog } from "./screen-session-lease";
-import type { ScreenPlaybackMode } from "./screen-playback";
-import { isScreenPacing, isScreenWidth, loadScreenMode, loadScreenPacing, loadScreenWidth, saveScreenMode, saveScreenPacing, saveScreenWidth, type ScreenMode } from "./settings";
+import {
+  buildScreenViewerQuery,
+  isScreenAudioAvailable,
+  resolveScreenPlaybackFailure,
+  screenAudioBridgeInstallScript,
+  screenAudioInjectScript,
+  type ScreenPlaybackMode,
+} from "./screen-playback";
+import {
+  isScreenPacing,
+  isScreenWidth,
+  loadScreenAudio,
+  loadScreenMode,
+  loadScreenPacing,
+  loadScreenWidth,
+  saveScreenAudio,
+  saveScreenMode,
+  saveScreenPacing,
+  saveScreenWidth,
+  type ScreenMode,
+} from "./settings";
 
 export interface ScreenViewport { x: number; y: number; width: number; height: number }
 
 export interface ScreenPageMessage {
   type?: string;
   on?: boolean;
+  enabled?: boolean;
   mode?: string;
   kind?: string;
   list?: unknown;
@@ -58,12 +78,16 @@ interface ScreenSessionContextValue {
   display: number | null;
   mode: ScreenMode;
   playback: ScreenPlaybackMode;
+  audio: boolean;
+  audioAvailable: boolean;
   attach(owner: object): void;
   detach(owner: object): void;
   present(owner: object, presentation: ScreenPresentation): void;
   inject(owner: object, script: string, generation?: number): void;
   focus(owner: object): void;
   selectDisplay(display: number): void;
+  setAudio(enabled: boolean): void;
+  toggleAudio(): void;
   retry(): void;
 }
 
@@ -94,8 +118,12 @@ export function ScreenSessionProvider({ children }: { children: ReactNode }) {
   const [display, setDisplay] = useState<number | null>(null);
   const [width, setWidth] = useState(loadScreenWidth);
   const [mode, setMode] = useState(loadScreenMode);
+  const [audio, setAudioState] = useState(loadScreenAudio);
+  const [nativeAudioAvailable, setNativeAudioAvailable] = useState<boolean | undefined>(undefined);
   // Read when a viewer starts: a new choice is a new negotiation, so it takes a new viewer.
   const pacing = useRef(loadScreenPacing());
+  const audioRef = useRef(audio);
+  audioRef.current = audio;
   const [playback, setPlayback] = useState(initialPlayback);
   const [presentation, setPresentation] = useState<ScreenPresentation | null>(null);
   const [origin, setOrigin] = useState({ x: 0, y: 0 });
@@ -121,6 +149,7 @@ export function ScreenSessionProvider({ children }: { children: ReactNode }) {
   const reset = useCallback(() => {
     pauseWatchdog.clear();
     configurable.current = null;
+    setNativeAudioAvailable(undefined);
     lease.reset();
   }, [lease, pauseWatchdog]);
 
@@ -194,6 +223,18 @@ export function ScreenSessionProvider({ children }: { children: ReactNode }) {
     setDisplay(next);
     if (configurable.current === false) reset();
   }, [reset]);
+  const setAudio = useCallback((enabled: boolean) => {
+    audioRef.current = enabled;
+    setAudioState(enabled);
+    saveScreenAudio(enabled);
+    const activeViewer = lease.getSnapshot().resource;
+    if (activeViewer && activeViewer.playback !== "native") {
+      web.current?.injectJavaScript(screenAudioInjectScript(enabled));
+    }
+  }, [lease]);
+  const toggleAudio = useCallback(() => {
+    setAudio(!audioRef.current);
+  }, [setAudio]);
   const retry = useCallback(() => {
     setFailure(null);
     // After an idle end the path that worked is still the one that works: no waiting for the others to fail again.
@@ -217,13 +258,17 @@ export function ScreenSessionProvider({ children }: { children: ReactNode }) {
         const target = { active: true, display: targetDisplay, width: desired.current.width, maxFps: 120 };
         // These are the initial target only. The immutable source object survives every later
         // configuration, including the native receiver which starts before the page bridge.
-        const query = new URLSearchParams({ token, video: playback === "relay" ? "0" : "1", display: String(targetDisplay), width: target.width, mode: desired.current.mode });
-        if (via === "relay" && computer.kind !== "direct") query.set("q", "low");
-        if (Platform.OS === "ios" && playback !== "relay") query.set("fallback", "relay");
-        // Read by the page's own receiver and by the native one, which both make the answer.
-        if (pacing.current === "smooth") query.set("pacing", "smooth");
-        // This app keeps an idle end final and takes a TURN login: the host may lend the picture its relay.
-        query.set("turn", "1");
+        const query = buildScreenViewerQuery({
+          token,
+          playback,
+          display: targetDisplay,
+          width: target.width,
+          mode: desired.current.mode,
+          via,
+          isDirectComputer: computer.kind === "direct",
+          pacing: pacing.current,
+          audio: audioRef.current,
+        });
         const initialChrome = route.current?.chrome ?? "{}";
         const viewer: Viewer = {
           link, accountId, generation, forward, displays, playback, via, initialTarget: { display: targetDisplay, width: target.width },
@@ -258,8 +303,14 @@ export function ScreenSessionProvider({ children }: { children: ReactNode }) {
     // Ended for being unused: the next path would only start the picture again by itself.
     if (description === SCREEN_IDLE) resumeWith.current = failed.playback;
     // Another device has the screen now: trying the next path would only take it back from them.
-    if (failed.playback === "relay" || Platform.OS !== "ios" || description === SCREEN_TAKEN || description === SCREEN_IDLE) setFailure(description || "屏幕显示已中断，请重新连接");
-    else setPlayback(failed.playback === "native" ? "standard" : "relay");
+    const resolution = resolveScreenPlaybackFailure({
+      failedPlayback: failed.playback,
+      description,
+      takenMessage: SCREEN_TAKEN,
+      idleMessage: SCREEN_IDLE,
+    });
+    if (resolution.failure) setFailure(resolution.failure);
+    else if (resolution.nextPlayback) setPlayback(resolution.nextPlayback);
     reset();
   }, [lease, reset]);
 
@@ -297,8 +348,13 @@ export function ScreenSessionProvider({ children }: { children: ReactNode }) {
       if (message.session?.t === "configured" && message.session.paused === true) pauseWatchdog.acknowledge(current.generation);
     }
     if (message.type === "nativeUnavailable") unavailable(current);
-    else if (message.type === "screenFallback" && Platform.OS === "ios") unavailable(current);
+    else if (message.type === "screenFallback") unavailable(current);
     else if (message.type === "screenLegacy") enableLegacy(current);
+    else if (message.type === "audio" && typeof message.enabled === "boolean") {
+      audioRef.current = message.enabled;
+      setAudioState(message.enabled);
+      saveScreenAudio(message.enabled);
+    }
     else if (message.type === "screenSession" && message.session?.t === "capabilities") {
       const supported = message.session.version === 1 && message.session.configure === true;
       configurable.current = supported;
@@ -338,10 +394,18 @@ export function ScreenSessionProvider({ children }: { children: ReactNode }) {
 
   const onLoaded = useCallback((current: Viewer) => {
     if (lease.getSnapshot().resource !== current) return;
-    web.current?.injectJavaScript(`${current.playback === "native" ? 'if (!window.linkshellNative) window.ReactNativeWebView.postMessage(JSON.stringify({type:"nativeUnavailable"}));' : ""} if (typeof window.linkshellSession !== "function") window.ReactNativeWebView.postMessage(JSON.stringify({type:"screenLegacy"})); true;`);
+    const audioBridge = current.playback !== "native" ? screenAudioBridgeInstallScript() : "";
+    const audioSync = current.playback !== "native" && audioRef.current ? screenAudioInjectScript(true) : "";
+    web.current?.injectJavaScript(`${current.playback === "native" ? 'if (!window.linkshellNative) window.ReactNativeWebView.postMessage(JSON.stringify({type:"nativeUnavailable"}));' : ""} if (typeof window.linkshellSession !== "function") window.ReactNativeWebView.postMessage(JSON.stringify({type:"screenLegacy"})); ${audioBridge} ${audioSync} true;`);
     sendChrome();
     sendSession(lease.getSnapshot().active && AppState.currentState === "active");
   }, [lease, sendChrome, sendSession]);
+
+  const onNativeState = useCallback((state: ScreenState) => {
+    if (typeof state.audioAvailable === "boolean") {
+      setNativeAudioAvailable(state.audioAvailable);
+    }
+  }, []);
 
   const measureRoot = useCallback(() => root.current?.measureInWindow((x, y) => {
     setOrigin((previous) => previous.x === x && previous.y === y ? previous : { x, y });
@@ -352,7 +416,11 @@ export function ScreenSessionProvider({ children }: { children: ReactNode }) {
   const clipRight = Math.min((viewport?.width ?? 0) - clipLeft, Math.max(0, presentation?.clipInsets.right ?? 0));
   const visible = active && viewport !== null && viewport !== undefined && !failure;
   const preparing = preparingGeneration === snapshot.generation;
-  const value = useMemo<ScreenSessionContextValue>(() => ({ viewer, failure, preparing, generation: snapshot.generation, display, mode, playback, attach, detach, present, inject, focus, selectDisplay, retry }), [viewer, failure, preparing, snapshot.generation, display, mode, playback, attach, detach, present, inject, focus, selectDisplay, retry]);
+  const audioAvailable = isScreenAudioAvailable(playback, nativeAudioAvailable);
+  const value = useMemo<ScreenSessionContextValue>(
+    () => ({ viewer, failure, preparing, generation: snapshot.generation, display, mode, playback, audio, audioAvailable, attach, detach, present, inject, focus, selectDisplay, setAudio, toggleAudio, retry }),
+    [viewer, failure, preparing, snapshot.generation, display, mode, playback, audio, audioAvailable, attach, detach, present, inject, focus, selectDisplay, setAudio, toggleAudio, retry],
+  );
 
   return <ScreenSessionContext value={value}>
     <View ref={root} collapsable={false} onLayout={measureRoot} style={{ flex: 1 }}>
@@ -366,7 +434,7 @@ export function ScreenSessionProvider({ children }: { children: ReactNode }) {
       >
         {/* Keep the receiver's full frame so clipping never changes video or pointer coordinates. */}
         <Animated.View style={[{ position: "absolute", left: -clipLeft, top: -clipTop, width: viewport?.width ?? 1, height: viewport?.height ?? 1, backgroundColor: "#000000" }, presentation?.keyboardLift]}>
-          <PersistentScreenSurface key={viewer.generation} viewer={viewer} active={active} web={web} onMessage={onMessage} onUnavailable={unavailable} onLoaded={onLoaded} onLoading={onLoading} />
+          <PersistentScreenSurface key={viewer.generation} viewer={viewer} active={active} audio={audio} web={web} onMessage={onMessage} onNativeState={onNativeState} onUnavailable={unavailable} onLoaded={onLoaded} onLoading={onLoading} />
           {visible && readyGeneration !== viewer.generation ? <View style={{ position: "absolute", inset: 0, backgroundColor: "#08090e" }}>
             <ScreenConnectionLoading key={viewer.generation} preparing onRetry={retry} top={clipTop} bottom={0} />
           </View> : null}
@@ -376,11 +444,13 @@ export function ScreenSessionProvider({ children }: { children: ReactNode }) {
   </ScreenSessionContext>;
 }
 
-function PersistentScreenSurface({ viewer, active, web, onMessage, onUnavailable, onLoaded, onLoading }: {
+function PersistentScreenSurface({ viewer, active, audio, web, onMessage, onNativeState, onUnavailable, onLoaded, onLoading }: {
   viewer: Viewer;
   active: boolean;
+  audio: boolean;
   web: React.RefObject<WebView | null>;
   onMessage(viewer: Viewer, event: WebViewMessageEvent): void;
+  onNativeState(state: ScreenState): void;
   onUnavailable(viewer: Viewer, description?: string): void;
   onLoaded(viewer: Viewer): void;
   onLoading(viewer: Viewer): void;
@@ -411,7 +481,7 @@ function PersistentScreenSurface({ viewer, active, web, onMessage, onUnavailable
     style={{ flex: 1, backgroundColor: viewer.playback === "native" ? "transparent" : "#000000" }}
     containerStyle={{ backgroundColor: viewer.playback === "native" ? "transparent" : "#000000" }}
   />;
-  return viewer.playback === "native" ? <NativeScreenPane url={viewer.source.uri} active={active} onUnavailable={(message) => onUnavailable(viewer, message)}>{page}</NativeScreenPane> : page;
+  return viewer.playback === "native" ? <NativeScreenPane url={viewer.source.uri} active={active} audio={audio} onState={onNativeState} onUnavailable={(message) => onUnavailable(viewer, message)}>{page}</NativeScreenPane> : page;
 }
 
 export function useScreenSession() {

@@ -3,7 +3,6 @@ import { useStore } from "zustand";
 import type { SessionSummary } from "@linkshell/wire";
 import { LOCALE_LABELS, groupProjects, type I18nKey } from "@linkshell/client-core";
 import {
-  AppWindowMac,
   Archive,
   Cpu,
   Layers3,
@@ -16,11 +15,9 @@ import {
   MessageSquarePlus,
   Monitor,
   Moon,
-  PanelLeft,
   PanelRight,
   Plus,
   RefreshCw,
-  Settings2,
   ShieldCheck,
   SlidersHorizontal,
   Sun,
@@ -30,18 +27,16 @@ import {
   TextCursorInput,
 } from "lucide-react";
 import { engine, type Computer, type Connection } from "../live/engine";
-import { AgentMark, baseName, titleOf } from "../live/common";
+import { AgentMark, agentLabel, baseName, titleOf } from "../live/common";
 import { computerName, computerNames } from "../live/computer-names";
-import { DESKTOP_LOCAL, isDesktop, isElectronDesktop, isWindowsDesktop, openDesktopManagement } from "../live/desktop";
-import { connectAndStartComputerFusion } from "../live/fusion";
 import {
-  desktopModeShortcuts,
-  desktopShortcuts,
-  sendDesktopCommand,
+  isApplePlatform,
+  sendWorkspaceCommand,
   shiftTabShortcut,
   shortcutText,
-  type DesktopShortcut,
-} from "../live/desktop-commands";
+  workspaceShortcuts,
+  type WorkspaceShortcut,
+} from "../live/workspace-commands";
 import { ProjectOverview, type ProjectSource } from "../live/project-overview";
 import type { CrossComputerProject } from "../live/cross-computer-projects";
 import { sessionNeedsAttention, waitingLabel } from "../live/session-list";
@@ -112,6 +107,7 @@ export function buildCommandSessionEntries(
         session.cwd,
         preview,
         computerLabel,
+        agentLabel(session.agent),
         session.agent,
         session.id,
       ]
@@ -212,7 +208,7 @@ export function CommandCenter({
                     newSessionOn={(computer, selected, cwd) =>
                       run(() => {
                         if (!selected) selectComputer(computer);
-                        sendDesktopCommand({ command: "new-session", cwd });
+                        sendWorkspaceCommand({ command: "new-session", cwd });
                       })
                     }
                     openProjectsOn={(computer, selected) =>
@@ -223,37 +219,27 @@ export function CommandCenter({
               </ProjectOverview>
             )}
             <CommandGroup heading="操作">
-              <CommandItem value="新建会话 new session" disabled={!connection} onSelect={() => run(() => sendDesktopCommand({ command: "new-session" }))}>
-                <MessageSquarePlus />新建会话<Shortcut shortcut={desktopShortcuts.newSession} />
+              <CommandItem value="新建会话 new session" disabled={!connection} onSelect={() => run(() => sendWorkspaceCommand({ command: "new-session" }))}>
+                <MessageSquarePlus />新建会话<Shortcut shortcut={workspaceShortcuts.newSession} />
               </CommandItem>
-              <CommandItem value="聚焦输入框 focus composer input" disabled={!connection} onSelect={() => run(() => sendDesktopCommand({ command: "composer", target: "focus" }))}>
-                <TextCursorInput />聚焦输入框<Shortcut shortcut={desktopShortcuts.focusComposer} />
+              <CommandItem value="聚焦输入框 focus composer input" disabled={!connection} onSelect={() => run(() => sendWorkspaceCommand({ command: "composer", target: "focus" }))}>
+                <TextCursorInput />聚焦输入框<Shortcut shortcut={workspaceShortcuts.focusComposer} />
               </CommandItem>
-              <CommandItem value="选择模型 model picker" disabled={!connection} onSelect={() => run(() => sendDesktopCommand({ command: "composer", target: "model" }))}>
-                <Cpu />选择模型<Shortcut shortcut={desktopShortcuts.modelPicker} />
+              <CommandItem value="选择模型 model picker" disabled={!connection} onSelect={() => run(() => sendWorkspaceCommand({ command: "composer", target: "model" }))}>
+                <Cpu />选择模型<Shortcut shortcut={workspaceShortcuts.modelPicker} />
               </CommandItem>
-              <CommandItem value="切换模式与计划 mode plan permission" disabled={!connection} onSelect={() => run(() => sendDesktopCommand({ command: "composer", target: "mode" }))}>
-                <ShieldCheck />切换模式与计划<Shortcut shortcut={desktopShortcuts.modePicker} />
+              <CommandItem value="切换模式与计划 mode plan permission" disabled={!connection} onSelect={() => run(() => sendWorkspaceCommand({ command: "composer", target: "mode" }))}>
+                <ShieldCheck />切换模式与计划<Shortcut shortcut={workspaceShortcuts.modePicker} />
               </CommandItem>
-              <CommandItem value="调整推理强度 effort reasoning" disabled={!connection} onSelect={() => run(() => sendDesktopCommand({ command: "composer", target: "effort" }))}>
-                <SlidersHorizontal />调整推理强度<Shortcut shortcut={desktopShortcuts.effortPicker} />
+              <CommandItem value="调整推理强度 effort reasoning" disabled={!connection} onSelect={() => run(() => sendWorkspaceCommand({ command: "composer", target: "effort" }))}>
+                <SlidersHorizontal />调整推理强度<Shortcut shortcut={workspaceShortcuts.effortPicker} />
               </CommandItem>
-              <CommandItem value="打开终端 terminal" disabled={!connection} onSelect={() => run(() => sendDesktopCommand({ command: "inspector", panel: "terminal" }))}>
-                <Terminal />在当前会话打开终端<Shortcut shortcut={desktopShortcuts.terminal} />
+              <CommandItem value="打开终端 terminal" disabled={!connection} onSelect={() => run(() => sendWorkspaceCommand({ command: "inspector", panel: "terminal" }))}>
+                <Terminal />在当前会话打开终端<Shortcut shortcut={workspaceShortcuts.terminal} />
               </CommandItem>
-              <CommandItem value="检查器 inspector 变更 diff" onSelect={() => run(() => sendDesktopCommand({ command: "inspector" }))}>
-                <PanelRight />显示或隐藏检查器<Shortcut shortcut={desktopShortcuts.toggleInspector} />
+              <CommandItem value="检查器 inspector 变更 diff" onSelect={() => run(() => sendWorkspaceCommand({ command: "inspector" }))}>
+                <PanelRight />显示或隐藏检查器<Shortcut shortcut={workspaceShortcuts.toggleInspector} />
               </CommandItem>
-              {isDesktop && (
-                <CommandItem value="侧栏 sidebar" onSelect={() => run(() => sendDesktopCommand({ command: "toggle-sidebar" }))}>
-                  <PanelLeft />显示或隐藏侧栏<Shortcut shortcut={desktopShortcuts.toggleSidebar} />
-                </CommandItem>
-              )}
-              {isElectronDesktop && !isWindowsDesktop && connection && connection.computer.key !== DESKTOP_LOCAL && (
-                <CommandItem value="融合模式 fusion mode 应用窗口" onSelect={() => run(() => void connectAndStartComputerFusion(connection.computer.key))}>
-                  <AppWindowMac />开启融合模式
-                </CommandItem>
-              )}
               <CommandItem value="刷新 reload refresh" disabled={!connection} onSelect={() => run(() => { void connection?.store.getState().refresh().catch(engine.report); })}>
                 <RefreshCw />刷新会话列表
               </CommandItem>
@@ -270,11 +256,6 @@ export function CommandCenter({
                   </CommandItem>
                 );
               })}
-              {isElectronDesktop && (
-                <CommandItem value="设置与本机服务 本机管理 management settings preferences 设置" onSelect={() => run(() => openDesktopManagement())}>
-                  <Settings2 />设置与本机服务<CommandShortcut>{shortcutText(desktopShortcuts.settings)}</CommandShortcut>
-                </CommandItem>
-              )}
             </CommandGroup>
             <CommandGroup heading="电脑">
               {state.computers.map((computer) => (
@@ -313,16 +294,13 @@ export function CommandCenter({
             <DialogDescription>控制远程桌面时，按键会发给那台电脑。</DialogDescription>
           </DialogHeader>
           <dl>
-            {Object.values(desktopShortcuts).map((shortcut) => (
+            {Object.values(workspaceShortcuts).map((shortcut) => (
               <div key={shortcut.label}><dt>{shortcut.label}</dt><dd><kbd>{shortcutText(shortcut)}</kbd></dd></div>
             ))}
             <div><dt>{shiftTabShortcut.label}</dt><dd><kbd>{shortcutText(shiftTabShortcut)}</kbd></dd></div>
-            {isElectronDesktop && Object.values(desktopModeShortcuts).map((shortcut) => (
-              <div key={shortcut.label}><dt>{shortcut.label}</dt><dd><kbd>{shortcutText(shortcut)}</kbd></dd></div>
-            ))}
             <div><dt>发送消息</dt><dd><kbd>Enter</kbd></dd></div>
-            <div><dt>换行</dt><dd><kbd>{isWindowsDesktop ? "Shift+Enter" : "⇧Enter"}</kbd></dd></div>
-            <div><dt>Agent 工作时立即发送</dt><dd><kbd>{isWindowsDesktop ? "Ctrl+Enter" : "⌘Enter"}</kbd></dd></div>
+            <div><dt>换行</dt><dd><kbd>{isApplePlatform() ? "⇧Enter" : "Shift+Enter"}</kbd></dd></div>
+            <div><dt>Agent 工作时立即发送</dt><dd><kbd>{isApplePlatform() ? "⌘Enter" : "Ctrl+Enter"}</kbd></dd></div>
           </dl>
         </DialogContent>
       </Dialog>
@@ -330,7 +308,7 @@ export function CommandCenter({
   );
 }
 
-function Shortcut({ shortcut }: { shortcut: DesktopShortcut }) {
+function Shortcut({ shortcut }: { shortcut: WorkspaceShortcut }) {
   return <CommandShortcut>{shortcutText(shortcut)}</CommandShortcut>;
 }
 

@@ -115,6 +115,22 @@ export interface RemoteCopy {
   screenKeysCaptureLabel: string;
   screenKeysCapturedOn: string;
   screenKeysCapturedOff: string;
+  screenAudioOn: string;
+  screenAudioMuted: string;
+  screenAudioEnabledNote: string;
+  screenAudioMutedNote: string;
+  screenSystemShortcutCaptureLabel: string;
+  screenSystemShortcutEscapeHint: string;
+  screenSystemShortcutCapturedOn: string;
+  screenSystemShortcutCapturedOff: string;
+  screenSystemShortcutUnavailable: string;
+  screenDropUploadTitle: string;
+  screenDropUploadDesc: string;
+  screenUploadProgress: (index: number, total: number, name: string) => string;
+  screenUploadComplete: (count: number, dir: string) => string;
+  screenUploadPartialFailed: (uploaded: number, failed: number, dir: string) => string;
+  screenUploadFailed: (reason: string) => string;
+  screenUploadTooLarge: (name: string) => string;
   screenToolsLabel: string;
   screenPasteToRemote: string;
   screenCopyFromRemote: string;
@@ -282,6 +298,22 @@ const ZH_COPY = (locale: Locale): RemoteCopy => ({
   screenKeysCaptureLabel: "系统快捷键转发",
   screenKeysCapturedOn: "系统快捷键已转发至远端",
   screenKeysCapturedOff: "保留系统快捷键给本机",
+  screenAudioOn: "声音已开启",
+  screenAudioMuted: "已静音（点击开启声音）",
+  screenAudioEnabledNote: "已开启远端声音",
+  screenAudioMutedNote: "远端声音已静音",
+  screenSystemShortcutCaptureLabel: "捕获系统快捷键",
+  screenSystemShortcutEscapeHint: "紧急退出：⌃⌘F / ⌃⌥⌘Esc",
+  screenSystemShortcutCapturedOn: "已接管系统快捷键（紧急退出：⌃⌘F 或 ⌃⌥⌘Esc）",
+  screenSystemShortcutCapturedOff: "已恢复本机系统快捷键",
+  screenSystemShortcutUnavailable: "系统快捷键捕获不可用",
+  screenDropUploadTitle: "松开即可上传文件到远端电脑",
+  screenDropUploadDesc: "文件将上传到远端 Desktop 或用户目录",
+  screenUploadProgress: (index, total, name) => `正在上传 (${index}/${total})：${name}`,
+  screenUploadComplete: (count, dir) => `已上传 ${count} 个文件至 ${dir}`,
+  screenUploadPartialFailed: (uploaded, failed, dir) => `已上传 ${uploaded} 个文件至 ${dir}，${failed} 个失败`,
+  screenUploadFailed: (reason) => `文件上传失败：${reason}`,
+  screenUploadTooLarge: (name) => `文件「${name}」超过 512 MB 上传上限，已跳过`,
   screenToolsLabel: "剪贴板与隐私",
   screenPasteToRemote: "发送本机剪贴板至远端",
   screenCopyFromRemote: "读取远端剪贴板至本机",
@@ -470,6 +502,22 @@ const EN_COPY = (locale: Locale): RemoteCopy => ({
   screenKeysCaptureLabel: "Forward system shortcuts",
   screenKeysCapturedOn: "System shortcuts forwarded to remote",
   screenKeysCapturedOff: "Keep system shortcuts on local computer",
+  screenAudioOn: "Sound On",
+  screenAudioMuted: "Muted (Click to Unmute)",
+  screenAudioEnabledNote: "Remote audio enabled",
+  screenAudioMutedNote: "Remote audio muted",
+  screenSystemShortcutCaptureLabel: "Capture System Shortcuts",
+  screenSystemShortcutEscapeHint: "Escape: ⌃⌘F / ⌃⌥⌘Esc",
+  screenSystemShortcutCapturedOn: "System shortcuts captured (Escape: ⌃⌘F or ⌃⌥⌘Esc)",
+  screenSystemShortcutCapturedOff: "System shortcuts restored to this Mac",
+  screenSystemShortcutUnavailable: "System shortcut capture is unavailable",
+  screenDropUploadTitle: "Drop files to upload to the remote computer",
+  screenDropUploadDesc: "Uploads into the remote Desktop or home directory",
+  screenUploadProgress: (index, total, name) => `Uploading (${index}/${total}): ${name}`,
+  screenUploadComplete: (count, dir) => `Uploaded ${count} file(s) to ${dir}`,
+  screenUploadPartialFailed: (uploaded, failed, dir) => `Uploaded ${uploaded} file(s) to ${dir}; ${failed} failed`,
+  screenUploadFailed: (reason) => `Upload failed: ${reason}`,
+  screenUploadTooLarge: (name) => `“${name}” exceeds the 512 MB upload limit and was skipped`,
   screenToolsLabel: "Clipboard & Privacy",
   screenPasteToRemote: "Send Clipboard to Remote",
   screenCopyFromRemote: "Copy Remote Clipboard",
@@ -601,6 +649,25 @@ const JA_COPY = (locale: Locale): RemoteCopy => ({
   screenControlViewOnly: "表示のみ",
   screenFullscreenEnter: "フルスクリーン",
   screenFullscreenExit: "フルスクリーン終了",
+  screenKeysCaptureLabel: "システムショートカットを転送",
+  screenKeysCapturedOn: "システムショートカットをリモートへ転送しています",
+  screenKeysCapturedOff: "システムショートカットをローカルに保持します",
+  screenAudioOn: "音声オン",
+  screenAudioMuted: "ミュート中（クリックで音声オン）",
+  screenAudioEnabledNote: "リモート音声をオンにしました",
+  screenAudioMutedNote: "リモート音声をミュートしました",
+  screenSystemShortcutCaptureLabel: "システムショートカットを捕捉",
+  screenSystemShortcutEscapeHint: "緊急解除: ⌃⌘F / ⌃⌥⌘Esc",
+  screenSystemShortcutCapturedOn: "システムショートカットを捕捉中（緊急解除: ⌃⌘F または ⌃⌥⌘Esc）",
+  screenSystemShortcutCapturedOff: "システムショートカットをこの Mac に戻しました",
+  screenSystemShortcutUnavailable: "システムショートカットの捕捉は利用できません",
+  screenDropUploadTitle: "ドロップしてリモートコンピュータへアップロード",
+  screenDropUploadDesc: "リモートの Desktop またはホームディレクトリへ送信します",
+  screenUploadProgress: (index, total, name) => `アップロード中 (${index}/${total})：${name}`,
+  screenUploadComplete: (count, dir) => `${count} 件のファイルを ${dir} へアップロードしました`,
+  screenUploadPartialFailed: (uploaded, failed, dir) => `${uploaded} 件を ${dir} へアップロードしました（${failed} 件失敗）`,
+  screenUploadFailed: (reason) => `アップロードに失敗しました：${reason}`,
+  screenUploadTooLarge: (name) => `「${name}」は 512 MB の上限を超えているためスキップしました`,
 });
 
 export function getRemoteCopy(locale: Locale = getDesktopLocale()): RemoteCopy {

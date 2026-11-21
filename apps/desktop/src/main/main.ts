@@ -16,6 +16,7 @@ import { fusionSlug, isFusionSlug, pickDirectFusionHost } from "./fusion-probe.j
 import { FusionElectronHub, fusionIconFile } from "./fusion/electron-hub.js";
 import { KeepAwake, normalizeKeepAwakeMode } from "./keep-awake.js";
 import { macUpdatePreparation } from "./mac-update-preparation.js";
+import { MdnsLanBrowser } from "./mdns-browser.js";
 import { MenuBar, updateFound, updateLabel, type MenuBarEntry, type MenuBarEvent } from "./menubar.js";
 import { native, type NativeModule } from "./native.js";
 import { WorkspacePolicy } from "./policy.js";
@@ -52,6 +53,36 @@ let tray: Tray | undefined;
 let menuBar: MenuBar | undefined;
 let nativeModule: NativeModule | undefined;
 let visible = false;
+let systemShortcutCaptured = false;
+const mdnsBrowser = new MdnsLanBrowser({
+  log: (line) => console.log(line),
+});
+mdnsBrowser.onChange((hosts) => {
+  send("linkshell-desktop-lan-hosts", hosts);
+});
+
+function setSystemShortcutCaptureEnabled(enabled: boolean): boolean {
+  if (enabled && MAC && nativeModule) {
+    const active = Boolean(nativeModule.setSystemShortcutCapture(true));
+    systemShortcutCaptured = active;
+    return active;
+  }
+  nativeModule?.setSystemShortcutCapture(false);
+  const changed = systemShortcutCaptured;
+  systemShortcutCaptured = false;
+  if (changed) {
+    send("linkshell-desktop-shortcut-capture", { captured: false });
+  }
+  return false;
+}
+
+function resetSystemShortcutCapture(): void {
+  if (systemShortcutCaptured) {
+    setSystemShortcutCaptureEnabled(false);
+  } else {
+    nativeModule?.setSystemShortcutCapture(false);
+  }
+}
 /** The workspace document has loaded and mounted: commands can be delivered to it. */
 let pageReady = false;
 let quitting = false;
@@ -273,7 +304,7 @@ function createWindow() {
     },
   });
   if (state.maximized) window.maximize();
-  window.on("closed", () => { clearPageReadyTimer(); pageReady = false; nativeModule?.setImmersiveFullScreen(false); nativeModule?.screenStop(); nativeScreenShown = false; });
+  window.on("closed", () => { clearPageReadyTimer(); pageReady = false; resetSystemShortcutCapture(); nativeModule?.setImmersiveFullScreen(false); nativeModule?.screenStop(); nativeScreenShown = false; void mdnsBrowser.stop(); });
   const web = window.webContents;
   guard(web);
   window.on("focus", () => {
@@ -318,7 +349,10 @@ function createWindow() {
     if (process.platform === "darwin") app.dock?.hide();
   });
   // Losing the focus gives the menu its shortcuts back: they are captured only while the remote screen is typed into.
-  window.on("blur", () => window?.webContents.setIgnoreMenuShortcuts(false));
+  window.on("blur", () => {
+    window?.webContents.setIgnoreMenuShortcuts(false);
+    resetSystemShortcutCapture();
+  });
   window.on("enter-full-screen", () => {
     fullScreenMoving = false;
     syncImmersivePresentation();
@@ -340,7 +374,7 @@ function createWindow() {
     if (wantedFullScreen !== true) send("linkshell-desktop-fullscreen", { fullscreen: false });
     reconcileFullScreen();
   });
-  web.on("did-start-navigation", (details) => { if (details.isMainFrame && !details.isSameDocument) { clearPageReadyTimer(); pageReady = false; nativeModule?.screenStop(); setNativeScreenShown(false); } });
+  web.on("did-start-navigation", (details) => { if (details.isMainFrame && !details.isSameDocument) { clearPageReadyTimer(); pageReady = false; resetSystemShortcutCapture(); nativeModule?.screenStop(); setNativeScreenShown(false); void mdnsBrowser.stop(); } });
   web.on("did-finish-load", () => {
     if (!server.policy?.isTrusted(web.getURL())) return;
     send("linkshell-desktop-visibility", { visible });
@@ -356,9 +390,11 @@ function createWindow() {
     clearHungTimer();
     clearPageReadyTimer();
     pageReady = false;
+    resetSystemShortcutCapture();
     nativeModule?.setImmersiveFullScreen(false);
     nativeModule?.screenStop();
     nativeScreenShown = false;
+    void mdnsBrowser.stop();
     showProblem(t("problem.gone"));
   });
   // Chromium reports a hang after a few seconds; give the page ten more before offering a reload,
@@ -653,6 +689,8 @@ ipcMain.on("linkshell:message", (event, body: unknown) => {
         }
         if ("overlayOpen" in message) adjusted.overlayOpen = Boolean(message.overlayOpen);
         if (message.type === "start") {
+          if ("audioMuted" in message) adjusted.audioMuted = Boolean(message.audioMuted);
+          if ("systemShortcutCapture" in message) adjusted.systemShortcutCapture = Boolean(message.systemShortcutCapture);
           nativeModule.screenStart(window.getNativeWindowHandle(), runtime.helper, adjusted, (detail) => {
             if ((detail as { type?: unknown }).type === "error") setNativeScreenShown(false);
             send("linkshell-native-screen", detail);
@@ -660,8 +698,15 @@ ipcMain.on("linkshell:message", (event, body: unknown) => {
           nativeModule.screenVisible(visible);
           setNativeScreenShown(true);
         } else {
+          if (message.type === "audio" || message.type === "mute") {
+            if ("muted" in message) adjusted.muted = Boolean(message.muted);
+            if ("enabled" in message) adjusted.enabled = Boolean(message.enabled);
+          }
           nativeModule.screenMessage(adjusted);
-          if (message.type === "stop") setNativeScreenShown(false);
+          if (message.type === "stop") {
+            resetSystemShortcutCapture();
+            setNativeScreenShown(false);
+          }
         }
       } catch (error) { setNativeScreenShown(false); send("linkshell-native-screen", { id: message.id, type: "error", error: error instanceof Error ? error.message : String(error) }); }
       return;
@@ -850,6 +895,16 @@ async function handle(method: string, params: Record<string, unknown>): Promise<
     case "fusionStop": return stopFusionHub(params);
     case "openRemotePortExternal": return openRemotePortExternal(params);
     case "remotePortReply": return remotePortProxies.reply(params);
+    case "setSystemShortcutCapture": return setSystemShortcutCaptureEnabled(params.enabled === true);
+    case "startLanDiscovery":
+      mdnsBrowser.start();
+      mdnsBrowser.refresh();
+      return mdnsBrowser.getHosts();
+    case "stopLanDiscovery":
+      await mdnsBrowser.stop();
+      return {};
+    case "getLanHosts":
+      return mdnsBrowser.getHosts();
     default: throw new Error("不支持的操作");
   }
 }
@@ -894,9 +949,11 @@ app.on("before-quit", (event) => {
   void flushOrConfirm(t("flush.quit")).then((confirmed) => {
     if (!confirmed) { quitting = false; return; }
     quitConfirmed = true;
+    resetSystemShortcutCapture();
     nativeModule?.setImmersiveFullScreen(false);
     nativeModule?.screenStop();
     nativeScreenShown = false;
+    void mdnsBrowser.stop();
     for (const hub of electronHubs.values()) hub.stop();
     stopAllFusionTunnels();
     remotePortProxies.stopAll();

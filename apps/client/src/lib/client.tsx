@@ -145,10 +145,13 @@ function createConnection(computer: Computer): Connection {
   return { key: computer.key, computer, url, link, store, streams, subscribeSession };
 }
 
+const EMPTY_LAN_HOSTS: never[] = [];
+
 export function ClientProvider({ children }: { children: ReactNode }) {
   const saved = useComputers((state) => state.saved);
   const live = useComputers((state) => state.live);
-  const selected = useMemo(() => selectedComputer({ saved, live }) ?? fallbackComputer(), [saved, live]);
+  const lanHosts = useComputers((state) => state.lanHosts) ?? EMPTY_LAN_HOSTS;
+  const selected = useMemo(() => selectedComputer({ saved, live, lanHosts }) ?? fallbackComputer(), [saved, live, lanHosts]);
   const [connection, setConnection] = useState(() => createConnection(selected));
   const [recovering, setRecovering] = useState(true);
   const initialRecovery = useRef(true);

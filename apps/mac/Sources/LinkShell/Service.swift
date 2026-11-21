@@ -7,7 +7,7 @@ import Foundation
 ///
 ///   → status | displays
 ///   → open {v, screen} | close {v} | an input event {v, …}        a viewer's hands (`Control`)
-///   → rtc.open {v, screen, iceServers, …} | rtc.configure | rtc.answer | rtc.ice | rtc.close (`ScreenSession`)
+///   → rtc.open {v, screen, iceServers, …} | rtc.configure | rtc.audio | rtc.answer | rtc.ice | rtc.close (`ScreenSession`)
 ///   → stream.open {v, screen, socket, width, fps, bitrate, …} | stream.set | stream.key | stream.close   (`StreamSession`)
 ///   ← status, trusted, displays, ready, cursor, posted, rtc.*, stream.*, log
 ///
@@ -56,6 +56,7 @@ final class Service {
     status["preview"] = true
     status["videoReconfigure"] = true
     status["privacy"] = true
+    status["audio"] = true
     // Input may name physical keys held and let go, and the middle button (`Control.physical`).
     status["keys"] = true
     if options.clock { status["clock"] = ClockStrip.timing }
@@ -135,6 +136,12 @@ final class Service {
       watched(by: id)?.candidate(command)
     case "rtc.configure":
       watched(by: id)?.configure(command)
+    case "rtc.audio":
+      if let number = command["enabled"] as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() {
+        let excludes = (command["excludesCurrentProcessAudio"] as? NSNumber)
+          .flatMap { CFGetTypeID($0) == CFBooleanGetTypeID() ? $0.boolValue : nil }
+        watched(by: id)?.setAudio(number.boolValue, excludesCurrentProcessAudio: excludes)
+      }
     case "rtc.close":
       watched(by: id)?.close()
       if session?.viewer == id { session = nil }

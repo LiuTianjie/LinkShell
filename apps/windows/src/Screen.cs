@@ -8,6 +8,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -26,6 +27,12 @@ namespace LinkShell.Windows {
         static bool leftDown, rightDown;
         static IntPtr desktop;
         static readonly AutoResetEvent CaptureWake = new AutoResetEvent(false);
+        static readonly AutoResetEvent ShapeWake = new AutoResetEvent(false);
+        static readonly Dictionary<string, CursorShapeSnapshot> CursorShapeCache = new Dictionary<string, CursorShapeSnapshot>();
+        sealed class CursorShapeSnapshot {
+            public string Id, Png;
+            public double Width, Height, HotX, HotY, Scale;
+        }
         sealed class CaptureProfile {
             public int Width, Fps, Quality;
             public CaptureProfile(int width, int fps, int quality) {
@@ -42,6 +49,11 @@ namespace LinkShell.Windows {
         [DllImport("user32.dll")] static extern bool SetProcessDpiAwarenessContext(IntPtr context);
         [DllImport("user32.dll", SetLastError = true)] static extern uint SendInput(uint count, INPUT[] input, int size);
         [DllImport("user32.dll")] static extern bool GetCursorPos(out POINT point);
+        [DllImport("user32.dll")] static extern bool GetCursorInfo(ref CURSORINFO info);
+        [DllImport("user32.dll")] static extern bool GetIconInfo(IntPtr icon, out ICONINFO info);
+        [DllImport("user32.dll")] static extern IntPtr CopyIcon(IntPtr icon);
+        [DllImport("user32.dll")] static extern bool DestroyIcon(IntPtr icon);
+        [DllImport("user32.dll", SetLastError = true)] static extern bool DrawIconEx(IntPtr hdc, int xLeft, int yTop, IntPtr icon, int width, int height, int step, IntPtr brush, int flags);
         [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr window);
         [DllImport("user32.dll")] static extern int ReleaseDC(IntPtr window, IntPtr dc);
         [DllImport("gdi32.dll", SetLastError = true)] static extern bool StretchBlt(IntPtr dest, int x, int y, int w, int h, IntPtr source, int sx, int sy, int sw, int sh, uint operation);
@@ -56,6 +68,8 @@ namespace LinkShell.Windows {
         [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
         [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool GetUserObjectInformation(IntPtr handle, int index, StringBuilder value, int length, out int needed);
         [StructLayout(LayoutKind.Sequential)] struct POINT { public int X, Y; }
+        [StructLayout(LayoutKind.Sequential)] struct CURSORINFO { public int cbSize, flags; public IntPtr hCursor; public POINT ptScreenPos; }
+        [StructLayout(LayoutKind.Sequential)] struct ICONINFO { [MarshalAs(UnmanagedType.Bool)] public bool fIcon; public int xHotspot, yHotspot; public IntPtr hbmMask, hbmColor; }
         [StructLayout(LayoutKind.Sequential)] struct INPUT { public uint type; public INPUTUNION data; }
         [StructLayout(LayoutKind.Explicit)] struct INPUTUNION {
             [FieldOffset(0)] public MOUSEINPUT mouse;
@@ -98,6 +112,14 @@ namespace LinkShell.Windows {
                 }
                 if (args.Length == 6 && args[0] == "--video") {
                     CaptureVideo(Int32.Parse(args[1]), Int32.Parse(args[2]), Int32.Parse(args[3]), Int32.Parse(args[4]), args[5]);
+                    return 0;
+                }
+                if (args.Length == 2 && args[0] == "--shape") {
+                    WatchShape(Int32.Parse(args[1]));
+                    return 0;
+                }
+                if (args.Length == 1 && args[0] == "--audio") {
+                    CaptureAudio();
                     return 0;
                 }
                 if (args.Length >= 1) {
@@ -248,6 +270,208 @@ namespace LinkShell.Windows {
                     }
                 }
             } finally { if (duplication != null) duplication.Dispose(); ReleaseDC(IntPtr.Zero, screenDC); }
+        }
+
+        static void WatchShape(int screen) {
+            bounds = Display(screen);
+            var eof = new Thread(() => {
+                try {
+                    string line;
+                    while ((line = Console.ReadLine()) != null) {
+                        if (line.Length > 1024) continue;
+                        try {
+                            var message = Json.Deserialize<Dictionary<string, object>>(line);
+                            if (Str(message, "t") == "pause") {
+                                capturePaused = Number(message, "value") != 0;
+                                ShapeWake.Set();
+                            }
+                        } catch { }
+                    }
+                } finally { ended = true; ShapeWake.Set(); }
+            }) { IsBackground = true };
+            eof.Start();
+            string lastId = null;
+            var sent = new HashSet<string>();
+            while (!ended) {
+                EnsureDesktop();
+                if (!capturePaused) {
+                    double displayScale = Math.Max(1.0, Math.Min(4.0, MonitorScale(new Point(bounds.Left + bounds.Width / 2, bounds.Top + bounds.Height / 2))));
+                    var shape = CaptureCursorShape(displayScale);
+                    if (shape != null && shape.Id != lastId) {
+                        lastId = shape.Id;
+                        Write(ShapeMessage(shape, bounds, displayScale, sent.Add(shape.Id)));
+                    }
+                }
+                ShapeWake.WaitOne(200);
+            }
+        }
+
+        internal static Dictionary<string, object> ShapeMessage(CursorShapeSnapshot shape, Rectangle displayBounds, double displayScale, bool includePng) {
+            var message = new Dictionary<string, object> {
+                { "t", "shape" },
+                { "id", shape.Id },
+            };
+            if (includePng) {
+                double scale = Math.Max(1.0, Math.Min(4.0, displayScale));
+                message["png"] = shape.Png;
+                message["w"] = shape.Width;
+                message["h"] = shape.Height;
+                message["hotX"] = shape.HotX;
+                message["hotY"] = shape.HotY;
+                message["scale"] = shape.Scale;
+                message["displayW"] = Math.Round(displayBounds.Width / scale, 2);
+                message["displayH"] = Math.Round(displayBounds.Height / scale, 2);
+            }
+            return message;
+        }
+
+        static bool DrawCursorToBitmap(IntPtr cursor, int width, int height, Color background, Bitmap target) {
+            using (var graphics = Graphics.FromImage(target)) {
+                graphics.Clear(background);
+                IntPtr hdc = graphics.GetHdc();
+                try {
+                    return DrawIconEx(hdc, 0, 0, cursor, width, height, 0, IntPtr.Zero, 3);
+                } finally {
+                    graphics.ReleaseHdc(hdc);
+                }
+            }
+        }
+
+        internal static CursorShapeSnapshot CaptureCursorShape(double fallbackScale) {
+            var ci = new CURSORINFO();
+            ci.cbSize = Marshal.SizeOf(typeof(CURSORINFO));
+            if (!GetCursorInfo(ref ci) || (ci.flags & 1) == 0 || ci.hCursor == IntPtr.Zero) return null;
+
+            IntPtr copied = IntPtr.Zero;
+            var iconInfo = new ICONINFO();
+            bool hasInfo = GetIconInfo(ci.hCursor, out iconInfo);
+            if (!hasInfo) {
+                copied = CopyIcon(ci.hCursor);
+                if (copied != IntPtr.Zero) hasInfo = GetIconInfo(copied, out iconInfo);
+            }
+            if (!hasInfo) {
+                if (copied != IntPtr.Zero) DestroyIcon(copied);
+                return null;
+            }
+
+            IntPtr drawHandle = copied != IntPtr.Zero ? copied : ci.hCursor;
+            try {
+                int pxW = 0, pxH = 0;
+                BITMAP bm;
+                if (iconInfo.hbmColor != IntPtr.Zero && GetObject(iconInfo.hbmColor, Marshal.SizeOf(typeof(BITMAP)), out bm) > 0) {
+                    pxW = bm.bmWidth;
+                    pxH = Math.Abs(bm.bmHeight);
+                } else if (iconInfo.hbmMask != IntPtr.Zero && GetObject(iconInfo.hbmMask, Marshal.SizeOf(typeof(BITMAP)), out bm) > 0) {
+                    pxW = bm.bmWidth;
+                    pxH = Math.Max(1, Math.Abs(bm.bmHeight) / 2);
+                } else {
+                    pxW = SystemInformation.CursorSize.Width;
+                    pxH = SystemInformation.CursorSize.Height;
+                }
+                if (pxW <= 0 || pxH <= 0 || pxW > 512 || pxH > 512) return null;
+
+                double scale = Math.Max(1.0, Math.Min(4.0, MonitorScale(new Point(ci.ptScreenPos.X, ci.ptScreenPos.Y))));
+                if (scale <= 0) scale = Math.Max(1.0, Math.Min(4.0, fallbackScale));
+                double logicalW = Math.Round(pxW / scale, 2);
+                double logicalH = Math.Round(pxH / scale, 2);
+                if (logicalW <= 0 || logicalH <= 0 || logicalW > 256 || logicalH > 256) return null;
+
+                int hotPxX = Math.Max(0, Math.Min(pxW, iconInfo.xHotspot));
+                int hotPxY = Math.Max(0, Math.Min(pxH, iconInfo.yHotspot));
+
+                using (var black = new Bitmap(pxW, pxH, PixelFormat.Format32bppArgb))
+                using (var white = new Bitmap(pxW, pxH, PixelFormat.Format32bppArgb))
+                using (var output = new Bitmap(pxW, pxH, PixelFormat.Format32bppArgb)) {
+                    if (!DrawCursorToBitmap(drawHandle, pxW, pxH, Color.Black, black)) return null;
+                    if (!DrawCursorToBitmap(drawHandle, pxW, pxH, Color.White, white)) return null;
+
+                    var rect = new Rectangle(0, 0, pxW, pxH);
+                    var bData = black.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+                    var wData = white.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+                    var oData = output.LockBits(rect, ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+                    byte[] packed = new byte[pxW * pxH * 4];
+                    try {
+                        int bStride = Math.Abs(bData.Stride);
+                        int wStride = Math.Abs(wData.Stride);
+                        int oStride = Math.Abs(oData.Stride);
+                        byte[] bBytes = new byte[bStride * pxH];
+                        byte[] wBytes = new byte[wStride * pxH];
+                        byte[] oBytes = new byte[oStride * pxH];
+                        Marshal.Copy(bData.Scan0, bBytes, 0, bBytes.Length);
+                        Marshal.Copy(wData.Scan0, wBytes, 0, wBytes.Length);
+
+                        for (int y = 0; y < pxH; y++) {
+                            int bRow = y * bStride, wRow = y * wStride, oRow = y * oStride, pRow = y * pxW * 4;
+                            for (int x = 0; x < pxW; x++) {
+                                int bi = bRow + x * 4, wi = wRow + x * 4, oi = oRow + x * 4, pi = pRow + x * 4;
+                                byte bB = bBytes[bi], bG = bBytes[bi + 1], bR = bBytes[bi + 2];
+                                byte wB = wBytes[wi], wG = wBytes[wi + 1], wR = wBytes[wi + 2];
+                                byte outB, outG, outR, outA;
+                                if (wB < bB || wG < bG || wR < bR) {
+                                    // Monochrome XOR-inverted cursor pixels (e.g. classic I-beam): render opaque black so they stay visible over video.
+                                    outB = 0; outG = 0; outR = 0; outA = 255;
+                                } else {
+                                    int diff = ((wR - bR) + (wG - bG) + (wB - bB)) / 3;
+                                    int a = Math.Max(0, Math.Min(255, 255 - diff));
+                                    if (a == 0) {
+                                        outB = 0; outG = 0; outR = 0; outA = 0;
+                                    } else if (a == 255) {
+                                        outB = bB; outG = bG; outR = bR; outA = 255;
+                                    } else {
+                                        outA = (byte)a;
+                                        outB = (byte)Math.Min(255, bB * 255 / a);
+                                        outG = (byte)Math.Min(255, bG * 255 / a);
+                                        outR = (byte)Math.Min(255, bR * 255 / a);
+                                    }
+                                }
+                                oBytes[oi] = packed[pi] = outB;
+                                oBytes[oi + 1] = packed[pi + 1] = outG;
+                                oBytes[oi + 2] = packed[pi + 2] = outR;
+                                oBytes[oi + 3] = packed[pi + 3] = outA;
+                            }
+                        }
+                        Marshal.Copy(oBytes, 0, oData.Scan0, oBytes.Length);
+                    } finally {
+                        black.UnlockBits(bData);
+                        white.UnlockBits(wData);
+                        output.UnlockBits(oData);
+                    }
+
+                    string id;
+                    using (var sha = SHA256.Create()) {
+                        sha.TransformBlock(packed, 0, packed.Length, null, 0);
+                        byte[] meta = Encoding.UTF8.GetBytes(String.Format(CultureInfo.InvariantCulture, "|{0}x{1}|{2},{3}|{4}", pxW, pxH, hotPxX, hotPxY, Math.Round(scale, 2)));
+                        sha.TransformFinalBlock(meta, 0, meta.Length);
+                        var sb = new StringBuilder(16);
+                        for (int i = 0; i < 8; i++) sb.Append(sha.Hash[i].ToString("x2", CultureInfo.InvariantCulture));
+                        id = sb.ToString();
+                    }
+
+                    lock (CursorShapeCache) {
+                        CursorShapeSnapshot cached;
+                        if (CursorShapeCache.TryGetValue(id, out cached)) return cached;
+                        using (var ms = new MemoryStream()) {
+                            output.Save(ms, ImageFormat.Png);
+                            if (CursorShapeCache.Count >= 64) CursorShapeCache.Clear();
+                            var snapshot = new CursorShapeSnapshot {
+                                Id = id,
+                                Png = Convert.ToBase64String(ms.ToArray()),
+                                Width = logicalW,
+                                Height = logicalH,
+                                HotX = Math.Round(hotPxX / scale, 2),
+                                HotY = Math.Round(hotPxY / scale, 2),
+                                Scale = Math.Round(scale, 2),
+                            };
+                            CursorShapeCache[id] = snapshot;
+                            return snapshot;
+                        }
+                    }
+                }
+            } finally {
+                if (iconInfo.hbmMask != IntPtr.Zero) DeleteObject(iconInfo.hbmMask);
+                if (iconInfo.hbmColor != IntPtr.Zero) DeleteObject(iconInfo.hbmColor);
+                if (copied != IntPtr.Zero) DestroyIcon(copied);
+            }
         }
 
         static void Control() {

@@ -25,12 +25,11 @@ import {
 } from "@linkshell/wire";
 import type { GatewayLink } from "../gateway.js";
 import type { SessionHub, Subscriber } from "../hub.js";
-import { downloadFile, listDirectory, listProjectFiles, makeDirectory, readFile, searchDirectories, uploadFile, writeTextFile } from "../fs.js";
+import { deletePath, downloadFile, listDirectory, listProjectFiles, makeDirectory, readFile, renamePath, searchDirectories, uploadFile, writeTextFile } from "../fs.js";
 import { gitCommit, gitDiff, gitRevertFile } from "../git-diff.js";
 import { isNamedPipe } from "../local-transport.js";
 import { readClipboard, writeClipboard } from "../clipboard.js";
 import type { KeepAwakeManager } from "../keep-awake.js";
-import { createLsaService, type LsaService } from "../lsa/index.js";
 import { listPorts, ProxyStreams } from "../ports.js";
 import { ScreenShare } from "../screen.js";
 import { FusionShare } from "../fusion.js";
@@ -219,7 +218,6 @@ export interface HostRpcServerOptions {
   liveActivities?: LiveActivityRelay;
   usage?: UsageStatistics;
   keepAwake?: KeepAwakeManager;
-  lsa?: LsaService;
   onLockScreen?: () => void | Promise<void>;
   shutdown?: () => void;
   /** The optional access password remote connections unlock with. */
@@ -282,8 +280,6 @@ export class HostRpcServer {
   private readonly fusion: FusionShare;
   private readonly computerPreview: ComputerPreviewServer;
   private readonly metrics: MachineMetricsSampler;
-  private readonly lsa: LsaService;
-  private readonly ownsLsa: boolean;
   private readonly demandListeners = new Set<() => void>();
   private readonly handlers: { [M in MethodName]: (params: never, context: ConnectionContext, signal: AbortSignal) => Promise<MethodResult<M>> | MethodResult<M> };
 
@@ -306,15 +302,6 @@ export class HostRpcServer {
       () => (options.machineInfo().direct && process.env.LINKSHELL_TURN !== "off" ? this.gateway?.turn() : undefined),
     );
     const hub = options.hub;
-    this.ownsLsa = !options.lsa;
-    this.lsa =
-      options.lsa ??
-      createLsaService({
-        dbPath: ":memory:",
-        hub,
-        machineId: () => options.machineInfo().machineId,
-        log: options.log,
-      });
     this.computerPreview = new ComputerPreviewServer(hub.previews);
     const terminals = options.terminals;
     type P<M extends MethodName> = import("zod").infer<(typeof methods)[M]["params"]>;
@@ -563,6 +550,8 @@ export class HostRpcServer {
       "fs.upload": (params: P<"fs.upload">) => uploadFile(params),
       "fs.write": (params: P<"fs.write">) => writeTextFile(params),
       "fs.mkdir": (params: P<"fs.mkdir">) => makeDirectory(params),
+      "fs.rename": (params: P<"fs.rename">) => renamePath(params),
+      "fs.delete": (params: P<"fs.delete">) => deletePath(params),
       "clipboard.read": () => readClipboard(),
       "clipboard.write": (params: P<"clipboard.write">) => writeClipboard(params.text),
       "terminals.list": () => ({ terminals: terminals.list() }),
@@ -625,7 +614,6 @@ export class HostRpcServer {
         return launch;
       },
       ...mcpHandlers(hub),
-      ...this.lsa.rpcHandlers(),
     };
   }
 
@@ -713,7 +701,6 @@ export class HostRpcServer {
     this.fusion.stop();
     this.screen.stop();
     this.computerPreview.stop();
-    if (this.ownsLsa) this.lsa.close();
     // A connection tidies up after itself when its socket closes, and that reaches into the hub. The close
     // comes a moment after terminate(): waited for here, so that it isn't still to come when the hub and
     // its database are gone.

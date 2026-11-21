@@ -22,9 +22,9 @@ Windows 桌面端复用现有 Host / Gateway / 手机协议，窗口与 macOS �
 
 ## 系统与安装
 
-- Windows 10 1809 或更新版本、Windows 11，x64；屏幕组件和安装器需要 .NET Framework 4.8。窗口自带 Chromium，不需要 WebView2 Runtime。ARM64 尚未提供原生安装包。
-- 在 Windows 上运行 `pnpm --filter @linkshell/windows build:standalone`，生成 `artifacts/LinkShell-Setup-<版本>-windows-x64.exe` 与 ZIP 便携包。
-- 手动安装默认安装到当前用户的 `%LOCALAPPDATA%\Programs\LinkShell`；应用内更新沿用当前安装目录，也支持 ZIP 解压的自定义目录。创建开始菜单入口，不需要管理员权限。打包流程支持可选的 Authenticode 代码签名（配置 `AZURE_TRUSTED_SIGNING_ENDPOINT` / `AZURE_TRUSTED_SIGNING_ACCOUNT` / `AZURE_TRUSTED_SIGNING_PROFILE` 使用 Azure Artifact Signing / Trusted Signing，或配置 `WINDOWS_PFX_PATH` / `WINDOWS_PFX_BASE64` 与 `WINDOWS_PFX_PASSWORD` 使用 `signtool.exe`），在生成便携 ZIP 与计算 SHA-256 前对 `LinkShell.exe`、`LinkShell.Screen.exe` 和安装包签名以消除 SmartScreen 警告；未配置签名凭据时自动跳过签名，保留本地开发与未签名构建流程。请从官方 Release 下载并核对随包提供的 SHA-256。
+- Windows 10 1809 或更新版本、Windows 11，x64 与 ARM64（已接入 CI 与打包脚本；ARM64 实机仍待验证）；屏幕组件和安装器需要 .NET Framework 4.8。窗口自带 Chromium，不需要 WebView2 Runtime。
+- 在 Windows 上运行 `pnpm --filter @linkshell/windows build:standalone`（或指定 `--arch arm64` / `LINKSHELL_WINDOWS_ARCH=arm64`），生成 `artifacts/LinkShell-Setup-<版本>-windows-<arch>.exe` 与 ZIP 便携包。打包流程支持按 `x64` / `arm64` 解析对应 Node 与 LGPL FFmpeg 运行时并保留对应架构的 `node-pty` / `sharp` 预编译二进制。
+- 手动安装默认安装到当前用户的 `%LOCALAPPDATA%\Programs\LinkShell`；应用内更新沿用当前安装目录，也支持 ZIP 解压的自定义目录。创建开始菜单入口，不需要管理员权限。当前构建与 CI 保持未签名发布流程（暂不启用 Authenticode / Trusted Signing 代码签名）；未在 Windows CI 配置签名凭据时输出未签名安装包与 ZIP。请从官方 Release 下载并核对随包提供的 SHA-256。
 - 安装器提供独立窗口，显示安装位置、解压百分比、已处理容量 / 文件数、服务恢复与开始菜单阶段。解压按实际读取的字节推进；替换文件与恢复服务期间禁止关闭，完成后可直接启动应用。解压时取消会清理暂存文件，失败会显示原因并允许重试。应用与安装器统一使用圆角矩形图标。
 - ZIP 解压后运行 `LinkShell.exe`。`linkshell.cmd` 为同一运行环境的 CLI 入口；不会修改系统 PATH。
 - 数据保存在 `%USERPROFILE%\.linkshell`，或 `LINKSHELL_HOME` 指定的位置。安装、更新和关闭界面不删除账号、配对与会话历史。
@@ -39,7 +39,7 @@ Windows 桌面端复用现有 Host / Gateway / 手机协议，窗口与 macOS �
 
 Windows 屏幕组件在已登录、已解锁的交互桌面中运行，按远程请求启动，支持多显示器与 DPI 缩放。手机和 Web 工作区继续使用现有屏幕查看页、配对权限及端到端加密通道。
 
-优先走 DXGI Desktop Duplication → GPU 缩放 → 硬件 H.264 → WebRTC 视频直连，复用 Mac 的 SDP/ICE 协商与 iOS 原生、WebView、Web 接收端。安装包自带校验固定版本的 FFmpeg LGPL 共享运行库，按显示适配器选择 AMD AMF、NVIDIA NVENC 或 Intel QSV，之后尝试硬件 Media Foundation。驱动拒绝 GPU 转换时，可使用 CPU 缩放与颜色转换，仍由硬件编码。初始能力上限为 1920×1080、60 fps；实际帧率取决于显卡、显示器、接收端与网络。尚未提供 Mac 的 120 fps、HEVC、FlexFEC 和原生光标形状同步。接收端丢包反馈触发重传和关键帧恢复，带宽不足时降档；当前切换视频档位会重启编码器。
+优先走 DXGI Desktop Duplication → GPU 缩放 → 硬件 H.264 → WebRTC 视频直连，复用 Mac 的 SDP/ICE 协商与 iOS 原生、Android 原生、WebView、Web 接收端。安装包自带校验固定版本的 FFmpeg LGPL 共享运行库，按显示适配器选择 AMD AMF、NVIDIA NVENC 或 Intel QSV，之后尝试硬件 Media Foundation。驱动拒绝 GPU 转换时，可使用 CPU 缩放与颜色转换，仍由硬件编码。初始能力上限为 1920×1080、60 fps；实际帧率取决于显卡、显示器、接收端与网络。已补齐 Win32 光标形状同步（`Screen.cs` / `Fusion.cs` 经 `GetCursorInfo` + `GetIconInfo` 编码 PNG 在 `shape` 通道下发）、WASAPI loopback 系统音频采集（`VideoCapture.cs --audio`，48 kHz 立体声经 `audio` DataChannel 发送）及 Fusion 文件剪贴板（`file-clipboard`，50 MiB 上限）；仍未提供 Mac 的 120 fps、HEVC 和 FlexFEC。接收端丢包反馈触发重传和关键帧恢复，带宽不足时降档；当前切换视频档位会重启编码器。
 
 视频旁的四条 DataChannel 与 Mac 使用相同协议：按键和鼠标按下/松开可靠有序，移动走独立的无序低延迟通道，并丢弃过期位置；光标位置也可直接回传。网关继续传输加密协商消息，不转发视频。没有 TURN，无法穿透的网络自动回退到兼容画面。`LINKSHELL_SCREEN_VIDEO=off` 可强制兼容；`LINKSHELL_WINDOWS_ENCODER` 可指定 `h264_amf`、`h264_nvenc`、`h264_qsv`、`h264_mf` 用于诊断。
 
@@ -95,7 +95,7 @@ Codex 优先使用 PATH 中的命令行程序；没有全局命令时，自动�
 
 2026-10-19 本机验收：在 3456×2168、200% 缩放的已解锁桌面，通过真实 Host 和浏览器屏幕查看器核对了 JPEG 画面、左键、右键菜单、拖选、中文 / 英文输入、Ctrl+A 替换和向下滚动。实测修复了 Windows 滚轮方向与桌面控件 DPI 缩放。原生测试 4 项通过，无跳过；Host 相关测试 110 项通过；CLI 测试 28 项通过，2 项 POSIX 专用测试跳过。完整构建和类型检查通过，仓库外解压的便携包通过命名管道、SQLite、ConPTY 和运行时依赖 smoke。已安装的 Codex / Claude 及 Claude ACP 完成隔离初始化，未创建真实任务。
 
-验收仍应覆盖：150% 缩放、多显示器负坐标、拔插显示器、手机经网关配对与重连、生产账号登录，以及真实 Agent 的长任务和权限批准。隔离 Windows 更新场景不替代真实用户环境、手机真机或性能发布验收。Unix socket / POSIX 信号专用的旧测试不能视为 Windows 验收。
+验收仍应覆盖：150% 缩放、多显示器负坐标、拔插显示器、手机经网关配对与重连、生产账号登录，以及真实 Agent 的长任务和权限批准。隔离 Windows 更新场景不替代真实用户环境、手机真机或性能发布验收。Unix socket / POSIX 信号专用的旧测试不能视为 Windows 验收。此外，本轮新增的 Windows C# 光标形状捕获、WASAPI loopback 系统音频、`Fusion.cs` 文件剪贴板以及 ARM64 打包（CI 保持未签名）目前在 macOS 上通过了 C# 5 语法静态检查、`@linkshell/windows` 跨平台打包单测以及宿主机模拟助手/werift 回环测试；Windows 本机 `.NET Framework 4.8` `csc.exe` 编译、真实 WASAPI 音频捕获、ARM64 Windows Runner 打包与实机端到端仍待 Windows 环境验证。
 
 2026-10-19 屏幕优化验收：在同一台主机、1280 像素输出的全屏滚动文字测试中，连续 10 秒的输出从旧版约 2.3 fps 提升到约 7.3 fps，帧间隔中位数从 412 ms 降到 137 ms；这是真实本机采集结果，不是稳定 30 fps 或手机端到端延迟的承诺。静态画面在 8 秒内只发送 5 帧（包含初始、清晰度补帧及心跳）。原生测试覆盖有效图像、不中断进程切换大小/质量、暂停恢复、强制补帧、禁用屏幕与输入释放，DXGI 与强制 GDI 两条路径均通过。`LINKSHELL_SCREEN_DIAGNOSTICS=1` 可输出各阶段平均耗时；`LINKSHELL_SCREEN_CAPTURE=gdi` 用于兼容路径排查。
 

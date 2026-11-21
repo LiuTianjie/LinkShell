@@ -1,20 +1,22 @@
 import { RpcError } from "@linkshell/wire";
 import * as Clipboard from "expo-clipboard";
 import { Image } from "expo-image";
-import { Stack, useLocalSearchParams } from "expo-router";
+import { Stack, router, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, Platform, Pressable, ScrollView, View } from "react-native";
+import { ActivityIndicator, Alert, FlatList, Platform, Pressable, ScrollView, View } from "react-native";
 import { Text } from "@/components/fixed-text";
 import { usePageInsets } from "@/components/adaptive-page";
 import { AppMenu } from "@/components/app-menu";
 import { AcpFileEditor } from "@/components/acp-file-editor";
 import { useFileSave } from "@/components/file-save-actions";
 import { Icon } from "@/components/icon";
+import { TextPromptModal } from "@/components/text-prompt-modal";
 import { ContentWidth, useContentWidth } from "@/lib/content-width";
 import { HeaderActions, useHeaderTitleWidth, type HeaderMenuItem } from "@/components/header-actions";
 import { ScrollableState } from "@/components/scrollable-state";
 import { Markdown } from "@/components/markdown";
 import { EmptyState, LoadingState } from "@/components/state-views";
+import { deleteConfirmCopy, renameTargetPath } from "@/lib/file-actions";
 import { describeActionError } from "@/lib/locale";
 import { useConnection, useClient } from "@/lib/client";
 import { baseName, fileSize, relativeTime, shortPath } from "@/lib/format";
@@ -168,20 +170,43 @@ export function FileScreen() {
 }
 
 /** A pane keeps the same reader mounted while the directory column is hidden. */
-export function FileContent({ path, line, embedded = false, onBack, backLabel = "返回文件列表" }: { path: string; line?: string; embedded?: boolean; onBack?: () => void; backLabel?: string }) {
+export function FileContent({
+  path,
+  line,
+  embedded = false,
+  onBack,
+  backLabel = "返回文件列表",
+  onRenamed,
+  onDeleted,
+}: {
+  path: string;
+  line?: string;
+  embedded?: boolean;
+  onBack?: () => void;
+  backLabel?: string;
+  onRenamed?: (fromPath: string, toPath: string) => void;
+  onDeleted?: (deletedPath: string) => void;
+}) {
   const [paneWidth, setPaneWidth] = useState<number | null>(null);
   const headerTitleWidth = useHeaderTitleWidth(1);
   const { link } = useConnection();
   const insets = usePageInsets();
+  const [currentPath, setCurrentPath] = useState(path);
   const [file, setFile] = useState<Loaded | null>(null);
   const [error, setError] = useState<{ message: string; tooLarge: boolean } | null>(null);
   const [more, setMore] = useState<"idle" | "loading" | "failed">("idle");
   const target = line ? Number(line) : undefined;
   const [wrap, setWrap] = useState(() => WRAPS.test(baseName(path)));
   const [editing, setEditing] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [mutating, setMutating] = useState(false);
   const open = useRef(true);
   const [attempt, setAttempt] = useState(0);
   const online = useClient((state) => state.status === "online");
+
+  useEffect(() => {
+    setCurrentPath(path);
+  }, [path]);
 
   useEffect(() => {
     open.current = true;
@@ -190,7 +215,7 @@ export function FileContent({ path, line, embedded = false, onBack, backLabel = 
     setError(null);
     setMore("idle");
     link
-      .call("fs.read", { path, maxBytes: PART }, 20_000)
+      .call("fs.read", { path: currentPath, maxBytes: PART }, 20_000)
       .then((result) => open.current && setFile(result))
       .catch((reason: unknown) => {
         if (!open.current) return;
@@ -201,7 +226,7 @@ export function FileContent({ path, line, embedded = false, onBack, backLabel = 
     return () => {
       open.current = false;
     };
-  }, [link, path, attempt]);
+  }, [link, currentPath, attempt]);
   // A file that failed to open while the computer was out of reach opens by itself once it is back.
   const failedToOpen = !!error && !error.tooLarge;
   useEffect(() => {
@@ -213,7 +238,7 @@ export function FileContent({ path, line, embedded = false, onBack, backLabel = 
     if (!file || file.kind !== "text" || !file.truncated || file.nextOffset === undefined || atLimit(file) || more === "loading") return;
     const offset = file.nextOffset;
     setMore("loading");
-    link.call("fs.read", { path, offset, maxBytes: Math.min(PART, MAX_TEXT - offset) }, 20_000).then(
+    link.call("fs.read", { path: currentPath, offset, maxBytes: Math.min(PART, MAX_TEXT - offset) }, 20_000).then(
       (part) => {
         if (!open.current) return;
         setFile((current) =>
@@ -225,7 +250,7 @@ export function FileContent({ path, line, embedded = false, onBack, backLabel = 
       },
       () => open.current && setMore("failed"),
     );
-  }, [file, link, more, path]);
+  }, [file, link, more, currentPath]);
 
   // A link to a line further down than the first part reaches: keep loading up to it.
   const lineCount = useMemo(() => (target && file?.text ? file.text.split("\n").length : 0), [target, file?.text]);
@@ -233,12 +258,68 @@ export function FileContent({ path, line, embedded = false, onBack, backLabel = 
     if (target && more === "idle" && lineCount > 0 && lineCount <= target) loadMore();
   }, [target, more, lineCount, loadMore]);
 
-  const name = baseName(path);
-  const markdown = MARKDOWN.test(path);
-  const directory = path.slice(0, path.length - name.length).replace(/\/$/, "");
+  const name = baseName(currentPath);
+  const markdown = MARKDOWN.test(currentPath);
+  const directory = currentPath.slice(0, currentPath.length - name.length).replace(/\/$/, "");
   const footer = file ? <MoreRow file={file} state={more} onPress={loadMore} /> : undefined;
 
-  const saving = useFileSave(path);
+  const submitRename = useCallback(
+    async (nextName: string) => {
+      const targetResult = renameTargetPath(currentPath, nextName);
+      if (!targetResult.ok) {
+        Alert.alert("重命名失败", targetResult.error);
+        return;
+      }
+      setMutating(true);
+      try {
+        const result = await link.call("fs.rename", { from: currentPath, to: targetResult.path }, 20_000);
+        haptics.success();
+        setRenameOpen(false);
+        const oldPath = currentPath;
+        setCurrentPath(result.path);
+        if (onRenamed) {
+          onRenamed(oldPath, result.path);
+        } else {
+          router.setParams({ path: result.path });
+        }
+      } catch (reason: unknown) {
+        haptics.error();
+        Alert.alert("重命名失败", describeActionError(reason));
+      } finally {
+        setMutating(false);
+      }
+    },
+    [currentPath, link, onRenamed],
+  );
+
+  const confirmDelete = useCallback(() => {
+    const copy = deleteConfirmCopy({ name, isFile: true });
+    Alert.alert(copy.title, copy.message, [
+      { text: "取消", style: "cancel" },
+      {
+        text: "删除",
+        style: "destructive",
+        onPress: () => {
+          void (async () => {
+            setMutating(true);
+            try {
+              await link.call("fs.delete", { path: currentPath }, 20_000);
+              haptics.success();
+              if (onDeleted) onDeleted(currentPath);
+              else router.back();
+            } catch (reason: unknown) {
+              haptics.error();
+              Alert.alert("删除失败", describeActionError(reason));
+            } finally {
+              setMutating(false);
+            }
+          })();
+        },
+      },
+    ]);
+  }, [currentPath, link, name, onDeleted]);
+
+  const saving = useFileSave(currentPath);
   const savable = !editing && (!!file || !!error?.tooLarge);
   const items: HeaderMenuItem[] = [
     ...(file?.kind === "text" && !file.truncated ? [{ title: "AI 编辑建议", icon: { sf: "pencil" as const, md: "edit" as const }, onPress: () => setEditing(true) }] : []),
@@ -261,11 +342,27 @@ export function FileContent({ path, line, embedded = false, onBack, backLabel = 
       title: "复制路径",
       icon: { sf: "link", md: "link" },
       onPress: () => {
-        void Clipboard.setStringAsync(path);
+        void Clipboard.setStringAsync(currentPath);
         haptics.success();
       },
     },
     ...(savable ? saving.items.map((item) => ({ ...item, section: "save" })) : []),
+    {
+      title: "重命名",
+      icon: { sf: "square.and.pencil", md: "drive_file_rename_outline" },
+      section: "manage",
+      onPress: () => {
+        haptics.selection();
+        setRenameOpen(true);
+      },
+    },
+    {
+      title: "删除",
+      icon: { sf: "trash", md: "delete" },
+      destructive: true,
+      section: "manage",
+      onPress: confirmDelete,
+    },
   ];
 
   return (
@@ -280,7 +377,15 @@ export function FileContent({ path, line, embedded = false, onBack, backLabel = 
             <Text numberOfLines={1} style={[type.headline, { color: colors.label }]}>{name}</Text>
             <Text numberOfLines={1} style={[type.caption, { color: colors.secondaryLabel }]}>{file ? `${fileSize(file.size)} · ${relativeTime(file.modifiedAt)}` : shortPath(directory)}</Text>
           </View>
-          <AppMenu actions={items.map((item, index) => ({ id: String(index), title: item.title, image: item.icon.sf }))} onPressAction={({ nativeEvent }) => items[Number(nativeEvent.event)]?.onPress?.()}>
+          <AppMenu
+            actions={items.map((item, index) => ({
+              id: String(index),
+              title: item.title,
+              image: item.icon.sf,
+              ...(item.destructive ? { attributes: { destructive: true } } : {}),
+            }))}
+            onPressAction={({ nativeEvent }) => items[Number(nativeEvent.event)]?.onPress?.()}
+          >
             <View accessibilityRole="button" accessibilityLabel="文件操作" style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}><Icon sf="ellipsis" md="more_vert" size={20} color={colors.accent} /></View>
           </AppMenu>
         </View>
@@ -317,7 +422,7 @@ export function FileContent({ path, line, embedded = false, onBack, backLabel = 
       />
       </>}
       {savable ? saving.strip : null}
-      {editing ? <AcpFileEditor path={path} onClose={() => { setEditing(false); void link.call("fs.read", { path, maxBytes: PART }).then(setFile).catch(() => {}); }} /> : error ? (
+      {editing ? <AcpFileEditor path={currentPath} onClose={() => { setEditing(false); void link.call("fs.read", { path: currentPath, maxBytes: PART }).then(setFile).catch(() => {}); }} /> : error ? (
         <ScrollableState>
           {error.tooLarge ? (
             <EmptyState icon={{ sf: "doc.badge.ellipsis", md: "draft" }} title={error.message} message="可以保存到手机后用别的 App 打开。" action={saving.busy ? undefined : { title: "保存到文件", onPress: saving.save }} />
@@ -343,9 +448,25 @@ export function FileContent({ path, line, embedded = false, onBack, backLabel = 
           </ScrollView>
         </LinkBase>
       ) : (
-        <CodeView key={path} text={file.text ?? ""} line={target} wrap={wrap} footer={footer} />
+        <CodeView key={currentPath} text={file.text ?? ""} line={target} wrap={wrap} footer={footer} />
       )}
       </ContentWidth>
+      <TextPromptModal
+        visible={renameOpen}
+        title="重命名文件"
+        initialValue={name}
+        placeholder="输入新文件名"
+        confirmLabel="重命名"
+        busy={mutating}
+        validate={(value) => {
+          const check = renameTargetPath(currentPath, value);
+          return check.ok ? null : check.error;
+        }}
+        onCancel={() => {
+          if (!mutating) setRenameOpen(false);
+        }}
+        onConfirm={submitRename}
+      />
     </View>
   );
 }

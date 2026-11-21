@@ -1,6 +1,6 @@
 import type { ProjectGroup } from "@linkshell/client-core";
 import type { ProjectSummary, SessionSummary } from "@linkshell/wire";
-import { desktopSessionTree } from "./desktop-session-tree";
+import { sessionTree } from "./session-tree";
 
 export interface ProjectComputer {
   key: string;
@@ -20,7 +20,7 @@ export interface CrossComputerProject {
 export function crossComputerProjects(computers: ProjectComputer[]): CrossComputerProject[] {
   const grouped = new Map<string, CrossComputerProject>();
   for (const computer of [...computers].sort((a, b) => a.key.localeCompare(b.key))) {
-    for (const project of desktopSessionTree(computer.projects, computer.sessions).groups) {
+    for (const project of sessionTree(computer.projects, computer.sessions).groups) {
       const key = JSON.stringify([project.generated, project.name]);
       const group: CrossComputerProject = grouped.get(key) ?? {
         key, name: project.name, generated: project.generated,

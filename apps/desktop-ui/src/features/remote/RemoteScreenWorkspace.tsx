@@ -9,7 +9,9 @@ import {
 import { useStore } from "zustand";
 import {
   DESKTOP_FULLSCREEN_EVENT,
+  DESKTOP_SHORTCUT_CAPTURE_EVENT,
   DESKTOP_WINDOW_EVENT,
+  setSystemShortcutCapture,
 } from "../../bridge/desktop-bridge";
 import {
   FULLSCREEN_SHORTCUT,
@@ -55,6 +57,7 @@ import {
 } from "../../primitives";
 import { NativeMetalStage } from "./NativeMetalStage";
 import { getRemoteCopy, localizeRemoteMessage, type RemoteCopy } from "./remote-copy";
+import { uploadDroppedFilesToScreen } from "./screen-upload";
 import type { RemoteStageStatus, ScreenTransportMode } from "./stage-types";
 import {
   resolveLocalDesktopEnv,
@@ -106,6 +109,13 @@ function formatEngineLabel(
   return copy.screenEngineWebRtc;
 }
 
+function hasFilesInTransfer(dt: DataTransfer | null | undefined): boolean {
+  if (!dt) return false;
+  if (dt.files && dt.files.length > 0) return true;
+  if (dt.types && Array.from(dt.types).includes("Files")) return true;
+  return false;
+}
+
 /**
  * Unified Remote Screen Workspace (`#7` §3.4, `#10` §2.1, `#18`, `#30`).
  * Single-header contextual HUD strip (`.ls-remote-subbar`), codec selector (including HEVC / H.264 on macOS!),
@@ -132,6 +142,7 @@ export function RemoteScreenWorkspace({
     platformIcon,
     online,
     statusTone,
+    machineInfo,
   } = useRemoteComputer(computerKey, { retainStreams: true });
 
   const isRouteActive =
@@ -155,6 +166,14 @@ export function RemoteScreenWorkspace({
   const [askingAccess, setAskingAccess] = useState(false);
 
   const [keysCaptured, setKeysCaptured] = useState(false);
+  const [systemShortcutsCaptured, setSystemShortcutsCaptured] = useState(false);
+  const systemShortcutsRef = useRef(false);
+  systemShortcutsRef.current = systemShortcutsCaptured;
+  const [audioEnabled, setAudioEnabled] = useState(false);
+  const audioUnlockRef = useRef<(() => void) | undefined>(undefined);
+  const dragDepthRef = useRef(0);
+  const [dragOverUpload, setDragOverUpload] = useState(false);
+  const [uploadBanner, setUploadBanner] = useState<string | undefined>(undefined);
   const [privacy, setPrivacy] = useState<{
     curtain: boolean;
     lockOnDisconnect: boolean;
@@ -186,6 +205,7 @@ export function RemoteScreenWorkspace({
       : formatShortcut(FULLSCREEN_SHORTCUT);
   const canUseNativeMetal =
     localEnv.electron && localEnv.localPlatform === "macos";
+  const canUseSystemShortcutCapture = canUseNativeMetal;
   const useNativeMetal = canUseNativeMetal && !fallbackReason;
 
   const selectedDisplay = prefs.byComputer[computerKey]?.display ?? 0;
@@ -202,7 +222,15 @@ export function RemoteScreenWorkspace({
     setFallbackReason(undefined);
     setStageStatus(INITIAL_STAGE_STATUS);
     setStarted(true);
-  }, [computerKey]);
+    setAudioEnabled(false);
+    setDragOverUpload(false);
+    dragDepthRef.current = 0;
+    if (canUseSystemShortcutCapture && systemShortcutsRef.current) {
+      systemShortcutsRef.current = false;
+      setSystemShortcutsCaptured(false);
+      void setSystemShortcutCapture(false);
+    }
+  }, [canUseSystemShortcutCapture, computerKey]);
 
   // The host keeps the curtain and lock-on-disconnect between viewers: show what it has, per
   // computer, so the first click changes what it says it changes.
@@ -268,6 +296,68 @@ export function RemoteScreenWorkspace({
       setScreenKeysCaptured(false);
     };
   }, []);
+
+  // Manage macOS native CGEventTap system shortcut capture with automatic blur/unmount/disconnect reset.
+  const applySystemShortcutCapture = useCallback(
+    async (enabled: boolean): Promise<boolean> => {
+      if (!canUseSystemShortcutCapture) {
+        systemShortcutsRef.current = false;
+        setSystemShortcutsCaptured(false);
+        return false;
+      }
+      if (!enabled) {
+        systemShortcutsRef.current = false;
+        setSystemShortcutsCaptured(false);
+        await setSystemShortcutCapture(false);
+        return false;
+      }
+      const applied = await setSystemShortcutCapture(true);
+      systemShortcutsRef.current = applied;
+      setSystemShortcutsCaptured(applied);
+      if (applied) setScreenKeysCaptured(true);
+      return applied;
+    },
+    [canUseSystemShortcutCapture],
+  );
+
+  useEffect(() => {
+    if (!canUseSystemShortcutCapture) return undefined;
+    if (!isRouteActive || !windowVisible || !started || !online || !connection) {
+      if (systemShortcutsRef.current) {
+        systemShortcutsRef.current = false;
+        setSystemShortcutsCaptured(false);
+        void setSystemShortcutCapture(false);
+      }
+      return undefined;
+    }
+    return undefined;
+  }, [canUseSystemShortcutCapture, connection, isRouteActive, online, started, windowVisible]);
+
+  useEffect(() => {
+    if (!canUseSystemShortcutCapture || typeof window === "undefined") return undefined;
+    const onBlur = () => {
+      if (systemShortcutsRef.current) {
+        systemShortcutsRef.current = false;
+        setSystemShortcutsCaptured(false);
+      }
+      void setSystemShortcutCapture(false);
+    };
+    const onMainSync = (event: Event) => {
+      const captured = (event as CustomEvent<{ captured?: unknown }>).detail?.captured;
+      if (captured === false) {
+        systemShortcutsRef.current = false;
+        setSystemShortcutsCaptured(false);
+      }
+    };
+    window.addEventListener("blur", onBlur);
+    window.addEventListener(DESKTOP_SHORTCUT_CAPTURE_EVENT, onMainSync);
+    return () => {
+      window.removeEventListener("blur", onBlur);
+      window.removeEventListener(DESKTOP_SHORTCUT_CAPTURE_EVENT, onMainSync);
+      systemShortcutsRef.current = false;
+      void setSystemShortcutCapture(false);
+    };
+  }, [canUseSystemShortcutCapture]);
 
   // Manage desktop window fullscreen synchronization.
   const setFullscreenEnabled = useCallback(
@@ -423,8 +513,86 @@ export function RemoteScreenWorkspace({
     setStarted(false);
     setFullscreenEnabled(false);
     setScreenKeysCaptured(false);
+    if (canUseSystemShortcutCapture) {
+      systemShortcutsRef.current = false;
+      setSystemShortcutsCaptured(false);
+      void setSystemShortcutCapture(false);
+    }
     setStageStatus(INITIAL_STAGE_STATUS);
-  }, [setFullscreenEnabled]);
+  }, [canUseSystemShortcutCapture, setFullscreenEnabled]);
+
+  const handleToggleAudio = useCallback(() => {
+    const next = !audioEnabled;
+    if (next) {
+      // Synchronously create/resume WebAudio AudioContext on user gesture.
+      audioUnlockRef.current?.();
+    }
+    setAudioEnabled(next);
+    flashNote(next ? copy.screenAudioEnabledNote : copy.screenAudioMutedNote);
+  }, [audioEnabled, copy.screenAudioEnabledNote, copy.screenAudioMutedNote, flashNote]);
+
+  const handleRegisterAudioUnlock = useCallback((unlock: (() => void) | undefined) => {
+    audioUnlockRef.current = unlock;
+  }, []);
+
+  const handleToggleSystemShortcutCapture = useCallback(async () => {
+    const wanted = !systemShortcutsCaptured;
+    const applied = await applySystemShortcutCapture(wanted);
+    if (wanted) {
+      flashNote(
+        applied
+          ? copy.screenSystemShortcutCapturedOn
+          : copy.screenSystemShortcutUnavailable,
+      );
+    } else {
+      flashNote(copy.screenSystemShortcutCapturedOff);
+    }
+  }, [
+    applySystemShortcutCapture,
+    copy.screenSystemShortcutCapturedOff,
+    copy.screenSystemShortcutCapturedOn,
+    copy.screenSystemShortcutUnavailable,
+    flashNote,
+    systemShortcutsCaptured,
+  ]);
+
+  const handleDropUpload = useCallback(
+    async (files: File[]) => {
+      if (files.length === 0) return;
+      if (!connection || !online) {
+        flashNote(copy.screenOfflineTitle);
+        return;
+      }
+      try {
+        const res = await uploadDroppedFilesToScreen({
+          connection,
+          files,
+          remoteHome: machineInfo?.home,
+          remotePlatform,
+          onProgress: ({ index, total, fileName }) => {
+            setUploadBanner(copy.screenUploadProgress(index, total, fileName));
+          },
+        });
+        setUploadBanner(undefined);
+        if (res.skippedNames.length > 0 && res.uploadedPaths.length === 0 && res.failedErrors.length === 0) {
+          flashNote(copy.screenUploadTooLarge(res.skippedNames[0]!));
+        } else if (res.failedErrors.length > 0 || res.skippedNames.length > 0) {
+          const failedCount = res.failedErrors.length + res.skippedNames.length;
+          if (res.uploadedPaths.length > 0) {
+            flashNote(copy.screenUploadPartialFailed(res.uploadedPaths.length, failedCount, res.dir));
+          } else {
+            flashNote(copy.screenUploadFailed(res.failedErrors[0] ?? copy.screenUploadTooLarge(res.skippedNames[0]!)));
+          }
+        } else if (res.uploadedPaths.length > 0) {
+          flashNote(copy.screenUploadComplete(res.uploadedPaths.length, res.dir));
+        }
+      } catch (err) {
+        setUploadBanner(undefined);
+        flashNote(copy.screenUploadFailed(err instanceof Error ? err.message : String(err)));
+      }
+    },
+    [connection, copy, flashNote, machineInfo?.home, online, remotePlatform],
+  );
 
   const handlePasteToRemote = useCallback(async () => {
     if (!connection) return;
@@ -733,6 +901,18 @@ export function RemoteScreenWorkspace({
         >
           {copy.screenKeysCaptureLabel}
         </MenuCheckboxItem>
+        {canUseSystemShortcutCapture ? (
+          <MenuCheckboxItem
+            checked={systemShortcutsCaptured}
+            disabled={!started || !online || !connection}
+            shortcut="⌃⌥⌘Esc"
+            onCheckedChange={() => {
+              void handleToggleSystemShortcutCapture();
+            }}
+          >
+            {copy.screenSystemShortcutCaptureLabel}
+          </MenuCheckboxItem>
+        ) : null}
         {privacy.supported !== false ? (
           <>
             <MenuSeparator />
@@ -856,6 +1036,36 @@ export function RemoteScreenWorkspace({
         </PopoverContent>
       </Popover>
 
+      {canUseSystemShortcutCapture ? (
+        <Button
+          size="sm"
+          variant={systemShortcutsCaptured ? "secondary" : "ghost"}
+          leadingIcon="command"
+          aria-pressed={systemShortcutsCaptured}
+          disabled={!started || !online || !connection}
+          title={`${copy.screenSystemShortcutCaptureLabel} · ${copy.screenSystemShortcutEscapeHint}`}
+          onClick={() => {
+            void handleToggleSystemShortcutCapture();
+          }}
+        >
+          <span>
+            {systemShortcutsCaptured
+              ? copy.screenSystemShortcutEscapeHint
+              : copy.screenSystemShortcutCaptureLabel}
+          </span>
+        </Button>
+      ) : null}
+
+      <IconButton
+        size="icon-sm"
+        variant={audioEnabled ? "subtle" : "ghost"}
+        icon={audioEnabled ? "volume-2" : "volume-x"}
+        aria-pressed={audioEnabled}
+        label={audioEnabled ? copy.screenAudioOn : copy.screenAudioMuted}
+        disabled={!started || !online || !connection || stageStatus.audioAvailable === false}
+        onClick={handleToggleAudio}
+      />
+
       <Button
         size="sm"
         variant={prefs.control ? "secondary" : "ghost"}
@@ -920,6 +1130,7 @@ export function RemoteScreenWorkspace({
   );
 
   const stageNotice =
+    uploadBanner ??
     transientNote ??
     (stageStatus.notice ? localizeRemoteMessage(stageStatus.notice) : undefined) ??
     // The reason, not a guess: a decoder or a sender can fail as well as the network.
@@ -927,7 +1138,7 @@ export function RemoteScreenWorkspace({
 
   useEffect(() => {
     if (useNativeMetal) notifyOverlayLayout();
-  }, [stageNotice, useNativeMetal]);
+  }, [dragOverUpload, stageNotice, useNativeMetal]);
 
   const livePathLabel = stageStatus.telemetry.path
     ? formatPathLabel(stageStatus.telemetry.path, copy)
@@ -1068,7 +1279,36 @@ export function RemoteScreenWorkspace({
         </>
       ) : null}
 
-      <div className="ls-screen-stage-shell">
+      <div
+        className="ls-screen-stage-shell"
+        onDragEnter={(event) => {
+          if (!hasFilesInTransfer(event.dataTransfer)) return;
+          event.preventDefault();
+          dragDepthRef.current += 1;
+          setDragOverUpload(true);
+        }}
+        onDragOver={(event) => {
+          if (!hasFilesInTransfer(event.dataTransfer)) return;
+          event.preventDefault();
+          if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+          if (!dragOverUpload) setDragOverUpload(true);
+        }}
+        onDragLeave={() => {
+          if (!dragOverUpload) return;
+          dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+          if (dragDepthRef.current === 0) {
+            setDragOverUpload(false);
+          }
+        }}
+        onDrop={(event) => {
+          dragDepthRef.current = 0;
+          setDragOverUpload(false);
+          const files = Array.from(event.dataTransfer?.files ?? []);
+          if (files.length === 0) return;
+          event.preventDefault();
+          void handleDropUpload(files);
+        }}
+      >
         {canRenderStage && connection ? (
           useNativeMetal ? (
             <NativeMetalStage
@@ -1084,6 +1324,7 @@ export function RemoteScreenWorkspace({
               pacingChoice={prefs.pacing}
               transportMode={transportMode}
               controlWanted={prefs.control}
+              audioEnabled={audioEnabled}
               remotePlatform={remotePlatform}
               revision={revision}
               onDisplayChange={(nextDisplay) =>
@@ -1107,6 +1348,7 @@ export function RemoteScreenWorkspace({
               pacingChoice={prefs.pacing}
               transportMode={transportMode}
               controlWanted={prefs.control}
+              audioEnabled={audioEnabled}
               remotePlatform={remotePlatform}
               revision={revision}
               onDisplayChange={(nextDisplay) =>
@@ -1114,6 +1356,7 @@ export function RemoteScreenWorkspace({
               }
               onExitFullScreen={() => setFullscreenEnabled(false)}
               onStatusChange={setStageStatus}
+              onRegisterAudioUnlock={handleRegisterAudioUnlock}
             />
           )
         ) : null}
@@ -1322,6 +1565,18 @@ export function RemoteScreenWorkspace({
                 </Button>
               </div>
             ) : null}
+          </div>
+        ) : null}
+
+        {dragOverUpload ? (
+          <div
+            role="status"
+            className="ls-screen-drop-overlay"
+            data-native-overlay={useNativeMetal ? "" : undefined}
+          >
+            <DesktopIcon name="upload" size="lg" />
+            <strong>{copy.screenDropUploadTitle}</strong>
+            <span>{copy.screenDropUploadDesc}</span>
           </div>
         ) : null}
 

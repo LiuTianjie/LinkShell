@@ -36,7 +36,6 @@ import { MachineName } from "./machine-name.js";
 import { openChildRegistry, reapOrphans } from "./children.js";
 import { KeepAwakeManager, type SpawnAssertion } from "./keep-awake.js";
 import { MdnsAdvertiser, hostFingerprint } from "./mdns.js";
-import { createLsaService, type LsaService } from "./lsa/index.js";
 
 /** macOS sun_path is 104 bytes including the terminator. */
 const MAX_SOCKET_PATH = 100;
@@ -126,7 +125,6 @@ export interface RunningHost {
   paths: HostPaths;
   hub: SessionHub;
   server: HostRpcServer;
-  lsa: LsaService;
   /** The current gateway connection; it can change on `gateway.refresh`. */
   readonly gateway?: GatewayLink;
   machineInfo(): MachineInfo;
@@ -264,7 +262,6 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
   let hub: SessionHub | undefined;
   let maintenanceTimer: ReturnType<typeof setInterval> | undefined;
   let keepAwake: KeepAwakeManager | undefined;
-  let lsa: LsaService | undefined;
   let liveActivities: LiveActivityRelay | undefined;
   let server: HostRpcServer | undefined;
   let stopWorkListener: (() => void) | undefined;
@@ -348,7 +345,6 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
     });
 
     let serverRef: HostRpcServer | undefined;
-    let lsaRef: LsaService | undefined;
     const defaultTestAssertion: SpawnAssertion | undefined = process.env.VITEST
       ? () => {
           let alive = true;
@@ -368,7 +364,7 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
         const work = sessionHub.activeWorkDemand();
         return {
           sessionActive: work.sessionActive,
-          goalActive: work.goalActive || (lsaRef ? !lsaRef.isStewardIdle() : false),
+          goalActive: work.goalActive,
           remoteConnected: serverRef?.hasRemoteClients() ?? false,
           screenActive: serverRef?.hasActiveScreen() ?? false,
         };
@@ -377,16 +373,6 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
       log,
     });
     keepAwake = keepAwakeManager;
-
-    const lsaService = createLsaService({
-      home: paths.home,
-      hub: sessionHub,
-      machineId: () => machineId,
-      followupPollIntervalMs: 15_000,
-      log,
-    });
-    lsa = lsaService;
-    lsaRef = lsaService;
 
     const liveActivityRelay = new LiveActivityRelay({
       path: join(paths.home, "live-activities.json"),
@@ -422,7 +408,6 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
         },
       ),
       keepAwake: keepAwakeManager,
-      lsa: lsaService,
       socketPath: paths.hostSocket,
       runDir: paths.runDir,
       shutdown: options.shutdown,
@@ -454,6 +439,7 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
     if (shouldAdvertiseMdns && tcpPort !== undefined) {
       mdns = new MdnsAdvertiser({
         port: tcpPort,
+        hostPort: tcpPort,
         machineId,
         fingerprint: hostFingerprint(paths.home, machineId),
         protocolVersion: HOST_PROTOCOL,
@@ -505,7 +491,6 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
       paths,
       hub: sessionHub,
       server: rpcServer,
-      lsa: lsaService,
       get gateway() {
         return gateway;
       },
@@ -523,7 +508,6 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
           await sessionHub.stop();
           terminalManager.stop();
           await activeChildren.close(log);
-          lsaService.close();
           hostStore.close();
           releaseHostLock();
         })();
@@ -542,7 +526,6 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
     await hub?.stop().catch(() => {});
     terminals?.stop();
     await children?.close(log).catch(() => {});
-    lsa?.close();
     store?.close();
     releaseHostLock();
     throw error;

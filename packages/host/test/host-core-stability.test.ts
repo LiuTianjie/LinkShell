@@ -6,7 +6,6 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import WebSocket from "ws";
 import { RTCPeerConnection } from "werift";
-import { LsaStore } from "../src/lsa/lsa-store.js";
 import { DirectPeer } from "../src/direct.js";
 import { ProxyStreams } from "../src/ports.js";
 import { acquireHostLock, ensureSecureRunDir, startHost } from "../src/host.js";
@@ -28,26 +27,6 @@ function tempDir(prefix = "lsh-stability-"): string {
   cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
   return dir;
 }
-
-describe("LsaStore busy_timeout and post-close guards", () => {
-  it("silently ignores reads and writes after close() without throwing ERR_INVALID_STATE", () => {
-    const dir = tempDir("lsh-lsa-");
-    const lsa = new LsaStore(join(dir, "lsa.db"));
-    expect(lsa.advanceControllerEpoch()).toBe(2);
-    lsa.close();
-    expect(lsa.isClosed).toBe(true);
-    expect(() => lsa.advanceControllerEpoch()).not.toThrow();
-    expect(lsa.getControllerEpoch()).toBe(1);
-    expect(() =>
-      lsa.saveMemory({
-        key: "k1",
-        scope: "global",
-        content: "hello",
-      }),
-    ).not.toThrow();
-    expect(lsa.searchMemories()).toEqual([]);
-  });
-});
 
 describe("DirectPeer lifecycle cleanup", () => {
   it("closes underlying RTCPeerConnection, notifies streams on failure, and unsubscribes gathering listener", async () => {

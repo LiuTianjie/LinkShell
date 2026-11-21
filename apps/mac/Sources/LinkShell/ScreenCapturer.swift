@@ -21,11 +21,23 @@ final class ScreenCapturer: RTCVideoCapturer, SCStreamOutput, SCStreamDelegate {
   var onStop: ((String) -> Void)?
   /// Each new picture and the host time it was displayed, on the capture queue.
   var onPicture: ((CVPixelBuffer, Double) -> Void)?
+  /// Each captured audio buffer (on `audioQueue`) when audio capture is enabled.
+  var onAudio: ((CMSampleBuffer) -> Void)? {
+    get { audioLock.lock(); defer { audioLock.unlock() }; return _onAudio }
+    set { audioLock.lock(); _onAudio = newValue; audioLock.unlock() }
+  }
 
   private let queue = DispatchQueue(label: "com.bd.linkshell.capture", qos: .userInteractive)
+  private let audioQueue = DispatchQueue(label: "com.bd.linkshell.capture.audio", qos: .userInteractive)
+  private let audioLock = NSLock()
+  private var _onAudio: ((CMSampleBuffer) -> Void)?
+  private var _audioActive = false
   private var stream: SCStream?
   private var configuration: SCStreamConfiguration?
   private var fps = 0
+  private var audioEnabled = false
+  private var excludesCurrentProcessAudio = false
+  private var audioOutputAdded = false
   private var stopped = false
   private var starting = false
   private var stopping = false
@@ -105,10 +117,13 @@ final class ScreenCapturer: RTCVideoCapturer, SCStreamOutput, SCStreamDelegate {
     }
   }
 
-  func start(display: Display, width: Int, height: Int, fps: Int, done: @escaping (String?) -> Void) {
+  func start(display: Display, width: Int, height: Int, fps: Int, audio: Bool = false, excludesCurrentProcessAudio: Bool = false, done: @escaping (String?) -> Void) {
     queue.async {
       guard !self.stopped else { return done("the capture was stopped") }
       self.fps = fps
+      self.audioEnabled = audio
+      self.excludesCurrentProcessAudio = excludesCurrentProcessAudio
+      self.setAudioActive(audio)
       self.displayID = display.id
       self.starting = true
       Self.fetchShareableContent(maxAge: 0) { content, error in
@@ -133,6 +148,10 @@ final class ScreenCapturer: RTCVideoCapturer, SCStreamOutput, SCStreamDelegate {
           // The pointer goes to the viewer by itself (the `cursor` channel) and is drawn there.
           configuration.showsCursor = false
           configuration.scalesToFit = true
+          configuration.capturesAudio = self.audioEnabled
+          configuration.sampleRate = ScreenAudioConstants.sampleRate
+          configuration.channelCount = ScreenAudioConstants.channels
+          configuration.excludesCurrentProcessAudio = self.excludesCurrentProcessAudio
 
           // Everything on the display except local privacy-curtain overlays, this app's own clock strip included.
           let curtainIDs = ScreenPrivacy.shared.curtainWindowIDs()
@@ -141,6 +160,11 @@ final class ScreenCapturer: RTCVideoCapturer, SCStreamOutput, SCStreamDelegate {
           let stream = SCStream(filter: filter, configuration: configuration, delegate: self)
           do {
             try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: self.queue)
+            self.audioOutputAdded = false
+            if self.audioEnabled {
+              try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: self.audioQueue)
+              self.audioOutputAdded = true
+            }
           } catch {
             self.starting = false
             return done(error.localizedDescription)
@@ -155,6 +179,7 @@ final class ScreenCapturer: RTCVideoCapturer, SCStreamOutput, SCStreamDelegate {
               }
               if let error {
                 self.stream = nil
+                self.audioOutputAdded = false
                 self.finishStopping()
                 return done(error.localizedDescription)
               }
@@ -164,8 +189,12 @@ final class ScreenCapturer: RTCVideoCapturer, SCStreamOutput, SCStreamDelegate {
                 return done("the capture was stopped")
               }
               self.configuration = configuration
-              // The rate was changed while it was starting.
-              if configuration.minimumFrameInterval != Self.interval(fps: self.fps) { self.update(done: { _ in }) }
+              // Settings changed while the stream was starting.
+              if configuration.minimumFrameInterval != Self.interval(fps: self.fps)
+                || configuration.capturesAudio != self.audioEnabled
+                || configuration.excludesCurrentProcessAudio != self.excludesCurrentProcessAudio {
+                self.update(done: { _ in })
+              }
               self.startRepeating()
               if Self.fusionFilter != nil { self.startFilterRefresh(display: target) }
               done(nil)
@@ -371,11 +400,27 @@ final class ScreenCapturer: RTCVideoCapturer, SCStreamOutput, SCStreamDelegate {
     }
   }
 
+  /// Dynamically toggle system audio capture without recreating the capture stream when running.
+  func setAudio(_ enabled: Bool, excludesCurrentProcessAudio: Bool? = nil, done: @escaping (String?) -> Void = { _ in }) {
+    queue.async {
+      guard !self.stopped else { return done("the capture was stopped") }
+      self.audioEnabled = enabled
+      if let excludesCurrentProcessAudio {
+        self.excludesCurrentProcessAudio = excludesCurrentProcessAudio
+      }
+      self.setAudioActive(enabled)
+      guard self.stream != nil, self.configuration != nil else { return done(nil) }
+      self.update(done: done)
+    }
+  }
+
   /// For good: a capturer is started once.
   func stop(done: @escaping (String?) -> Void = { _ in }) {
     queue.async {
       self.stopCompletions.append(done)
       self.stopped = true
+      self.setAudioActive(false)
+      self.onAudio = nil
       self.timer?.cancel()
       self.timer = nil
       self.filterTimer?.cancel()
@@ -391,6 +436,7 @@ final class ScreenCapturer: RTCVideoCapturer, SCStreamOutput, SCStreamDelegate {
     guard !stopping else { return }
     guard let stream else { return finishStopping() }
     self.stream = nil
+    self.audioOutputAdded = false
     stopping = true
     stoppingStream = stream
     stream.stopCapture { error in
@@ -424,6 +470,15 @@ final class ScreenCapturer: RTCVideoCapturer, SCStreamOutput, SCStreamDelegate {
   // MARK: SCStreamOutput
 
   func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
+    if type == .audio {
+      audioLock.lock()
+      let active = _audioActive
+      let callback = _onAudio
+      audioLock.unlock()
+      guard active, sampleBuffer.isValid else { return }
+      callback?(sampleBuffer)
+      return
+    }
     guard type == .screen, self.stream === stream, !stopped, sampleBuffer.isValid else { return }
     let attachments = (CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]])?.first
     let status = (attachments?[.status] as? Int).flatMap(SCFrameStatus.init(rawValue:))
@@ -468,6 +523,8 @@ final class ScreenCapturer: RTCVideoCapturer, SCStreamOutput, SCStreamDelegate {
       guard self.stream === stream || self.stoppingStream === stream else { return }
       self.ended = true
       self.stream = nil
+      self.audioOutputAdded = false
+      self.setAudioActive(false)
       self.timer?.cancel()
       self.timer = nil
       if !self.stopped { self.onStop?(error.localizedDescription) }
@@ -477,13 +534,31 @@ final class ScreenCapturer: RTCVideoCapturer, SCStreamOutput, SCStreamDelegate {
 
   // MARK: Private
 
+  private func setAudioActive(_ active: Bool) {
+    audioLock.lock()
+    _audioActive = active
+    audioLock.unlock()
+  }
+
   private static func interval(fps: Int) -> CMTime {
     CMTime(value: 1000, timescale: CMTimeScale(Double(fps) * 1000 * Tuning.captureRateSlack))
   }
 
   private func update(done: @escaping (String?) -> Void) {
     guard let stream, let configuration else { return }
+    if audioEnabled, !audioOutputAdded {
+      do {
+        try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: audioQueue)
+        audioOutputAdded = true
+      } catch {
+        return done(error.localizedDescription)
+      }
+    }
     configuration.minimumFrameInterval = Self.interval(fps: fps)
+    configuration.capturesAudio = audioEnabled
+    configuration.sampleRate = ScreenAudioConstants.sampleRate
+    configuration.channelCount = ScreenAudioConstants.channels
+    configuration.excludesCurrentProcessAudio = excludesCurrentProcessAudio
     stream.updateConfiguration(configuration) { error in done(error?.localizedDescription) }
   }
 

@@ -314,6 +314,16 @@ import WebKit
       if let rect = DesktopScreenBridge.rect(body["rect"]) { screenRect = rect; layoutNativeScreen() }
     case "control":
       if let enabled = DesktopScreenBridge.boolean(body["enabled"]) { screenReceiver?.setControl(enabled) }
+    case "mute":
+      if let muted = DesktopScreenBridge.boolean(body["muted"]) ?? DesktopScreenBridge.boolean(body["enabled"]) {
+        screenReceiver?.setAudioMuted(muted)
+      }
+    case "audio":
+      if let muted = DesktopScreenBridge.boolean(body["muted"]) {
+        screenReceiver?.setAudioMuted(muted)
+      } else if let enabled = DesktopScreenBridge.boolean(body["enabled"]) {
+        screenReceiver?.setAudioMuted(!enabled)
+      }
     default: break
     }
   }

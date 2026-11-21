@@ -1,8 +1,10 @@
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { downloadFile, listDirectory, makeDirectory, readFile, uploadFile, writeTextFile } from "../src/fs.js";
+import { deletePath, downloadFile, listDirectory, makeDirectory, readFile, renamePath, uploadFile, writeTextFile } from "../src/fs.js";
+import { startHost } from "../src/host.js";
+import { connectHost } from "../src/rpc/client.js";
 
 describe("fs.list", () => {
   it("downloads original binary bytes in chunks beyond the preview limit", async () => {
@@ -238,6 +240,89 @@ describe("fs.list", () => {
       symlinkSync(join(outside, "target.txt"), join(root, "link.txt"));
       await expect(writeTextFile({ path: join(root, "link.txt"), text: "x" })).rejects.toMatchObject({ appCode: "invalid_params" });
       expect(readFileSync(join(outside, "target.txt"), "utf8")).toBe("keep");
+    }
+  });
+
+  it("fs.rename moves files/directories, enforces overwrite, and guards protected paths", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lsh-rename-"));
+    try {
+      const src = join(root, "alpha.txt");
+      const sub = join(root, "nested");
+      mkdirSync(sub);
+      writeFileSync(src, "hello world");
+
+      const moved = await renamePath({ from: src, to: join(sub, "beta.txt") }, { allowedRoots: [root] });
+      expect(moved.path).toBe(join(sub, "beta.txt"));
+      expect(existsSync(src)).toBe(false);
+      expect(readFileSync(join(sub, "beta.txt"), "utf8")).toBe("hello world");
+
+      // Refuse overwrite by default, allow when overwrite: true.
+      const extra = join(root, "extra.txt");
+      writeFileSync(extra, "new content");
+      await expect(renamePath({ from: extra, to: join(sub, "beta.txt") }, { allowedRoots: [root] })).rejects.toMatchObject({ appCode: "conflict" });
+      await renamePath({ from: extra, to: join(sub, "beta.txt"), overwrite: true }, { allowedRoots: [root] });
+      expect(readFileSync(join(sub, "beta.txt"), "utf8")).toBe("new content");
+
+      // Prevent moving a directory into itself, relative paths, and allowedRoots escapes.
+      await expect(renamePath({ from: sub, to: join(sub, "inside") })).rejects.toMatchObject({ appCode: "invalid_params" });
+      await expect(renamePath({ from: "rel.txt", to: join(root, "b.txt") })).rejects.toMatchObject({ appCode: "invalid_params" });
+      await expect(renamePath({ from: join(sub, "beta.txt"), to: join(tmpdir(), "outside.txt") }, { allowedRoots: [root] })).rejects.toMatchObject({ appCode: "invalid_params" });
+      await expect(renamePath({ from: "/", to: join(root, "slash") })).rejects.toMatchObject({ appCode: "invalid_params" });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("fs.delete removes files and directories with recursive and root safety guards", async () => {
+    const root = mkdtempSync(join(tmpdir(), "lsh-delete-"));
+    try {
+      const file = join(root, "temp.txt");
+      writeFileSync(file, "bye");
+      await expect(deletePath({ path: file }, { allowedRoots: [root] })).resolves.toEqual({ deleted: true });
+      expect(existsSync(file)).toBe(false);
+
+      const dir = join(root, "folder");
+      mkdirSync(join(dir, "child"), { recursive: true });
+      writeFileSync(join(dir, "child", "a.txt"), "1");
+      await expect(deletePath({ path: dir }, { allowedRoots: [root] })).rejects.toMatchObject({ appCode: "invalid_params" });
+      expect(existsSync(dir)).toBe(true);
+
+      await expect(deletePath({ path: dir, recursive: true }, { allowedRoots: [root] })).resolves.toEqual({ deleted: true });
+      expect(existsSync(dir)).toBe(false);
+
+      await expect(deletePath({ path: "/" })).rejects.toMatchObject({ appCode: "invalid_params" });
+      await expect(deletePath({ path: homedir(), recursive: true })).rejects.toMatchObject({ appCode: "invalid_params" });
+      await expect(deletePath({ path: tmpdir(), recursive: true })).rejects.toMatchObject({ appCode: "invalid_params" });
+      await expect(deletePath({ path: join(tmpdir(), "other") }, { allowedRoots: [root] })).rejects.toMatchObject({ appCode: "invalid_params" });
+      await expect(deletePath({ path: join(root, "nonexistent") }, { allowedRoots: [root] })).rejects.toMatchObject({ appCode: "not_found" });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("exposes fs.rename and fs.delete over Host RPC", async () => {
+    const home = mkdtempSync(join(tmpdir(), "lsh-rpc-home-"));
+    const work = mkdtempSync(join(tmpdir(), "lsh-rpc-work-"));
+    const host = await startHost({ home, version: "test", drivers: () => [], log: () => {} });
+    const client = await connectHost(host.paths.hostSocket);
+    try {
+      const a = join(work, "a.txt");
+      const b = join(work, "b.txt");
+      writeFileSync(a, "rpc-body");
+
+      const renamed = await client.call("fs.rename", { from: a, to: b });
+      expect(renamed.path).toBe(b);
+      expect(existsSync(a)).toBe(false);
+      expect(readFileSync(b, "utf8")).toBe("rpc-body");
+
+      const deleted = await client.call("fs.delete", { path: b });
+      expect(deleted.deleted).toBe(true);
+      expect(existsSync(b)).toBe(false);
+    } finally {
+      client.close();
+      await host.stop();
+      rmSync(home, { recursive: true, force: true });
+      rmSync(work, { recursive: true, force: true });
     }
   });
 });

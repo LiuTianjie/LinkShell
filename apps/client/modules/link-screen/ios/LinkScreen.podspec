@@ -11,7 +11,7 @@ Pod::Spec.new do |s|
   s.dependency 'ExpoModulesCore'
   # Share the framework already used by react-native-webrtc; never load two libwebrtc builds.
   s.dependency 'WebRTC-lib', '154.0.0'
-  s.frameworks = 'Metal', 'CoreVideo', 'QuartzCore', 'Network', 'WebKit'
+  s.frameworks = 'Metal', 'CoreVideo', 'QuartzCore', 'Network', 'WebKit', 'AVFoundation', 'AudioToolbox'
   s.source_files = '**/*.swift'
   s.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES' }
 end

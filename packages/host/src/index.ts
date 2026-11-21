@@ -18,4 +18,3 @@ export { gitDiff, gitRevertFile } from "./git-diff.js";
 export { listProjectFiles, scoreProjectPath } from "./fs.js";
 export { MdnsAdvertiser, buildMdnsCommand, hostFingerprint } from "./mdns.js";
 export { readClipboard, writeClipboard } from "./clipboard.js";
-export * from "./lsa/index.js";

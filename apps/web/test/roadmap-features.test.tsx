@@ -11,7 +11,6 @@ import {
 import { MembershipStatus, ReferralCard } from "../src/live/AccountMembership";
 import { ComputerResourceReadings } from "../src/live/ComputerMetricsVisuals";
 import { setWebLocalePreference } from "../src/live/i18n";
-import { membershipOf } from "../src/live/management-model";
 import { formatDiffReviewPrompt } from "../src/live/Panels";
 import { atFileMention } from "../src/live/Session";
 import { DiffView } from "../src/live/Timeline";
@@ -111,25 +110,6 @@ describe("Web localization & Membership/Referral growth UI", () => {
     );
     expect(referralMarkup).toContain("友だち招待");
     expect(referralMarkup).toContain("+44");
-  });
-
-  it("models active accounts and remaining days in desktop management", () => {
-    const now = Date.parse("2026-11-12T00:00:00.000Z");
-    const tomorrow = "2026-11-13T12:00:00.000Z";
-    const status = membershipOf(
-      {
-        state: "signed-in",
-        plan: "pro",
-        tier: "monthly",
-        planExpiresAt: tomorrow,
-      },
-      now,
-    );
-    expect(status.kind).toBe("pro");
-    if (status.kind === "pro") {
-      expect(status.tier).toBe("monthly");
-      expect(status.daysRemaining).toBe(2);
-    }
   });
 });
 

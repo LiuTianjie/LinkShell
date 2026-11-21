@@ -1,7 +1,6 @@
 import { fetchProMembership, fetchReferralSummary, type Locale } from "@linkshell/client-core";
-import { desktopAccount, isDesktop } from "./desktop";
 
-// Unified iTool Core account backend (shared with iTool, CLI, desktop, and mobile).
+// Unified iTool Core account backend (shared with iTool, CLI, and mobile).
 const CORE_URL = "https://api.itool.tech";
 const CORE_PUBLIC_KEY = "itool-core";
 const STORAGE_KEY = "linkshell.web.account.v2";
@@ -319,7 +318,6 @@ function createCoreWebClient(baseUrl: string): WebAccountClient {
 let client: WebAccountClient | undefined;
 
 export function accountClient(): WebAccountClient {
-  if (isDesktop) throw new Error("桌面端使用 LinkShell 的系统浏览器登录");
   const { supabaseUrl } = accountConfig();
   return (client ??= createCoreWebClient(supabaseUrl));
 }
@@ -330,11 +328,6 @@ function assertAccount(userId: string | undefined, expectedUserId: string) {
 }
 
 export async function accountToken(expectedUserId?: string) {
-  if (isDesktop) {
-    const account = await desktopAccount();
-    if (expectedUserId !== undefined) assertAccount(account.userId, expectedUserId);
-    return account.accessToken;
-  }
   const auth = accountClient().auth;
   const { data, error } = await auth.getSession();
   if (error) throw error;
@@ -352,12 +345,6 @@ export async function accountToken(expectedUserId?: string) {
 }
 
 async function currentAccountSession(expectedUserId: string) {
-  if (isDesktop) {
-    const account = await desktopAccount();
-    assertAccount(account.userId, expectedUserId);
-    if (!account.accessToken) throw new Error("登录已失效，请重新登录");
-    return { access_token: account.accessToken };
-  }
   const { data, error } = await accountClient().auth.getSession();
   if (error) throw error;
   if (!data.session) throw new Error("登录已失效，请重新登录");

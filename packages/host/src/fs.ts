@@ -1,8 +1,8 @@
 import { execFile } from "node:child_process";
 import { constants as fsConstants, existsSync } from "node:fs";
-import { chmod, lstat, mkdir, open, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
+import { chmod, cp, lstat, mkdir, open, readdir, realpath, rename, rm, rmdir, stat, unlink, writeFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
+import { basename, dirname, extname, isAbsolute, join, parse, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { RpcError, type DirectoryEntry } from "@linkshell/wire";
 
@@ -389,6 +389,212 @@ export async function makeDirectory(input: { parent: string; name: string }) {
     throw error;
   }
   return { path };
+}
+
+function expandFullPath(raw: string): string {
+  if (!raw || raw.includes("\0")) throw RpcError.app("invalid_params", "路径无效");
+  if (raw === "~") return resolve(homedir());
+  if (raw.startsWith("~/") || raw.startsWith("~\\")) return resolve(homedir(), raw.slice(2));
+  if (!isAbsolute(raw)) throw RpcError.app("invalid_params", "需要文件或文件夹的完整路径");
+  return resolve(raw);
+}
+
+const PROTECTED_POSIX_PATHS = new Set([
+  "/bin",
+  "/sbin",
+  "/usr",
+  "/etc",
+  "/var",
+  "/lib",
+  "/lib64",
+  "/boot",
+  "/dev",
+  "/proc",
+  "/sys",
+  "/root",
+  "/System",
+  "/Library",
+  "/Applications",
+  "/Users",
+  "/home",
+  "/Volumes",
+  "/private",
+  "/private/var",
+  "/private/etc",
+  "/private/tmp",
+]);
+
+function isProtectedRoot(candidate: string): boolean {
+  const parsed = parse(candidate);
+  if (candidate === parsed.root || dirname(candidate) === candidate) return true;
+  if (candidate === resolve(homedir()) || candidate === resolve(tmpdir())) return true;
+  if (process.platform === "win32") {
+    const lower = candidate.toLowerCase();
+    return /^[a-z]:\\(?:windows|program files(?: \(x86\))?|programdata|users)$/.test(lower);
+  }
+  return PROTECTED_POSIX_PATHS.has(candidate);
+}
+
+async function assertNotProtectedPath(resolvedPath: string, followLeaf: boolean): Promise<void> {
+  const realHome = await realpath(homedir()).catch(() => resolve(homedir()));
+  const realTmp = await realpath(tmpdir()).catch(() => resolve(tmpdir()));
+  const realLeaf = followLeaf ? await realpath(resolvedPath).catch(() => undefined) : undefined;
+  for (const candidate of [resolvedPath, realLeaf]) {
+    if (!candidate) continue;
+    if (isProtectedRoot(candidate) || candidate === realHome || candidate === realTmp) {
+      throw RpcError.app("invalid_params", "不能修改或删除系统根目录或主目录");
+    }
+  }
+}
+
+function isStrictlyInside(root: string, candidate: string): boolean {
+  const rel = relative(root, candidate);
+  return Boolean(rel) && !rel.startsWith("..") && !isAbsolute(rel);
+}
+
+async function assertInsideAllowedRoots(resolvedPath: string, realParent: string, allowedRoots?: readonly string[]): Promise<void> {
+  if (!allowedRoots || allowedRoots.length === 0) return;
+  const targetInRealParent = join(realParent, basename(resolvedPath));
+  for (const rawRoot of allowedRoots) {
+    const expanded = expandFullPath(rawRoot);
+    const realRoot = await realpath(expanded).catch(() => expanded);
+    if (isStrictlyInside(realRoot, targetInRealParent)) return;
+  }
+  throw RpcError.app("invalid_params", "路径超出允许的目录范围");
+}
+
+function mapFsError(error: unknown, action: string, target: string): never {
+  if (error instanceof RpcError) throw error;
+  const code = (error as NodeJS.ErrnoException).code;
+  if (code === "ENOENT") throw RpcError.app("not_found", `找不到文件或文件夹：${target}`);
+  if (code === "EACCES" || code === "EPERM") throw RpcError.app("forbidden", `没有权限${action}：${target}`);
+  if (code === "EEXIST" || code === "ENOTEMPTY") throw RpcError.app("conflict", `目标已存在或文件夹不为空：${target}`);
+  if (code === "EISDIR" || code === "ENOTDIR") throw RpcError.app("invalid_params", `文件与文件夹类型不匹配：${target}`);
+  throw error;
+}
+
+export interface FsPathOptions {
+  allowedRoots?: readonly string[];
+}
+
+/**
+ * Safely renames or moves a file, symlink, or directory within allowed roots.
+ * Refuses protected system/home roots and prevents moving a directory into itself.
+ */
+export async function renamePath(
+  input: { from: string; to: string; overwrite?: boolean },
+  options?: FsPathOptions,
+): Promise<{ path: string }> {
+  const fromPath = expandFullPath(input.from);
+  const toPath = expandFullPath(input.to);
+  const fromInfo = await lstat(fromPath).catch(() => undefined);
+  if (!fromInfo) throw RpcError.app("not_found", `找不到文件或文件夹：${fromPath}`);
+  await assertNotProtectedPath(fromPath, !fromInfo.isSymbolicLink());
+  await assertNotProtectedPath(toPath, false);
+
+  const fromParentReal = await realpath(dirname(fromPath)).catch(() => undefined);
+  if (!fromParentReal) throw RpcError.app("not_found", `找不到文件或文件夹：${fromPath}`);
+  const toParent = dirname(toPath);
+  const toParentInfo = await stat(toParent).catch(() => undefined);
+  if (!toParentInfo?.isDirectory()) throw RpcError.app("not_found", `找不到目标文件夹：${toParent}`);
+  const toParentReal = await realpath(toParent);
+
+  await assertInsideAllowedRoots(fromPath, fromParentReal, options?.allowedRoots);
+  await assertInsideAllowedRoots(toPath, toParentReal, options?.allowedRoots);
+
+  if (fromPath === toPath) return { path: toPath };
+
+  if (fromInfo.isDirectory()) {
+    const fromReal = await realpath(fromPath);
+    if (toParentReal === fromReal || isStrictlyInside(fromReal, toParentReal)) {
+      throw RpcError.app("invalid_params", "不能将文件夹移动到自身内部");
+    }
+  }
+
+  const toInfo = await lstat(toPath).catch(() => undefined);
+  const sameInodeCaseRename = Boolean(
+    toInfo &&
+      fromInfo.dev === toInfo.dev &&
+      fromInfo.ino === toInfo.ino &&
+      fromInfo.ino !== 0 &&
+      fromParentReal === toParentReal &&
+      basename(fromPath).toLowerCase() === basename(toPath).toLowerCase(),
+  );
+
+  if (toInfo && !sameInodeCaseRename) {
+    if (!input.overwrite) throw RpcError.app("conflict", `目标已存在：${toPath}`);
+    if (fromInfo.isDirectory() !== toInfo.isDirectory()) {
+      throw RpcError.app("invalid_params", toInfo.isDirectory() ? "不能用文件覆盖文件夹" : "不能用文件夹覆盖文件");
+    }
+  }
+
+  try {
+    await rename(fromPath, toPath);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "EXDEV") {
+      if (toInfo?.isDirectory()) {
+        // Match POSIX rename semantics: only empty target directories can be overwritten.
+        const entries = await readdir(toPath).catch(() => []);
+        if (entries.length > 0) throw RpcError.app("conflict", `目标文件夹不为空：${toPath}`);
+        await rmdir(toPath);
+      }
+      try {
+        await cp(fromPath, toPath, { recursive: true, force: Boolean(input.overwrite), verbatimSymlinks: true });
+        await rm(fromPath, { recursive: true, force: true });
+      } catch (copyError) {
+        mapFsError(copyError, "移动", toPath);
+      }
+    } else {
+      mapFsError(error, "移动", toPath);
+    }
+  }
+  return { path: toPath };
+}
+
+/**
+ * Safely deletes a file, symlink, or directory. Requires `recursive: true` for
+ * non-empty directories and blocks deleting system roots, home, or temp roots.
+ */
+export async function deletePath(
+  input: { path: string; recursive?: boolean },
+  options?: FsPathOptions,
+): Promise<{ deleted: boolean }> {
+  const target = expandFullPath(input.path);
+  const info = await lstat(target).catch(() => undefined);
+  await assertNotProtectedPath(target, Boolean(info && !info.isSymbolicLink()));
+
+  if (options?.allowedRoots?.length) {
+    const parentReal = await realpath(dirname(target)).catch(() => undefined);
+    if (!parentReal) throw RpcError.app("not_found", `找不到文件或文件夹：${target}`);
+    await assertInsideAllowedRoots(target, parentReal, options.allowedRoots);
+  }
+
+  if (!info) throw RpcError.app("not_found", `找不到文件或文件夹：${target}`);
+
+  try {
+    if (info.isDirectory()) {
+      if (input.recursive) {
+        await rm(target, { recursive: true, force: false });
+      } else {
+        try {
+          await rmdir(target);
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException).code;
+          if (code === "ENOTEMPTY" || code === "EEXIST") {
+            throw RpcError.app("invalid_params", "文件夹不为空，需要指定 recursive: true 才能删除");
+          }
+          throw error;
+        }
+      }
+    } else {
+      await unlink(target);
+    }
+  } catch (error) {
+    mapFsError(error, "删除", target);
+  }
+
+  return { deleted: true };
 }
 
 export interface ProjectFileEntry {

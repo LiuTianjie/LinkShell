@@ -1,6 +1,7 @@
 import type { HostLink, HostStreams } from "@linkshell/client-core";
 import { openWebSocket } from "./transport";
 import { ScreenGate, type ScreenTarget } from "./screen-gate";
+import { ScreenAudioPlayer, supportsScreenAudio } from "./screen-audio";
 import type { Modifier, ScreenInput } from "./screen-input";
 
 /**
@@ -62,6 +63,8 @@ export interface ReceiverState {
   appliedWidth?: number;
   /** The host can change the picture on the same connection (display, width, frame rate, pause). */
   configurable: boolean;
+  /** Desktop audio streaming is enabled on this receiver. */
+  audio: boolean;
 }
 
 export interface ReceiverOptions {
@@ -70,6 +73,7 @@ export interface ReceiverOptions {
   target: Omit<ScreenTarget, "paused">;
   active: boolean;
   control: boolean;
+  audio?: boolean;
   hevc: boolean;
   /** The workspace reaches this computer through a gateway: the host's own fallback is then lighter. */
   relayed: boolean;
@@ -118,6 +122,8 @@ export class ScreenReceiver {
   private target: Omit<ScreenTarget, "paused">;
   private active: boolean;
   private controlWanted: boolean;
+  private audioEnabled: boolean;
+  private readonly audioPlayer: ScreenAudioPlayer;
   private closed = false;
   private socket?: Socket;
   private socketOpen = false;
@@ -167,10 +173,13 @@ export class ScreenReceiver {
     this.target = options.target;
     this.active = options.active;
     this.controlWanted = options.control;
+    this.audioEnabled = options.audio === true;
+    this.audioPlayer = new ScreenAudioPlayer({ enabled: this.audioEnabled });
     this.context = options.canvas.getContext("2d");
     this.state = {
       phase: "starting", taken: false, displays: [], display: options.target.display,
       control: { known: false, available: false, trusted: false }, canInput: false, configurable: false,
+      audio: this.audioEnabled,
     };
     const video = options.video;
     video.muted = true;
@@ -237,13 +246,18 @@ export class ScreenReceiver {
       // This receiver passes a TURN server's login on to WebRTC: the host may give it one.
       turn: "1",
     });
+    const wantsAudio = this.audioEnabled || supportsScreenAudio();
     if (this.options.hevc) query.set("codec", "hevc");
     if (this.options.relayed) query.set("q", "low");
+    if (wantsAudio) query.set("audio", "1");
     try {
       const socket = await openWebSocket(this.options.streams, this.port, "/stream?" + query, {
         open: () => {
           this.socketOpen = true;
-          for (const message of this.outgoing.splice(0)) this.socket?.send(message);
+          if (wantsAudio && !this.audioEnabled) this.sendSocket({ t: "audio", enabled: false });
+          if (this.socket) {
+            for (const message of this.outgoing.splice(0)) this.socket.send(message);
+          }
           // A host from before capabilities says nothing of them.
           this.later(10_000, () => { if (!this.gate.capabilitiesKnown) { this.gate.assumeLegacy(); this.afterGate(); } });
         },
@@ -255,7 +269,12 @@ export class ScreenReceiver {
         },
       });
       if (this.closed) socket.close();
-      else this.socket = socket;
+      else {
+        this.socket = socket;
+        if (this.socketOpen) {
+          for (const message of this.outgoing.splice(0)) socket.send(message);
+        }
+      }
     } catch (error) {
       this.fail(error instanceof Error ? error.message : String(error));
     }
@@ -272,6 +291,7 @@ export class ScreenReceiver {
     clearTimeout(this.ackTimer);
     cancelAnimationFrame(this.moveFrame);
     this.dropPeer();
+    this.audioPlayer.close();
     this.socket?.close();
     this.socket = undefined;
     try { this.decoder?.close(); } catch { /* Already closed. */ }
@@ -446,9 +466,14 @@ export class ScreenReceiver {
       void video.play().catch(() => {});
     };
     pc.ondatachannel = ({ channel }) => {
-      if (!["input", "pointer", "cursor", "shape"].includes(channel.label) || this.channels[channel.label]) { channel.close(); return; }
+      if (!["input", "pointer", "cursor", "shape", "audio"].includes(channel.label) || this.channels[channel.label]) { channel.close(); return; }
       this.channels[channel.label] = channel;
-      if (channel.label === "cursor" || channel.label === "shape") channel.onmessage = (event) => {
+      if (channel.label === "audio") {
+        channel.binaryType = "arraybuffer";
+        channel.onmessage = (event) => {
+          if (this.pc === pc) this.audioPlayer.handlePacket(event.data);
+        };
+      } else if (channel.label === "cursor" || channel.label === "shape") channel.onmessage = (event) => {
         if (this.pc !== pc || typeof event.data !== "string" || event.data.length > 1_500_000) return;
         try {
           const message = object(JSON.parse(event.data));
@@ -540,6 +565,7 @@ export class ScreenReceiver {
     this.cancel(this.patience);
     this.cancel(this.away);
     this.away = undefined;
+    this.audioPlayer.reset();
     const pc = this.pc;
     if (!pc) return;
     this.pc = undefined;
@@ -636,13 +662,30 @@ export class ScreenReceiver {
   setActive(active: boolean) {
     if (this.active === active) return;
     this.active = active;
-    if (!active) this.releaseAll();
+    if (!active) {
+      this.releaseAll();
+      this.audioPlayer.reset();
+    }
     if (this.gate.canConfigure) this.configure();
     else if (this.gate.capabilitiesKnown) this.sendSocket({ t: active ? "shown" : "hidden" });
-    if (active) this.askControl();
+    if (active) {
+      this.askControl();
+      if (this.audioEnabled) this.sendSocket({ t: "audio", enabled: true });
+    }
     this.set({ phase: this.resumedPhase() });
   }
   get canPause(): boolean { return this.gate.canPause; }
+
+  setAudio(enabled: boolean) {
+    this.audioEnabled = enabled;
+    this.audioPlayer.setEnabled(enabled);
+    this.sendSocket({ t: "audio", enabled });
+    this.set({ audio: enabled });
+  }
+
+  unlockAudio() {
+    if (this.audioEnabled) this.audioPlayer.unlock();
+  }
 
   setControl(wanted: boolean) {
     if (this.controlWanted === wanted) return;

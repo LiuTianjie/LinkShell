@@ -57,7 +57,7 @@ it("uses the domestic refresh proxy without retrying a token after an ambiguous 
 });
 
 it("can refresh against an older deployment that has no token proxy", async () => {
-  const fetch = vi.fn(async (url: string) => url.includes("itool.tech")
+  const fetch = vi.fn(async (url: string) => url.includes("/api/linkshell/token")
     ? new Response("Not Found", { status: 404 })
     : Response.json({ access_token: "fresh", refresh_token: "rotated", user: { id: expired.userId } }));
   vi.stubGlobal("fetch", fetch);

@@ -15,7 +15,7 @@ import {
   InputGroupButton,
 } from "@/components/ui/input-group";
 import { useDialogs } from "@/components/Dialogs";
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowUp,
@@ -28,28 +28,14 @@ import {
   FolderOpen,
   Home,
   LoaderCircle,
-  FolderTree,
+  Pencil,
   RefreshCw,
   Search,
-  Upload,
+  Trash2,
   WrapText,
   X,
-  Ellipsis,
-  Eye,
-  EyeOff,
 } from "lucide-react";
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { PageHeader } from "@/components/PageHeader";
-import { ColumnResizer } from "@/components/ColumnResizer";
 import { readLocal, saveLocal } from "./storage";
-import { isDesktop } from "./desktop";
 import type { MethodResult } from "@linkshell/wire";
 import { cn } from "@/lib/utils";
 import {
@@ -64,7 +50,6 @@ import {
 } from "./common";
 import { FileEditor } from "./Editor";
 import { FileDownload } from "./FileDownload";
-import { DesktopFileView } from "./FilePreview";
 import {
   appendFileChunk,
   formatFileSize,
@@ -80,6 +65,32 @@ export async function fileBase64(file: File): Promise<string> {
     reader.onload = () => resolve(String(reader.result).split(",")[1] ?? "");
     reader.readAsDataURL(file);
   });
+}
+
+export function renameTargetPath(entryPath: string, nextInput: string): string {
+  const value = nextInput.trim();
+  if (!value || value === "." || value === ".." || /[/\\\0]/.test(value) || value.length > 255) {
+    throw new Error("请输入有效的名称，不要包含斜杠，最多 255 个字符。");
+  }
+  const clean = entryPath.length > 1 ? entryPath.replace(/[/\\]+$/, "") : entryPath;
+  const separatorIndex = Math.max(clean.lastIndexOf("/"), clean.lastIndexOf("\\"));
+  if (separatorIndex < 0) return value;
+  return `${clean.slice(0, separatorIndex + 1)}${value}`;
+}
+
+function isSameOrChildPath(candidate: string, parent: string): boolean {
+  if (candidate === parent) return true;
+  const cleanParent = parent.length > 1 ? parent.replace(/[/\\]+$/, "") : parent;
+  return candidate.startsWith(`${cleanParent}/`) || candidate.startsWith(`${cleanParent}\\`);
+}
+
+function rewritePathPrefix(candidate: string, from: string, to: string): string {
+  if (candidate === from) return to;
+  if (isSameOrChildPath(candidate, from)) {
+    const cleanFrom = from.length > 1 ? from.replace(/[/\\]+$/, "") : from;
+    return `${to}${candidate.slice(cleanFrom.length)}`;
+  }
+  return candidate;
 }
 
 /** A file's content as read so far, more on request, and the requested line split out. */
@@ -107,41 +118,27 @@ function useFileContent(path: string, line: number | undefined) {
       const chunk = await link.call("fs.read", { path, offset: file.nextOffset });
       setExtra({ source: loaded.value!, file: appendFileChunk(file, chunk) });
     });
-  return { loaded, file, highlighted, more, job };
+  return { loaded, file, highlighted, more, job, link };
 }
 
-export function FileView(props: {
-  path: string;
-  line?: number;
-  close?: () => void;
-  onDirtyChange?: (dirty: boolean) => void;
-}) {
-  return isDesktop ? <DesktopFile {...props} /> : <WebFileView {...props} />;
-}
-
-function DesktopFile(props: {
-  path: string;
-  line?: number;
-  close?: () => void;
-  onDirtyChange?: (dirty: boolean) => void;
-}) {
-  const content = useFileContent(props.path, props.line);
-  return <DesktopFileView {...props} content={content} />;
-}
-
-function WebFileView({
+export function FileView({
   path,
   line,
   close,
   onDirtyChange,
+  onRenamed,
+  onDeleted,
 }: {
   path: string;
   line?: number;
   close?: () => void;
   onDirtyChange?: (dirty: boolean) => void;
+  onRenamed?: (nextPath: string) => void;
+  onDeleted?: () => void;
 }) {
+  const dialogs = useDialogs();
   const lineRef = useRef<HTMLSpanElement>(null);
-  const { loaded, file, highlighted, more, job } = useFileContent(path, line);
+  const { loaded, file, highlighted, more, job, link } = useFileContent(path, line);
   const [editing, setEditing] = useState(false);
   const [wrap, setWrap] = useState(false);
   const markdown = /\.(md|markdown)$/i.test(path);
@@ -159,6 +156,26 @@ function WebFileView({
     void job.run(async () => {
       await navigator.clipboard.writeText(value);
       setCopied(kind);
+    });
+  }
+  async function renameCurrent() {
+    const currentName = baseName(path);
+    const input = await dialogs.prompt("重命名文件", currentName, "重命名");
+    if (input === null || input === undefined) return;
+    void job.run(async () => {
+      const trimmed = input.trim();
+      if (trimmed === currentName) return;
+      const to = renameTargetPath(path, trimmed);
+      const result = await link.call("fs.rename", { from: path, to });
+      onRenamed?.(result.path);
+    });
+  }
+  async function deleteCurrent() {
+    const ok = await dialogs.confirm(`确定要删除文件“${baseName(path)}”？此操作无法撤销。`);
+    if (!ok) return;
+    void job.run(async () => {
+      await link.call("fs.delete", { path, recursive: false });
+      onDeleted?.();
     });
   }
   if (editing)
@@ -204,6 +221,30 @@ function WebFileView({
           </div>
         </div>
         <div className="resource-inline-actions">
+          {onRenamed && (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              disabled={job.busy}
+              title="重命名文件"
+              aria-label="重命名文件"
+              onClick={() => void renameCurrent()}
+            >
+              <Pencil />
+            </Button>
+          )}
+          {onDeleted && (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              disabled={job.busy}
+              title="删除文件"
+              aria-label="删除文件"
+              onClick={() => void deleteCurrent()}
+            >
+              <Trash2 />
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="icon-sm"
@@ -385,36 +426,23 @@ export function Files({
   onPick,
   onDirtyChange,
   directoriesOnly = false,
-  page = false,
 }: {
   start?: string;
   onPick?: (path: string) => void;
   onDirtyChange?: (dirty: boolean) => void;
   directoriesOnly?: boolean;
-  /** The 文件 page itself (it has a toolbar), rather than a panel or a picker. */
-  page?: boolean;
 }) {
   const dialogs = useDialogs();
-  const uploadRef = useRef<HTMLInputElement>(null);
-  const browserRef = useRef<HTMLElement>(null);
-  const [searching, setSearching] = useState(false);
   const { link } = useConnection();
   const [path, setPath] = useState(start);
   const [hidden, setHidden] = useState(() => readLocal<unknown>("filesShowHidden", false) === true);
   const [file, setFile] = useState<string>();
   const [fileLine, setFileLine] = useState<number>();
   const [dirty, setDirty] = useState(false);
-  // The 文件 page's list column, as an editor's side bar: it folds away beside an open file and
-  // its edge drags; both are kept.
-  const [listFolded, setListFolded] = useState(() => readLocal("desktopFilesListFolded", false));
-  const [listWidth, setListWidth] = useState(() => readLocal("desktopFilesListWidth", 300));
-  const keep = <T,>(key: string, set: (value: T) => void) => (value: T) => {
-    set(value);
-    try { saveLocal(key, value); } catch { /* A preference, not state. */ }
+  const showHidden = (value: boolean) => {
+    setHidden(value);
+    try { saveLocal("filesShowHidden", value); } catch { /* A preference, not state. */ }
   };
-  const foldList = keep("desktopFilesListFolded", setListFolded);
-  const sizeList = keep("desktopFilesListWidth", setListWidth);
-  const showHidden = keep("filesShowHidden", setHidden);
   useEffect(() => {
     onDirtyChange?.(dirty);
     return () => onDirtyChange?.(false);
@@ -527,6 +555,50 @@ export function Files({
     const next = await dialogs.prompt("输入要打开的目录路径", loaded.value?.path ?? path ?? "", "打开目录");
     if (next?.trim()) void navigate(next.trim());
   }
+  function reloadDirectory() {
+    loaded.reload();
+    if (submitted) search.reload();
+  }
+  async function renameEntry(entry: MethodResult<"fs.list">["entries"][number]) {
+    if (file && isSameOrChildPath(file, entry.path) && dirty) {
+      const proceed = await dialogs.confirm("当前打开的文件有未保存修改，确定继续重命名吗？");
+      if (!proceed) return;
+    }
+    const input = await dialogs.prompt("重命名", entry.name, "重命名");
+    if (input === null || input === undefined) return;
+    setNotice("");
+    void job.run(async () => {
+      const trimmed = input.trim();
+      if (trimmed === entry.name) return;
+      const to = renameTargetPath(entry.path, trimmed);
+      const result = await link.call("fs.rename", { from: entry.path, to });
+      if (file && isSameOrChildPath(file, entry.path)) {
+        setFile(rewritePathPrefix(file, entry.path, result.path));
+      }
+      setNotice(`已重命名为“${baseName(result.path)}”`);
+      reloadDirectory();
+    });
+  }
+  async function deleteEntry(entry: MethodResult<"fs.list">["entries"][number]) {
+    const targetKind = entry.file ? "文件" : "目录及其中的全部内容";
+    const ok = await dialogs.confirm(`确定要删除${targetKind}“${entry.name}”？此操作无法撤销。`);
+    if (!ok) return;
+    if (file && isSameOrChildPath(file, entry.path) && dirty) {
+      const proceed = await dialogs.confirm("当前打开的文件有未保存修改，仍要删除吗？");
+      if (!proceed) return;
+    }
+    setNotice("");
+    void job.run(async () => {
+      await link.call("fs.delete", { path: entry.path, recursive: !entry.file });
+      if (file && isSameOrChildPath(file, entry.path)) {
+        setDirty(false);
+        setFile(undefined);
+        setFileLine(undefined);
+      }
+      setNotice(`已删除“${entry.name}”`);
+      reloadDirectory();
+    });
+  }
   function submitSearch() {
     if (!query.trim()) return;
     setSubmitted(query.trim());
@@ -539,33 +611,6 @@ export function Files({
   const summary = submitted
     ? `“${submitted}”的目录结果`
     : `${entries.length}${loaded.value?.truncated ? "+" : ""} 个${directoriesOnly ? "目录" : "项目"}`;
-  // The desktop puts where you are and what you can do in one toolbar row:
-  // the page's own toolbar, or in the inspector a compact bar with the rest in a menu.
-  const desktopLayout = isDesktop && !directoriesOnly;
-  const upward = (
-    <>
-      <Button
-        variant="ghost"
-        size="icon"
-        disabled={job.busy || loaded.loading}
-        title="主目录"
-        aria-label="前往主目录"
-        onClick={() => void navigate()}
-      >
-        <Home />
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon"
-        disabled={job.busy || !loaded.value?.parent}
-        title="上一级目录"
-        aria-label="前往上一级目录"
-        onClick={() => void navigate(loaded.value?.parent)}
-      >
-        <ArrowUp />
-      </Button>
-    </>
-  );
   const refresh = (
     <Button
       variant="ghost"
@@ -578,64 +623,6 @@ export function Files({
       <RefreshCw />
     </Button>
   );
-  const searchField = (
-    <form
-      className="resource-search"
-      onSubmit={(event) => {
-        event.preventDefault();
-        submitSearch();
-      }}
-    >
-      <InputGroup className="page-search">
-        <InputGroupAddon>
-          <Search aria-hidden="true" />
-        </InputGroupAddon>
-        <InputGroupInput
-          aria-label="搜索电脑上的目录"
-          placeholder="搜索目录"
-          maxLength={200}
-          autoFocus={!page}
-          value={query}
-          onChange={(event) => {
-            setQuery(event.target.value);
-            if (!event.target.value) setSubmitted("");
-          }}
-          onKeyDown={(event) => {
-            if (event.key !== "Escape") return;
-            clearSearch();
-            if (!page) setSearching(false);
-          }}
-        />
-        {query && (
-          <InputGroupAddon align="inline-end">
-            <InputGroupButton size="icon-xs" title="清空搜索" aria-label="清空搜索" onClick={clearSearch}>
-              <X />
-            </InputGroupButton>
-          </InputGroupAddon>
-        )}
-      </InputGroup>
-    </form>
-  );
-  const uploadInput = (
-    <input
-      ref={uploadRef}
-      type="file"
-      multiple
-      hidden
-      tabIndex={-1}
-      onChange={(event) => {
-        const list = event.target.files;
-        uploadFiles(list);
-        event.target.value = "";
-      }}
-    />
-  );
-  const chooseUpload = () => {
-    if (!uploadRef.current) return;
-    // Selecting the same file again must still trigger a failed upload's retry.
-    uploadRef.current.value = "";
-    uploadRef.current.click();
-  };
   const hiddenToggle = (
     <Label className="resource-hidden-toggle">
       <Checkbox checked={hidden} onCheckedChange={(checked) => showHidden(checked === true)} />
@@ -644,98 +631,12 @@ export function Files({
   );
   return (
     <section
-      ref={browserRef}
       className={cn(
         "file-browser resource-files",
         file && "resource-has-preview",
       )}
-      data-layout={desktopLayout ? (page ? "page" : "panel") : undefined}
-      data-list-folded={(desktopLayout && page && !!file && listFolded) || undefined}
-      style={desktopLayout && page ? ({ "--files-list-width": `${listWidth}px` } as CSSProperties) : undefined}
       aria-label={directoriesOnly ? "选择目录" : "文件浏览器"}
     >
-      {desktopLayout && uploadInput}
-      {desktopLayout && page && (
-        <PageHeader
-          leading={<span className="resource-toolbar-nav">
-            {/* Its place is kept while no file is open, so the title doesn't move when one is. */}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="files-list-toggle"
-              data-unused={!file || undefined}
-              aria-hidden={!file || undefined}
-              tabIndex={file ? undefined : -1}
-              disabled={!file}
-              aria-pressed={!listFolded}
-              title={listFolded ? "显示文件列表" : "隐藏文件列表"}
-              aria-label={listFolded ? "显示文件列表" : "隐藏文件列表"}
-              onClick={() => foldList(!listFolded)}
-            >
-              <FolderTree />
-            </Button>
-            {upward}
-          </span>}
-          title={<span title={currentPath}>{baseName(currentPath) || "根目录"}</span>}
-          detail={<span className="resource-toolbar-path" title={currentPath}>{currentPath}</span>}
-          actions={<>
-            {searchField}
-            <Button variant="ghost" size="icon" title="前往目录" aria-label="前往目录" disabled={job.busy} onClick={() => void goTo()}>
-              <FolderOpen />
-            </Button>
-            {refresh}
-            <Button variant="ghost" size="icon" aria-pressed={hidden} title={hidden ? "不显示隐藏项目" : "显示隐藏项目"} aria-label={hidden ? "不显示隐藏项目" : "显示隐藏项目"} onClick={() => { clearSearch(); showHidden(!hidden); }}>
-              {hidden ? <EyeOff /> : <Eye />}
-            </Button>
-            <Button variant="ghost" size="sm" disabled={!changeable} onClick={() => void makeDirectory()}>
-              <FolderPlus data-icon="inline-start" />新建目录
-            </Button>
-            <Button size="sm" disabled={!changeable} title={`单个文件最大 ${MAX_ATTACHMENT_LABEL}`} onClick={chooseUpload}>
-              <Upload data-icon="inline-start" />上传文件
-            </Button>
-          </>}
-        />
-      )}
-      {desktopLayout && !page && (
-        <>
-          <div className="resource-toolbar">
-            {upward}
-            <span className="resource-toolbar-name" title={currentPath}>{baseName(currentPath) || "根目录"}</span>
-            <Button
-              variant="ghost"
-              size="icon"
-              title="搜索目录"
-              aria-label="搜索目录"
-              aria-pressed={searching}
-              onClick={() => {
-                if (searching) clearSearch();
-                setSearching(!searching);
-              }}
-            >
-              <Search />
-            </Button>
-            {refresh}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" title="更多" aria-label="更多文件操作">
-                  <Ellipsis />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem disabled={!changeable} onSelect={chooseUpload}><Upload />上传文件</DropdownMenuItem>
-                <DropdownMenuItem disabled={!changeable} onSelect={() => void makeDirectory()}><FolderPlus />新建目录</DropdownMenuItem>
-                <DropdownMenuItem disabled={job.busy} onSelect={() => void goTo()}><FolderOpen />前往目录…</DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuCheckboxItem checked={hidden} onCheckedChange={(checked) => { clearSearch(); showHidden(checked === true); }}>
-                  显示隐藏项目
-                </DropdownMenuCheckboxItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-          {searching && searchField}
-        </>
-      )}
-      {!desktopLayout && (
       <div className="resource-browser-controls">
         <div className="resource-location-bar">
           <Button
@@ -834,7 +735,6 @@ export function Files({
           )}
         </div>
       </div>
-      )}
       {directoriesOnly ? (
         <div className="resource-picker-footer">
           <p className="resource-path" title={currentPath}>
@@ -849,7 +749,7 @@ export function Files({
             选择此目录
           </Button>
         </div>
-      ) : desktopLayout ? null : (
+      ) : (
         <div className="resource-files-footer">
           <div className="resource-inline-actions">
             <FilePicker
@@ -916,7 +816,7 @@ export function Files({
                     return;
                   const buttons = [
                     ...event.currentTarget.querySelectorAll<HTMLButtonElement>(
-                      "button:not(:disabled)",
+                      "[data-entry-trigger]:not(:disabled)",
                     ),
                   ];
                   const current = buttons.indexOf(
@@ -940,43 +840,75 @@ export function Files({
                 }}
               >
                 {entries.map((entry) => (
-                  <Button
-                    variant={file === entry.path ? "secondary" : "ghost"}
+                  <div
                     key={entry.path}
-                    className="resource-entry h-10 gap-2.5 rounded-none px-2"
-                    aria-current={file === entry.path ? "true" : undefined}
-                    title={entry.path}
-                    disabled={job.busy}
-                    onClick={(event) => {
-                      if (entry.file)
-                        lastFileButton.current = event.currentTarget;
-                      void (entry.file
-                        ? selectFile(entry.path)
-                        : navigate(entry.path));
-                    }}
+                    className="resource-entry-row"
+                    data-current={file === entry.path ? "true" : undefined}
                   >
-                    {entry.file ? (
-                      <File data-icon="inline-start" />
-                    ) : (
-                      <Folder data-icon="inline-start" />
-                    )}
-                    <span className="resource-entry-main">
-                      <span className="resource-entry-name">{entry.name}</span>
-                      {submitted && (
-                        <span className="resource-entry-path">
-                          {entry.path}
-                        </span>
+                    <Button
+                      variant={file === entry.path ? "secondary" : "ghost"}
+                      data-entry-trigger=""
+                      className="resource-entry h-10 gap-2.5 rounded-none px-2"
+                      aria-current={file === entry.path ? "true" : undefined}
+                      title={entry.path}
+                      disabled={job.busy}
+                      onClick={(event) => {
+                        if (entry.file)
+                          lastFileButton.current = event.currentTarget;
+                        void (entry.file
+                          ? selectFile(entry.path)
+                          : navigate(entry.path));
+                      }}
+                    >
+                      {entry.file ? (
+                        <File data-icon="inline-start" />
+                      ) : (
+                        <Folder data-icon="inline-start" />
                       )}
-                    </span>
-                    {entry.project ? (
-                      <Badge variant="secondary">项目</Badge>
-                    ) : entry.size !== undefined ? (
-                      <span className="resource-entry-size">
-                        {formatFileSize(entry.size)}
+                      <span className="resource-entry-main">
+                        <span className="resource-entry-name">{entry.name}</span>
+                        {submitted && (
+                          <span className="resource-entry-path">
+                            {entry.path}
+                          </span>
+                        )}
                       </span>
-                    ) : null}
-                    {!entry.file && <ChevronRight data-icon="inline-end" />}
-                  </Button>
+                      {entry.project ? (
+                        <Badge variant="secondary">项目</Badge>
+                      ) : entry.size !== undefined ? (
+                        <span className="resource-entry-size">
+                          {formatFileSize(entry.size)}
+                        </span>
+                      ) : null}
+                      {!entry.file && <ChevronRight data-icon="inline-end" />}
+                    </Button>
+                    {!directoriesOnly && (
+                      <div className="resource-entry-actions">
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          data-action="rename"
+                          disabled={job.busy}
+                          title={`重命名 ${entry.name}`}
+                          aria-label={`重命名 ${entry.name}`}
+                          onClick={() => void renameEntry(entry)}
+                        >
+                          <Pencil />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          data-action="delete"
+                          disabled={job.busy}
+                          title={`删除 ${entry.name}`}
+                          aria-label={`删除 ${entry.name}`}
+                          onClick={() => void deleteEntry(entry)}
+                        >
+                          <Trash2 />
+                        </Button>
+                      </div>
+                    )}
+                  </div>
                 ))}
               </div>
               {entries.length === 0 && (
@@ -997,14 +929,6 @@ export function Files({
                   }
                 />
               )}
-              {desktopLayout && entries.length > 0 && (
-                <p className="resource-list-foot">
-                  <span>{summary}</span>
-                  {submitted ? (
-                    <Button variant="link" size="sm" onClick={clearSearch}>返回当前目录</Button>
-                  ) : null}
-                </p>
-              )}
               {active.value?.truncated && (
                 <p className="resource-caption resource-results-note">
                   结果较多，仅显示前 {entries.length}{" "}
@@ -1014,27 +938,6 @@ export function Files({
             </>
           )}
         </div>
-        {desktopLayout && page && !(file && listFolded) && (
-          <ColumnResizer
-            className="files-list-resizer"
-            label="调整文件列表宽度"
-            width={listWidth}
-            clamp={(value) => Math.round(Math.min(Math.max(value, 200), Math.max(200, Math.min(560, (browserRef.current?.clientWidth ?? window.innerWidth) * 0.5))))}
-            side="end"
-            target=".file-browser"
-            column=".resource-directory"
-            variable="--files-list-width"
-            resize={sizeList}
-            initial={300}
-          />
-        )}
-        {desktopLayout && page && !file && (
-          // The file's side of the page, before one is chosen: the layout doesn't move when one is.
-          <div className="file-preview-empty">
-            <File aria-hidden="true" />
-            <span>选择一个文件查看内容</span>
-          </div>
-        )}
         {file && (
           <TimelineNavigation.Provider
             value={{
@@ -1048,6 +951,18 @@ export function Files({
               line={fileLine}
               close={() => void selectFile()}
               onDirtyChange={setDirty}
+              onRenamed={(nextPath) => {
+                setFile(nextPath);
+                setNotice(`已重命名为“${baseName(nextPath)}”`);
+                reloadDirectory();
+              }}
+              onDeleted={() => {
+                setDirty(false);
+                setFile(undefined);
+                setFileLine(undefined);
+                setNotice("已删除文件");
+                reloadDirectory();
+              }}
             />
           </TimelineNavigation.Provider>
         )}

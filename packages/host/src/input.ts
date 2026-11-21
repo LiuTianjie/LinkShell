@@ -8,6 +8,7 @@ import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { z } from "zod";
 import { windowsHelper } from "./windows-screen.js";
+import { LinuxInputControl } from "./linux-screen.js";
 
 // LinkShell.app, the Mac side of the screen (apps/mac): it captures and sends
 // the picture, and posts the viewer's pointer and key events to the system.
@@ -110,6 +111,8 @@ export interface VideoOffer {
   codec?: "hevc";
   /** The viewer's screen (its points, and pixels to a point): the app shows the desktop at that resolution. Older apps ignore it. */
   match?: ScreenMatch;
+  /** Whether to capture and stream system audio alongside the video track. */
+  audio?: boolean;
 }
 
 export interface ScreenMatch { w: number; h: number; scale: number }
@@ -527,7 +530,8 @@ export class HelperApp {
    */
   async offerVideo(id: string, offer: VideoOffer, route: Route): Promise<void> {
     this.routes.set(id, route);
-    await this.write({ t: "rtc.open", v: id, ...offer });
+    const { audio, ...rest } = offer;
+    await this.write({ t: "rtc.open", v: id, ...rest, ...(audio !== undefined ? { audio } : {}) });
   }
 
   async preview(id: string, target: { bundleId: string; title?: string; app?: boolean }, route: Route): Promise<void> {
@@ -570,6 +574,13 @@ export class HelperApp {
 
   private cancelConfigurations(id: string): void {
     for (const request of this.configuring.get(id)?.values() ?? []) request.reject(new Error("屏幕连接已断开"));
+  }
+
+  /** Toggle audio capture for an open Mac helper video session. */
+  setAudio(id: string, enabled: boolean): void {
+    if (this.socket && !this.socket.destroyed && this.routes.has(id)) {
+      this.socket.write(`${JSON.stringify({ t: "rtc.audio", v: id, enabled })}\n`);
+    }
   }
 
   endVideo(id: string): void {
@@ -631,6 +642,7 @@ export function previewApp(log: (message: string) => void): HelperApp | undefine
 export class InputControl {
   private child?: ChildProcess;
   private joined?: { app: HelperApp; id: string; watcher: (status: HelperStatus) => void };
+  private linux?: LinuxInputControl;
   private stopped = false;
   private started = false;
 
@@ -651,8 +663,18 @@ export class InputControl {
       else this.spawn(helper, screen, this.options.dryRun ?? dryRunByDefault());
       return;
     }
+    if (process.platform === "linux") {
+      const linux = new LinuxInputControl(this.listener, this.log);
+      this.linux = linux;
+      await linux.start(screen);
+      if (this.stopped && this.linux === linux) {
+        linux.stop();
+        this.linux = undefined;
+      }
+      return;
+    }
     if (process.platform !== "darwin") {
-      this.listener.state({ available: false, reason: "暂时只能控制 macOS 电脑" });
+      this.listener.state({ available: false, reason: "暂时只支持 macOS、Windows 和 Linux 电脑" });
       return;
     }
     const dryRun = this.options.dryRun ?? dryRunByDefault();
@@ -746,6 +768,10 @@ export class InputControl {
       else this.joined.app.send(this.joined.id, parsed.data);
       return;
     }
+    if (this.linux) {
+      this.linux.send(parsed.data);
+      return;
+    }
     const stdin = this.child?.stdin;
     if (stdin?.writable) stdin.write(`${JSON.stringify(parsed.data)}\n`);
   }
@@ -756,6 +782,10 @@ export class InputControl {
     if (this.joined) {
       this.joined.app.leave(this.joined.id, this.joined.watcher);
       this.joined = undefined;
+    }
+    if (this.linux) {
+      this.linux.stop();
+      this.linux = undefined;
     }
     this.child?.stdin?.end();
     const child = this.child;

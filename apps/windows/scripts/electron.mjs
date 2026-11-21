@@ -5,15 +5,28 @@ import { createHash } from 'node:crypto';
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { normalizeWindowsArch } from './prune-runtime.mjs';
 
 const app = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const desktop = resolve(app, '../desktop');
 // electron/rcedit's own release binary, pinned: npm marks every version of its wrapper unsupported.
+// Upstream only ships rcedit-x64.exe / rcedit-x86.exe; rcedit-x64.exe edits resources on both
+// x64 and arm64 LinkShell.exe binaries and runs under Prism on Windows 11 ARM64.
 export const rcedit = { version: '2.0.0', sha256: '3e7801db1a5edbec91b49a24a094aad776cb4515488ea5a4ca2289c400eade2a' };
 // Chromium's strings for the languages the UI is in.
 const LOCALES = ['en-US.pak', 'zh-CN.pak', 'zh-TW.pak', 'ja.pak'];
 // Files of the Electron folder that are not the app's: its sample app and its version note.
 const SKIPPED = new Set(['electron.exe', 'resources', 'locales', 'LICENSE', 'version']);
+
+export function resolveElectronTarget(arch = 'x64') {
+  const targetArch = normalizeWindowsArch(arch);
+  return {
+    arch: targetArch,
+    platform: 'win32',
+    electronDistArgs: [join(desktop, 'scripts/electron-dist.mjs'), targetArch, 'win32'],
+    rceditAsset: 'rcedit-x64.exe',
+  };
+}
 
 async function rceditPath() {
   const file = join(app, 'build', `rcedit-${rcedit.version}`, 'rcedit-x64.exe');
@@ -29,9 +42,11 @@ async function rceditPath() {
 }
 
 /** Puts the window into `bundle`; apps/desktop must be compiled (its dist) first. */
-export async function assembleElectron(bundle, version) {
+export async function assembleElectron(bundle, version, archOrOptions = 'x64') {
+  const arch = typeof archOrOptions === 'string' ? archOrOptions : archOrOptions?.arch ?? 'x64';
+  const target = resolveElectronTarget(arch);
   if (!existsSync(join(desktop, 'dist/main/main.js'))) throw new Error('Compile apps/desktop first (pnpm --filter @linkshell/desktop exec tsc -p tsconfig.json).');
-  const electron = execFileSync(process.execPath, [join(desktop, 'scripts/electron-dist.mjs'), 'x64', 'win32'], { encoding: 'utf8', windowsHide: true }).trim();
+  const electron = execFileSync(process.execPath, target.electronDistArgs, { encoding: 'utf8', windowsHide: true }).trim();
   for (const entry of readdirSync(electron)) {
     if (!SKIPPED.has(entry)) cpSync(join(electron, entry), join(bundle, entry), { recursive: true });
   }

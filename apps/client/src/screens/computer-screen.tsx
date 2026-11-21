@@ -17,7 +17,16 @@ import { PressedWash } from "@/components/pressable-feedback";
 import { formatApiComputeValue } from "@/components/usage-dashboard";
 import { useAccount } from "@/lib/account";
 import { computerDisplayName, useComputerNames } from "@/lib/computer-names";
-import { listComputers, useComputers } from "@/lib/computers";
+import {
+  lanHostDisplayName,
+  lanHostUrl,
+  listComputers,
+  matchLanHostToComputer,
+  resolveLanReachabilityHint,
+  useComputers,
+  type DiscoveredLanHost,
+} from "@/lib/computers";
+import { useNativeLanDiscovery } from "@/lib/lan-discovery-native";
 import { useActions, useClient, useConnection, useConnectionStatus, useHasComputer } from "@/lib/client";
 import { Welcome } from "@/components/welcome";
 import { relativeTime } from "@/lib/format";
@@ -730,10 +739,14 @@ export function ComputerScreen() {
   const { ports } = usePorts();
   const savedComputers = useComputers((state) => state.saved);
   const liveComputers = useComputers((state) => state.live);
-  const computersCount = useMemo(
-    () => listComputers({ saved: savedComputers, live: liveComputers }).length,
-    [savedComputers, liveComputers],
+  const lanHosts = useComputers((state) => state.lanHosts);
+  useNativeLanDiscovery(true);
+  const allComputers = useMemo(
+    () => listComputers({ saved: savedComputers, live: liveComputers, lanHosts }),
+    [savedComputers, liveComputers, lanHosts],
   );
+  const computersCount = allComputers.length;
+  const currentLanHint = useMemo(() => resolveLanReachabilityHint(computer, lanHosts), [computer, lanHosts]);
   const account = useAccount((state) => state.session);
   const accountAction: PageAction = {
     key: "account",
@@ -789,8 +802,28 @@ export function ComputerScreen() {
     computer.kind === "relay"
       ? `${computer.lanUrl ? `${t("connection.lanDirect")} + ` : ""}${t("connection.gatewayRelay")}${
           hostOf(computer.gateway) !== "gateway.itool.tech" ? ` · ${hostOf(computer.gateway)}` : ""
-        }`
+        }${!computer.lanUrl && currentLanHint ? ` · ${pick({ zh: "局域网可达", en: "LAN available", ja: "LAN 到達可能" })}` : ""}`
       : `${t("connection.lanDirect")} · ${url.replace(/^wss?:\/\//, "")}`;
+
+  const connectDiscoveredLanHost = (host: DiscoveredLanHost) => {
+    const discoveredUrl = lanHostUrl(host);
+    if (!discoveredUrl) return;
+    haptics.selection();
+    const computers = useComputers.getState();
+    const matched = allComputers.find((item) => Boolean(matchLanHostToComputer(host, item)));
+    if (matched) {
+      if (matched.kind === "relay") {
+        computers.setLanUrl(matched.key, discoveredUrl, { e2ee: matched.lanE2ee });
+      }
+      if (matched.key !== computer.key) {
+        computers.select(matched.key);
+      } else {
+        link.reconnectNow();
+      }
+      return;
+    }
+    computers.select(computers.addDirect(discoveredUrl, lanHostDisplayName(host)));
+  };
 
   const agentPanel = (
     <ComputerPanel
@@ -856,6 +889,61 @@ export function ComputerScreen() {
       ) : null}
     </ComputerPanel>
   );
+
+  const lanPanel = lanHosts.length > 0 ? (
+    <ComputerPanel
+      title={pick({ zh: "局域网发现的电脑", en: "LAN Discovered", ja: "LAN 検出" })}
+      expanded={true}
+      detail={String(lanHosts.length)}
+    >
+      {lanHosts.map((host, index) => {
+        const discoveredUrl = lanHostUrl(host);
+        if (!discoveredUrl) return null;
+        const matched = allComputers.find((item) => Boolean(matchLanHostToComputer(host, item)));
+        const isCurrent = matched?.key === computer.key;
+        const alreadyDirect =
+          (matched?.kind === "relay" && matched.lanUrl === discoveredUrl) ||
+          (matched?.kind === "direct" && matched.url === discoveredUrl);
+        const subtitle = matched
+          ? `${isCurrent ? pick({ zh: "当前电脑", en: "Current", ja: "現在" }) : computerDisplayName(matched, names)} · ${discoveredUrl.replace(/^wss?:\/\//, "")}`
+          : discoveredUrl.replace(/^wss?:\/\//, "");
+        return (
+          <View key={`${discoveredUrl}-${host.machineId ?? host.fingerprint ?? host.name}`}>
+            {index > 0 ? <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: colors.separator }} /> : null}
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => (alreadyDirect ? router.push("/connect") : connectDiscoveredLanHost(host))}
+              style={({ pressed }) => ({
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 10,
+                minHeight: 48,
+                paddingVertical: 10,
+                opacity: pressed ? 0.65 : 1,
+              })}
+            >
+              <Icon sf="wifi" md="wifi" size={16} color={colors.accent} />
+              <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+                <Text numberOfLines={1} style={[type.callout, { color: colors.label }]}>
+                  {lanHostDisplayName(host)}
+                </Text>
+                <Text numberOfLines={1} style={[type.caption, { color: colors.secondaryLabel }]}>
+                  {subtitle}
+                </Text>
+              </View>
+              <Text style={[type.footnote, { color: colors.accent, fontWeight: "600" }]}>
+                {alreadyDirect
+                  ? pick({ zh: "已绑定", en: "Bound", ja: "設定済み" })
+                  : matched
+                    ? pick({ zh: "局域网直连", en: "Use LAN", ja: "LAN 接続" })
+                    : pick({ zh: "连接", en: "Connect", ja: "接続" })}
+              </Text>
+            </Pressable>
+          </View>
+        );
+      })}
+    </ComputerPanel>
+  ) : null;
 
   return (
     <>
@@ -1025,17 +1113,22 @@ export function ComputerScreen() {
                 <ComputerList background={colors.card} />
               </ComputerPanel>
 
+              {lanPanel}
+
               {online ? <DevicesSection defaultExpanded={wide} /> : null}
             </View>
           </View>
         ) : (
-          <View>
-            <Welcome />
-            {inlineControls ? (
-              <View style={{ position: "absolute", top: 0, right: 0 }}>
-                <PageActionButton action={accountAction} />
-              </View>
-            ) : null}
+          <View style={{ gap: 16 }}>
+            <View>
+              <Welcome />
+              {inlineControls ? (
+                <View style={{ position: "absolute", top: 0, right: 0 }}>
+                  <PageActionButton action={accountAction} />
+                </View>
+              ) : null}
+            </View>
+            {lanPanel}
           </View>
         )}
       </ScrollView>

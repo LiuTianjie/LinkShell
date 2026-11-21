@@ -49,10 +49,15 @@ import {
   useInspectorI18n,
 } from "./i18n-inspector";
 import {
+  INSPECTOR_FILES_CHANGED_EVENT,
+  INSPECTOR_FILE_SAVED_EVENT,
+  closeInspectorTab,
+  closeOpenTabsForDeletedPath,
+  findDirtyFileTabsForPath,
   getFileDraft,
   openFileTabInInspector,
+  retargetOpenTabsAfterRename,
   setFileDraft,
-  INSPECTOR_FILE_SAVED_EVENT,
 } from "./inspector-tabs-store";
 import {
   resolveFileHrefTarget,
@@ -71,6 +76,22 @@ function basenameOfFilePath(rawPath: string): string {
   if (!cleaned) return rawPath;
   const parts = cleaned.split(/[\\/]/);
   return parts[parts.length - 1] || cleaned;
+}
+
+function joinSiblingFilePath(existingPath: string, nextName: string): string {
+  const cleaned = existingPath.replace(/[\\/]+$/, "");
+  const idx = Math.max(cleaned.lastIndexOf("/"), cleaned.lastIndexOf("\\"));
+  const sep = idx >= 0 ? cleaned[idx]! : cleaned.includes("\\") ? "\\" : "/";
+  const parent = idx > 0 ? cleaned.slice(0, idx) : idx === 0 ? cleaned.slice(0, 1) : "";
+  if (!parent) return nextName;
+  if (parent === "/" || parent === "\\") return `${parent}${nextName}`;
+  return `${parent}${sep}${nextName}`;
+}
+
+function isValidFileEntryName(name: string): boolean {
+  const trimmed = name.trim();
+  if (!trimmed || trimmed === "." || trimmed === "..") return false;
+  return !/[\\/\0]/.test(trimmed);
 }
 
 function joinDirAndRelative(dir: string, rel: string): string {
@@ -799,6 +820,83 @@ export function FileViewerTabPanel({
     return stripped || cwd || activePath;
   }, [activePath, cwd]);
 
+  const handleRenameFile = useCallback(async () => {
+    if (!connection || !online || !activePath) return;
+    const currentName = basenameOfFilePath(activePath);
+    const nextName = await dialogs.prompt(ti("renamePrompt"), {
+      title: ti("rename"),
+      initial: currentName,
+      submitLabel: ti("rename"),
+      cancelLabel: ti("cancel"),
+    });
+    if (nextName === null) return;
+    const trimmed = nextName.trim();
+    if (!trimmed || trimmed === currentName) return;
+    if (!isValidFileEntryName(trimmed)) {
+      await dialogs.alert(ti("invalidRenameName"));
+      return;
+    }
+    const owner = computerKey ?? connection.computer.key ?? "default";
+    const hasUnsaved = isDirty || findDirtyFileTabsForPath(owner, activePath).length > 0;
+    if (hasUnsaved) {
+      const discard = await dialogs.confirm(
+        ti("dirtyRenameConfirm", { name: currentName }),
+        {
+          title: ti("rename"),
+          confirmLabel: ti("rename"),
+          cancelLabel: ti("cancel"),
+          destructive: true,
+        },
+      );
+      if (!discard) return;
+    }
+    const nextPath = joinSiblingFilePath(activePath, trimmed);
+    try {
+      const res = await connection.link.call("fs.rename", {
+        from: activePath,
+        to: nextPath,
+      });
+      const actualTo = res?.path || nextPath;
+      setFileDraft(draftOwner, sessionId, draftTabId, undefined);
+      setEditing(false);
+      retargetOpenTabsAfterRename(owner, activePath, actualTo);
+      setLoadedFile((prev) => (prev ? { ...prev, path: actualTo } : prev));
+      window.dispatchEvent(new CustomEvent(INSPECTOR_FILES_CHANGED_EVENT));
+    } catch (err) {
+      await dialogs.alert(err instanceof Error ? err.message : String(err));
+    }
+  }, [activePath, computerKey, connection, dialogs, draftOwner, draftTabId, isDirty, online, sessionId, ti]);
+
+  const handleDeleteFile = useCallback(async () => {
+    if (!connection || !online || !activePath) return;
+    const currentName = basenameOfFilePath(activePath);
+    const owner = computerKey ?? connection.computer.key ?? "default";
+    const hasUnsaved = isDirty || findDirtyFileTabsForPath(owner, activePath).length > 0;
+    const confirmed = await dialogs.confirm(
+      hasUnsaved
+        ? ti("dirtyDeleteConfirm", { name: currentName })
+        : ti("deleteFileConfirm", { name: currentName }),
+      {
+        title: ti("deleteFileTitle"),
+        confirmLabel: ti("delete"),
+        cancelLabel: ti("cancel"),
+        destructive: true,
+      },
+    );
+    if (!confirmed) return;
+    try {
+      await connection.link.call("fs.delete", { path: activePath });
+      setFileDraft(draftOwner, sessionId, draftTabId, undefined);
+      setEditing(false);
+      closeOpenTabsForDeletedPath(owner, activePath);
+      closeInspectorTab(draftOwner, sessionId, draftTabId);
+      window.dispatchEvent(new CustomEvent(INSPECTOR_FILES_CHANGED_EVENT));
+      onBack?.();
+    } catch (err) {
+      await dialogs.alert(err instanceof Error ? err.message : String(err));
+    }
+  }, [activePath, computerKey, connection, dialogs, draftOwner, draftTabId, isDirty, onBack, online, sessionId, ti]);
+
   const loadMoreBanner =
     loadedFile?.kind === "text" && loadedFile.nextOffset !== undefined ? (
       <div className="inspector-banner">
@@ -1054,6 +1152,26 @@ export function FileViewerTabPanel({
               }}
             >
               {ti("openInTerminal")}
+            </MenuItem>
+            <MenuSeparator />
+            <MenuItem
+              icon="edit"
+              disabled={!online || !connection}
+              onSelect={() => {
+                void handleRenameFile();
+              }}
+            >
+              {ti("rename")}
+            </MenuItem>
+            <MenuItem
+              icon="trash"
+              destructive
+              disabled={!online || !connection}
+              onSelect={() => {
+                void handleDeleteFile();
+              }}
+            >
+              {ti("delete")}
             </MenuItem>
           </Menu>
         </div>

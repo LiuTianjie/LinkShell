@@ -309,17 +309,12 @@ host：`fusion.ts` 的 `fusionPlatform()` 决定本机能当哪种远端；`fusi
 - Mac 本地端（本次构建）经网关隧道连 Windows 远端实机（Surface Go，0.10.106 host）：控制连接稳定、视频 2 秒内连通、记事本两个窗口出现在 Mac 上、退出与结束正常。
 - Mac 本地端对 host 的模拟远端（同一台 Mac）：握手、媒体连通、首帧解码。
 - `apps/desktop/scripts/fusion-e2e.mjs`：真实 Electron 里的 `FusionElectronHub` + `fusion.html`，对着 host 的模拟远端（同一台 Mac）：窗口打开、画面按 SEI 裁剪、点击送到远端窗口、缩放、关闭、回收的 transceiver 上的新窗口，8 项通过。
-- `packages/host/test/fusion-remote.test.ts`：Node 远端 + 模拟平台，真实 TLS-PSK 与 WebRTC（werift 作接收方）：握手、目录、`wopen`、`streams`、带 SEI 的 RTP、按流键分发输入、缩放确认、关闭与 `app.exited`。
+- `packages/host/test/fusion-remote.test.ts`、`test/windows-fusion.test.ts` 与 Electron/Mac 单测：覆盖 `file-clipboard` 协商（50 MiB 上限、`512 KiB` 分块 `clip.file.start`/`clip.file.chunk`/`clip.file.end`、路径穿越防护与临时目录清理）、Windows 融合侧基于 `GetCursorInfo`/`GetIconInfo` 的光标形状同步与 STA 文件列表剪贴板，以及 Mac `NSPasteboard` 文件读写和 Swift `FusionProtocolTests`。
 - TLS-PSK 套件：Network.framework、OpenSSL 3.5、Electron 44 两两握手（每个套件逐一）。
-- `apps/windows/src/*.cs` 在 Mono `mcs -langversion:5` 下编译通过（与 .NET Framework 自带编译器同一语言版本）。
 
-未验证（需要 Windows 实机或 Windows CI）：`Fusion.cs` 的 P/Invoke 与窗口分类、`gfxcapture` 截取与硬件编码、`SendInput` 落点、任务栏 AppUserModelID 分组与开始菜单快捷方式、多显示器与缩放、Mac 本地端连 Windows 远端的整条路径。Windows CI 新增 `apps/windows/test/fusion.test.mjs`（记事本：目录、启动、窗口与标题栏、缩放、关闭）。
+未验证（需要 Windows 实机或 Windows CI / 双机实测）：`Fusion.cs` 的 `.NET Framework 4.8` 编译、P/Invoke 光标捕获与 STA 文件列表剪贴板、`gfxcapture` 截取与硬件编码、`SendInput` 落点、任务栏 AppUserModelID 分组与开始菜单快捷方式、多显示器与缩放、双 Mac / Mac↔Windows 跨机 `file-clipboard` 整条路径。Windows CI 新增 `apps/windows/test/fusion.test.mjs`（记事本：目录、启动、窗口与标题栏、缩放、关闭）。
 
-尚未实现：Windows 远端的光标形状；剪贴板里的文件（协议里没有文件消息，要做得另加分块传输）；Windows 两侧的 RTF。
-
-Electron 本地端的剪贴板（`apps/desktop/src/main/fusion/clipboard.ts`）：Electron 没有剪贴板变化计数，所以在远端的窗口得到焦点时看一次（读文字和 PNG，按内容摘要判断是否变过），停留在窗口里时每 0.7 秒只比较文字和格式；连续两张图片格式相同，要到下一次窗口得到焦点才会发现。远端发来的内容写入后记下摘要，不回送。
-
-状态（2026-11-16）：Windows 远端与 Electron 本地端的剪贴板有单元测试（规则、大小上限、不回送）和 host 模拟远端的测试；Electron 44 的 `clipboard.read()` 在 Mac 上读过一次。C# 一侧（读写剪贴板、PNG 转码）没有在 Windows 上编译或运行过。
+Electron 本地端的剪贴板（`apps/desktop/src/main/fusion/clipboard.ts`）：除文字与 PNG 外，现支持 `file-clipboard`（读写 macOS `NSFilenamesPboardType` plist / `public.file-url` 与 Windows `CF_HDROP` / `FileNameW`）并隔离暂存接收文件；Electron 没有剪贴板变化计数，仍沿用窗口获焦检查与驻留摘要对比。Windows 两侧的 RTF 仍未支持。
 
 已知限制：Windows 远端的每帧元数据（`ack`、窗口大小）是在 host 发出这一帧时取的最新值，不是截取时刻的值（Mac 远端用 4 ms 采样环按截取时间对齐），缩放过程中裁剪会有短暂错位；`MAX_WINDOW_STREAMS`（6）个窗口以上不再出画面，并提示一次。
 

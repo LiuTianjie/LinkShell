@@ -3,8 +3,6 @@ export type Source = "official" | "self-hosted";
 declare global {
   interface Window {
     __LINKSHELL_CONFIG__?: {
-      desktop?: boolean;
-      desktopPlatform?: string;
       deployment?: Source;
       gatewayUrl?: string;
       previewOrigin?: string;

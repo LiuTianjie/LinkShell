@@ -81,7 +81,7 @@ def main():
             files = [*sorted((source / "Core").glob("*.swift")), source / "ScreenMetrics.swift", metal,
                      module / "tools/fixtures/RendererAudit.swift"]
             if options.connection:
-                files[-1:] = [source / "HEVCDecoder.swift", source / "ScreenDecoder.swift", source / "ScreenConnection.swift", module / "tools/fixtures/ConnectionAudit.swift"]
+                files[-1:] = [source / "ScreenAudioPlayer.swift", source / "HEVCDecoder.swift", source / "ScreenDecoder.swift", source / "ScreenConnection.swift", module / "tools/fixtures/ConnectionAudit.swift"]
             checks = ["-D", "SCREEN_RENDER_PAUSE_CHECK"] if name == "worker" and not options.connection else []
             run("xcrun", "--sdk", "iphonesimulator", "swiftc", "-swift-version", "5", *checks, "-target", arch + "-apple-ios16.4-simulator",
                 "-sdk", sdk, "-F", str(framework), "-framework", "WebRTC", "-Xlinker", "-rpath", "-Xlinker", "@executable_path/Frameworks",

@@ -28,25 +28,14 @@ import {
   RotateCw,
   TerminalSquare,
   X,
-  Ellipsis,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuShortcut,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { fileBase64 } from "./Files";
 import { readLocal, saveLocal } from "./storage";
-import { DESKTOP_FULLSCREEN_EVENT, isDesktop, setDesktopScreenFullScreen } from "./desktop";
 import { replayTerminal, writeTerminal } from "./terminal-replay";
 import { useDialogs } from "@/components/Dialogs";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Terminal as Xterm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
@@ -73,21 +62,11 @@ function isLight(color: string): boolean {
 export function Terminal({
   id,
   active = true,
-  extraActions,
-  menuActions,
-  actionsSlot,
 }: {
   id: string;
   active?: boolean;
-  /** The desktop's buttons beside the terminal's menu (a new terminal). */
-  extraActions?: ReactNode;
-  /** The desktop's items at the end of the terminal's menu (close it). */
-  menuActions?: ReactNode;
-  /** Where the desktop puts this terminal's actions: the end of its tab row. */
-  actionsSlot?: HTMLElement | null;
 }) {
   const { link } = useConnection();
-  const uploadInput = useRef<HTMLInputElement>(null);
   const mount = useRef<HTMLDivElement>(null);
   const activeTerm = useRef<Xterm | null>(null);
   const mountedRef = useRef(true);
@@ -113,53 +92,20 @@ export function Terminal({
     { path: string; inserted: boolean }[]
   >([]);
   const [copied, setCopied] = useState(false);
-  const [awayFromBottom, setAwayFromBottom] = useState(false);
   const [dragging, setDragging] = useState(false);
   const dragDepth = useRef(0);
   const uploadJob = useJob();
   const fontRef = useRef(fontSize);
   fontRef.current = fontSize;
-  // Full screen like the remote screen's: in the desktop app the window goes full screen and the
-  // terminal fills it; in a browser it fills the page. Esc stays with the terminal (vim, less, …).
+  // Full screen in the browser fills the page; Esc stays with the terminal (vim, less, …).
   const [fullscreen, setFullscreen] = useState(false);
-  const fullscreenRef = useRef(false);
-  fullscreenRef.current = fullscreen;
-  const ownsFullscreen = useRef(false);
   const fullscreenRequest = useCallback((enabled: boolean) => {
-    if (!enabled && !ownsFullscreen.current && !fullscreenRef.current) return;
-    ownsFullscreen.current = enabled;
-    // Leaving the terminal (including a cached tab) restores its layout immediately;
-    // the native window's later answer no longer belongs to this terminal.
-    if (!enabled) {
-      fullscreenRef.current = false;
-      setFullscreen(false);
-    }
-    const native = setDesktopScreenFullScreen(enabled);
-    if (!native) {
-      ownsFullscreen.current = false;
-      fullscreenRef.current = enabled;
-      setFullscreen(enabled);
-    }
-  }, []);
-  useEffect(() => {
-    const changed = (event: Event) => {
-      if (!ownsFullscreen.current) return;
-      const value = (event as CustomEvent<{ fullscreen?: unknown }>).detail?.fullscreen === true;
-      if (!value) ownsFullscreen.current = false;
-      fullscreenRef.current = value;
-      setFullscreen(value);
-    };
-    window.addEventListener(DESKTOP_FULLSCREEN_EVENT, changed);
-    return () => {
-      window.removeEventListener(DESKTOP_FULLSCREEN_EVENT, changed);
-      if (ownsFullscreen.current) setDesktopScreenFullScreen(false);
-      ownsFullscreen.current = false;
-    };
+    setFullscreen(enabled);
   }, []);
   useEffect(() => {
     // Another tab or page took its place.
-    if (!active) fullscreenRequest(false);
-  }, [active, fullscreenRequest]);
+    if (!active) setFullscreen(false);
+  }, [active]);
   const ended =
     closed || Boolean(info && (info.exitCode != null || info.interrupted));
   const canInput = onlineStatus && !restoring && !restoreFailed && !ended;
@@ -237,13 +183,6 @@ export function Terminal({
     activeTerm.current = term;
     fitRef.current = fit;
     term.open(mount.current);
-    // Whether the reader has scrolled up from the newest output: the way back down shows only then.
-    const scrolled = () => {
-      const buffer = term.buffer.active;
-      setAwayFromBottom(buffer.viewportY < buffer.baseY);
-    };
-    const scrollWatch = term.onScroll(scrolled);
-    const writeWatch = term.onWriteParsed(scrolled);
     // A considered, muted 16-colour palette — soft, legible,
     // never the harsh VGA primaries. Background/foreground track the app theme.
     const ansi = {
@@ -543,8 +482,6 @@ export function Terminal({
       online();
       status();
       input.dispose();
-      scrollWatch.dispose();
-      writeWatch.dispose();
       activeTerm.current = null;
       fitRef.current = null;
       readyForInput.current = false;
@@ -574,9 +511,6 @@ export function Terminal({
     }
   }, [fontSize, active, link, id, restoring, restoreFailed]);
 
-  // Full screen hides the tab row, so there the actions stay in the terminal itself.
-  const inRow = !!actionsSlot && active && !fullscreen;
-  const inSlot = (node: ReactNode) => (inRow ? createPortal(node, actionsSlot!) : node);
   return (
     <div
       className={cn("terminal-live", fullscreen && "terminal-fullscreen")}
@@ -611,75 +545,6 @@ export function Terminal({
         }
       }}
     >
-      {isDesktop ? (
-        // The desktop's terminal has no bar of its own: its actions sit at the end of the tab row
-        // (in a menu), its state shows only when it isn't simply connected, and the way back to
-        // the newest output appears when the view has left it.
-        <>
-          {/* Rendered into the tab row (a portal), so they sit at its end whatever is positioned
-              around this terminal; without a row (another page embeds it, or full screen) they
-              stay here. A hidden tab's terminal keeps them in itself, out of sight. */}
-          {inSlot(
-          <div className="terminal-actions" data-in-row={inRow || undefined}>
-            {(!onlineStatus || restoring || restoreFailed || ended) && (
-              <span className="terminal-connection" role="status">
-                {onlineStatus && restoring ? <LoaderCircle className="animate-spin" size={13} /> : <span className={canInput ? "online-dot" : "offline-dot"} aria-hidden="true" />}
-                {!onlineStatus ? "连接已断开" : restoring ? "正在恢复…" : restoreFailed ? "恢复失败" : "只读记录"}
-              </span>
-            )}
-            {extraActions}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" aria-label="终端选项" title="终端选项"><Ellipsis /></Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="min-w-52">
-                <div className="terminal-font-menu" role="group" aria-label="终端字号">
-                  <span>字号</span>
-                  <Button variant="ghost" size="icon" aria-label="缩小终端字号" disabled={fontSize <= 10} onClick={() => setFontSize((value) => value - 1)}>A−</Button>
-                  <span className="terminal-font-value">{fontSize}</span>
-                  <Button variant="ghost" size="icon" aria-label="放大终端字号" disabled={fontSize >= 24} onClick={() => setFontSize((value) => value + 1)}>A+</Button>
-                </div>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem disabled={uploadJob.busy || !canInput} onSelect={() => uploadInput.current?.click()}>
-                  <Upload />{uploadJob.busy ? "正在上传…" : "上传文件到终端…"}
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => fullscreenRequest(!fullscreen)}>
-                  {fullscreen ? <Minimize /> : <Maximize />}{fullscreen ? "退出全屏" : "全屏"}<DropdownMenuShortcut>⌃⌘F</DropdownMenuShortcut>
-                </DropdownMenuItem>
-                {menuActions}
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <input
-              ref={uploadInput}
-              type="file"
-              multiple
-              hidden
-              tabIndex={-1}
-              onChange={(event) => {
-                const files = Array.from(event.target.files ?? []);
-                event.target.value = "";
-                startUpload(files);
-              }}
-            />
-          </div>,
-          )}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="terminal-bottom"
-            data-hidden={!awayFromBottom || undefined}
-            aria-label="回到底部"
-            title="回到底部"
-            tabIndex={awayFromBottom ? 0 : -1}
-            onClick={() => {
-              activeTerm.current?.scrollToBottom();
-              activeTerm.current?.focus();
-            }}
-          >
-            <ArrowDownToLine />
-          </Button>
-        </>
-      ) : (
       <div className="terminal-controls">
         <span className="terminal-connection" role="status">
           {onlineStatus && restoring ? (
@@ -756,7 +621,6 @@ export function Terminal({
           {fullscreen ? "退出全屏" : "全屏"}
         </Button>
       </div>
-      )}
       <div className="terminal-feedback">
         {restoreFailed ? (
           <Alert variant="destructive">
@@ -1013,8 +877,6 @@ export function Terminals({
   const [command, setCommand] = useState("");
   const [visited, setVisited] = useState<string[]>(selected ? [selected] : []);
   const tabList = useRef<HTMLDivElement>(null);
-  // State, not a ref: the terminals render into it once it exists.
-  const [actionsSlot, setActionsSlot] = useState<HTMLDivElement | null>(null);
   const pendingSelection = useRef<string | undefined>(undefined);
   const online = useClient((state) => state.status === "online");
   const terminals = useMemo(
@@ -1139,7 +1001,7 @@ export function Terminals({
   const newButton = (
     <Button
       variant="ghost"
-      size={isDesktop ? "icon" : "icon-sm"}
+      size="icon-sm"
       aria-label="新建另一个终端"
       title="新建另一个终端"
       disabled={!online}
@@ -1245,22 +1107,17 @@ export function Terminals({
                 重新运行
               </Button>
             )}
-            {/* On the desktop these join the terminal's own actions at the end of this row. */}
-            {!isDesktop && newButton}
-            {!isDesktop && (
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label={stopped ? "删除当前终端记录" : "关闭当前终端"}
-                title={stopped ? "删除当前终端记录" : "关闭当前终端"}
-                disabled={!current || job.busy || !online}
-                onClick={() => void closeCurrent()}
-              >
-                <X />
-              </Button>
-            )}
-            {/* The open terminal's own actions land here (Terminal renders them into it). */}
-            {isDesktop && <div className="terminal-tab-actions" ref={setActionsSlot} />}
+            {newButton}
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={stopped ? "删除当前终端记录" : "关闭当前终端"}
+              title={stopped ? "删除当前终端记录" : "关闭当前终端"}
+              disabled={!current || job.busy || !online}
+              onClick={() => void closeCurrent()}
+            >
+              <X />
+            </Button>
           </div>
           {mounted.map((id) => (
             <TabsContent
@@ -1277,16 +1134,6 @@ export function Terminals({
               <Terminal
                 id={id}
                 active={id === selected}
-                actionsSlot={isDesktop ? actionsSlot : undefined}
-                extraActions={newButton}
-                menuActions={
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem variant="destructive" disabled={!current || job.busy || !online} onSelect={() => void closeCurrent()}>
-                      <X />{stopped ? "删除这个终端记录" : "关闭这个终端"}
-                    </DropdownMenuItem>
-                  </>
-                }
               />
             </TabsContent>
           ))}
@@ -1309,9 +1156,7 @@ export function Terminals({
         <EmptyState
           icon={<TerminalSquare />}
           title="一个随时能回来的终端"
-          description={isDesktop
-            ? "Shell 持续运行在当前电脑。关闭窗口后，也能回来继续查看输出和执行命令。"
-            : "Shell 持续运行在当前电脑。刷新网页后，也能继续查看输出和执行命令。"}
+          description="Shell 持续运行在当前电脑。刷新网页后，也能继续查看输出和执行命令。"
         >
           <Button disabled={!online} onClick={openCreate}>
             <Plus data-icon="inline-start" />

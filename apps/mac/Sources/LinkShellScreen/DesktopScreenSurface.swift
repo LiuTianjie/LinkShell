@@ -82,6 +82,10 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
   public var onFirstFrame: (() -> Void)?
   public var onFailure: ((String) -> Void)?
   public var onExitFullScreen: (() -> Void)?
+  public var onFocusChanged: ((Bool) -> Void)?
+  public var hasControlFocus: Bool {
+    !stopped && active && controlEnabled && window?.isKeyWindow == true && window?.firstResponder === self
+  }
   public var controlEnabled = false {
     didSet {
       if !controlEnabled {
@@ -89,6 +93,7 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
         if !fullScreen, window?.firstResponder === self { window?.makeFirstResponder(nil) }
       }
       updateCursorVisibility()
+      notifyFocusChanged()
     }
   }
   /// The remote computer's helper accepts held keys and the middle button (`keys` capability).
@@ -140,9 +145,11 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
   private var presentationFrozen = false
   private var tracking: NSTrackingArea?
   private var windowObserver: NSObjectProtocol?
+  private var windowBecomeKeyObserver: NSObjectProtocol?
   private var screenObserver: NSObjectProtocol?
   private var active = true
   private var stopped = false
+  private var lastReportedFocus = false
   private var marked = NSAttributedString(string: "")
   private var markedSelection = NSRange(location: 0, length: 0)
   private let compositionLabel = DesktopScreenTextLabel(labelWithString: "")
@@ -198,6 +205,7 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
     if let dragMonitor { NSEvent.removeMonitor(dragMonitor) }
     dragReleaseTimer?.invalidate()
     if let windowObserver { NotificationCenter.default.removeObserver(windowObserver) }
+    if let windowBecomeKeyObserver { NotificationCenter.default.removeObserver(windowBecomeKeyObserver) }
     if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
   }
 
@@ -205,6 +213,7 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
   public override func viewDidMoveToWindow() {
     super.viewDidMoveToWindow()
     if let windowObserver { NotificationCenter.default.removeObserver(windowObserver); self.windowObserver = nil }
+    if let windowBecomeKeyObserver { NotificationCenter.default.removeObserver(windowBecomeKeyObserver); self.windowBecomeKeyObserver = nil }
     if let screenObserver { NotificationCenter.default.removeObserver(screenObserver); self.screenObserver = nil }
     if let window {
       window.acceptsMouseMovedEvents = true
@@ -212,9 +221,18 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
       screenObserver = NotificationCenter.default.addObserver(forName: NSWindow.didChangeScreenNotification, object: window, queue: .main) { [weak self] _ in
         self?.updateRunning()
       }
-      windowObserver = NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self] _ in self?.releaseInput(); self?.updateCursorVisibility() }
+      windowObserver = NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self] _ in
+        self?.releaseInput()
+        self?.updateCursorVisibility()
+        self?.notifyFocusChanged()
+      }
+      windowBecomeKeyObserver = NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { [weak self] _ in
+        self?.updateCursorVisibility()
+        self?.notifyFocusChanged()
+      }
     } else { releaseInput() }
     updateRunning()
+    notifyFocusChanged()
   }
   public override func updateTrackingAreas() {
     super.updateTrackingAreas()
@@ -249,7 +267,17 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
   }
   public override func mouseEntered(with event: NSEvent) { pointerInside = true; updateCursorVisibility() }
   public override func mouseExited(with event: NSEvent) { pointerInside = false; updateCursorVisibility() }
-  public override func resignFirstResponder() -> Bool { releaseInput(); return super.resignFirstResponder() }
+  public override func becomeFirstResponder() -> Bool {
+    let accepted = super.becomeFirstResponder()
+    notifyFocusChanged()
+    return accepted
+  }
+  public override func resignFirstResponder() -> Bool {
+    let resigned = super.resignFirstResponder()
+    releaseInput()
+    notifyFocusChanged()
+    return resigned
+  }
 
   public func setActive(_ value: Bool) {
     guard active != value else { return }
@@ -258,6 +286,7 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
     updateRunning()
     if !value { releaseInput(); pictureSize = .zero }
     updateCursorVisibility()
+    notifyFocusChanged()
   }
   public func stop() {
     cancelWindowDragReleaseTracking()
@@ -265,6 +294,13 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
     stopped = true; active = false
     renderer.stop()
     cursorShapes.removeAll(); cursorView.isHidden = true
+    notifyFocusChanged()
+  }
+  private func notifyFocusChanged() {
+    let focused = hasControlFocus
+    guard focused != lastReportedFocus else { return }
+    lastReportedFocus = focused
+    onFocusChanged?(focused)
   }
   public func resetPresentation() {
     releaseInput(); pictureSize = .zero

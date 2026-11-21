@@ -33,8 +33,14 @@ import {
 } from "../../primitives";
 import { FileExtBadge } from "./file-ext-badge";
 import {
+  INSPECTOR_FILES_CHANGED_EVENT,
   INSPECTOR_FILE_SAVED_EVENT,
   INSPECTOR_FOCUS_FILE_SEARCH_EVENT,
+  closeOpenTabsForDeletedPath,
+  findDirtyFileTabsForPath,
+  isSameOrDescendantPath,
+  rebaseRenamedPath,
+  retargetOpenTabsAfterRename,
   takeFileSearchFocus,
 } from "./inspector-tabs-store";
 import {
@@ -84,6 +90,22 @@ function splitSearchEntryLabel(rawName: string): {
   };
 }
 
+function joinSiblingPath(existingPath: string, nextName: string): string {
+  const cleaned = existingPath.replace(/[\\/]+$/, "");
+  const idx = Math.max(cleaned.lastIndexOf("/"), cleaned.lastIndexOf("\\"));
+  const sep = idx >= 0 ? cleaned[idx]! : cleaned.includes("\\") ? "\\" : "/";
+  const parent = idx > 0 ? cleaned.slice(0, idx) : idx === 0 ? cleaned.slice(0, 1) : "";
+  if (!parent) return nextName;
+  if (parent === "/" || parent === "\\") return `${parent}${nextName}`;
+  return `${parent}${sep}${nextName}`;
+}
+
+function isValidEntryName(name: string): boolean {
+  const trimmed = name.trim();
+  if (!trimmed || trimmed === "." || trimmed === "..") return false;
+  return !/[\\/\0]/.test(trimmed);
+}
+
 export interface FilesPanelProps {
   connection?: Connection;
   online: boolean;
@@ -119,9 +141,11 @@ export function FilesPanel({
 
   const [searchQuery, setSearchQuery] = useState("");
   const [searchHits, setSearchHits] = useState<DirectoryEntry[] | null>(null);
+  const [searchRefreshNonce, setSearchRefreshNonce] = useState(0);
   const [activeFilePath, setActiveFilePath] = useState<string | undefined>(
     undefined,
   );
+  const ownerKey = connection?.computer.key ?? "default";
 
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const searchWrapRef = useRef<HTMLDivElement | null>(null);
@@ -210,13 +234,20 @@ export function FilesPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Reload when host comes online, root cwd changes, or hidden toggle changes.
   }, [connection, online, cwd, showHidden]);
 
-  // Saving from the viewer changes a size and a time this list shows.
+  // Saving, renaming, or deleting from the viewer changes directory listings.
   useEffect(() => {
     const reload = () => {
-      if (connection && online) void loadDirectory(currentDir || cwd || "");
+      if (connection && online) {
+        void loadDirectory(currentDir || cwd || "");
+        setSearchRefreshNonce((n) => n + 1);
+      }
     };
     window.addEventListener(INSPECTOR_FILE_SAVED_EVENT, reload);
-    return () => window.removeEventListener(INSPECTOR_FILE_SAVED_EVENT, reload);
+    window.addEventListener(INSPECTOR_FILES_CHANGED_EVENT, reload);
+    return () => {
+      window.removeEventListener(INSPECTOR_FILE_SAVED_EVENT, reload);
+      window.removeEventListener(INSPECTOR_FILES_CHANGED_EVENT, reload);
+    };
   }, [connection, online, currentDir, cwd, loadDirectory]);
 
   useEffect(() => {
@@ -289,7 +320,7 @@ export function FilesPanel({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [searchQuery, connection, online, currentDir, cwd, entries]);
+  }, [searchQuery, searchRefreshNonce, connection, online, currentDir, cwd, entries]);
 
   const handleOpenExternal = useCallback(
     async (targetPath: string, app: ExternalOpenTarget) => {
@@ -363,6 +394,94 @@ export function FilesPanel({
       await loadDirectory(dir);
     },
     [currentDir, cwd, connection, dialogs, ti, loadDirectory],
+  );
+
+  const handleRenameEntry = useCallback(
+    async (entryPath: string, currentName: string) => {
+      if (!connection || !online) return;
+      const nextName = await dialogs.prompt(ti("renamePrompt"), {
+        title: ti("rename"),
+        initial: currentName,
+        submitLabel: ti("rename"),
+        cancelLabel: ti("cancel"),
+      });
+      if (nextName === null) return;
+      const trimmed = nextName.trim();
+      if (!trimmed || trimmed === currentName) return;
+      if (!isValidEntryName(trimmed)) {
+        await dialogs.alert(ti("invalidRenameName"));
+        return;
+      }
+      const dirtyTabs = findDirtyFileTabsForPath(ownerKey, entryPath);
+      if (dirtyTabs.length > 0) {
+        const discard = await dialogs.confirm(
+          ti("dirtyRenameConfirm", { name: currentName }),
+          {
+            title: ti("rename"),
+            confirmLabel: ti("rename"),
+            cancelLabel: ti("cancel"),
+            destructive: true,
+          },
+        );
+        if (!discard) return;
+      }
+      const nextPath = joinSiblingPath(entryPath, trimmed);
+      try {
+        const res = await connection.link.call("fs.rename", {
+          from: entryPath,
+          to: nextPath,
+        });
+        const actualTo = res?.path || nextPath;
+        retargetOpenTabsAfterRename(ownerKey, entryPath, actualTo);
+        if (activeFilePath && isSameOrDescendantPath(activeFilePath, entryPath)) {
+          setActiveFilePath(rebaseRenamedPath(activeFilePath, entryPath, actualTo));
+        }
+        await loadDirectory(currentDir || cwd || "");
+        setSearchRefreshNonce((n) => n + 1);
+      } catch (err) {
+        await dialogs.alert(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [activeFilePath, connection, currentDir, cwd, dialogs, loadDirectory, online, ownerKey, ti],
+  );
+
+  const handleDeleteEntry = useCallback(
+    async (entryPath: string, currentName: string, isFile: boolean) => {
+      if (!connection || !online) return;
+      const dirtyTabs = findDirtyFileTabsForPath(ownerKey, entryPath);
+      const confirmed = await dialogs.confirm(
+        dirtyTabs.length > 0
+          ? ti("dirtyDeleteConfirm", { name: currentName })
+          : isFile
+            ? ti("deleteFileConfirm", { name: currentName })
+            : ti("deleteFolderConfirm", { name: currentName }),
+        {
+          title: isFile ? ti("deleteFileTitle") : ti("deleteFolderTitle"),
+          confirmLabel: ti("delete"),
+          cancelLabel: ti("cancel"),
+          destructive: true,
+        },
+      );
+      if (!confirmed) return;
+      try {
+        await connection.link.call("fs.delete", {
+          path: entryPath,
+          ...(isFile ? {} : { recursive: true }),
+        });
+        closeOpenTabsForDeletedPath(ownerKey, entryPath);
+        if (activeFilePath && isSameOrDescendantPath(activeFilePath, entryPath)) {
+          setActiveFilePath(undefined);
+        }
+        const targetDir = isSameOrDescendantPath(currentDir, entryPath)
+          ? (parentDir ?? cwd ?? "")
+          : (currentDir || cwd || "");
+        await loadDirectory(targetDir);
+        setSearchRefreshNonce((n) => n + 1);
+      } catch (err) {
+        await dialogs.alert(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [activeFilePath, connection, currentDir, cwd, dialogs, loadDirectory, online, ownerKey, parentDir, ti],
   );
 
   const toggleShowHidden = useCallback(() => {
@@ -610,6 +729,9 @@ export function FilesPanel({
               ...(isFile
                 ? [{ id: "download", label: t("desktop.inspector.download") }]
                 : []),
+              { id: "sep-2", label: "", type: "separator" },
+              { id: "rename", label: ti("rename") },
+              { id: "delete", label: ti("delete") },
             ];
 
             return (
@@ -630,6 +752,10 @@ export function FilesPanel({
                     copyPath(entryPath);
                   } else if (actionId === "download" && isFile) {
                     void handleDownload(entryPath);
+                  } else if (actionId === "rename") {
+                    void handleRenameEntry(entryPath, base);
+                  } else if (actionId === "delete") {
+                    void handleDeleteEntry(entryPath, base, isFile);
                   }
                 }}
                 menu={
@@ -677,6 +803,26 @@ export function FilesPanel({
                         {t("desktop.inspector.download")}
                       </MenuItem>
                     ) : null}
+                    <MenuSeparator />
+                    <MenuItem
+                      icon="edit"
+                      disabled={!online}
+                      onSelect={() => {
+                        void handleRenameEntry(entryPath, base);
+                      }}
+                    >
+                      {ti("rename")}
+                    </MenuItem>
+                    <MenuItem
+                      icon="trash"
+                      destructive
+                      disabled={!online}
+                      onSelect={() => {
+                        void handleDeleteEntry(entryPath, base, isFile);
+                      }}
+                    >
+                      {ti("delete")}
+                    </MenuItem>
                   </>
                 }
               >

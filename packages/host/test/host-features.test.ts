@@ -123,7 +123,7 @@ describe("LAN mDNS / Bonjour _linkshell._tcp discovery", () => {
   });
 });
 
-describe("Clipboard, Screen Privacy, LSA RPC wiring & Push-to-Start Zero-Plaintext Wakeup", () => {
+describe("Clipboard, Screen Privacy & Push-to-Start Zero-Plaintext Wakeup", () => {
   it("handles clipboard read/write with injected runner across platforms", async () => {
     let clipboardBuf = "initial";
     const run = vi.fn(async (_cmd: string, _args: string[], stdinText?: string) => {
@@ -140,7 +140,7 @@ describe("Clipboard, Screen Privacy, LSA RPC wiring & Push-to-Start Zero-Plainte
     await expect(writeClipboard("win-clip", { platform: "win32", runCommand: run })).resolves.toEqual({ ok: true });
   });
 
-  it("wires screen.privacy, fs.projectFiles, and lsa.status through HostRpcServer", async () => {
+  it("wires screen.privacy and fs.projectFiles through HostRpcServer", async () => {
     const home = tempDir("ls-rpc-all-");
     writeFileSync(join(home, "hello.ts"), "export const x = 1;\n");
     const host = await startHost({ home, version: "test", drivers: () => [], discoveryIntervalMs: 0, log: () => {} });
@@ -154,10 +154,6 @@ describe("Clipboard, Screen Privacy, LSA RPC wiring & Push-to-Start Zero-Plainte
 
       const proj = await client.call("fs.projectFiles", { cwd: home, query: "hello" });
       expect(proj.files.some((f) => f.relativePath === "hello.ts")).toBe(true);
-
-      const lsaStatus = await client.call("lsa.status", {});
-      expect(lsaStatus.enabled).toBe(true);
-      expect(lsaStatus.requiresYearlyTier).toBe(true);
     } finally {
       client.close();
       await host.stop();

@@ -1,13 +1,26 @@
 import type { PromptProgress, SessionView } from "@linkshell/client-core";
-import { buildLiveActivitySnapshot, liveActivityContent, type AttentionPhase, type SessionSummary, type TerminalInfo } from "@linkshell/wire";
+import {
+  buildLiveActivitySnapshot,
+  liveActivityContent,
+  liveActivityDetailLink,
+  permissionChoices,
+  type AttentionPhase,
+  type SessionSummary,
+  type TerminalInfo,
+} from "@linkshell/wire";
 export { classifySessionPhase, phasePriority, type AttentionPhase } from "@linkshell/wire";
 import Storage from "expo-sqlite/kv-store";
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { AppState, Platform } from "react-native";
+import * as linkLayout from "../../modules/link-layout";
 import {
   setNativeShortcutItems,
   syncNativeLiveActivity,
+  type AndroidNotificationActionInput,
+  type AndroidStatusNotificationPayload,
   type LiveActivityPayload,
+  type LocalApprovalNotificationPayload,
+  type NativeNotificationAction,
   type ShortcutItemInput,
 } from "../../modules/link-layout";
 import { agentLook } from "@/theme/agents";
@@ -376,26 +389,349 @@ export interface AttentionSyncScheduler {
   dispose(): void;
 }
 
+export function shouldUseLocalApprovalFallback(params: {
+  liveActivityAvailable: boolean;
+  liveActivitySynced: boolean;
+}): boolean {
+  return !params.liveActivityAvailable || !params.liveActivitySynced;
+}
+
+/**
+ * Extracts pending approval requests that can be surfaced as interactive iOS local
+ * notifications whenever ActivityKit Live Activities are unavailable or disabled/rejected.
+ */
+export function buildLocalApprovalNotifications(
+  computerName: string,
+  computerKey: string,
+  sessions: SessionSummary[],
+  online: boolean,
+): LocalApprovalNotificationPayload[] {
+  if (!online || !computerKey) return [];
+  const out: LocalApprovalNotificationPayload[] = [];
+  for (const session of sessions) {
+    if (session.archived) continue;
+    const perm = session.permission;
+    if (!perm || perm.url || perm.questions?.length) continue;
+    const choices = permissionChoices(perm.options);
+    const approveChoice = choices.find((c) => c.role === "allow") ?? choices.find((c) => c.role === "always");
+    const denyChoice = choices.find((c) => c.role === "reject") ?? choices.find((c) => c.role === "stop");
+    out.push({
+      id: `approval:${computerKey}:${session.id}:${perm.requestId}`,
+      title: `${sessionTitle(session)} · 需要你批准`,
+      body: perm.title?.trim() || `${computerName} 等待确认继续执行`,
+      computerKey,
+      sessionId: session.id,
+      requestId: perm.requestId,
+      ...(approveChoice ? { approveOptionId: approveChoice.option.optionId } : {}),
+      ...(denyChoice ? { denyOptionId: denyChoice.option.optionId } : {}),
+      deepLink: liveActivityDetailLink(computerKey, "session", session.id),
+    });
+  }
+  return out;
+}
+
+/**
+ * Builds the Android foreground/status notification payload including interactive
+ * Approve/Deny/Cancel/Open buttons and `foregroundService` continuity guard.
+ */
+export function buildAndroidStatusPayload(params: {
+  computerName: string;
+  computerKey: string;
+  sessions: SessionSummary[];
+  terminals: TerminalInfo[];
+  online: boolean;
+  goals?: Record<string, { status: string; objective: string }>;
+}): AndroidStatusNotificationPayload {
+  const { computerName, computerKey, sessions, terminals, online, goals } = params;
+  const snapshot = buildLiveActivitySnapshot(computerName, sessions, terminals, online, computerKey, goals);
+  if (!snapshot.active) {
+    return { active: false, foregroundService: false, actions: [] };
+  }
+  const content = liveActivityContent(snapshot);
+  const urgent =
+    snapshot.phase === "waiting_for_approval" ||
+    snapshot.phase === "waiting_for_input" ||
+    snapshot.phase === "failed";
+  const ongoing = snapshot.phase === "running" || snapshot.phase === "starting";
+  const foregroundService =
+    ongoing || snapshot.phase === "waiting_for_approval" || snapshot.phase === "waiting_for_input";
+  const deepLink = content.deepLink || snapshot.deepLink || "linkshell:///";
+  const actions: AndroidNotificationActionInput[] = [];
+
+  if (snapshot.phase === "waiting_for_approval" && content.actions?.length) {
+    const permActions = content.actions.filter((action) => action.kind === "permission");
+    const allow = permActions.find((action) => action.role === "allow") ?? permActions.find((action) => action.role === "always");
+    const deny = permActions.find((action) => action.role === "reject") ?? permActions.find((action) => action.role === "stop");
+    if (allow) {
+      actions.push({
+        id: `approve:${allow.sessionId}:${allow.requestId}`,
+        label: allow.label || "允许",
+        kind: "approve",
+        computerKey: allow.computerKey,
+        sessionId: allow.sessionId,
+        requestId: allow.requestId,
+        optionId: allow.optionId,
+        deepLink,
+      });
+    }
+    if (deny) {
+      actions.push({
+        id: `deny:${deny.sessionId}:${deny.requestId}`,
+        label: deny.label || "拒绝",
+        kind: "deny",
+        computerKey: deny.computerKey,
+        sessionId: deny.sessionId,
+        requestId: deny.requestId,
+        optionId: deny.optionId,
+        deepLink,
+      });
+    }
+  } else if (ongoing) {
+    const heroSession = snapshot.tasks?.find((task) => task.kind === "session");
+    if (heroSession) {
+      actions.push({
+        id: `cancel:${heroSession.id}`,
+        label: "停止",
+        kind: "cancel",
+        computerKey,
+        sessionId: heroSession.id,
+        deepLink,
+      });
+    }
+    actions.push({
+      id: `open:${heroSession?.id ?? "home"}`,
+      label: "查看",
+      kind: "open",
+      computerKey,
+      ...(heroSession ? { sessionId: heroSession.id } : {}),
+      deepLink,
+    });
+  } else {
+    const heroSession = snapshot.tasks?.find((task) => task.kind === "session");
+    actions.push({
+      id: `open:${heroSession?.id ?? "home"}`,
+      label: "查看",
+      kind: "open",
+      computerKey,
+      ...(heroSession ? { sessionId: heroSession.id } : {}),
+      deepLink,
+    });
+  }
+
+  return {
+    active: true,
+    title: content.title || computerName,
+    subtitle: content.subtitle || "",
+    computerName,
+    deepLink,
+    urgent,
+    ongoing,
+    foregroundService,
+    actions,
+  };
+}
+
+export type NotificationRouteTarget =
+  | { pathname: "/session/[id]"; params: { id: string } }
+  | { pathname: "/terminal/[id]"; params: { id: string } }
+  | { pathname: "/activity"; params: Record<string, string> }
+  | { pathname: "/" };
+
+/** Resolves a `NativeNotificationAction`'s `deepLink` / `sessionId` into an Expo Router target. */
+export function resolveNotificationRoute(
+  action: Pick<NativeNotificationAction, "deepLink" | "sessionId" | "computerKey">,
+): NotificationRouteTarget {
+  const raw = action.deepLink?.trim();
+  if (raw?.startsWith("linkshell:///")) {
+    try {
+      const parsed = new URL(raw.replace(/^linkshell:\/\/\//, "https://linkshell.local/"));
+      if (parsed.pathname.startsWith("/session/")) {
+        const id = decodeURIComponent(parsed.pathname.slice("/session/".length));
+        if (id) return { pathname: "/session/[id]", params: { id } };
+      }
+      if (parsed.pathname.startsWith("/terminal/")) {
+        const id = decodeURIComponent(parsed.pathname.slice("/terminal/".length));
+        if (id) return { pathname: "/terminal/[id]", params: { id } };
+      }
+      if (parsed.pathname === "/activity") {
+        const params: Record<string, string> = {};
+        for (const key of ["computer", "session", "terminal", "filter"]) {
+          const val = parsed.searchParams.get(key);
+          if (val) params[key] = val;
+        }
+        return { pathname: "/activity", params };
+      }
+    } catch {
+      // Fall through to explicit sessionId.
+    }
+  }
+  if (action.sessionId) {
+    return { pathname: "/session/[id]", params: { id: action.sessionId } };
+  }
+  if (action.computerKey) {
+    return { pathname: "/activity", params: { computer: action.computerKey } };
+  }
+  return { pathname: "/" };
+}
+
+export interface NotificationActionCoordinatorDeps {
+  pendingId: () => Promise<string | null>;
+  consume: (id: string) => Promise<NativeNotificationAction | null>;
+  subscribe: (listener: (event: { id: string }) => void) => () => void;
+  onExecute: (action: NativeNotificationAction) => Promise<void> | void;
+}
+
+/**
+ * Drains and subscribes to native notification actions with strict id deduplication
+ * so pending actions on cold launch and foreground resume never double-submit.
+ */
+export function createNotificationActionCoordinator(deps: NotificationActionCoordinatorDeps) {
+  const handled = new Set<string>();
+  const inFlight = new Set<string>();
+  let disposed = false;
+
+  const processId = async (id: string): Promise<boolean> => {
+    if (disposed || !id || handled.has(id) || inFlight.has(id)) return false;
+    inFlight.add(id);
+    try {
+      const action = await deps.consume(id).catch(() => null);
+      handled.add(id);
+      if (disposed || !action) return false;
+      await deps.onExecute(action);
+      return true;
+    } finally {
+      inFlight.delete(id);
+    }
+  };
+
+  let drainChain: Promise<void> = Promise.resolve();
+  const drain = () => {
+    drainChain = drainChain
+      .then(async () => {
+        for (let guard = 0; guard < 32; guard += 1) {
+          if (disposed) return;
+          const nextId = await deps.pendingId().catch(() => null);
+          if (!nextId || handled.has(nextId) || inFlight.has(nextId)) break;
+          await processId(nextId);
+        }
+      })
+      .catch(() => {});
+    return drainChain;
+  };
+
+  const unsubscribe = deps.subscribe(({ id }) => {
+    void processId(id);
+  });
+
+  return {
+    drain,
+    processId,
+    handledCount: () => handled.size,
+    dispose() {
+      disposed = true;
+      unsubscribe();
+    },
+  };
+}
+
+function optionalLinkLayoutFn<K extends keyof typeof linkLayout>(
+  key: K,
+): (typeof linkLayout)[K] | undefined {
+  if (!Object.prototype.hasOwnProperty.call(linkLayout, key)) return undefined;
+  const value = linkLayout[key];
+  return typeof value === "function" ? value : undefined;
+}
+
 export function createAttentionSyncScheduler(
   options: {
     throttleMs?: number;
     setShortcuts?: (items: ShortcutItemInput[]) => Promise<unknown> | unknown;
     syncActivity?: (payload: LiveActivityPayload) => Promise<boolean | unknown> | boolean | unknown;
+    isLiveActivityAvailable?: () => Promise<boolean>;
+    syncLocalApproval?: (payload: LocalApprovalNotificationPayload) => Promise<boolean>;
+    cancelLocalApproval?: (id: string) => Promise<void>;
   } = {},
 ): AttentionSyncScheduler {
   const throttleMs = options.throttleMs ?? ATTENTION_STREAM_THROTTLE_MS;
   const setShortcuts = options.setShortcuts ?? setNativeShortcutItems;
   const syncActivity = options.syncActivity ?? syncNativeLiveActivity;
+  const checkLiveActivityAvailable =
+    options.isLiveActivityAvailable ?? optionalLinkLayoutFn("isNativeLiveActivityAvailable");
+  const syncLocalApproval =
+    options.syncLocalApproval ?? optionalLinkLayoutFn("syncNativeLocalApprovalNotification");
+  const cancelLocalApproval =
+    options.cancelLocalApproval ?? optionalLinkLayoutFn("cancelNativeLocalApprovalNotification");
+
   let latestReader: (() => AttentionSyncInput) | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let lastSyncAt = 0;
   let lastShortcutKey: string | undefined;
   let lastActivityKey: string | undefined;
+  let lastSyncSucceeded: boolean | undefined;
   let needsForegroundRetry = false;
+  let reconcileSeq = 0;
+  const activeLocalApprovals = new Map<string, string>();
 
   const cancelPending = () => {
     if (timer) clearTimeout(timer);
     timer = undefined;
+  };
+
+  const reconcileLocalApprovals = async (
+    seq: number,
+    expected: LocalApprovalNotificationPayload[],
+    online: boolean,
+    activityActive: boolean,
+    syncPromise: Promise<boolean>,
+  ) => {
+    if (!syncLocalApproval || !cancelLocalApproval) return;
+    const available = checkLiveActivityAvailable
+      ? await checkLiveActivityAvailable().catch(() => false)
+      : false;
+    const syncOk = activityActive ? await syncPromise.catch(() => false) : false;
+    if (seq !== reconcileSeq) return;
+
+    const useFallback =
+      expected.length > 0 &&
+      shouldUseLocalApprovalFallback({
+        liveActivityAvailable: available,
+        liveActivitySynced: syncOk,
+      });
+
+    if (useFallback) {
+      const expectedIds = new Set(expected.map((item) => item.id));
+      for (const id of [...activeLocalApprovals.keys()]) {
+        if (!expectedIds.has(id)) {
+          activeLocalApprovals.delete(id);
+          void cancelLocalApproval(id).catch(() => {});
+        }
+      }
+      for (const item of expected) {
+        const signature = JSON.stringify(item);
+        if (activeLocalApprovals.get(item.id) !== signature) {
+          activeLocalApprovals.set(item.id, signature);
+          void syncLocalApproval(item).catch(() => {});
+        }
+      }
+      return;
+    }
+
+    // Cancel local fallback approvals once resolved/cancelled online, or when Live Activity took over.
+    const liveTookOver = available && syncOk;
+    if (liveTookOver || (online && expected.length === 0)) {
+      for (const id of [...activeLocalApprovals.keys()]) {
+        activeLocalApprovals.delete(id);
+        void cancelLocalApproval(id).catch(() => {});
+      }
+    } else if (online) {
+      const expectedIds = new Set(expected.map((item) => item.id));
+      for (const id of [...activeLocalApprovals.keys()]) {
+        if (!expectedIds.has(id)) {
+          activeLocalApprovals.delete(id);
+          void cancelLocalApproval(id).catch(() => {});
+        }
+      }
+    }
   };
 
   const flush = (flushOptions?: { foregroundReturn?: boolean }) => {
@@ -436,20 +772,40 @@ export function createAttentionSyncScheduler(
       computerKey: current.computerKey,
     };
     const activityKey = liveActivityPayloadFingerprint(payload);
+    let syncPromise: Promise<boolean>;
     if (activityKey !== lastActivityKey) {
       lastActivityKey = activityKey;
       const sentInBackground = AppState.currentState !== "active";
-      void Promise.resolve(syncActivity(payload)).then(
+      syncPromise = Promise.resolve(syncActivity(payload)).then(
         (ok) => {
-          // Activity.request cannot start a new Live Activity while backgrounded; retry once foregrounded.
-          if (ok === false && sentInBackground && payload.active) {
+          const accepted = ok !== false;
+          lastSyncSucceeded = accepted;
+          // Activity.request cannot start while backgrounded (or if disabled in Settings): retry on foreground return.
+          if (ok === false && payload.active && (sentInBackground || Boolean(syncLocalApproval))) {
             needsForegroundRetry = true;
           }
+          return accepted;
         },
         () => {
+          lastSyncSucceeded = false;
           if (lastActivityKey === activityKey) lastActivityKey = undefined;
+          return false;
         },
       );
+    } else {
+      syncPromise = Promise.resolve(lastSyncSucceeded ?? false);
+    }
+
+    if (syncLocalApproval && cancelLocalApproval) {
+      reconcileSeq += 1;
+      const seq = reconcileSeq;
+      const expectedApprovals = buildLocalApprovalNotifications(
+        current.computerName,
+        current.computerKey,
+        merged,
+        current.online,
+      );
+      void reconcileLocalApprovals(seq, expectedApprovals, current.online, payload.active, syncPromise);
     }
   };
 

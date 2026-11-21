@@ -16,7 +16,6 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { accountMembership, accountReferral } from "./account";
 import { useLoad } from "./common";
-import { isDesktop, openDesktopExternal } from "./desktop";
 import { useLocale } from "./i18n";
 
 function expiry(at: string, locale: Locale): string {
@@ -287,7 +286,7 @@ export function ReferralCard({
   );
 }
 
-/** A link to itool.tech's buy page: a new tab in a browser, the default browser on the desktop. */
+/** A link to itool.tech's buy page. */
 function ShopLink({ url, onShop, children }: { url: string; onShop?(): void; children: ReactNode }) {
   return (
     <a
@@ -295,13 +294,7 @@ function ShopLink({ url, onShop, children }: { url: string; onShop?(): void; chi
       href={url}
       target="_blank"
       rel="noopener noreferrer"
-      onClick={(event) => {
-        onShop?.();
-        if (isDesktop) {
-          event.preventDefault();
-          openDesktopExternal(url);
-        }
-      }}
+      onClick={() => onShop?.()}
     >
       {children}
     </a>

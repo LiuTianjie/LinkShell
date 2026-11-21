@@ -8,5 +8,6 @@
   {"why":"unknown platform","message":{"t":"welcome","proto":2,"platform":"linux","features":[],"session":"s","resumed":false}},
   {"why":"menu.press needs a parent and an item","message":{"t":"menu.press","app":"com.apple.Safari","path":[2]}},
   {"why":"stream keys are w<id> or d<index>","message":{"t":"rtc","m":{"t":"streams","streams":[{"k":"window-1","mid":"0"}]}}},
-  {"why":"rects are {x,y,w,h}","message":{"t":"place","id":1,"seq":1,"frame":[0,0,10,10],"resize":false}}
+  {"why":"rects are {x,y,w,h}","message":{"t":"place","id":1,"seq":1,"frame":[0,0,10,10],"resize":false}},
+  {"why":"clip.file.start totalBytes capped at 50 MiB","message":{"t":"clip.file.start","transferId":"fc-over","files":[{"index":0,"name":"huge.bin","size":52428801}],"totalBytes":52428801}}
 ]

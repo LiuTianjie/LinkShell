@@ -11,9 +11,16 @@ enum FusionProtocol {
   /// Frames above this close the connection (`protocol`).
   static let maxFrame = 16 << 20
   /// What a Mac remote offers (`welcome.features`).
-  static let remoteFeatures = ["menubar", "dockmenu", "clipboard", "virtual-displays", "keys"]
+  static let remoteFeatures = ["menubar", "dockmenu", "clipboard", "file-clipboard", "virtual-displays", "keys"]
   /// What a Mac local computer offers (`hello.features`).
-  static let localFeatures = ["clipboard", "keys"]
+  static let localFeatures = ["clipboard", "file-clipboard", "keys"]
+
+  static let maxFileClipboard = 50 << 20
+  static let fileClipboardChunkBytes = 512 << 10
+  static let maxFileClipboardFiles = 256
+  static let maxFileClipboardTransferIdBytes = 128
+  static let maxFileClipboardChunkBase64Bytes = ((512 << 10) * 4 + 2) / 3 + 64
+  static let maxFileClipboardErrorBytes = 1024
 
   /// Every message type, for the fixture test: a type the schema has and these files don't
   /// handle is a gap in one of them.
@@ -21,7 +28,8 @@ enum FusionProtocol {
     "hello", "welcome", "bye", "ping", "pong", "displays", "apps", "ready", "launch", "quit",
     "app.exited", "app.hidden", "app.active", "icon", "wopen", "wclose", "wstyle", "layout", "place",
     "wclose.req", "focus", "prewarm", "fullscreen", "minimize", "menu.fetch", "menu.press", "menu",
-    "dockmenu", "dockmenu.press", "clip", "alert", "rtc",
+    "dockmenu", "dockmenu.press", "clip", "clip.file.start", "clip.file.chunk", "clip.file.end",
+    "alert", "rtc",
   ]
 
   /// Both Fusion processes are windowless background apps: App Nap would delay their pings past

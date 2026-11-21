@@ -16,13 +16,17 @@ export const FUSION_MAX_FRAME = 16 << 20;
 export const FUSION_CIPHERS = ["ECDHE-PSK-CHACHA20-POLY1305", "ECDHE-PSK-AES128-CBC-SHA", "PSK-AES128-GCM-SHA256", "PSK-AES128-CBC-SHA"];
 /** Raw clipboard bytes; base64 grows them by 4/3 and the frame must still fit. */
 export const FUSION_MAX_CLIPBOARD = 8 << 20;
+/** Total raw bytes allowed across one chunked file-clipboard transfer (50 MiB). */
+export const FUSION_MAX_FILE_CLIPBOARD = 50 << 20;
+/** Raw bytes per `clip.file.chunk` payload (512 KiB; base64 stays well under `FUSION_MAX_FRAME`). */
+export const FUSION_FILE_CLIPBOARD_CHUNK_BYTES = 512 << 10;
 /** How long the remote keeps an unexpectedly dropped session for `resume`. */
 export const FUSION_RESUME_GRACE_MS = 30_000;
 
 export const fusionPlatformSchema = z.enum(["macos", "windows"]);
 export type FusionPlatform = z.infer<typeof fusionPlatformSchema>;
 
-export const fusionFeatureSchema = z.enum(["menubar", "dockmenu", "clipboard", "virtual-displays", "keys"]);
+export const fusionFeatureSchema = z.enum(["menubar", "dockmenu", "clipboard", "file-clipboard", "virtual-displays", "keys"]);
 export type FusionFeature = z.infer<typeof fusionFeatureSchema>;
 
 const num = z.number().finite();
@@ -114,6 +118,13 @@ const clip = {
   png: z.string().optional(),
 };
 
+const clipFileEntrySchema = z.object({
+  index: z.number().int().min(0),
+  name: z.string().min(1).max(255),
+  size: z.number().int().min(0).max(FUSION_MAX_FILE_CLIPBOARD),
+  mime: z.string().max(255).optional(),
+});
+
 export const fusionMessageSchema = z.discriminatedUnion("t", [
   z.object({
     t: z.literal("hello"),
@@ -179,6 +190,25 @@ export const fusionMessageSchema = z.discriminatedUnion("t", [
   z.object({ t: z.literal("dockmenu.press"), app: appId, path: menuPath }),
   z.object({ t: z.literal("clip"), ...clip }),
   z.object({
+    t: z.literal("clip.file.start"),
+    transferId: z.string().min(1).max(128),
+    files: z.array(clipFileEntrySchema).min(1).max(256),
+    totalBytes: z.number().int().min(0).max(FUSION_MAX_FILE_CLIPBOARD),
+  }),
+  z.object({
+    t: z.literal("clip.file.chunk"),
+    transferId: z.string().min(1).max(128),
+    index: z.number().int().min(0),
+    seq: z.number().int().min(0),
+    data: z.string().max(Math.ceil((FUSION_FILE_CLIPBOARD_CHUNK_BYTES * 4) / 3) + 64),
+  }),
+  z.object({
+    t: z.literal("clip.file.end"),
+    transferId: z.string().min(1).max(128),
+    ok: z.boolean(),
+    error: z.string().max(1024).optional(),
+  }),
+  z.object({
     t: z.literal("alert"),
     kind: z.string().min(1),
     subject: z.string().optional(),
@@ -222,6 +252,9 @@ export const FUSION_DIRECTION: Record<FusionMessageType, "local" | "remote" | "b
   dockmenu: "remote",
   "dockmenu.press": "local",
   clip: "both",
+  "clip.file.start": "both",
+  "clip.file.chunk": "both",
+  "clip.file.end": "both",
   alert: "remote",
   rtc: "both",
 };

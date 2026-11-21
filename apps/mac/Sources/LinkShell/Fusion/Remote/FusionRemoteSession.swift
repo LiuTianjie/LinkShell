@@ -131,6 +131,16 @@ final class FusionRemoteSession: @unchecked Sendable {
   var rebuilding = false
   var lastUserAction: [pid_t: Double] = [:]
   var clipboard = FusionClipboardGuard()
+  lazy var fileClipboardSender = FusionFileClipboardSender { [weak self] message in
+    DispatchQueue.main.async { [weak self] in
+      guard let self, !self.ended, !self.paused else { return }
+      self.wire.send(message)
+    }
+  }
+  lazy var fileClipboardReceiver = FusionFileClipboardReceiver { [weak self] urls in
+    guard let self, self.clipboard.armed else { return }
+    self.clipboard.didWrite(changeCount: FusionFileClipboard.writePasteboardFiles(urls, to: NSPasteboard.general))
+  }
   var prewarmUntil: Double = 0
   var lastPopupMirrors: Set<Int> = []
   var hiddenBundles: Set<String> = []
@@ -192,6 +202,8 @@ final class FusionRemoteSession: @unchecked Sendable {
       if clipboard.armed, let item = FusionClipboardItem(message: m) {
         clipboard.didWrite(changeCount: item.write(to: NSPasteboard.general))
       }
+    case "clip.file.start", "clip.file.chunk", "clip.file.end":
+      if clipboard.armed { fileClipboardReceiver.handle(m) }
     case "prewarm":
       if let id = (m["id"] as? NSNumber).map({ CGWindowID($0.uint32Value) }), let s = streams[id] { noteUserAction(pid: s.pid) }
       prewarmOverlay()
@@ -307,6 +319,8 @@ extension FusionRemoteSession {
   /// Stops what needs a connection: timers, pictures.
   private func pause() {
     paused = true
+    fileClipboardSender.cancel()
+    fileClipboardReceiver.cancelPending()
     timers.forEach { $0.invalidate() }
     timers.removeAll()
     media?.close()
@@ -407,6 +421,20 @@ extension FusionRemoteSession {
     let count = pasteboard.changeCount
     guard clipboard.isUnseen(changeCount: count) else { return }
     let types = (pasteboard.types ?? []).map(\.rawValue)
+    if localFeatures.contains("file-clipboard") {
+      let selection = FusionFileClipboard.readPasteboardFiles(pasteboard)
+      if selection.containsFileURLs {
+        guard clipboard.shouldSend(
+          changeCount: count,
+          types: types,
+          bytes: selection.files.isEmpty ? -1 : selection.totalBytes,
+          maxBytes: FusionProtocol.maxFileClipboard,
+          allowEmpty: true
+        ) else { return }
+        fileClipboardSender.send(files: selection.files)
+        return
+      }
+    }
     let item = FusionClipboardItem.read(pasteboard)
     guard clipboard.shouldSend(changeCount: count, types: types, bytes: item.bytes) else { return }
     wire.send(item.message)
@@ -442,6 +470,8 @@ extension FusionRemoteSession {
   func end() {
     guard !ended else { return }
     ended = true
+    fileClipboardSender.cancel()
+    fileClipboardReceiver.cleanupAll()
     graceTimer?.cancel()
     graceTimer = nil
     timers.forEach { $0.invalidate() }

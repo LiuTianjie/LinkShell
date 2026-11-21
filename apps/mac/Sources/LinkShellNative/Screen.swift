@@ -8,10 +8,12 @@ import LinkShellScreen
 /// Only signalling/status reaches Node. Mach IPC delivers IOSurfaces directly to the Metal mailbox.
 final class NativeScreen: NSObject {
   static var current: NativeScreen?
+  static var desiredSystemShortcutCapture = false
   let id: String
   private let host: NSView
   private let clip = DesktopScreenClipView(frame: .zero)
   private let surface = DesktopScreenSurface(frame: .zero)
+  private let shortcutCapture = SystemShortcutCapture(physicalKeys: false, forwardsModifiers: false)
   private let port: DesktopFramePort
   private let process = Process()
   private let input = Pipe()
@@ -32,6 +34,7 @@ final class NativeScreen: NSObject {
   private var fullScreenOverlay: DesktopFullScreenOverlay?
   private var wantedControl = false
   private var wantedSmooth: Bool
+  private var systemShortcutCaptureEnabled: Bool
   private var startup: DispatchWorkItem?
 
   init(
@@ -43,6 +46,8 @@ final class NativeScreen: NSObject {
     overlayOpen: Bool = false,
     smooth: Bool = false,
     fullScreen: Bool = false,
+    audioMuted: Bool = false,
+    systemShortcutCapture: Bool = NativeScreen.desiredSystemShortcutCapture,
     callback: Callback
   ) throws {
     guard let port = DesktopFramePort(receiver: true) else {
@@ -57,6 +62,7 @@ final class NativeScreen: NSObject {
     self.overlayOpen = overlayOpen
     self.wantedSmooth = smooth
     self.fullScreen = fullScreen
+    self.systemShortcutCaptureEnabled = systemShortcutCapture
     self.callback = callback
     super.init()
     surface.fullScreen = fullScreen
@@ -72,6 +78,17 @@ final class NativeScreen: NSObject {
     surface.onExitFullScreen = { [weak self] in
       guard let self, !self.closed else { return }
       self.callback.call(["id": self.id, "type": "status", "status": ["exitFullScreen": true]])
+    }
+    surface.onFocusChanged = { [weak self] _ in
+      self?.syncSystemShortcutCapture()
+    }
+    shortcutCapture.onInput = { [weak self] message in
+      guard let self, self.ready, !self.closed else { return }
+      self.pipe.send(["type": "input", "message": message, "replaceable": false])
+    }
+    shortcutCapture.onReleaseAll = { [weak self] in
+      guard let self, !self.closed else { return }
+      self.surface.releaseHeldInputs()
     }
     process.executableURL = URL(fileURLWithPath: helper)
     process.arguments = ["--desktop-media"]
@@ -93,7 +110,7 @@ final class NativeScreen: NSObject {
       DesktopMediaPipe.read(output.fileHandleForReading, each: { [weak self] in self?.event($0) }, end: { [weak self] in
         DispatchQueue.main.async { self?.fail("原生画面连接已关闭，请重新连接") }
       })
-      pipe.send(["type": "start", "port": port.name, "smooth": smooth])
+      pipe.send(["type": "start", "port": port.name, "smooth": smooth, "audioMuted": audioMuted])
     } catch { stop(); throw error }
     let timeout = DispatchWorkItem { [weak self] in self?.fail("原生画面进程未就绪，请重新连接") }
     startup = timeout; DispatchQueue.main.asyncAfter(deadline: .now() + 10, execute: timeout)
@@ -103,7 +120,26 @@ final class NativeScreen: NSObject {
     for name in [NSWindow.didChangeScreenNotification, ProcessInfo.thermalStateDidChangeNotification, Notification.Name.NSProcessInfoPowerStateDidChange] {
       observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in self?.reportDisplayRate() })
     }
+    for name in [
+      NSApplication.didBecomeActiveNotification,
+      NSApplication.didResignActiveNotification,
+      NSApplication.didHideNotification,
+      NSApplication.didUnhideNotification,
+      NSWindow.didBecomeKeyNotification,
+      NSWindow.didResignKeyNotification,
+    ] {
+      observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+        self?.syncSystemShortcutCapture()
+      })
+    }
     reportDisplayRate()
+    syncSystemShortcutCapture()
+  }
+
+  deinit {
+    for observer in observers { NotificationCenter.default.removeObserver(observer) }
+    observers.removeAll()
+    shortcutCapture.teardown()
   }
 
   private var observers: [NSObjectProtocol] = []
@@ -133,8 +169,12 @@ final class NativeScreen: NSObject {
         self.pipe.send(["type": "pacing", "smooth": self.wantedSmooth])
         for message in self.pending { self.pipe.send(message) }
         self.pending.removeAll()
-      case "surfaceControl": self.surface.controlEnabled = value["enabled"] as? Bool == true
-      case "surfaceKeys": self.surface.physicalKeys = value["enabled"] as? Bool == true
+      case "surfaceControl":
+        self.surface.controlEnabled = value["enabled"] as? Bool == true
+        self.syncSystemShortcutCapture()
+      case "surfaceKeys":
+        self.surface.physicalKeys = value["enabled"] as? Bool == true
+        self.shortcutCapture.physicalKeys = self.surface.physicalKeys
       case "cursor": if let cursor = value["message"] as? [String: Any] { self.surface.updateCursor(cursor) }
       case "error": self.fail(value["error"] as? String ?? "原生画面连接失败")
       case "signal", "status": self.callback.call(value.merging(["id": self.id]) { _, new in new })
@@ -190,6 +230,14 @@ final class NativeScreen: NSObject {
         wantedSmooth = smooth
         if ready { pipe.send(["type": "pacing", "smooth": smooth]) }
       }
+    case "systemShortcutCapture":
+      if let enabled = DesktopScreenBridge.boolean(value["enabled"]) {
+        NativeScreen.desiredSystemShortcutCapture = enabled
+        _ = setSystemShortcutCapture(enabled)
+      }
+    case "mute", "audio":
+      if ready { pipe.send(value) }
+      else if pending.count < 128 { pending.append(value) }
     case "signal":
       guard let message = value["message"] as? [String: Any], DesktopMediaIPC.data(message) != nil else { return }
       let command: [String: Any] = ["type": "signal", "message": message]
@@ -198,6 +246,33 @@ final class NativeScreen: NSObject {
       else { fail("原生画面协商队列已满，请重新连接") }
     default: break
     }
+  }
+
+  @discardableResult
+  func setSystemShortcutCapture(_ enabled: Bool) -> Bool {
+    guard !closed else { return false }
+    systemShortcutCaptureEnabled = enabled
+    return syncSystemShortcutCapture()
+  }
+
+  @discardableResult
+  private func syncSystemShortcutCapture() -> Bool {
+    guard !closed else {
+      shortcutCapture.teardown()
+      return false
+    }
+    shortcutCapture.physicalKeys = surface.physicalKeys
+    let windowIsKey = host.window?.isKeyWindow == true
+    let appIsActive = NSApp.map { $0.isActive && !$0.isHidden } ?? false
+    let surfaceActive = visible && !clip.isHidden && !overlayOpen && surface.controlEnabled && !closed
+    let surfaceFocused = surface.hasControlFocus
+    return shortcutCapture.updateState(
+      enabled: systemShortcutCaptureEnabled,
+      windowIsKey: windowIsKey,
+      appIsActive: appIsActive,
+      surfaceActive: surfaceActive,
+      surfaceFocused: surfaceFocused
+    )
   }
 
   func setVisible(_ visible: Bool) { self.visible = visible; layout() }
@@ -214,6 +289,7 @@ final class NativeScreen: NSObject {
     guard showing else {
       clip.applyCutouts([], in: host)
       MainActor.assumeIsolated { syncFullScreenOverlay() }
+      syncSystemShortcutCapture()
       return
     }
     clip.frame = clipped
@@ -226,6 +302,7 @@ final class NativeScreen: NSObject {
       syncFullScreenOverlay()
       fullScreenOverlay?.layout()
     }
+    syncSystemShortcutCapture()
   }
   @MainActor private func syncFullScreenOverlay() {
     let showing = fullScreen && visible && !clip.isHidden && !closed
@@ -252,6 +329,7 @@ final class NativeScreen: NSObject {
     startup?.cancel(); startup = nil
     for observer in observers { NotificationCenter.default.removeObserver(observer) }
     observers.removeAll()
+    shortcutCapture.teardown()
     MainActor.assumeIsolated {
       fullScreenOverlay?.detach()
       fullScreenOverlay = nil

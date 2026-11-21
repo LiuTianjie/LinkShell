@@ -37,6 +37,7 @@ import {
   ClipboardPaste,
   Expand,
   EyeOff,
+  LoaderCircle,
   Lock,
   Maximize,
   Minimize,
@@ -45,12 +46,15 @@ import {
   RotateCw,
   Square,
   SlidersHorizontal,
+  Upload,
+  Volume2,
+  VolumeX,
+  X,
 } from "lucide-react";
 import { cn } from "../lib/utils";
-import { isDesktop, isElectronDesktop, isWindowsDesktop, readDesktopStorage, saveDesktopStorage } from "./desktop";
-import { useDesktopVisibility } from "./desktop-visibility";
-import { MacScreen } from "./DesktopScreen";
-import { RemoteScreen } from "./RemoteScreen";
+import { MAX_ATTACHMENT_LABEL } from "./attachments";
+import { supportsScreenAudio } from "./screen-audio";
+import { formatScreenUploadSummary, uploadScreenFiles, type ScreenUploadProgress } from "./screen-upload";
 import {
   autoScreenWidth,
   screenPreferences,
@@ -300,6 +304,16 @@ export function socketBootstrap(
         void data.arrayBuffer().then((bytes) => this.send(bytes));
         return;
       }
+      if (typeof data === "string" && data.startsWith("{")) {
+        try {
+          const parsed = JSON.parse(data) as { t?: unknown; enabled?: unknown };
+          if (parsed?.t === "audio" && typeof parsed.enabled === "boolean") {
+            parent.postMessage({ channel, type: "screen-audio-state", enabled: parsed.enabled }, "*");
+          }
+        } catch {
+          // Ignore non-JSON control messages.
+        }
+      }
       const value = ArrayBuffer.isView(data)
         ? data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)
         : data;
@@ -384,6 +398,18 @@ export function socketBootstrap(
       if (typeof fn === "function") fn(event.data.arg);
       return;
     }
+    if (event.data.type === "screen-audio" && typeof event.data.enabled === "boolean") {
+      const el = document.getElementById("audiobar");
+      if (el && el.getAttribute("aria-pressed") !== String(event.data.enabled)) {
+        if (typeof PointerEvent === "function") {
+          el.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 1, clientX: 0, clientY: 0 }));
+          el.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 1, clientX: 0, clientY: 0 }));
+        } else {
+          el.click();
+        }
+      }
+      return;
+    }
     if (event.data.type === "screen-session") {
       const configure = (window as unknown as {
         linkshellSession?: (state: unknown) => void;
@@ -404,7 +430,6 @@ export function socketBootstrap(
 
 function readStored(key: string): string | undefined {
   try {
-    if (isDesktop) return readDesktopStorage<string | undefined>(`screen:${key}`, undefined);
     return localStorage.getItem(key) ?? undefined;
   } catch {
     return undefined;
@@ -413,7 +438,6 @@ function readStored(key: string): string | undefined {
 
 function writeStored(key: string, value: string): void {
   try {
-    if (isDesktop) { saveDesktopStorage(`screen:${key}`, value); return; }
     localStorage.setItem(key, value);
   } catch {
     // Not kept: the next visit starts at the page's own choice.
@@ -443,15 +467,11 @@ export interface ScreenProps {
   onOpen?: () => void;
   autoStart?: boolean;
   active?: boolean;
+  uploadDir?: string;
 }
 
 export function Screen(props: ScreenProps) {
-  const visible = useDesktopVisibility();
-  // Mac keeps native WebRTC/VideoToolbox/Metal, including inside Electron. Windows uses its
-  // Chromium receiver; a browser keeps the host's viewer page.
-  if (isDesktop && !isWindowsDesktop) return <MacScreen {...props} />;
-  if (isElectronDesktop && !props.embedded) return <RemoteScreen title={props.title ?? "电脑屏幕"} active={props.active ?? true} />;
-  return <BrowserScreen {...props} active={(props.active ?? true) && (!isDesktop || visible)} />;
+  return <BrowserScreen {...props} />;
 }
 
 function BrowserScreen({
@@ -461,15 +481,27 @@ function BrowserScreen({
   onOpen,
   autoStart = false,
   active = true,
+  uploadDir,
 }: ScreenProps) {
   const { link, streams } = useConnection();
   const job = useJob();
+  const uploadJob = useJob();
   const loaded = useLoad(() => link.call("screen.access", {}), [link]);
   const [started, setStarted] = useState(autoStart);
   const [display, setDisplay] = useState(0);
   const [retry, setRetry] = useState(0);
   const [focused, setFocused] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
+  const audioSupported = supportsScreenAudio();
+  const [audio, setAudio] = useState(() => readStored("linkshell.screen.audio") === "1");
+  const audioRef = useRef(audio);
+  audioRef.current = audio;
+  const activeSocketsRef = useRef<Set<{ send(data: string | ArrayBuffer): void }>>(new Set());
+  const [dragging, setDragging] = useState(false);
+  const dragDepth = useRef(0);
+  const [uploadProgress, setUploadProgress] = useState<ScreenUploadProgress>();
+  const [uploadNotice, setUploadNotice] = useState<string>();
+  const [uploadError, setUploadError] = useState<string>();
   const compact = embedded && !started && !focused;
   const surface = useRef<HTMLElement>(null);
   const stage = useRef<HTMLDivElement>(null);
@@ -511,8 +543,7 @@ function BrowserScreen({
     reply: (data: object) => void;
   } | undefined>(undefined);
   const pauseTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  // Desktop windows release media and pressed inputs while hidden, matching the native Mac receiver.
-  const keepSession = started && (active || (!isDesktop && reusable === true));
+  const keepSession = started && (active || reusable === true);
   function tellSession() {
     const current = session.current;
     if (!current) return;
@@ -526,6 +557,55 @@ function BrowserScreen({
       type: "screen-session",
       state: { active: next.active, display: next.display, width, maxFps: Number(next.view.maxFps) },
     });
+    current.reply({ type: "screen-audio", enabled: audioRef.current });
+  }
+  useEffect(() => {
+    if (!uploadNotice) return;
+    const timer = setTimeout(() => setUploadNotice(undefined), 4500);
+    return () => clearTimeout(timer);
+  }, [uploadNotice]);
+  function toggleAudio() {
+    const next = !audioRef.current;
+    audioRef.current = next;
+    setAudio(next);
+    writeStored("linkshell.screen.audio", next ? "1" : "0");
+    if (next && audioSupported) {
+      try {
+        const Ctor = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+        if (Ctor) {
+          const ctx = new Ctor();
+          if (ctx.state === "suspended") void ctx.resume().catch(() => {});
+          if (typeof ctx.close === "function") void ctx.close().catch(() => {});
+        }
+      } catch {
+        // Ignore AudioContext probe restrictions.
+      }
+    }
+    const payload = JSON.stringify({ t: "audio", enabled: next });
+    for (const socket of activeSocketsRef.current) socket.send(payload);
+    session.current?.reply({ type: "screen-audio", enabled: next });
+  }
+  function handleDropFiles(fileList: FileList | null) {
+    const files = Array.from(fileList ?? []);
+    if (!files.length || uploadJob.busy) return;
+    setUploadNotice(undefined);
+    setUploadError(undefined);
+    void uploadJob.run(async () => {
+      try {
+        const result = await uploadScreenFiles({
+          link,
+          files,
+          preferredDir: uploadDir,
+          onProgress: (progress) => setUploadProgress(progress),
+        });
+        setUploadNotice(formatScreenUploadSummary(result));
+      } catch (err) {
+        setUploadError(messageOf(err));
+        throw err;
+      } finally {
+        setUploadProgress(undefined);
+      }
+    });
   }
   useEffect(() => {
     if (active) return;
@@ -537,8 +617,7 @@ function BrowserScreen({
     if (!focused || !surface.current) return;
     const previous = document.activeElement;
     const hidden: { node: HTMLElement; inert: boolean }[] = [];
-    // The desktop Shell owns inert state so both layers cannot restore stale values.
-    let node: HTMLElement | null = isDesktop ? null : surface.current;
+    let node: HTMLElement | null = surface.current;
     // Keep the existing iframe alive while isolating the expanded workspace from keyboard navigation.
     while (node?.parentElement) {
       for (const sibling of node.parentElement.children) {
@@ -594,6 +673,7 @@ function BrowserScreen({
     let alive = true;
     let display = desired.current.display;
     const view = desired.current.view;
+    const activeSockets = activeSocketsRef.current;
     const sockets = new Map<
       string,
       Awaited<ReturnType<typeof openWebSocket>>
@@ -623,6 +703,7 @@ function BrowserScreen({
         phase?: unknown;
         key?: unknown;
         value?: unknown;
+        enabled?: unknown;
         payload?: unknown;
         session?: { t?: unknown; version?: unknown; configure?: unknown; pause?: unknown; paused?: unknown; message?: unknown };
         stats?: {
@@ -655,6 +736,12 @@ function BrowserScreen({
       }
       if (message.type === "leave-focus") {
         if (!document.fullscreenElement) setFocused(false);
+        return;
+      }
+      if (message.type === "screen-audio-state" && typeof message.enabled === "boolean") {
+        audioRef.current = message.enabled;
+        setAudio(message.enabled);
+        writeStored("linkshell.screen.audio", message.enabled ? "1" : "0");
         return;
       }
       if (message.type === "screen-state") {
@@ -819,6 +906,8 @@ function BrowserScreen({
             data: (data) => reply({ id: message.id, type: "ws-data", data }),
             close: (reason) => {
               pending.delete(message.id);
+              const closedSocket = sockets.get(message.id);
+              if (closedSocket) activeSockets.delete(closedSocket);
               sockets.delete(message.id);
               reply({ id: message.id, type: "ws-close", reason });
               if (!alive) return;
@@ -836,6 +925,10 @@ function BrowserScreen({
             else {
               pending.delete(message.id);
               sockets.set(message.id, socket);
+              activeSockets.add(socket);
+              if (audioSupported && !audioRef.current) {
+                socket.send(JSON.stringify({ t: "audio", enabled: false }));
+              }
             }
           },
           (error) => {
@@ -898,6 +991,7 @@ function BrowserScreen({
           display,
           { ...view, width },
           codecs,
+          { audio: audioRef.current || audioSupported },
         );
         session.current = { initial: { display, width, maxFps: view.maxFps }, reply };
         const response = await httpRequest(streams, port, "/" + query);
@@ -933,11 +1027,14 @@ function BrowserScreen({
       session.current = undefined;
       clearTimeout(pauseTimer.current);
       window.removeEventListener("message", listen);
-      for (const socket of sockets.values()) socket.close();
+      for (const socket of sockets.values()) {
+        activeSockets.delete(socket);
+        socket.close();
+      }
       sockets.clear();
       pending.clear();
     };
-  }, [keepSession, retry, link, streams, view.codec]);
+  }, [keepSession, retry, link, streams, view.codec, audioSupported]);
   useEffect(() => {
     if (!html || !session.current) return;
     const current = session.current;
@@ -1196,6 +1293,33 @@ function BrowserScreen({
       aria-label={`${title}观看区域`}
       role={focused ? "dialog" : undefined}
       aria-modal={focused || undefined}
+      onDragEnter={(event) => {
+        if (!event.dataTransfer.types.includes("Files")) return;
+        event.preventDefault();
+        dragDepth.current++;
+        setDragging(true);
+      }}
+      onDragOver={(event) => {
+        if (!event.dataTransfer.types.includes("Files")) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = uploadJob.busy ? "none" : "copy";
+      }}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          dragDepth.current = 0;
+          setDragging(false);
+          return;
+        }
+        dragDepth.current = Math.max(0, dragDepth.current - 1);
+        if (!dragDepth.current) setDragging(false);
+      }}
+      onDrop={(event) => {
+        if (!event.dataTransfer.files.length) return;
+        event.preventDefault();
+        dragDepth.current = 0;
+        setDragging(false);
+        handleDropFiles(event.dataTransfer.files);
+      }}
     >
       {!compact && (
         <div className="screen-toolbar">
@@ -1210,6 +1334,17 @@ function BrowserScreen({
             <div className="screen-actions">
               {started && (
                 <>
+                  <Button
+                    variant={audio ? "secondary" : "outline"}
+                    size="sm"
+                    aria-pressed={audio}
+                    title={audio ? "静音电脑声音" : "开启电脑声音"}
+                    disabled={!audioSupported && !audio}
+                    onClick={toggleAudio}
+                  >
+                    {audio ? <Volume2 data-icon="inline-start" /> : <VolumeX data-icon="inline-start" />}
+                    {audio ? "声音" : "静音"}
+                  </Button>
                   <ScreenToolsMenu
                     container={fullscreen || focused ? surface.current : undefined}
                   />
@@ -1381,6 +1516,42 @@ function BrowserScreen({
             srcDoc={html}
             onLoad={tellSession}
           />
+        )}
+        {dragging && (
+          <div className="screen-drop-overlay" role="status" aria-live="polite">
+            <Upload size={24} />
+            <strong>{uploadJob.busy ? "正在上传文件…" : "松开以上传到电脑"}</strong>
+            <span>
+              {uploadDir ? `保存到当前目录 · 单个文件最大 ${MAX_ATTACHMENT_LABEL}` : `保存到电脑桌面或主目录 · 单个文件最大 ${MAX_ATTACHMENT_LABEL}`}
+            </span>
+          </div>
+        )}
+        {(uploadProgress || uploadNotice || uploadError) && (
+          <div className="screen-upload-toast" data-tone={uploadError ? "error" : undefined} role="status">
+            {uploadProgress ? (
+              <>
+                <LoaderCircle className="animate-spin" size={14} />
+                <span>
+                  正在上传 {uploadProgress.done + 1} / {uploadProgress.total}：{uploadProgress.name}
+                </span>
+              </>
+            ) : (
+              <>
+                <span>{uploadError ?? uploadNotice}</span>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label="关闭上传提示"
+                  onClick={() => {
+                    setUploadError(undefined);
+                    setUploadNotice(undefined);
+                  }}
+                >
+                  <X />
+                </Button>
+              </>
+            )}
+          </div>
         )}
       </div>
       {html && <ErrorNotice error={sessionError} />}

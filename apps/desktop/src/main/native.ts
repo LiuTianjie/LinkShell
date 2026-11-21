@@ -14,6 +14,7 @@ interface Raw {
   screenVisible(visible: boolean): void;
   screenStop(): void;
   setImmersiveFullScreen?(enabled: boolean): void;
+  setSystemShortcutCapture?(enabled: boolean): boolean;
   permissions(): string;
   loginItem(): string;
   setLoginItem(enabled: boolean): string;
@@ -31,6 +32,7 @@ export interface NativeModule {
   screenVisible(visible: boolean): void;
   screenStop(): void;
   setImmersiveFullScreen(enabled: boolean): void;
+  setSystemShortcutCapture(enabled: boolean): boolean;
   permissions(): { recording: boolean; control: boolean };
   loginItem(): { enabled: boolean; approval: boolean };
   /** Why it could not be changed, or undefined. */
@@ -53,6 +55,7 @@ function wrap(raw: Raw): NativeModule {
     screenVisible: (visible) => raw.screenVisible(visible),
     screenStop: () => raw.screenStop(),
     setImmersiveFullScreen: (enabled) => raw.setImmersiveFullScreen?.(enabled),
+    setSystemShortcutCapture: (enabled) => Boolean(raw.setSystemShortcutCapture?.(enabled)),
     permissions: () => value(raw.permissions()) as { recording: boolean; control: boolean },
     loginItem: () => value(raw.loginItem()) as { enabled: boolean; approval: boolean },
     setLoginItem: (enabled) => raw.setLoginItem(enabled) || undefined,

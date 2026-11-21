@@ -25,6 +25,7 @@ final class DesktopScreenReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataC
   private var cursorNumber = 0
   private var publishedControl: Bool?
   private var publishedControlRequested: Bool?
+  private var publishedAudioAvailable: Bool?
   private var negotiating = false
   private var closed = false
   private var receivedPicture = false
@@ -35,11 +36,17 @@ final class DesktopScreenReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataC
   /// Even pacing over the lowest latency (`ScreenPacing`): chosen by the viewer, adjustable in-band.
   private var smooth: Bool
   private let preferH264: Bool
+  private let audioPlayer: ScreenAudioPlayer
+  private var audioMuted: Bool
 
   /// Create on the main thread, where the surface lives. All supplied callbacks return there.
-  init(surface: DesktopScreenOutput, smooth: Bool = false, preferH264: Bool = false, onSignal: @escaping ([String: Any]) -> Void,
+  init(surface: DesktopScreenOutput, smooth: Bool = false, preferH264: Bool = false, audioMuted: Bool = false,
+       audioOutputEnabled: Bool = true, onSignal: @escaping ([String: Any]) -> Void,
        onStatus: @escaping ([String: Any]) -> Void, onFailure: @escaping (String) -> Void) {
-    self.surface = surface; self.smooth = smooth; self.preferH264 = preferH264; self.onSignal = onSignal; self.onStatus = onStatus; self.onFailure = onFailure
+    self.surface = surface; self.smooth = smooth; self.preferH264 = preferH264
+    self.audioMuted = audioMuted
+    self.audioPlayer = ScreenAudioPlayer(muted: audioMuted, outputEnabled: audioOutputEnabled)
+    self.onSignal = onSignal; self.onStatus = onStatus; self.onFailure = onFailure
     super.init()
     surface.onInput = { [weak self] message, replaceable in self?.input(message, replaceable: replaceable) }
     surface.onFirstFrame = { [weak self] in self?.pictureArrived() }
@@ -103,6 +110,15 @@ final class DesktopScreenReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataC
     }
   }
 
+  func setAudioMuted(_ muted: Bool) {
+    queue.async {
+      guard !self.closed else { return }
+      self.audioMuted = muted
+      self.audioPlayer.setMuted(muted)
+      self.status(["audioMuted": muted])
+    }
+  }
+
   func stop() { queue.async { self.close() } }
 
   private func message(_ message: [String: Any]) {
@@ -141,6 +157,17 @@ final class DesktopScreenReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataC
       updateControl()
     }
     if let cursor = message["cursor"] as? [String: Any] { cursorMessage(cursor.merging(["t": "cursor"]) { _, new in new }) }
+    if let audio = message["audio"] as? [String: Any] {
+      if let muted = DesktopScreenBridge.boolean(audio["muted"]) {
+        audioMuted = muted
+        audioPlayer.setMuted(muted)
+        status(["audioMuted": muted])
+      } else if let enabled = DesktopScreenBridge.boolean(audio["enabled"]) {
+        audioMuted = !enabled
+        audioPlayer.setMuted(audioMuted)
+        status(["audioMuted": audioMuted])
+      }
+    }
     guard let rtc = message["rtc"] as? [String: Any], let type = rtc["t"] as? String else { return }
     switch type {
     case "config": createPeer(rtc)
@@ -336,6 +363,7 @@ final class DesktopScreenReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataC
     guard !closed else { return }
     closed = true
     timer?.cancel(); timer = nil
+    audioPlayer.stop()
     track?.remove(surface); track = nil
     for channel in channels.values { channel.delegate = nil }
     channels.removeAll(); candidates.removeAll(); heldButtons.removeAll()
@@ -366,12 +394,16 @@ final class DesktopScreenReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataC
   func peerConnection(_ peerConnection: RTCPeerConnection, didOpen dataChannel: RTCDataChannel) {
     queue.async {
       guard !self.closed, self.peer === peerConnection,
-            ["input", "pointer", "cursor", "shape"].contains(dataChannel.label), self.channels[dataChannel.label] == nil else {
+            ["input", "pointer", "cursor", "shape", "audio"].contains(dataChannel.label), self.channels[dataChannel.label] == nil else {
         dataChannel.close(); return
       }
       self.channels[dataChannel.label] = dataChannel
       dataChannel.delegate = self
-      self.updateControl()
+      if dataChannel.label == "audio" {
+        self.updateAudioStatus()
+      } else {
+        self.updateControl()
+      }
     }
   }
   func peerConnection(_ peerConnection: RTCPeerConnection, didChange stateChanged: RTCSignalingState) {}
@@ -383,11 +415,26 @@ final class DesktopScreenReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataC
   func dataChannelDidChangeState(_ dataChannel: RTCDataChannel) {
     queue.async {
       guard !self.closed, self.channels[dataChannel.label] === dataChannel else { return }
+      if dataChannel.label == "audio" {
+        self.updateAudioStatus()
+        return
+      }
       if dataChannel.label == "input", dataChannel.readyState == .closed { return self.fail("控制连接已中断，请重新连接") }
       self.updateControl()
     }
   }
   func dataChannel(_ dataChannel: RTCDataChannel, didReceiveMessageWith buffer: RTCDataBuffer) {
+    if dataChannel.label == "audio" {
+      guard buffer.isBinary,
+            buffer.data.count >= ScreenAudioConstants.headerBytes,
+            buffer.data.count <= ScreenAudioConstants.maxPacketBytes else { return }
+      let data = buffer.data
+      queue.async { [weak self] in
+        guard let self, !self.closed, self.channels["audio"] === dataChannel else { return }
+        self.audioPlayer.enqueue(data)
+      }
+      return
+    }
     guard !buffer.isBinary, buffer.data.count <= 262_144,
           let message = (try? JSONSerialization.jsonObject(with: buffer.data)) as? [String: Any] else { return }
     queue.async {
@@ -395,6 +442,13 @@ final class DesktopScreenReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataC
             ["cursor", "shape"].contains(dataChannel.label), message["t"] as? String == dataChannel.label else { return }
       self.cursorMessage(message)
     }
+  }
+
+  private func updateAudioStatus() {
+    let available = channels["audio"]?.readyState == .open
+    guard publishedAudioAvailable != available else { return }
+    publishedAudioAvailable = available
+    status(["audioAvailable": available, "audioMuted": audioMuted])
   }
 }
 

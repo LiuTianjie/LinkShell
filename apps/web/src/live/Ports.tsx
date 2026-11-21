@@ -3,7 +3,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   InputGroup,
   InputGroupAddon,
@@ -17,7 +16,6 @@ import {
   LoaderCircle,
   Maximize,
   Minimize,
-  Plus,
   RefreshCw,
   Send,
   Server,
@@ -25,7 +23,7 @@ import {
   X,
 } from "lucide-react";
 import { httpStreamRequest } from "./http-stream";
-import { useEffect, useId, useReducer, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useId, useReducer, useRef, useState, type FormEvent } from "react";
 import {
   ErrorNotice,
   EmptyState,
@@ -37,7 +35,6 @@ import {
 } from "./common";
 import { socketBootstrap } from "./Video";
 import { openWebSocket } from "./transport";
-import { isDesktop } from "./desktop";
 import { initialPortTabs, portTabsReducer } from "./port-tabs";
 import { isImeComposing } from "./ComposerBox";
 import { useT } from "./i18n";
@@ -621,8 +618,6 @@ export function Ports() {
   const load = useLoad(() => link.call("ports.list", {}), [link], 10000);
   const [{ tabs, selected, focused }, dispatch] = useReducer(portTabsReducer, initialPortTabs);
   const [manual, setManual] = useState("");
-  const [addingPort, setAddingPort] = useState(false);
-  const [newPort, setNewPort] = useState("");
   const [error, setError] = useState<string>();
   const preview = useRef<HTMLDivElement>(null);
   const manualField = useRef<HTMLInputElement>(null);
@@ -638,18 +633,8 @@ export function Ports() {
     (a, b) => Number(b.http) - Number(a.http) || a.port - b.port,
   );
   const current = services.find((entry) => entry.port === selected);
-  // On the desktop an open preview is the page, as a browser: the list of services makes way for
-  // it (it moves into the new-tab menu) instead of pushing it below the fold.
-  const browsing = isDesktop && selected !== undefined;
-  const unopened = services.filter((entry) => !tabs.some((tab) => tab.port === entry.port));
   function open(port: number) {
-    dispatch({ type: "open", port, multiple: isDesktop });
-    setManual(String(port));
-    setError(undefined);
-    setAddingPort(false);
-  }
-  function select(port: number) {
-    dispatch({ type: "select", port });
+    dispatch({ type: "open", port, multiple: false });
     setManual(String(port));
     setError(undefined);
   }
@@ -658,24 +643,7 @@ export function Ports() {
     dispatch({ type: "close", port });
     setError(undefined);
     if (next.selected !== undefined) setManual(String(next.selected));
-    requestAnimationFrame(() => {
-      if (next.selected === undefined) manualField.current?.focus();
-      else document.getElementById(`${tabId}-tab-${next.selected}`)?.focus();
-    });
-  }
-  function tabKey(event: KeyboardEvent<HTMLButtonElement>, port: number) {
-    const index = tabs.findIndex((tab) => tab.port === port);
-    const next = event.key === "ArrowRight" ? (index + 1) % tabs.length
-      : event.key === "ArrowLeft" ? (index + tabs.length - 1) % tabs.length
-        : event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : undefined;
-    if (next !== undefined) {
-      event.preventDefault();
-      select(tabs[next].port);
-      document.getElementById(`${tabId}-tab-${tabs[next].port}`)?.focus();
-    } else if (event.key === "Delete") {
-      event.preventDefault();
-      close(port);
-    }
+    requestAnimationFrame(() => manualField.current?.focus());
   }
   const retry = (port = selected) => {
     if (port !== undefined) dispatch({ type: "refresh", port });
@@ -686,44 +654,18 @@ export function Ports() {
     if (Number.isInteger(port) && port >= 1 && port <= 65535) open(port);
   };
   return (
-    <section className="ports-page resource-ports" data-browsing={browsing || undefined}>
+    <section className="ports-page resource-ports">
       <PageHeader
         title={t("nav.ports")}
-        actions={<>
-      {/* On the desktop a port is typed in the toolbar, as an address; an open preview has its own new tab. */}
-      {isDesktop && !browsing && (
-        <form className="port-toolbar-form" onSubmit={openManual}>
-          <InputGroup className="port-toolbar-field">
-            <InputGroupInput
-              ref={manualField}
-              aria-label={t("nav.ports")}
-              type="number"
-              inputMode="numeric"
-              min="1"
-              max="65535"
-              step="1"
-              value={manual}
-              onChange={(event) => setManual(event.target.value)}
-              required
-              placeholder="3000"
-            />
-          </InputGroup>
-          <Button type="submit" variant="secondary" size="sm" disabled={!manual}>
-            {t("ports.openPreview")}
+        actions={
+          <Button variant="ghost" size="sm" disabled={load.loading} onClick={load.reload}>
+            <RefreshCw data-icon="inline-start" className={load.loading ? "animate-spin" : undefined} />
+            {t("common.refresh")}
           </Button>
-        </form>
-      )}
-      <Button variant="ghost" size="sm" disabled={load.loading} onClick={load.reload}>
-        <RefreshCw data-icon="inline-start" className={load.loading ? "animate-spin" : undefined} />
-        {t("common.refresh")}
-      </Button>
-        </>}
-        detail={services.length || isDesktop ? <>
-          {!!services.length && <span>{services.length} 个服务</span>}
-          {isDesktop && <span>加密连接</span>}
-        </> : undefined}
+        }
+        detail={services.length ? <span>{services.length} 个服务</span> : undefined}
       />
-      {!browsing && !isDesktop && <div className="resource-port-connect">
+      <div className="resource-port-connect">
         <div className="resource-port-connect-copy">
           <ShieldCheck aria-hidden="true" />
           <span>电脑本地服务 · 加密连接</span>
@@ -763,9 +705,9 @@ export function Ports() {
             </Field>
           </FieldGroup>
         </form>
-      </div>}
-      {!browsing && <LoadState {...load} />}
-      {!browsing && load.error && (
+      </div>
+      <LoadState {...load} />
+      {load.error && (
         <div className="resource-retry">
           <span className="resource-caption">
             服务发现失败，仍可输入端口手动打开。
@@ -775,14 +717,12 @@ export function Ports() {
           </Button>
         </div>
       )}
-      {!browsing && !!services.length && (
+      {!!services.length && (
         <section className="resource-services" aria-label="已发现的开发服务">
-          {!isDesktop && (
-            <div className="resource-directory-summary">
-              <span>已发现 {services.length} 个服务</span>
-              <span>每 10 秒自动更新</span>
-            </div>
-          )}
+          <div className="resource-directory-summary">
+            <span>已发现 {services.length} 个服务</span>
+            <span>每 10 秒自动更新</span>
+          </div>
           <div className="resource-service-list">
             {services.map((port) => (
               <Button
@@ -825,111 +765,12 @@ export function Ports() {
             }
           }}
         >
-          {isDesktop && (
-            <div className="port-preview-tab-bar">
-              <div className="port-preview-tabs" role="tablist" aria-label="打开的端口预览">
-                {tabs.map((tab) => {
-                  const service = services.find((entry) => entry.port === tab.port);
-                  const title = service?.title || service?.process || "端口预览";
-                  return (
-                    <div className="port-preview-tab" data-active={tab.port === selected || undefined} key={tab.port}>
-                      <Button
-                        variant="ghost"
-                        size="plain"
-                        className="port-preview-tab-trigger"
-                        role="tab"
-                        id={`${tabId}-tab-${tab.port}`}
-                        aria-label={`端口 ${tab.port}`}
-                        aria-selected={tab.port === selected}
-                        aria-controls={`${tabId}-panel-${tab.port}`}
-                        tabIndex={tab.port === selected ? 0 : -1}
-                        title={`${title} · 127.0.0.1:${tab.port}`}
-                        onClick={() => select(tab.port)}
-                        onKeyDown={(event) => tabKey(event, tab.port)}
-                      >
-                        <Globe aria-hidden="true" />
-                        <span>{title}</span>
-                        <small>{tab.port}</small>
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        className="port-preview-tab-close"
-                        aria-label={`关闭端口 ${tab.port} 预览`}
-                        title={`关闭端口 ${tab.port} 预览`}
-                        onClick={() => close(tab.port)}
-                      ><X /></Button>
-                    </div>
-                  );
-                })}
-              </div>
-              <Popover open={addingPort} onOpenChange={setAddingPort}>
-                <PopoverTrigger asChild>
-                  <Button variant="ghost" size="icon-sm" aria-label="打开新的端口预览" title="打开新的端口预览">
-                    <Plus />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent align="end" className="port-new-tab w-72">
-                  <form onSubmit={(event) => {
-                    event.preventDefault();
-                    const port = Number(newPort);
-                    if (Number.isInteger(port) && port >= 1 && port <= 65535) {
-                      open(port);
-                      setNewPort("");
-                    }
-                  }}>
-                    <FieldGroup>
-                      <Field>
-                        <FieldLabel htmlFor={`${tabId}-new-port`}>打开端口预览</FieldLabel>
-                        <InputGroup>
-                          <InputGroupInput
-                            id={`${tabId}-new-port`}
-                            aria-label="新预览端口"
-                            type="number"
-                            inputMode="numeric"
-                            min="1"
-                            max="65535"
-                            step="1"
-                            required
-                            value={newPort}
-                            onChange={(event) => setNewPort(event.target.value)}
-                            placeholder="如 3000"
-                          />
-                          <InputGroupAddon align="inline-end">
-                            <InputGroupButton type="submit" variant="secondary" disabled={!newPort}>打开</InputGroupButton>
-                          </InputGroupAddon>
-                        </InputGroup>
-                      </Field>
-                    </FieldGroup>
-                  </form>
-                  {!!unopened.length && (
-                    <div className="port-new-tab-services" role="group" aria-label="已发现的开发服务">
-                      <span>已发现的服务</span>
-                      {unopened.map((entry) => (
-                        <button
-                          type="button"
-                          key={entry.port}
-                          className="port-new-tab-service"
-                          title={[entry.title ?? entry.process, entry.cwd].filter(Boolean).join(" · ")}
-                          onClick={() => open(entry.port)}
-                        >
-                          <Globe aria-hidden="true" />
-                          <span>{entry.title || entry.process || "开发服务"}</span>
-                          <small>{entry.port}</small>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </PopoverContent>
-              </Popover>
-            </div>
-          )}
           <div className="resource-preview-toolbar">
             <div className="resource-preview-address">
               <Globe aria-hidden="true" />
-              {!isDesktop && <strong title={current?.title ?? `端口 ${selected}`}>
+              <strong title={current?.title ?? `端口 ${selected}`}>
                 {current?.title || `端口 ${selected}`}
-              </strong>}
+              </strong>
               <span title={`所连接电脑上的本地服务：127.0.0.1:${selected}`}>127.0.0.1:{selected}</span>
             </div>
             <div className="resource-inline-actions">
@@ -942,19 +783,7 @@ export function Ports() {
               >
                 <RefreshCw />
               </Button>
-              {isDesktop ? (
-                <Button
-                  variant={focused ? "outline" : "ghost"}
-                  size="sm"
-                  aria-label={focused ? "退出铺满窗口" : "铺满窗口"}
-                  aria-pressed={focused}
-                  title={focused ? "退出铺满窗口" : "在当前窗口铺满预览"}
-                  onClick={() => dispatch({ type: "focus", focused: !focused })}
-                >
-                  {focused ? <Minimize /> : <Maximize />}
-                  {focused ? "退出铺满窗口" : "铺满窗口"}
-                </Button>
-              ) : document.fullscreenEnabled && (
+              {document.fullscreenEnabled && (
                 <Button
                   variant="ghost"
                   size="icon"
@@ -972,7 +801,7 @@ export function Ports() {
                   {fullscreen ? <Minimize /> : <Maximize />}
                 </Button>
               )}
-              {!isDesktop && <Button
+              <Button
                 variant="ghost"
                 size="icon"
                 title="关闭预览"
@@ -980,7 +809,7 @@ export function Ports() {
                 onClick={() => close(selected)}
               >
                 <X />
-              </Button>}
+              </Button>
             </div>
           </div>
           {current && !current.http && (
@@ -991,9 +820,7 @@ export function Ports() {
           {tabs.map((tab) => (
             <div
               className="port-preview-panel"
-              role={isDesktop ? "tabpanel" : undefined}
               id={`${tabId}-panel-${tab.port}`}
-              aria-labelledby={isDesktop ? `${tabId}-tab-${tab.port}` : undefined}
               hidden={tab.port !== selected}
               key={tab.port}
             >
@@ -1006,8 +833,7 @@ export function Ports() {
           ))}
         </div>
       ) : (
-        // On the desktop the list of services already says what to do; the hint is for an empty page.
-        !load.loading && !(isDesktop && services.length) && (
+        !load.loading && (
           <EmptyState
             icon={<Server />}
             title={services.length ? "选择一个开发服务" : "还没有发现开发服务"}

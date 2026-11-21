@@ -115,6 +115,16 @@ const inspectorZh = {
   filterFilesPlaceholder: "搜索文件名",
   newFolder: "新建文件夹",
   newFolderPrompt: "新建文件夹名称",
+  rename: "重命名",
+  renamePrompt: "新名称",
+  invalidRenameName: "名称无效：不能为空且不能包含路径分隔符或 . / ..",
+  delete: "删除",
+  deleteFileTitle: "删除文件",
+  deleteFolderTitle: "删除文件夹",
+  deleteFileConfirm: "确定永久删除「{name}」吗？此操作无法撤销。",
+  deleteFolderConfirm: "确定永久删除文件夹「{name}」及其全部内容吗？此操作无法撤销。",
+  dirtyRenameConfirm: "「{name}」有未保存修改，确定放弃修改并继续重命名吗？",
+  dirtyDeleteConfirm: "「{name}」有未保存修改，确定放弃修改并永久删除吗？",
   uploadFiles: "上传文件",
   uploadTooLarge: "文件「{name}」超过 20 MB 上限，已跳过上传。",
   emptyDirTitle: "此目录为空",
@@ -331,6 +341,16 @@ const inspectorEn: Record<InspectorCopyKey, string> = {
   filterFilesPlaceholder: "Filter files",
   newFolder: "New Folder",
   newFolderPrompt: "New folder name",
+  rename: "Rename",
+  renamePrompt: "New name",
+  invalidRenameName: "Invalid name: cannot be empty, . / .., or contain path separators.",
+  delete: "Delete",
+  deleteFileTitle: "Delete File",
+  deleteFolderTitle: "Delete Folder",
+  deleteFileConfirm: "Permanently delete “{name}”? This cannot be undone.",
+  deleteFolderConfirm: "Permanently delete folder “{name}” and all its contents? This cannot be undone.",
+  dirtyRenameConfirm: "“{name}” has unsaved changes. Discard edits and rename anyway?",
+  dirtyDeleteConfirm: "“{name}” has unsaved changes. Discard edits and permanently delete?",
   uploadFiles: "Upload Files",
   uploadTooLarge: "\"{name}\" exceeds the 20 MB upload limit.",
   emptyDirTitle: "Directory is Empty",
@@ -540,6 +560,16 @@ const inspectorJa: Record<InspectorCopyKey, string> = {
   filterFilesPlaceholder: "ファイルを検索",
   newFolder: "新規フォルダ",
   newFolderPrompt: "新しいフォルダ名",
+  rename: "名前を変更",
+  renamePrompt: "新しい名前",
+  invalidRenameName: "無効な名前です：空、. / ..、パス区切り文字は使用できません。",
+  delete: "削除",
+  deleteFileTitle: "ファイルを削除",
+  deleteFolderTitle: "フォルダを削除",
+  deleteFileConfirm: "「{name}」を完全に削除しますか？この操作は取り消せません。",
+  deleteFolderConfirm: "フォルダ「{name}」とその中身をすべて完全に削除しますか？この操作は取り消せません。",
+  dirtyRenameConfirm: "「{name}」には未保存の変更があります。編集を破棄して名前を変更しますか？",
+  dirtyDeleteConfirm: "「{name}」には未保存の変更があります。編集を破棄して完全に削除しますか？",
   uploadFiles: "アップロード",
   uploadTooLarge: "「{name}」は 20 MB の上限を超えています。",
   emptyDirTitle: "空のディレクトリ",
@@ -704,11 +734,20 @@ export function useInspectorI18n(targetPlatform?: string): InspectorI18n {
   }, [locale, resolvedPlatform, t]);
 }
 
+/** Pure helper translating an inspector key in `locale`. */
+export function translateInspector(
+  locale: Locale,
+  key: InspectorCopyKey,
+  params?: Record<string, string | number>,
+): string {
+  const dict = INSPECTOR_DICTS[locale] ?? inspectorZh;
+  return formatTemplate(dict[key] ?? inspectorZh[key], params);
+}
+
 /** For code outside React (the remote-port responder) that still speaks the user's language. */
 export function inspectorText(
   key: InspectorCopyKey,
   params?: Record<string, string | number>,
 ): string {
-  const dict = INSPECTOR_DICTS[getDesktopLocale()] ?? inspectorZh;
-  return formatTemplate(dict[key] ?? inspectorZh[key], params);
+  return translateInspector(getDesktopLocale(), key, params);
 }

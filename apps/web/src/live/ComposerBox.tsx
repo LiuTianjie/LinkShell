@@ -40,12 +40,12 @@ import { ErrorNotice, useConnection } from "./common";
 import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_LABEL, shrinkImage } from "./attachments";
 import { useComposerDraft } from "./composer-draft";
 import {
-  desktopShortcuts,
   keysBelongToContent,
   matchesShortcut,
   shiftTabShortcut,
-  useDesktopCommand,
-} from "./desktop-commands";
+  useWorkspaceCommand,
+  workspaceShortcuts,
+} from "./workspace-commands";
 import { useT } from "./i18n";
 
 /** Plain-text pastes at or above 32 KiB become removable text-attachment chips instead of flooding the textarea. */
@@ -406,8 +406,8 @@ export const ComposerBox = forwardRef<ComposerBoxHandle, ComposerBoxProps>(funct
     return () => window.removeEventListener("resize", resize);
   }, [draft, layoutKey]);
 
-  // In-session composer commands (`⌘K` palette & native shortcuts)
-  useDesktopCommand((command) => {
+  // In-session composer commands (`⌘K` palette & workspace shortcuts)
+  useWorkspaceCommand((command) => {
     if (!active) return;
     if (command.command === "composer") {
       if (command.target === "focus") textareaRef.current?.focus();
@@ -419,19 +419,19 @@ export const ComposerBox = forwardRef<ComposerBoxHandle, ComposerBoxProps>(funct
     if (!active) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || keysBelongToContent() || isImeComposing(event)) return;
-      if (matchesShortcut(event, desktopShortcuts.focusComposer)) {
+      if (matchesShortcut(event, workspaceShortcuts.focusComposer)) {
         event.preventDefault();
         textareaRef.current?.focus();
         return;
       }
       if (!onShortcutPicker) return;
-      if (matchesShortcut(event, desktopShortcuts.modelPicker)) {
+      if (matchesShortcut(event, workspaceShortcuts.modelPicker)) {
         event.preventDefault();
         onShortcutPicker("model");
-      } else if (matchesShortcut(event, desktopShortcuts.modePicker)) {
+      } else if (matchesShortcut(event, workspaceShortcuts.modePicker)) {
         event.preventDefault();
         onShortcutPicker("mode");
-      } else if (matchesShortcut(event, desktopShortcuts.effortPicker)) {
+      } else if (matchesShortcut(event, workspaceShortcuts.effortPicker)) {
         event.preventDefault();
         onShortcutPicker("effort");
       } else if (matchesShortcut(event, shiftTabShortcut)) {

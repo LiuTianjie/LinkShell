@@ -46,7 +46,11 @@ App ID 开启能力后，本地 Release 构建使用现有自动签名流程更�
 
 生产验收需要覆盖：带推送能力的生产签名构建、真实 ActivityKit token 注册、App 后台/退出后更新、token 轮换、Host 重启、等待确认、结束/用户关闭和弱网过期验证。布局模拟器与 mock APNs 测试不能证明真实 APNs 投递；未经许可不在日常正式版设备上安装或操作。
 
-Apple 对实时活动寿命和推送频率仍有限制。第一版由前台启动活动，不实现 push-to-start 或无限期保持一张活动；单张活动最长 8 小时，过期后需要重新在 App 中开启。
+Apple 对实时活动寿命和推送频率仍有限制。单张活动最长 8 小时，过期后需要重新在 App 中开启。当前仓库补齐了以下能力，真机 APNs / Android 通知栏仍待真机实测：
+
+- **iOS push-to-start 令牌注册**：`LinkLayoutModule.swift` 已监听 `Activity.pushToStartTokenUpdates` 并由客户端通过 `liveActivities.registerPushToStart` 交接给 Host（`packages/host/src/live-activities.ts`），仍需带生产推送 entitlement 的真机签名构建验收。
+- **iOS 本地可交互审批通知回退**：当 Live Activity 不可用、被系统禁用或创建失败时，`session-attention.ts` 调用 `syncNativeLocalApprovalNotification` 发送带「允许 / 拒绝」按钮（Category `LINKSHELL_APPROVAL`）的本地 `UNUserNotificationCenter` 通知，操作响应写入队列并在冷启动/回前台时消费分发。
+- **Android 通知栏操作按钮与前台保活服务**：`ActiveSessionForegroundService`（`foregroundServiceType="dataSync"`）在存在运行中轮次或待审批请求时维持后台保活与通知操作按钮（审批、拒绝、取消、打开），按钮事件由 `NotificationActionReceiver` + SharedPreferences `NotificationActionQueue` 持久化，确保 App 重启或唤起后不丢失操作。
 
 ## 官方资料
 

@@ -44,6 +44,50 @@ export type { LiveActivityPayload, LiveActivityAction, WatchSnapshot, WatchComma
 
 export interface NativeLiveActivityRegistration { activityId: string; computerKey: string; token: string }
 
+export interface AndroidNotificationActionInput {
+  id: string;
+  label: string;
+  kind: "approve" | "deny" | "cancel" | "open";
+  computerKey?: string;
+  sessionId?: string;
+  requestId?: string;
+  optionId?: string;
+  deepLink?: string;
+}
+
+export interface NativeNotificationAction {
+  id: string;
+  actionId: string;
+  kind: "approve" | "deny" | "cancel" | "open";
+  computerKey?: string;
+  sessionId?: string;
+  requestId?: string;
+  optionId?: string;
+  deepLink?: string;
+  createdAt: number;
+}
+
+export interface LocalApprovalNotificationPayload {
+  id: string;
+  title: string;
+  body: string;
+  computerKey: string;
+  sessionId: string;
+  requestId: string;
+  approveOptionId?: string;
+  denyOptionId?: string;
+  deepLink?: string;
+}
+
+export interface DiscoveredLanHost {
+  name: string;
+  host: string;
+  port: number;
+  machineId?: string;
+  fingerprint?: string;
+  displayName?: string;
+}
+
 export interface AndroidStatusNotificationPayload {
   active: boolean;
   title?: string;
@@ -52,6 +96,8 @@ export interface AndroidStatusNotificationPayload {
   deepLink?: string;
   urgent?: boolean;
   ongoing?: boolean;
+  actions?: AndroidNotificationActionInput[];
+  foregroundService?: boolean;
 }
 
 export interface NativeWatchStatus {
@@ -72,6 +118,13 @@ interface NativeLayoutModuleType {
   stopSpeaking?: () => Promise<void>;
   syncStatusNotification?: (payload: AndroidStatusNotificationPayload) => Promise<boolean>;
   cancelStatusNotification?: () => Promise<void>;
+  pendingNotificationActionId?: () => Promise<string | null>;
+  consumeNotificationAction?: (id: string) => Promise<NativeNotificationAction | null>;
+  syncLocalApprovalNotification?: (payload: LocalApprovalNotificationPayload) => Promise<boolean>;
+  cancelLocalApprovalNotification?: (id: string) => Promise<void>;
+  startLanDiscovery?: () => Promise<boolean>;
+  stopLanDiscovery?: () => Promise<void>;
+  getLanHosts?: () => Promise<DiscoveredLanHost[]>;
   setShortcutItems?: (items: ShortcutItemInput[]) => Promise<void>;
   isLiveActivityAvailable?: () => Promise<boolean>;
   syncLiveActivity?: (payload: LiveActivityPayload) => Promise<boolean>;
@@ -142,6 +195,58 @@ export function syncNativeAndroidStatusNotification(payload: AndroidStatusNotifi
 export function cancelNativeAndroidStatusNotification(): Promise<void> {
   if (Platform.OS !== "android") return Promise.resolve();
   return nativeLayout?.cancelStatusNotification?.() ?? Promise.resolve();
+}
+
+export function pendingNativeNotificationActionId(): Promise<string | null> {
+  return nativeLayout?.pendingNotificationActionId?.() ?? Promise.resolve(null);
+}
+
+export function consumeNativeNotificationAction(id: string): Promise<NativeNotificationAction | null> {
+  return nativeLayout?.consumeNotificationAction?.(id) ?? Promise.resolve(null);
+}
+
+export function subscribeNativeNotificationActions(listener: (event: { id: string }) => void): () => void {
+  if (!nativeLayout?.pendingNotificationActionId || !nativeLayout.addListener) return () => {};
+  try {
+    const sub = nativeLayout.addListener("onNotificationAction", listener);
+    return () => sub.remove();
+  } catch {
+    return () => {};
+  }
+}
+
+export function syncNativeLocalApprovalNotification(payload: LocalApprovalNotificationPayload): Promise<boolean> {
+  return nativeLayout?.syncLocalApprovalNotification?.(payload) ?? Promise.resolve(false);
+}
+
+export function cancelNativeLocalApprovalNotification(id: string): Promise<void> {
+  return nativeLayout?.cancelLocalApprovalNotification?.(id) ?? Promise.resolve();
+}
+
+export function hasNativeLanDiscovery(): boolean {
+  return typeof nativeLayout?.startLanDiscovery === "function";
+}
+
+export function startNativeLanDiscovery(): Promise<boolean> {
+  return nativeLayout?.startLanDiscovery?.() ?? Promise.resolve(false);
+}
+
+export function stopNativeLanDiscovery(): Promise<void> {
+  return nativeLayout?.stopLanDiscovery?.() ?? Promise.resolve();
+}
+
+export function getNativeLanHosts(): Promise<DiscoveredLanHost[]> {
+  return nativeLayout?.getLanHosts?.() ?? Promise.resolve([]);
+}
+
+export function subscribeNativeLanHosts(listener: (event: { hosts: DiscoveredLanHost[] }) => void): () => void {
+  if (!nativeLayout?.startLanDiscovery || !nativeLayout.addListener) return () => {};
+  try {
+    const sub = nativeLayout.addListener("onLanHosts", listener);
+    return () => sub.remove();
+  } catch {
+    return () => {};
+  }
 }
 
 export function subscribeNativeSpeech(handlers: {

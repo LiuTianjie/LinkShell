@@ -441,6 +441,18 @@ export const UI_ICON_GLYPHS = {
   shield: (
     <path d="M12 3L19.5 6.25V11.75C19.5 16.4 16.3 19.9 12 21.25C7.7 19.9 4.5 16.4 4.5 11.75V6.25L12 3Z" />
   ),
+  "volume-2": (
+    <>
+      <polygon points="11,5 6.5,9 3.5,9 3.5,15 6.5,15 11,19" />
+      <path d="M15.25 8.75a4.75 4.75 0 0 1 0 6.5M18 6a8.5 8.5 0 0 1 0 12" />
+    </>
+  ),
+  "volume-x": (
+    <>
+      <polygon points="11,5 6.5,9 3.5,9 3.5,15 6.5,15 11,19" />
+      <path d="M15.5 9.5L20.5 14.5M20.5 9.5L15.5 14.5" />
+    </>
+  ),
 } satisfies Record<string, ReactNode>;
 
 export type UiIconName = keyof typeof UI_ICON_GLYPHS;

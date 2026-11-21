@@ -537,3 +537,11 @@ Mac 桌面恢复 `DesktopScreen.tsx` 的界面与信令桥接。`LinkShell --des
 共享渲染器保持最新帧 mailbox 和一个在途 GPU 提交。解码进程最多持有三个导出帧及一个最新待发帧，接收视图和 GPU 都释放后才允许解码器复用缓冲；色彩矩阵随元数据传递。原生视图按 DOM 矩形与页面缩放定位，菜单/模态层覆盖时隐藏。结束会话、切页、页面崩溃和退出销毁视图、Mach 端口与子进程，父进程异常退出时管道 EOF 也会结束子进程。
 
 本轮已通过真实本机采集 → 独立原生接收进程 → Electron 窗口内 Metal 的冒烟检查，确认 H.265 硬件解码、实际呈现和隐藏后恢复。该证据不代表成都远端、公网弱网、长期稳定性或实际端到端延迟已验收。
+
+### 2026-11：全端屏幕音频、Android 原生接收、Windows 光标、Wayland 与局域网发现补齐
+
+- **屏幕音频传输（`audio` DataChannel + `?audio=1`）**：共享 `@linkshell/wire` `screen-audio.ts`（8 字节大端头，支持 Opus 与 48 kHz 立体声 PCM16）。Mac 端由 `ScreenCaptureKit` 采集并通过 `ScreenAudio.swift` 编码（优先 Opus、回退 PCM16）并在桌面原生端以 `AVAudioEngine` 播放；Windows 端由 `VideoCapture.cs --audio` 的 WASAPI loopback 采集并经 `windows-video.ts` 发往 `audio` DataChannel；Host `screen-viewer`（已按模块拆分为 `packages/host/src/screen-viewer/`）、`apps/web` 与 `apps/desktop-ui` 通过 WebCodecs `AudioDecoder` + Web Audio API 播放并提供静音开关；iOS 与 Android `link-screen` 原生模块分别通过 `AVAudioEngine` 与 `MediaCodec` + `AudioTrack` 解码播放。
+- **Android 原生 `link-screen` 与三层回退**：`apps/client/modules/link-screen` 补齐 Android Kotlin 实现（`SurfaceViewRenderer` + `MediaCodec` 硬件解码 + 透明控制 `WebView`），`apps/client/src/screens/screen-screen.tsx` 对 Android 开放与 iOS 一致的「原生 WebRTC → WebView WebRTC → 强制 RPC 中继（`direct: false`）」三层自动回退。
+- **Windows 光标形状与 macOS 系统快捷键捕获**：Windows `Screen.cs` / `Fusion.cs` 捕获指针图形并同步至 `shape` DataChannel；macOS 桌面版新增受辅助功能、钥匙窗口与控件焦点门控的 `CGEventTap` 系统快捷键捕获开关（`SystemShortcutCapture.swift`），始终放行本地 `⌃⌘F` 与 `⌃⌥⌘Esc`，并在失焦/断开时立即销毁 tap 与释放修饰键。
+- **Linux Wayland 与纯 Node mDNS**：`packages/host/src/linux-screen.ts` 新增 Wayland 检测（`wf-recorder` / `gst-launch-1.0`）与 `xdotool` / `ydotool` / `dotool` / `wtype` 输入映射；`packages/host/src/mdns.ts` 内置零依赖 UDP 多播 `PureMdnsResponder`（Windows/Linux 原生，macOS 异常回退），移动端（iOS `NWBrowser` / Android `NsdManager`）与桌面端（`mdns-browser.ts`）可自动发现同局域网主机。
+- **验证边界（本轮仅完成单测与本地编译，以下仍待真机验收）**：Windows `.NET Framework 4.8` `csc.exe` 编译与 GPU/WASAPI/ARM64 实机、Android `expo prebuild` 后的完整 Gradle 构建与真机 MediaCodec/AudioTrack/NsdManager、iOS 真机屏幕音频与 `NWBrowser`/本地审批通知、Linux Wayland 实机捕获与输入、以及 Intel Mac 真机链路均尚未在物理目标设备上端到端实测。

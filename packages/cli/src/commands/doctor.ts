@@ -53,22 +53,15 @@ export function inspectLocalState(options: {
 
   const stateSize = fileSize(join(options.home, "state.db"));
   const stateWalSize = fileSize(join(options.home, "state.db-wal")) ?? 0;
-  const lsaSize = fileSize(join(options.home, "lsa.db"));
-  const lsaWalSize = fileSize(join(options.home, "lsa.db-wal")) ?? 0;
 
-  if (stateSize === undefined && lsaSize === undefined) {
+  if (stateSize === undefined) {
     checks.push({ name: "Storage", ok: true, detail: "no database yet (created on first host start)" });
   } else {
-    const parts: string[] = [];
+    const parts: string[] = [
+      `state.db ${formatBytes(stateSize)}${stateWalSize > 0 ? ` (WAL ${formatBytes(stateWalSize)})` : ""}`,
+    ];
     const bloated: string[] = [];
-    if (stateSize !== undefined) {
-      parts.push(`state.db ${formatBytes(stateSize)}${stateWalSize > 0 ? ` (WAL ${formatBytes(stateWalSize)})` : ""}`);
-      if (stateWalSize > walThreshold) bloated.push(`state.db-wal (${formatBytes(stateWalSize)})`);
-    }
-    if (lsaSize !== undefined) {
-      parts.push(`lsa.db ${formatBytes(lsaSize)}${lsaWalSize > 0 ? ` (WAL ${formatBytes(lsaWalSize)})` : ""}`);
-      if (lsaWalSize > walThreshold) bloated.push(`lsa.db-wal (${formatBytes(lsaWalSize)})`);
-    }
+    if (stateWalSize > walThreshold) bloated.push(`state.db-wal (${formatBytes(stateWalSize)})`);
     if (bloated.length > 0) {
       checks.push({
         name: "Storage",

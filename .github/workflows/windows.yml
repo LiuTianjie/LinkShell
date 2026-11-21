@@ -6,7 +6,15 @@ on:
 
 jobs:
   windows:
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runs_on: windows-latest
+          - arch: arm64
+            runs_on: windows-11-arm
+    runs-on: ${{ matrix.runs_on }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -24,45 +32,53 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm typecheck
-      - run: pnpm --filter @linkshell/host exec vitest run test/codex-installation.test.ts test/windows.test.ts test/windows-viewer.test.ts test/windows-video.test.ts test/windows-screen-session.test.ts test/screen-session.test.ts test/screen-viewer-session.test.ts test/dev-port.e2e.test.ts test/screen-viewer.test.ts test/screen-pacer.test.ts test/screen-fallback.test.ts test/screen.test.ts test/screen-platform.test.ts test/screen-native-controls.test.ts test/screen-metrics.test.ts test/fusion.test.ts test/fusion-remote.test.ts
-      - run: pnpm --filter linkshell-cli exec vitest run test/desktop.test.ts test/desktop-update.test.ts test/desktop-workspace.test.ts test/daemon.test.ts test/auth.test.ts test/pro-membership.test.ts
-      - run: pnpm --filter @linkshell/web exec vitest run --maxWorkers=2
-      - run: pnpm --filter @linkshell/web lint
-      - run: pnpm --filter @linkshell/desktop test
+      - if: matrix.arch == 'x64'
+        run: pnpm --filter @linkshell/host exec vitest run test/codex-installation.test.ts test/windows.test.ts test/windows-viewer.test.ts test/windows-video.test.ts test/windows-screen-session.test.ts test/screen-session.test.ts test/screen-viewer-session.test.ts test/dev-port.e2e.test.ts test/screen-viewer.test.ts test/screen-pacer.test.ts test/screen-fallback.test.ts test/screen.test.ts test/screen-platform.test.ts test/screen-native-controls.test.ts test/screen-metrics.test.ts test/fusion.test.ts test/fusion-remote.test.ts
+      - if: matrix.arch == 'arm64'
+        run: pnpm --filter @linkshell/host exec vitest run test/windows.test.ts test/windows-viewer.test.ts test/windows-video.test.ts test/windows-screen-session.test.ts test/fusion.test.ts test/fusion-remote.test.ts
+      - if: matrix.arch == 'x64'
+        run: pnpm --filter linkshell-cli exec vitest run test/desktop.test.ts test/desktop-update.test.ts test/desktop-workspace.test.ts test/daemon.test.ts test/auth.test.ts test/pro-membership.test.ts
+      - if: matrix.arch == 'x64'
+        run: pnpm --filter @linkshell/web exec vitest run --maxWorkers=2
+      - if: matrix.arch == 'x64'
+        run: pnpm --filter @linkshell/web lint
+      - if: matrix.arch == 'x64'
+        run: pnpm --filter @linkshell/desktop test
       - run: pnpm --filter @linkshell/windows test
-      - run: pnpm --filter @linkshell/windows build:standalone
+      - run: pnpm --filter @linkshell/windows build:standalone -- --arch=${{ matrix.arch }}
         id: windows_bundle
         env:
           LINKSHELL_SMOKE_SHOTS: artifacts/window-shots
+          LINKSHELL_WINDOWS_ARCH: ${{ matrix.arch }}
       - name: Exercise Windows automatic update, rollback and data preservation
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && matrix.arch == 'x64'
         run: pnpm --filter @linkshell/windows test:update-e2e
       - uses: actions/upload-artifact@v4
-        if: always() && github.event_name == 'workflow_dispatch'
+        if: always() && github.event_name == 'workflow_dispatch' && matrix.arch == 'x64'
         with:
           name: LinkShell-Windows-update-e2e
           path: artifacts/windows-update-e2e
           if-no-files-found: warn
       - name: Exercise real Codex model selection and session option persistence
-        if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && steps.windows_bundle.outcome == 'success' }}
+        if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && matrix.arch == 'x64' && steps.windows_bundle.outcome == 'success' }}
         timeout-minutes: 12
         run: pnpm --filter @linkshell/windows test:model-ui-e2e
       - uses: actions/upload-artifact@v4
-        if: always() && github.event_name == 'workflow_dispatch'
+        if: always() && github.event_name == 'workflow_dispatch' && matrix.arch == 'x64'
         with:
           name: LinkShell-Windows-model-ui-e2e
           path: artifacts/windows-model-ui-e2e
           if-no-files-found: warn
       - uses: actions/upload-artifact@v4
         with:
-          name: LinkShell-Windows-x64-unsigned
+          name: LinkShell-Windows-${{ matrix.arch }}-unsigned
           path: |
-            artifacts/LinkShell-Setup-*-windows-x64.exe
-            artifacts/LinkShell-*-windows-x64.zip
+            artifacts/LinkShell-Setup-*-windows-${{ matrix.arch }}.exe
+            artifacts/LinkShell-*-windows-${{ matrix.arch }}.zip
             artifacts/*.sha256
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: LinkShell-Windows-window-shots
+          name: LinkShell-Windows-window-shots-${{ matrix.arch }}
           path: artifacts/window-shots
           if-no-files-found: ignore

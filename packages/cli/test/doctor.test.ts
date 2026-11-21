@@ -28,7 +28,7 @@ it("loads the installed native module when doctor runs outside a Node project", 
   }
 });
 
-it("reports state.db/lsa.db sizes, WAL bloat, and stale PID/socket/lock diagnostics", () => {
+it("reports state.db size, WAL bloat, and stale PID/socket/lock diagnostics", () => {
   const home = mkdtempSync(join(tmpdir(), "lsh-doc-state-"));
   const runDir = join(home, "run");
   mkdirSync(runDir, { recursive: true });
@@ -36,7 +36,6 @@ it("reports state.db/lsa.db sizes, WAL bloat, and stale PID/socket/lock diagnost
     writeFileSync(join(home, "state.db"), Buffer.alloc(4096));
     writeFileSync(join(home, "state.db-wal"), "");
     truncateSync(join(home, "state.db-wal"), 2 * 1024 * 1024);
-    writeFileSync(join(home, "lsa.db"), Buffer.alloc(2048));
     writeFileSync(join(home, "host.pid"), "999999992\n");
     writeFileSync(join(runDir, "host.sock"), "");
     writeFileSync(join(runDir, "host.lock"), '{"pid":999999992}\n');
@@ -52,7 +51,6 @@ it("reports state.db/lsa.db sizes, WAL bloat, and stale PID/socket/lock diagnost
     expect(storage?.ok).toBe(false);
     expect(storage?.detail).toContain("WAL bloat");
     expect(storage?.detail).toContain("state.db");
-    expect(storage?.detail).toContain("lsa.db");
 
     const hostState = failed.find((r) => r.name === "Host state");
     expect(hostState?.ok).toBe(false);

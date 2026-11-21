@@ -27,7 +27,10 @@ final class DesktopMedia {
             let port = DesktopFramePort(name: name, receiver: false) else { exit(1) }
       let output = DesktopMediaOutput(port: port, pipe: pipe)
       self.output = output
-      receiver = DesktopScreenReceiver(surface: output, smooth: message["smooth"] as? Bool == true, onSignal: { output.emit(["type": "signal", "message": $0]) },
+      let audioMuted = (DesktopScreenBridge.boolean(message["audioMuted"]))
+        ?? (DesktopScreenBridge.boolean(message["audio"]).map { !$0 })
+        ?? false
+      receiver = DesktopScreenReceiver(surface: output, smooth: message["smooth"] as? Bool == true, audioMuted: audioMuted, onSignal: { output.emit(["type": "signal", "message": $0]) },
         onStatus: { output.emit(["type": "status", "status": $0]) }, onFailure: { output.emit(["type": "error", "error": $0]) })
       output.emit(["type": "ready"])
     case "signal": if let value = message["message"] as? [String: Any] { receiver?.receive(value) }
@@ -37,6 +40,16 @@ final class DesktopMedia {
       }
     case "control": receiver?.setControl(message["enabled"] as? Bool == true)
     case "pacing": receiver?.setSmooth(message["smooth"] as? Bool == true)
+    case "mute":
+      if let muted = DesktopScreenBridge.boolean(message["muted"]) ?? DesktopScreenBridge.boolean(message["enabled"]) {
+        receiver?.setAudioMuted(muted)
+      }
+    case "audio":
+      if let muted = DesktopScreenBridge.boolean(message["muted"]) {
+        receiver?.setAudioMuted(muted)
+      } else if let enabled = DesktopScreenBridge.boolean(message["enabled"]) {
+        receiver?.setAudioMuted(!enabled)
+      }
     case "visible":
       let visible = message["enabled"] as? Bool == true
       output?.setVisible(visible); receiver?.setPresentationVisible(visible)

@@ -1,7 +1,7 @@
 [
   {"t":"hello","proto":2,"token":"tok_abcdefghijklmnopqrstuvwx","platform":"macos","features":["clipboard","keys"],"displays":[{"frame":{"x":0,"y":0,"w":1512,"h":982},"visible":{"x":0,"y":38,"w":1512,"h":944},"scale":2,"hz":120},{"frame":{"x":1512,"y":-200,"w":2560,"h":1440},"visible":{"x":1512,"y":-175,"w":2560,"h":1415},"scale":1.5,"hz":60}],"name":"Studio 的 MacBook Pro"},
   {"t":"hello","proto":2,"token":"tok_resume","platform":"windows","features":["clipboard"],"displays":[{"frame":{"x":0,"y":0,"w":1707,"h":960},"visible":{"x":0,"y":0,"w":1707,"h":912},"scale":1.5,"hz":144}],"resume":"s-7f3a"},
-  {"t":"welcome","proto":2,"platform":"macos","features":["menubar","dockmenu","clipboard","virtual-displays","keys"],"session":"s-7f3a","resumed":false},
+  {"t":"welcome","proto":2,"platform":"macos","features":["menubar","dockmenu","clipboard","file-clipboard","virtual-displays","keys"],"session":"s-7f3a","resumed":false},
   {"t":"bye","reason":"user"},
   {"t":"bye","reason":"proto","message":"远端 LinkShell 版本过旧，请升级后再开启融合模式"},
   {"t":"ping","ts":1234.5},
@@ -34,6 +34,9 @@
   {"t":"dockmenu","app":"com.apple.Safari","items":[{"title":"New Window","section":"action","path":[2,0]}]},
   {"t":"dockmenu.press","app":"com.apple.Safari","path":[]},
   {"t":"clip","text":"hello 融合"},
+  {"t":"clip.file.start","transferId":"fc-1","files":[{"index":0,"name":"spec.pdf","size":1024,"mime":"application/pdf"}],"totalBytes":1024},
+  {"t":"clip.file.chunk","transferId":"fc-1","index":0,"seq":0,"data":"JVBERi0xLjQ="},
+  {"t":"clip.file.end","transferId":"fc-1","ok":true},
   {"t":"alert","kind":"accessibility","message":"远端 Mac 尚未允许 LinkShell 使用辅助功能"},
   {"t":"alert","kind":"launch","subject":"com.apple.Safari","clear":true},
   {"t":"rtc","m":{"t":"config","iceServers":[{"urls":["stun:stun.example:3478"]},{"urls":"turn:turn.example:3478","username":"u","credential":"c"}]}},

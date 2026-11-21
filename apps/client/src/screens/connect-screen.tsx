@@ -1,8 +1,8 @@
 import * as Clipboard from "expo-clipboard";
 import { formatConnectionDetail } from "@/components/connection-banner";
 import { router } from "expo-router";
-import { useState } from "react";
-import { Pressable, Switch, View } from "react-native";
+import { useMemo, useState } from "react";
+import { Pressable, StyleSheet, Switch, View } from "react-native";
 import { Text, TextInput } from "@/components/fixed-text";
 import { usePageInsets } from "@/components/adaptive-page";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
@@ -11,7 +11,18 @@ import { Icon } from "@/components/icon";
 import { LinkDot } from "@/components/status";
 import { useClient, useConnection, useConnectionStatus, useHasComputer } from "@/lib/client";
 import { haptics } from "@/lib/haptics";
-import { normalizeLanUrl, reconnectRelays, useComputers } from "@/lib/computers";
+import {
+  isLanDiscoveryAvailable,
+  lanHostDisplayName,
+  lanHostUrl,
+  listComputers,
+  matchLanHostToComputer,
+  normalizeLanUrl,
+  reconnectRelays,
+  useComputers,
+  type DiscoveredLanHost,
+} from "@/lib/computers";
+import { useNativeLanDiscovery } from "@/lib/lan-discovery-native";
 import { useLocale } from "@/lib/locale";
 import { SheetHeader } from "@/components/sheet-header";
 import { colors } from "@/theme/colors";
@@ -32,9 +43,50 @@ export function ConnectScreen() {
   const [draft, setDraft] = useState(initialDraft);
   const [lanE2ee, setLanE2ee] = useState(throughGateway ? Boolean(computer.lanE2ee) : false);
   const [invalid, setInvalid] = useState(false);
+  const savedComputers = useComputers((state) => state.saved);
+  const liveComputers = useComputers((state) => state.live);
+  const lanHosts = useComputers((state) => state.lanHosts);
+  const discoverySupported = isLanDiscoveryAvailable();
+  useNativeLanDiscovery(true);
+  const allComputers = useMemo(
+    () => listComputers({ saved: savedComputers, live: liveComputers, lanHosts }),
+    [savedComputers, liveComputers, lanHosts],
+  );
   const online = status === "online";
   const normalized = normalizeLanUrl(draft);
   const changed = Boolean(normalized && normalized !== initialDraft);
+
+  const connectDiscoveredHost = (host: DiscoveredLanHost) => {
+    const discoveredUrl = lanHostUrl(host);
+    if (!discoveredUrl) return;
+    haptics.medium();
+    const computers = useComputers.getState();
+    const matched = allComputers.find((item) => Boolean(matchLanHostToComputer(host, item)));
+    if (matched) {
+      if (matched.kind === "relay") {
+        computers.setLanUrl(matched.key, discoveredUrl, {
+          e2ee: matched.key === computer.key ? lanE2ee : matched.lanE2ee,
+        });
+      }
+      if (matched.key !== computer.key) {
+        computers.select(matched.key);
+      } else {
+        setDraft(discoveredUrl);
+        setInvalid(false);
+        link.reconnectNow();
+      }
+      router.back();
+      return;
+    }
+    const key = computers.addDirect(discoveredUrl, lanHostDisplayName(host));
+    computers.select(key);
+    if (!hasComputer) {
+      router.dismissAll();
+      router.navigate("/");
+    } else {
+      router.back();
+    }
+  };
 
   const reconnect = () => {
     haptics.medium();
@@ -238,6 +290,106 @@ export function ConnectScreen() {
               />
             ) : null}
           </View>
+        </View>
+      ) : null}
+
+      {discoverySupported || lanHosts.length > 0 ? (
+        <View style={{ gap: 8 }}>
+          <Text style={[type.footnote, { color: colors.secondaryLabel, fontWeight: "600" }]}>
+            {pick({ zh: "局域网发现的电脑", en: "Discovered on LAN", ja: "LAN 上のコンピュータ" })}
+          </Text>
+          {lanHosts.length > 0 ? (
+            <View
+              style={{
+                backgroundColor: colors.card,
+                borderRadius: radius.control,
+                borderCurve: "continuous",
+                overflow: "hidden",
+              }}
+            >
+              {lanHosts.map((host, index) => {
+                const discoveredUrl = lanHostUrl(host);
+                if (!discoveredUrl) return null;
+                const matched = allComputers.find((item) => Boolean(matchLanHostToComputer(host, item)));
+                const isCurrent = matched?.key === computer.key;
+                const badge = isCurrent
+                  ? pick({ zh: "当前电脑", en: "Current", ja: "現在の端末" })
+                  : matched
+                    ? pick({ zh: "已添加", en: "Saved", ja: "保存済み" })
+                    : pick({ zh: "局域网新主机", en: "New Host", ja: "新規" });
+                return (
+                  <View key={`${discoveredUrl}-${host.machineId ?? host.fingerprint ?? host.name}`}>
+                    {index > 0 ? (
+                      <View style={{ marginLeft: 14, height: StyleSheet.hairlineWidth, backgroundColor: colors.separator }} />
+                    ) : null}
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={() => connectDiscoveredHost(host)}
+                      style={({ pressed }) => ({
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 10,
+                        paddingHorizontal: 14,
+                        paddingVertical: 11,
+                        backgroundColor: pressed ? colors.fill : "transparent",
+                      })}
+                    >
+                      <Icon sf="wifi" md="wifi" size={16} color={colors.accent} />
+                      <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                          <Text numberOfLines={1} style={[type.callout, { color: colors.label, flexShrink: 1 }]}>
+                            {lanHostDisplayName(host)}
+                          </Text>
+                          <View
+                            style={{
+                              paddingHorizontal: 6,
+                              paddingVertical: 2,
+                              borderRadius: radius.chip,
+                              backgroundColor: isCurrent ? colors.accentSoft : colors.fill,
+                            }}
+                          >
+                            <Text style={[type.caption2, { color: isCurrent ? colors.accent : colors.secondaryLabel }]}>
+                              {badge}
+                            </Text>
+                          </View>
+                        </View>
+                        <Text numberOfLines={1} style={[type.caption, { fontFamily: mono, color: colors.secondaryLabel }]}>
+                          {discoveredUrl}
+                        </Text>
+                      </View>
+                      <Text style={[type.subhead, { color: colors.accent, fontWeight: "600" }]}>
+                        {isCurrent
+                          ? pick({ zh: "直连", en: "Use", ja: "接続" })
+                          : pick({ zh: "连接", en: "Connect", ja: "接続" })}
+                      </Text>
+                    </Pressable>
+                  </View>
+                );
+              })}
+            </View>
+          ) : (
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 8,
+                backgroundColor: colors.card,
+                borderRadius: radius.control,
+                borderCurve: "continuous",
+                paddingHorizontal: 14,
+                paddingVertical: 12,
+              }}
+            >
+              <Icon sf="dot.radiowaves.left.and.right" md="wifi_tethering" size={16} color={colors.secondaryLabel} />
+              <Text style={[type.caption, { color: colors.secondaryLabel, flex: 1 }]}>
+                {pick({
+                  zh: "正在搜索同一 Wi-Fi 下的电脑（mDNS）…",
+                  en: "Searching for LinkShell hosts on this Wi-Fi (mDNS)...",
+                  ja: "同じ Wi-Fi 上のコンピュータを検索しています…",
+                })}
+              </Text>
+            </View>
+          )}
         </View>
       ) : null}
 

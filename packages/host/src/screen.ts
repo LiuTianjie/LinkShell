@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import { WebSocketServer, type WebSocket } from "ws";
 import { RpcError, type RelayIceServer, type ScreenPrivacyState, type TurnCredentials } from "@linkshell/wire";
 import { closeInputApp, inputApp, InputControl, macAppSupported, NO_APP, videoSignal, type ScreenMatch, type StreamProfile, type VideoConfigured } from "./input.js";
+import { buildLinuxCapturePlan, buildX11CaptureArgs, JpegFrameSplitter, listLinuxDisplays, probeLinuxScreen, spawnLinuxCapture } from "./linux-screen.js";
 import { LADDER, Pacer, RELAY_LEVEL, rung } from "./screen-pacer.js";
 import { SCREEN_IDLE, SCREEN_TAKEN, viewerPage } from "./screen-viewer.js";
 import { screenMeasurementLog } from "./screen-metrics.js";
@@ -38,13 +39,6 @@ export interface Display {
   name: string;
 }
 
-async function hasFfmpeg(): Promise<boolean> {
-  return run("ffmpeg", ["-hide_banner", "-version"], { timeout: 5000 }).then(
-    () => true,
-    () => false,
-  );
-}
-
 /** What the phone is told when the picture can't be had for want of the permission. */
 const notAllowed = (app: string) =>
   `电脑还没有允许${app ? `「${app}」` : ""}录制屏幕。在电脑上运行 linkshell screen 按提示操作，或在「系统设置 › 隐私与安全性 › 录屏与系统录音」里打开${app ? `「${app}」` : "它"}的开关，然后重新进入这个页面。`;
@@ -60,7 +54,7 @@ export interface ScreenAccess {
 
 interface CaptureEvents {
   /** One whole frame. */
-  frame(unit: Buffer, key: boolean): void;
+  frame(unit: Buffer, key: boolean, format?: "h264" | "jpeg"): void;
   /** The frames from here on are of another size (a capture that changes level without stopping). */
   resized?(): void;
   /** Over, and not because it was ended here; with words for the viewer when they can do something about it. */
@@ -96,28 +90,7 @@ async function captureReleased(capture: Running): Promise<void> {
 
 /** ffmpeg's capture of an X display (Linux), for one rung of the ladder (see `screen-pacer.ts`): 0 is the best picture. */
 export function captureArgs(level = 0, profile = fallbackProfile(level)): string[] {
-  const rate = (bits: number) => `${Math.round(bits / 1000)}k`;
-  return [
-    "-hide_banner",
-    "-loglevel",
-    "error",
-    "-f", "x11grab", "-framerate", String(profile.fps), "-i", process.env.DISPLAY ?? ":0",
-    "-vf",
-    `fps=${profile.fps},scale='min(${profile.width},iw)':-2,format=yuv420p`,
-    "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-profile:v", "baseline", "-x264-params", "sliced-threads=0",
-    "-b:v", rate(profile.bitrate), "-maxrate", rate(profile.ceiling), "-bufsize", rate(profile.ceiling),
-    // A keyframe a second: a viewer that fell behind is back on the live picture within one.
-    "-g",
-    String(profile.fps),
-    "-bf",
-    "0",
-    // An access-unit delimiter before every frame, so the stream splits into frames cleanly.
-    "-bsf:v",
-    "h264_metadata=aud=insert",
-    "-f",
-    "h264",
-    "-",
-  ];
+  return buildX11CaptureArgs(level, profile);
 }
 
 /** Splits an Annex-B stream at access-unit delimiters (NAL type 9) into whole frames. */
@@ -271,6 +244,8 @@ const VIEWER_OWN = new Set(["ack", "ping", "measure", "keyframe", "hidden"]);
 interface VideoViewer {
   /** The viewer's own screen, when it asked for the desktop at that resolution. */
   match?: ScreenMatch;
+  /** Whether the viewer requested desktop audio streaming (`?audio=1`). */
+  audio?: boolean;
   closed(): boolean;
   claim(): void;
   tell(message: object): void;
@@ -443,10 +418,9 @@ export class ScreenShare {
       return displays.map(({ screen, name, w, h }) => ({ index: screen, screen, name: name || `屏幕 ${screen + 1}`, w, h }));
     }
     if (process.platform !== "linux") throw RpcError.app("not_supported", "这台电脑的系统暂不支持查看屏幕");
-    if (!(await hasFfmpeg())) throw RpcError.app("not_supported", "查看屏幕需要电脑上装有 ffmpeg");
-    // x11grab captures the X display's root window, which may span several monitors.
-    const dimensions = await run("xdpyinfo", [], { timeout: 5000 }).then(({ stdout }) => /dimensions:\s+(\d+)x(\d+)\s+pixels/.exec(stdout), () => null);
-    return [{ index: 0, name: "屏幕", screen: 0, ...(dimensions ? { w: Number(dimensions[1]), h: Number(dimensions[2]) } : {}) }];
+    const diag = await probeLinuxScreen();
+    if (!diag.recording) throw RpcError.app("not_supported", diag.problem || "查看屏幕需要电脑上装有 ffmpeg 或 Wayland 录屏组件");
+    return listLinuxDisplays();
   }
 
   private listen(): Promise<number> {
@@ -494,7 +468,8 @@ export class ScreenShare {
       // unused. Older ones drop the login (and WebRTC then refuses the whole configuration): they get neither.
       const turn = url.searchParams.get("turn") === "1";
       const match = videoMatch(url.searchParams.get("match"));
-      sockets.handleUpgrade(request, socket, head, (ws) => this.stream(ws, Number(url.searchParams.get("display") ?? NaN), relayed, video, width, maxFps, diagnostics, codec, turn, match));
+      const audio = url.searchParams.get("audio") === "1";
+      sockets.handleUpgrade(request, socket, head, (ws) => this.stream(ws, Number(url.searchParams.get("display") ?? NaN), relayed, video, width, maxFps, diagnostics, codec, turn, match, audio));
     });
     this.server = server;
     return new Promise((resolve, reject) => {
@@ -526,8 +501,19 @@ export class ScreenShare {
         return { supported: true, ffmpeg: found, recording: false, control: false, problem: (error as Error).message };
       }
     }
-    const supported = macAppSupported() || process.platform === "linux";
-    if (process.platform !== "darwin") return { supported, ffmpeg: supported && (await hasFfmpeg()), recording: null, control: null, problem: "只有 macOS 支持控制屏幕" };
+    if (process.platform === "linux") {
+      const diag = await probeLinuxScreen();
+      return {
+        supported: true,
+        ffmpeg: diag.recording,
+        recording: diag.recording,
+        control: diag.control,
+        ...(diag.inputBackend ? { app: diag.inputBackend } : {}),
+        ...(diag.problem ? { problem: diag.problem } : {}),
+      };
+    }
+    const supported = macAppSupported();
+    if (process.platform !== "darwin") return { supported, ffmpeg: false, recording: null, control: null, problem: "暂时只支持 macOS、Windows 和 Linux 电脑" };
     const app = inputApp(this.log);
     if (!app) {
       const problem =
@@ -596,31 +582,74 @@ export class ScreenShare {
     }
     if (!wanted()) return undefined;
     const windows = process.platform === "win32";
-    const capture = windows ? captureWindows(screen, { ...profile, quality: windowsProfile(level).quality }) : spawn("ffmpeg", captureArgs(level, profile), { stdio: ["ignore", "pipe", "pipe"] });
-    this.captures.add(capture);
+    let format: "h264" | "jpeg" = windows ? "jpeg" : "h264";
+    let primary: ChildProcess;
+    let output: NodeJS.ReadableStream;
+    let stderrSources: NodeJS.ReadableStream[];
+    let children: ChildProcess[];
+    let stopCapture: (force?: boolean) => void;
+    if (windows) {
+      primary = captureWindows(screen, { ...profile, quality: windowsProfile(level).quality });
+      output = primary.stdout!;
+      stderrSources = [primary.stderr!];
+      children = [primary];
+      stopCapture = (force) => endCapture(primary, force);
+    } else {
+      const diag = await probeLinuxScreen();
+      if (!wanted()) return undefined;
+      const displays = diag.displayServer === "wayland" ? await listLinuxDisplays() : [];
+      if (!wanted()) return undefined;
+      const targetDisplay = displays.find((d) => d.screen === screen || d.index === screen) ?? displays[0];
+      const plan = buildLinuxCapturePlan(diag, level, profile, targetDisplay);
+      if (!diag.recording && !plan) {
+        on.exit(diag.problem || "屏幕捕获组件未安装");
+        leave();
+        return undefined;
+      }
+      if (plan) {
+        const spawned = spawnLinuxCapture(plan);
+        format = plan.format;
+        primary = spawned.primary;
+        output = spawned.output;
+        stderrSources = spawned.stderrSources;
+        children = spawned.children;
+        stopCapture = spawned.stop;
+      } else {
+        primary = spawn("ffmpeg", captureArgs(level, profile), { stdio: ["ignore", "pipe", "pipe"] });
+        output = primary.stdout!;
+        stderrSources = [primary.stderr!];
+        children = [primary];
+        stopCapture = (force) => endCapture(primary, force);
+      }
+    }
+    for (const child of children) this.captures.add(child);
     const splitter = new AccessUnitSplitter();
-    const jpeg = new WindowsFrameSplitter();
+    const jpeg = windows ? new WindowsFrameSplitter() : new JpegFrameSplitter();
     let errors = "";
-    capture.stdout!.on("data", (chunk: Buffer) => {
+    output.on("data", (chunk: Buffer) => {
       if (ended || !wanted()) return;
       try {
-        if (windows) jpeg.push(chunk, frame => on.frame(frame, true));
-        else splitter.push(chunk, on.frame);
+        if (format === "jpeg") jpeg.push(chunk, frame => on.frame(frame, true, "jpeg"));
+        else splitter.push(chunk, (unit, key) => on.frame(unit, key, "h264"));
       } catch (error) {
         errors = (error as Error).message;
-        endCapture(capture, true);
+        stopCapture(true);
       }
     });
-    capture.stderr!.on("data", (chunk: Buffer) => (errors = (errors + chunk.toString()).slice(-2000)));
+    for (const errStream of stderrSources) {
+      errStream.on("data", (chunk: Buffer) => (errors = (errors + chunk.toString()).slice(-2000)));
+    }
     const finished = (code: number, said: string) => {
       leave();
       if (ended || !wanted()) return;
       if (code) this.log(`[screen] capture exited ${code}: ${said.trim()}`);
       on.exit(code ? "屏幕捕获失败" : undefined);
     };
-    capture.on("error", (error) => finished(-1, error.message));
-    capture.on("exit", (code) => {
-      this.captures.delete(capture);
+    primary.on("error", (error) => finished(-1, error.message));
+    for (const child of children) {
+      child.on("exit", () => this.captures.delete(child));
+    }
+    primary.on("exit", (code) => {
       finished(code ?? 0, errors);
     });
     return {
@@ -628,11 +657,11 @@ export class ScreenShare {
       gone,
       end: () => {
         ended = true;
-        endCapture(capture);
+        stopCapture();
       },
       ...(windows ? {
-        change: (next: number, requested?: StreamProfile) => configureWindowsCapture(capture, { t: "profile", ...(requested ?? profile), quality: windowsProfile(next).quality }),
-        key: () => configureWindowsCapture(capture, { t: "keyframe" }),
+        change: (next: number, requested?: StreamProfile) => configureWindowsCapture(primary, { t: "profile", ...(requested ?? profile), quality: windowsProfile(next).quality }),
+        key: () => configureWindowsCapture(primary, { t: "keyframe" }),
       } : {}),
     };
   }
@@ -685,7 +714,7 @@ export class ScreenShare {
       if (viewer.closed()) return "refused";
       const iceServers = this.servers(relay);
       viewer.tell({ rtc: { t: "config", iceServers } });
-      const session = new WindowsVideoSession({ screen, iceServers, maxWidth, maxFps, ...(relay?.maxKbps ? { relayKbps: relay.maxKbps } : {}) }, {
+      const session = new WindowsVideoSession({ screen, iceServers, maxWidth, maxFps, ...(viewer.audio ? { audio: true } : {}), ...(relay?.maxKbps ? { relayKbps: relay.maxKbps } : {}) }, {
         tell: message => viewer.tell({ rtc: message }), input: viewer.input, lost: viewer.lost, log: this.log, path: viewer.path,
       });
       const mine = { id: session.id, taken: () => {
@@ -750,7 +779,7 @@ export class ScreenShare {
     viewer.tell({ rtc: { t: "config", iceServers } });
     // LINKSHELL_SCREEN_FPS: another frame rate than the app's own choice, to try one out.
     const fps = Number(process.env.LINKSHELL_SCREEN_FPS);
-    await app.offerVideo(id, { screen, iceServers, ...(relay?.maxKbps ? { relayKbps: relay.maxKbps } : {}), ...(fps >= 1 && fps <= 120 ? { fps } : {}), ...(maxWidth ? { maxWidth } : {}), ...(maxFps ? { maxFps } : {}), ...(codec ? { codec } : {}), ...(viewer.match ? { match: viewer.match } : {}) }, (message) => {
+    await app.offerVideo(id, { screen, iceServers, ...(relay?.maxKbps ? { relayKbps: relay.maxKbps } : {}), ...(fps >= 1 && fps <= 120 ? { fps } : {}), ...(maxWidth ? { maxWidth } : {}), ...(maxFps ? { maxFps } : {}), ...(codec ? { codec } : {}), ...(viewer.match ? { match: viewer.match } : {}), ...(viewer.audio ? { audio: true } : {}) }, (message) => {
       if (this.video !== mine) return;
       const kind = String(message.t);
       if (kind === "gone" || kind === "rtc.error") {
@@ -778,10 +807,10 @@ export class ScreenShare {
       if (this.video === mine) this.video = undefined;
       return "refused";
     }
-    return { id, reconfigure: status.videoReconfigure === true, keys: status.keys === true, configure: configuration => app.configureVideo(id, configuration), signal: message => app.signal(id, message), end: () => app.endVideo(id) };
+    return { id, reconfigure: status.videoReconfigure === true, keys: status.keys === true, configure: configuration => app.configureVideo(id, configuration), signal: message => app.signal(id, message), setAudio: enabled => app.setAudio(id, enabled), end: () => app.endVideo(id) };
   }
 
-  private stream(ws: WebSocket, display: number, relayed: boolean, wantsVideo: boolean, width: number | undefined, maxFps?: number, diagnostics = false, codec?: "hevc", turn = false, match?: ScreenMatch): void {
+  private stream(ws: WebSocket, display: number, relayed: boolean, wantsVideo: boolean, width: number | undefined, maxFps?: number, diagnostics = false, codec?: "hevc", turn = false, match?: ScreenMatch, audio = false): void {
     let shown = this.displays.find((entry) => entry.index === display) ?? this.displays[0];
     let desired: ScreenConfiguration = { display: shown?.index ?? 0, width: width ?? 1920, maxFps: maxFps === 30 || maxFps === 60 || maxFps === 120 ? maxFps : undefined, paused: false };
     let closed = false;
@@ -911,7 +940,7 @@ export class ScreenShare {
     const startReminder = () => { if (!reminder) reminder = setInterval(askForKey, 500); };
     startReminder();
     const events: CaptureEvents = {
-      frame: (unit, key) => {
+      frame: (unit, key, format) => {
         if (!live() || desired.paused) return;
         if (windows && ws.bufferedAmount > 256 * 1024) return;
         if (wantsKey && !key) return;
@@ -920,7 +949,7 @@ export class ScreenShare {
         const seq = pacer.next(key, now);
         if (seq !== undefined) {
           const head = Buffer.allocUnsafe(5);
-          head[0] = windows ? 2 : key ? 1 : 0;
+          head[0] = (format === "jpeg" || windows) ? 2 : key ? 1 : 0;
           head.writeUInt32BE(seq >>> 0, 1);
           ws.send(Buffer.concat([head, unit]));
         } else askForKey();
@@ -1154,7 +1183,10 @@ export class ScreenShare {
         if (desired.paused || !inputEnabled) return tell({ clipboardResult: { ok: false, message: "需要先获得控制权限" } });
         void answerClipboard(message, this.clipboard).then((answer) => { if (live()) tell(answer); });
       }
-      else if (kind === "control" && !desired.paused) {
+      else if (kind === "audio") {
+        const enabled = (message as { enabled?: unknown }).enabled === true;
+        if (!desired.paused) video?.setAudio?.(enabled);
+      } else if (kind === "control" && !desired.paused) {
         // Requesting control only records intent. Input still needs the applied generation,
         // and startup/configuration must finish before the helper can be joined.
         controlRequested = true;
@@ -1168,7 +1200,7 @@ export class ScreenShare {
     if (wantsVideo) {
       let lostWhileOpening = false;
       void this.offerVideo(shown?.screen ?? 0, width, maxFps, diagnostics, codec, turn, {
-        match, closed: () => !live(), claim, tell,
+        match, ...(audio ? { audio: true } : {}), closed: () => !live(), claim, tell,
         refuse: (message) => { tell({ error: message }); dispose(); ws.close(); },
         lost: () => { if (video) fallBack(); else lostWhileOpening = true; },
         path: (through) => {

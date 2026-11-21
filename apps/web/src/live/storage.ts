@@ -1,8 +1,6 @@
 import { createIdentity, type Identity } from "@linkshell/wire";
-import { isDesktop, desktopIdentity, readDesktopStorage, saveDesktopStorage } from "./desktop";
 
 export function readLocal<T>(key: string, fallback: T): T {
-  if (isDesktop) return readDesktopStorage(key, fallback);
   try {
     return (
       (JSON.parse(
@@ -14,14 +12,12 @@ export function readLocal<T>(key: string, fallback: T): T {
   }
 }
 export function saveLocal(key: string, value: unknown) {
-  if (isDesktop) return saveDesktopStorage(key, value);
   if (value === undefined) localStorage.removeItem(`linkshell.web.${key}`);
   else localStorage.setItem(`linkshell.web.${key}`, JSON.stringify(value));
 }
 
 let identityPromise: Promise<Identity> | undefined;
 export function browserIdentity(): Promise<Identity> {
-  if (isDesktop) return Promise.resolve(desktopIdentity());
   return (identityPromise ??= new Promise((resolve, reject) => {
     const request = indexedDB.open("linkshell.web.identity", 1);
     request.onupgradeneeded = () => request.result.createObjectStore("keys");

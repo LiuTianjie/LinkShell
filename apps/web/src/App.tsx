@@ -19,7 +19,6 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Archive,
-  ArrowLeft,
   RefreshCw,
   X,
   Plus,
@@ -37,7 +36,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useStore } from "zustand";
 import { PageHeader } from "./components/PageHeader";
-import { NEW_SESSION_COMMANDS, NewSessionPage } from "./live/NewSessionPage";
+import type { Command } from "../../client/src/lib/commands";
 import {
   ComposerBox,
   buildComposerContentBlocks,
@@ -55,7 +54,7 @@ import appMark from "../../client/assets/mark.png";
 import { Icon } from "./icons";
 import { engine } from "./live/engine";
 import { ComputerName } from "./live/ComputerName";
-import { AccessPasswordSettings, AccessPasswordSummary, AccessUnlock, LockMark } from "./live/Access";
+import { AccessUnlock, LockMark } from "./live/Access";
 import {
   computerName,
   computerOption,
@@ -71,6 +70,7 @@ import {
   LoadState,
   Modal,
   Runtime,
+  agentLabel,
   baseName,
   titleOf,
   useActions,
@@ -96,32 +96,28 @@ import { useNavigationGuard } from "./live/use-navigation-guard";
 import { SessionLookup } from "./live/SessionLookup";
 import { AllProjects, Projects } from "./live/Projects";
 import { projectScope, setProjectScope } from "./live/project-overview";
-import { isDesktop, isElectronDesktop, openDesktopManagement, THIS_COMPUTER_SPACED, THIS_COMPUTER } from "./live/desktop";
-import { management, serviceAction } from "./live/management-store";
-import { isManageView, managePage, manageView } from "./live/management-model";
-import { takeDeferredNewSession, useDesktopCommand, useNewSessionTarget } from "./live/desktop-commands";
-import { useDesktopVisibility } from "./live/desktop-visibility";
+import { useWorkspaceCommand } from "./live/workspace-commands";
+
+const NEW_SESSION_COMMANDS: Command[] = [
+  { name: "plan", description: "进入计划模式" },
+  { name: "init", description: "生成项目说明（CLAUDE.md / AGENTS.md）" },
+  { name: "review", description: "审查改动" },
+  { name: "security-review", description: "安全审查" },
+  { name: "goal", description: "管理持续目标" },
+];
 
 export function App() {
   return <LiveApp />;
 }
-/** Management opens as a dialog over the workspace; saved/deep manage hashes resolve to home behind it. */
-function viewable(view: string): string {
-  return isManageView(view) ? "home" : view;
-}
 function LiveApp() {
-  const workspaceVisible = useDesktopVisibility();
   const projectsScope = useStore(projectScope, (state) => state.value);
   const state = useStore(engine.state);
-  const managementState = useStore(management);
   const names = useStore(computerNames.store);
   const guard = useNavigationGuard();
   const [connect, setConnect] = useState(false);
   const [view, setView] = useState(() =>
-    viewable(
-      new URLSearchParams(location.hash.slice(1)).get("view") ??
-        readLocal("lastView", "home"),
-    ),
+    new URLSearchParams(location.hash.slice(1)).get("view") ??
+      readLocal("lastView", "home"),
   );
   const lastWorkspaceView = useRef("home");
   const isAllProjects = view === "projects" && projectsScope === "all";
@@ -134,13 +130,7 @@ function LiveApp() {
   }, []);
   useEffect(() => {
     const change = () => {
-      const raw = new URLSearchParams(location.hash.slice(1)).get("view") ?? "home";
-      if (isElectronDesktop && isManageView(raw)) {
-        history.replaceState(null, "", `#${new URLSearchParams({ view })}`);
-        openDesktopManagement(managePage(raw));
-        return;
-      }
-      const next = viewable(raw);
+      const next = new URLSearchParams(location.hash.slice(1)).get("view") ?? "home";
       if (next === view) return;
       // Keep the editor mounted while the user decides whether to leave.
       history.replaceState(null, "", `#${new URLSearchParams({ view })}`);
@@ -163,10 +153,6 @@ function LiveApp() {
     setView(id);
   }
   function navigate(id: string) {
-    if (isElectronDesktop && isManageView(id)) {
-      openDesktopManagement(managePage(id));
-      return;
-    }
     if (id !== view) void guard(() => commitView(id));
   }
   function selectComputer(computer: Computer) {
@@ -190,7 +176,7 @@ function LiveApp() {
   const openConnect = () => void guard(() => setConnect(true));
   return (
     <ConsoleShell
-      view={isDesktop ? view : screenComputerKey(view) ? "screen" : view}
+      view={screenComputerKey(view) ? "screen" : view}
       navigate={navigate}
       connect={openConnect}
       selectComputer={selectComputer}
@@ -222,7 +208,7 @@ function LiveApp() {
         key={state.accountUserId ?? "paired"}
         activeKey={screenComputerKey(view)}
         selectedKey={state.connection?.computer.key}
-        enabled={!state.locked && workspaceVisible}
+        enabled={!state.locked}
       >
         {(computerKey, active) => (
           <ScreenDetail
@@ -250,7 +236,7 @@ function LiveApp() {
             )}
             {isScreenOverview && (
               <Screens
-                live={workspaceVisible}
+                live
                 connect={() => setConnect(true)}
                 open={(computer) => {
                   engine.select(computer);
@@ -273,54 +259,13 @@ function LiveApp() {
                 </Runtime>
               </div>
             ) : !workspaceHidden && (
-              isElectronDesktop && (managementState.starting || (managementState.busy && !managementState.snapshot)) ? (
-                <div className="welcome-live" role="status">
-                  <LoaderCircle className="size-6 animate-spin text-muted-foreground" aria-hidden />
-                  <h1>正在准备{THIS_COMPUTER}…</h1>
-                  <p className="muted">正在连接本机后台服务与会话记录。</p>
-                </div>
-              ) : isElectronDesktop && managementState.snapshot?.status === "stopped" ? (
-                <div className="welcome-live">
-                  <img src={appMark} alt="LinkShell" />
-                  <h1>本机服务已停止</h1>
-                  <p className="muted">
-                    启动{THIS_COMPUTER_SPACED}的后台服务以恢复本地会话、终端与预览，或连接其他电脑。
-                  </p>
-                  <div className="flex flex-wrap items-center justify-center gap-2">
-                    <Button
-                      variant="default"
-                      disabled={managementState.busy}
-                      onClick={() => void serviceAction("start")}
-                    >
-                      {managementState.busy ? "正在启动…" : "启动本机服务"}
-                    </Button>
-                    <Button variant="secondary" disabled={!state.ready} onClick={() => setConnect(true)}>
-                      连接其他电脑
-                    </Button>
-                  </div>
-                  <Button variant="ghost" size="sm" onClick={() => openDesktopManagement()}>
-                    设置与本机服务
-                  </Button>
-                  {state.computers.map((computer) => (
-                    <Button
-                      variant="outline"
-                      key={computer.key}
-                      onClick={() => engine.select(computer)}
-                    >
-                      {computerOption(computer, names)}
-                    </Button>
-                  ))}
-                </div>
-              ) : (
                 <div className="welcome-live">
                   <img src={appMark} alt="LinkShell" />
                   <h1>连接你的电脑</h1>
                   <p className="muted">
-                    {isDesktop
-                      ? `在${THIS_COMPUTER_SPACED}上，继续每一台电脑的工作。`
-                      : "会话在电脑上运行，网页让你继续对话、审批和操作。"}
+                    会话在电脑上运行，网页让你继续对话、审批和操作。
                   </p>
-                  {!isDesktop && <pre>npm i -g linkshell-cli{"\n"}linkshell host --daemon</pre>}
+                  <pre>npm i -g linkshell-cli{"\n"}linkshell host --daemon</pre>
                   <Button
                     variant="default"
                     disabled={!state.ready}
@@ -332,17 +277,10 @@ function LiveApp() {
                         : "连接电脑"
                       : "正在准备设备身份…"}
                   </Button>
-                  {isDesktop && (
-                    <Button variant="ghost" onClick={() => openDesktopManagement()}>
-                      设置与本机服务
-                    </Button>
-                  )}
                   <p className="muted">
                     {deployment === "self-hosted"
                       ? "运行 linkshell pair，输入此网关的配对码即可连接。"
-                      : isDesktop
-                        ? "登录已有账号发现其他电脑，或使用配对码添加。"
-                        : "官方服务使用 iTool 账号，自托管使用自己的网关与配对码。"}
+                      : "官方服务使用 iTool 账号，自托管使用自己的网关与配对码。"}
                   </p>
                   {state.computers.map((computer) => (
                     <Button
@@ -354,7 +292,6 @@ function LiveApp() {
                     </Button>
                   ))}
                 </div>
-              )
             )}
           </>
         )}
@@ -380,32 +317,15 @@ function Workspace({
 }) {
   const state = useClient((state) => state);
   const { link } = useConnection();
-  useNewSessionTarget();
-  // Asked for from 本机管理 or the remote screen, before this workspace was showing to hear it.
-  const [create, setCreate] = useState<string | null | undefined>(() => {
-    const waiting = isDesktop ? takeDeferredNewSession() : undefined;
-    return waiting ? waiting.cwd ?? null : undefined;
-  });
-  useEffect(() => {
-    if (!active || !isDesktop) return;
-    const waiting = takeDeferredNewSession();
-    if (waiting) setCreate(waiting.cwd ?? null);
-  }, [active]);
+  const [create, setCreate] = useState<string | null | undefined>();
   const [terminal, setTerminal] = useState<string>();
   const [filesStart, setFilesStart] = useState<string>();
   const session = state.sessions[view];
   const engineState = useStore(engine.state);
   const names = useStore(computerNames.store);
-  useDesktopCommand((command) => {
-    // The desktop's new-session page also opens while offline: the draft waits for the computer.
-    if (command.command === "new-session" && (isDesktop || state.status === "online")) setCreate(command.cwd ?? null);
+  useWorkspaceCommand((command) => {
+    if (command.command === "new-session" && state.status === "online") setCreate(command.cwd ?? null);
   });
-  // Going anywhere else leaves the new-session page.
-  const [shownView, setShownView] = useState(view);
-  if (shownView !== view) {
-    setShownView(view);
-    if (isDesktop) setCreate(undefined);
-  }
   if (state.status === "locked") {
     const computer = engineState.connection?.computer;
     return <AccessUnlock name={computer ? computerName(computer, names) : "这台电脑"} />;
@@ -424,17 +344,7 @@ function Workspace({
           </Button>
         </div>
       )}
-      {isDesktop && create !== undefined ? (
-        <NewSessionPage
-          key={create ?? ""}
-          initialDirectory={create ?? undefined}
-          cancel={() => setCreate(undefined)}
-          created={(session) => {
-            setCreate(undefined);
-            navigate(session.id);
-          }}
-        />
-      ) : session ? (
+      {session ? (
         <Session key={session.id} session={session} navigate={navigate} active={active} />
       ) : (
         <div className="overview live-overview">
@@ -454,13 +364,12 @@ function Workspace({
             />
           )}
           {view === "computers" && (
-            <Computers connect={connect} selectComputer={selectComputer} navigate={navigate} />
+            <Computers connect={connect} selectComputer={selectComputer} />
           )}
           {view === "files" && (
             <>
-              {/* On the desktop the browser's own toolbar is the page's: where you are and what to do. */}
-              {!isDesktop && <PageHeader title="文件" />}
-              <Files key={filesStart ?? "default"} page start={filesStart} />
+              <PageHeader title="文件" />
+              <Files key={filesStart ?? "default"} start={filesStart} />
             </>
           )}
           {view === "terminals" && (
@@ -500,29 +409,26 @@ function Workspace({
           )}
         </div>
       )}
-      {!isDesktop && create !== undefined && (
-        <NewSession
-          initialDirectory={create ?? undefined}
-          close={() => setCreate(undefined)}
-          created={(session) => {
-            setCreate(undefined);
-            navigate(session.id);
-          }}
-        />
-      )}
-    </>
-  );
-}
-function SessionTable({
-  sessions,
-  navigate,
-  group,
-}: {
-  sessions: SessionSummary[];
-  navigate: (id: string) => void;
-  /** The group the rows are under: a row doesn't repeat what its heading says. */
-  group?: string;
-}) {
+          {create !== undefined && (
+            <NewSession
+              initialDirectory={create ?? undefined}
+              close={() => setCreate(undefined)}
+              created={(session) => {
+                setCreate(undefined);
+                navigate(session.id);
+              }}
+            />
+          )}
+        </>
+      );
+    }
+    function SessionTable({
+      sessions,
+      navigate,
+    }: {
+      sessions: SessionSummary[];
+      navigate: (id: string) => void;
+    }) {
   const [permissionId, setPermissionId] = useState<string>();
   const permissionSession = sessions.find(
     (session) => session.id === permissionId && session.permission,
@@ -548,7 +454,7 @@ function SessionTable({
                 navigate(session.id);
               }}
             >
-              <span title={session.agent} className="flex shrink-0">
+              <span title={agentLabel(session.agent)} className="flex shrink-0">
                 <AgentMark agent={session.agent} />
               </span>
               {/* The project follows the title, so every preview has the row's whole width to run in. */}
@@ -571,12 +477,9 @@ function SessionTable({
               </span>
               <span className="list-row-detail">{sessionPreview(session)}</span>
               <span className="list-row-status">
-                {/* An idle session is the normal state, not news, and a row under 运行中 or 等你处理
-                    is already said to be: on the desktop only the others say so. */}
                 {(() => {
                   const status = sessionNeedsAttention(session) ? "waiting" : session.state;
-                  const said = status === "idle" || (group === "running" && status === "running") || (group === "waiting" && status === "waiting");
-                  return !isDesktop || !said ? <StatusText state={status} label={status === "waiting" ? waitingLabel(session) : undefined} /> : null;
+                  return <StatusText state={status} label={status === "waiting" ? waitingLabel(session) : undefined} />;
                 })()}
               </span>
               {session.permission && (
@@ -702,7 +605,7 @@ function Home({
   );
   const refreshButton = (
     <Button
-      variant={isDesktop ? "ghost" : "outline"}
+      variant="outline"
       size="icon"
       className="list-refresh"
       aria-label="刷新会话列表"
@@ -741,18 +644,7 @@ function Home({
   );
   return (
     <section className="session-overview flex min-w-0 flex-col gap-4">
-      {isDesktop && (
-        <OverviewHeading
-          archived={archived}
-          sessions={Object.values(state.sessions).filter((session) => !session.archived)}
-          more={state.sessionsNextBefore !== undefined}
-          online={state.status === "online"}
-          create={create}
-          navigate={navigate}
-          search={searchField}
-        />
-      )}
-      {!isDesktop && <div className="session-overview-heading flex items-center justify-between gap-4">
+      <div className="session-overview-heading flex items-center justify-between gap-4">
         <div className="min-w-0">
           <h1 className="text-xl font-semibold">
             {archived ? "已归档会话" : "会话概览"}
@@ -774,11 +666,10 @@ function Home({
           <Icon name="plus" />
           新建会话
         </Button>
-      </div>}
+      </div>
       {/* An empty archive has nothing to sort: its empty state is the page. */}
-      {/* The desktop's archive has one group: its sort and refresh sit in that group's heading. */}
-      <div className="session-overview-filters flex flex-wrap items-center justify-between gap-3" hidden={isDesktop && archived}>
-        <Tabs value={filter} onValueChange={setFilter} hidden={archived && isDesktop}>
+      <div className="session-overview-filters flex flex-wrap items-center justify-between gap-3">
+        <Tabs value={filter} onValueChange={setFilter}>
           <TabsList variant="line" aria-label="筛选会话">
             {[
               { id: "all", name: "全部会话" },
@@ -789,8 +680,7 @@ function Home({
             ].map((item) => (
               <TabsTrigger key={item.id} value={item.id}>
                 {item.name}
-                {/* On the desktop the groups below are counted; the filters only filter. */}
-                {!isDesktop && !archived && counts[item.id] !== undefined && (
+                {!archived && counts[item.id] !== undefined && (
                   <span className="text-[var(--tertiaryLabel)] tabular-nums">
                     {counts[item.id]}
                   </span>
@@ -800,10 +690,9 @@ function Home({
           </TabsList>
         </Tabs>
         <div className="session-overview-tools flex min-w-0 flex-1 items-center justify-end gap-2 max-sm:w-full max-sm:flex-none">
-          {!isDesktop && searchField}
+          {searchField}
           {sortChoice}
-          {/* The live list follows the computer by itself; only the archive is read on request. */}
-          {!isDesktop && refreshButton}
+          {refreshButton}
         </div>
       </div>
       <ErrorNotice error={loadError ?? job.error} />
@@ -840,32 +729,18 @@ function Home({
           </Button>
         </div>
       )}
-      {(isDesktop && archived ? ["archived"] : ["waiting", "running", "recent"]).map((group) => {
-        const shown = group === "archived"
-          ? sessions
-          : sessions.filter((session) => sessionGroup(session) === group);
-        // Older records are recent ones: while the computer has more, that count is a floor.
-        const floor = nextBefore !== undefined && (group === "recent" || group === "archived");
-        const heading = (
-          <h2 className="list-section-title">
-            {({ waiting: "等你处理", running: "运行中", recent: "最近会话", archived: "已归档" } as Record<string, string>)[group]}
-            <span className="font-normal text-[var(--tertiaryLabel)]">
-              {shown.length}{floor ? "+" : ""}
-            </span>
-          </h2>
-        );
+      {(["waiting", "running", "recent"] as const).map((group) => {
+        const shown = sessions.filter((session) => sessionGroup(session) === group);
+        const floor = nextBefore !== undefined && group === "recent";
         return shown.length ? (
           <div className="session-group" data-session-group={group} key={group}>
-            {group === "archived" ? (
-              <div className="list-section-heading">
-                {heading}
-                <div className="list-section-actions">
-                  {sortChoice}
-                  {refreshButton}
-                </div>
-              </div>
-            ) : heading}
-            <SessionTable sessions={shown} navigate={navigate} group={group} />
+            <h2 className="list-section-title">
+              {({ waiting: "等你处理", running: "运行中", recent: "最近会话" })[group]}
+              <span className="font-normal text-[var(--tertiaryLabel)]">
+                {shown.length}{floor ? "+" : ""}
+              </span>
+            </h2>
+            <SessionTable sessions={shown} navigate={navigate} />
           </div>
         ) : null;
       })}
@@ -915,15 +790,14 @@ function Home({
             >
               {job.busy ? "正在加载…" : "加载更早的会话"}
             </Button>
-          ) : !isDesktop ? (
+          ) : (
             <Button variant="outline" onClick={() => navigate("home")}>
               返回会话概览
             </Button>
-          ) : null}
+          )}
         </EmptyState>
       )}
       {nextBefore !== undefined && !(loaded && !loadError && !sessions.length && archived && !query && filter === "all") && (
-        // On the desktop the way on is a quiet button under the list, not a row that reads as one.
         <LoadMore
           disabled={job.busy || archive.loading || state.status !== "online"}
           onClick={() =>
@@ -1301,11 +1175,9 @@ function NewSession({
 function Computers({
   connect,
   selectComputer,
-  navigate,
 }: {
   connect: () => void;
   selectComputer: (computer: Computer) => void;
-  navigate: (view: string) => void;
 }) {
   const dialogs = useDialogs();
   const state = useStore(engine.state);
@@ -1315,7 +1187,6 @@ function Computers({
   const { link } = useConnection();
   const job = useJob();
   const gateway = useLoad(() => link.call("gateway.status", {}), [link], 10000);
-  // A section's title and its line of why sit above its box, as 本机管理's groups do.
   const section = (title: string, hint: string | undefined, rows: ReactNode) => (
     <section className="computers-group" aria-label={title}>
       <div className="computers-section-heading px-3 pb-2">
@@ -1329,26 +1200,18 @@ function Computers({
   );
   return (
     <section className="computers-page flex min-w-0 flex-col gap-6">
-      {isDesktop ? (
-        <PageHeader
-          title="电脑与 Agent"
-          detail={`${state.computers.length} 台电脑`}
-          actions={<Button size="sm" onClick={connect}><Icon name="plus" data-icon="inline-start" />连接电脑</Button>}
-        />
-      ) : (
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-semibold">电脑</h1>
-            <p className="mt-1 text-[13px] text-[var(--secondaryLabel)]">
-              管理已连接的电脑、Agent 和配对设备。
-            </p>
-          </div>
-          <Button onClick={connect}>
-            <Icon name="plus" data-icon="inline-start" />
-            添加电脑
-          </Button>
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-semibold">电脑</h1>
+          <p className="mt-1 text-[13px] text-[var(--secondaryLabel)]">
+            管理已连接的电脑、Agent 和配对设备。
+          </p>
         </div>
-      )}
+        <Button onClick={connect}>
+          <Icon name="plus" data-icon="inline-start" />
+          添加电脑
+        </Button>
+      </div>
       <ErrorNotice error={job.error} />
       {section("已连接的电脑", "切换电脑后，文件、终端和会话会随之切换。", <>
         {state.computers.map((computer) => {
@@ -1363,8 +1226,6 @@ function Computers({
                 >
                   <span className="truncate">{computerName(computer, names)}</span>
                   <LockMark locked={computer.machine.locked} />
-                  {/* On the desktop renaming is a pencil beside the name it changes, shown on hover. */}
-                  {isDesktop && <ComputerName computer={computer} iconOnly />}
                 </div>
                 <div
                   className="truncate text-xs text-[var(--tertiaryLabel)]"
@@ -1380,20 +1241,16 @@ function Computers({
                 label={computer.machine.online ? "在线" : "离线"}
               />
               <div className="flex shrink-0 items-center gap-1">
-                {!isDesktop && <ComputerName computer={computer} />}
-                {current && isDesktop ? (
-                  <span className="computer-current">当前</span>
-                ) : (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={current}
-                    onClick={() => selectComputer(computer)}
-                  >
-                    {current ? "当前电脑" : "切换"}
-                  </Button>
-                )}
-                {computer.key !== "desktop:local" && <Button
+                <ComputerName computer={computer} />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={current}
+                  onClick={() => selectComputer(computer)}
+                >
+                  {current ? "当前电脑" : "切换"}
+                </Button>
+                <Button
                   variant="ghost"
                   size="sm"
                   disabled={job.busy}
@@ -1407,16 +1264,12 @@ function Computers({
                   }}
                 >
                   移除
-                </Button>}
+                </Button>
               </div>
             </div>
           );
         })}
       </>)}
-      {state.connection?.computer.key === "desktop:local" && (
-        // The app shows this Mac's password beside its devices, as links to 本机管理.
-        isElectronDesktop ? null : section("这台电脑的访问密码", "设置后，其他设备打开这台电脑前要先输入密码。可以随时修改或移除。", <AccessPasswordSettings />)
-      )}
       {section("当前电脑的 Agent", `${machine?.hostname ?? ""} · ${machine?.platform ?? ""} · Host ${machine?.hostVersion ?? ""}${machine && (machine.protocol ?? 0) < HOST_PROTOCOL ? "（比这个界面旧，部分新功能暂时用不了：请更新电脑上的 LinkShell）" : ""}`, <>
         {!machine && <LoadState loading />}
         {machine?.agents.map((agent) => {
@@ -1429,11 +1282,12 @@ function Computers({
               : agent.auth?.state === "missing"
                 ? "需要登录"
                 : "登录状态未知";
+          const displayLabel = agentLabel(agent.id, agent.label);
           return (
             <div className="list-row list-row-static computer-agent-row" data-installed={agent.installed || undefined} key={agent.id}>
               <AgentMark agent={agent.id} />
               <span className="computer-agent-name">
-                <span className="computer-agent-label" title={agent.label}>{agent.label}</span>
+                <span className="computer-agent-label" title={displayLabel}>{displayLabel}</span>
                 {agent.installed && (
                   <span className="computer-agent-version" title={agent.version}>{agent.version ?? "已安装"}</span>
                 )}
@@ -1450,25 +1304,7 @@ function Computers({
           );
         })}
       </>)}
-      {isElectronDesktop && state.connection?.computer.key === "desktop:local" ? (
-        // This Mac's phones and password have their own pages (本机管理 → 设备 / 访问密码): here their
-        // state and the way there.
-        section(`${THIS_COMPUTER_SPACED}的访问`, undefined, <>
-          <AccessPasswordSummary open={() => navigate(manageView("password"))} />
-          <div className="list-row list-row-static">
-            {/* The same mark as the password row above, so the two labels line up. */}
-            <span className="access-settings-mark" aria-hidden><MonitorSmartphone size={16} /></span>
-            <div className="min-w-0 flex-1">
-              <div className="font-medium">配对设备</div>
-              <p className="text-xs text-[var(--tertiaryLabel)]">
-                {gateway.value ? `${gateway.value.devices.length} 台设备` : "正在读取…"}
-              </p>
-            </div>
-            <Button variant="secondary" size="sm" onClick={() => navigate(manageView("devices"))}>管理</Button>
-          </div>
-        </>)
-      ) : (
-        section("配对设备", "撤销后，该设备需要重新配对才能连接。", <>
+      {section("配对设备", "撤销后，该设备需要重新配对才能连接。", <>
         <LoadState {...gateway} />
         {gateway.error && (
           <Button
@@ -1514,61 +1350,8 @@ function Computers({
             </Button>
           </div>
         ))}
-      </>)
-      )}
+      </>)}
       <AcpManager />
     </section>
-  );
-}
-
-/** The desktop list's title row: the noun, then the one finding computed from the rows. */
-function OverviewHeading({
-  archived,
-  sessions,
-  more,
-  online,
-  create,
-  navigate,
-  search,
-}: {
-  archived: boolean;
-  sessions: SessionSummary[];
-  /** The computer has older sessions than those read so far. */
-  more: boolean;
-  online: boolean;
-  create: () => void;
-  navigate: (id: string) => void;
-  search: ReactNode;
-}) {
-  const startOfDay = new Date();
-  startOfDay.setHours(0, 0, 0, 0);
-  const today = sessions.filter((session) => session.updatedAt >= startOfDay.getTime()).length;
-  // Only what is so, and said once: what waits on you and what runs head their own groups below;
-  // the computer is named in the sidebar; an empty count says nothing; a count of what has been
-  // read so far, while the computer has more, is a floor.
-  const facts = [
-    sessions.length ? `${sessions.length}${more ? "+" : ""} 个会话` : undefined,
-    today ? `今天更新 ${today} 个` : undefined,
-  ].filter(Boolean);
-  return (
-    <PageHeader
-      title={archived ? "已归档会话" : "会话"}
-      detail={archived
-        ? "不在侧栏显示，记录仍在电脑上"
-        : <>{facts.map((fact, index) => <span key={index}>{fact}</span>)}</>}
-      actions={<>
-        {search}
-        <Button variant="ghost" size="sm" onClick={() => navigate(archived ? "home" : "archive")}>
-          {archived ? <ArrowLeft data-icon="inline-start" /> : <Archive data-icon="inline-start" />}
-          {archived ? "返回会话" : "已归档"}
-        </Button>
-        {!archived && (
-          <Button variant="default" size="sm" disabled={!online} onClick={create}>
-            <Icon name="plus" />
-            新建会话
-          </Button>
-        )}
-      </>}
-    />
   );
 }

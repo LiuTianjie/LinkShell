@@ -23,7 +23,7 @@ a > .external-link-icon {
     height: 18px;
     overflow: hidden;
     border-radius: var(--radius-small);
-    background: var(--inset);
+    background: var(--agent-mark-bg-light, var(--inset));
     box-shadow: inset 0 0 0 1px var(--separator);
   }
 .agent-mark[data-size="md"] {
@@ -35,8 +35,31 @@ a > .external-link-icon {
     width: 66%;
     height: 66%;
   }
+.agent-mark-dark {
+    display: none;
+  }
+:root[data-theme="dark"] .agent-mark {
+    background: var(--agent-mark-bg-dark, var(--agent-mark-bg-light, var(--inset)));
+  }
+:root[data-theme="dark"] .agent-mark-light {
+    display: none;
+  }
+:root[data-theme="dark"] .agent-mark-dark {
+    display: block;
+  }
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .agent-mark {
+      background: var(--agent-mark-bg-dark, var(--agent-mark-bg-light, var(--inset)));
+    }
+    :root:not([data-theme="light"]) .agent-mark-light {
+      display: none;
+    }
+    :root:not([data-theme="light"]) .agent-mark-dark {
+      display: block;
+    }
+  }
 .agent-mark.full-mark {
-    background: transparent;
+    background: transparent !important;
   }
 .agent-mark.full-mark img {
     width: 100%;

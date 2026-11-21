@@ -1,5 +1,6 @@
 import AppKit
 import CoreGraphics
+import CoreMedia
 import Foundation
 import WebRTC
 
@@ -19,6 +20,8 @@ struct ScreenRequest {
   let relayKbps: Int?
   /// The viewer's own screen, when it wants this Mac's desktop at that resolution (`ScreenMatch`).
   let match: ScreenMatch.Wanted?
+  let audio: Bool
+  let excludesCurrentProcessAudio: Bool
 
   init(viewer: String, _ message: [String: Any]) {
     self.viewer = viewer
@@ -36,6 +39,8 @@ struct ScreenRequest {
     maxFps = [30, 60, 120].contains(ceiling) ? ceiling : Tuning.fullFps
     codec = (message["codec"] as? String) == "hevc" ? "hevc" : "h264"
     match = ScreenMatch.Wanted(message["match"])
+    audio = (message["audio"] as? Bool) ?? false
+    excludesCurrentProcessAudio = (message["excludesCurrentProcessAudio"] as? Bool) ?? false
   }
 }
 
@@ -87,7 +92,15 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
   private var capturer: ScreenCapturer?
   private var cursor: RTCDataChannel?
   private var shape: RTCDataChannel?
+  private var audioChannel: RTCDataChannel?
   private var channels: [RTCDataChannel] = []
+  private let audioSendLock = NSLock()
+  private var _audioSendingEnabled = false
+  private var _audioChannelLocked: RTCDataChannel?
+  private var _audioEncoderLocked: ScreenAudioEncoder?
+  private var audioEncoder: ScreenAudioEncoder?
+  private var audioEnabled: Bool
+  private var excludesCurrentProcessAudio: Bool
   /// Messages that came up each channel, for the numbers.
   private var heard: [String: Int] = [:]
   private var control: Control?
@@ -158,6 +171,8 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
     self.link = link
     viewer = request.viewer
     frameRate = request.fps ?? Tuning.fullFps
+    audioEnabled = request.audio
+    excludesCurrentProcessAudio = request.excludesCurrentProcessAudio
   }
 
   // MARK: Life
@@ -269,12 +284,18 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
     let lossy = RTCDataChannelConfiguration()
     lossy.isOrdered = false
     lossy.maxRetransmits = 0
-    for (label, delivery) in [("input", reliable), ("pointer", lossy), ("cursor", lossy), ("shape", reliable)] {
+    for (label, delivery) in [("input", reliable), ("pointer", lossy), ("cursor", lossy), ("shape", reliable), ("audio", lossy)] {
       guard let channel = connection.dataChannel(forLabel: label, configuration: delivery) else { continue }
       channel.delegate = self
       channels.append(channel)
       if label == "cursor" { cursor = channel }
       if label == "shape" { shape = channel }
+      if label == "audio" {
+        audioChannel = channel
+        audioSendLock.lock()
+        _audioChannelLocked = channel
+        audioSendLock.unlock()
+      }
     }
 
     if options.clock, let screen = display.screen {
@@ -307,7 +328,15 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
       }
     }
     let rate = steps.map { "\($0.full) fps, \($0.reduced) while that is not carried" } ?? "\(frameRate) fps"
-    capturer.start(display: display, width: size.width, height: size.height, fps: frameRate) { [weak self] error in
+    if audioEnabled { attachAudio(to: capturer) }
+    capturer.start(
+      display: display,
+      width: size.width,
+      height: size.height,
+      fps: frameRate,
+      audio: audioEnabled,
+      excludesCurrentProcessAudio: excludesCurrentProcessAudio
+    ) { [weak self] error in
       DispatchQueue.main.async {
         guard let self, !self.closed, self.capturer === capturer, !self.configurations.busy else { return }
         if let error { return self.fail("the screen could not be captured: \(error)") }
@@ -337,6 +366,13 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
     restartTimer = nil
     // The viewer left: nothing stays pressed.
     control?.releaseAll()
+    audioSendLock.lock()
+    _audioSendingEnabled = false
+    _audioChannelLocked = nil
+    _audioEncoderLocked = nil
+    audioSendLock.unlock()
+    audioEncoder?.onPacket = nil
+    audioEncoder = nil
     capturer?.stop()
     source = nil
     strip?.hide()
@@ -349,10 +385,80 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
     channels.removeAll()
     cursor = nil
     shape = nil
+    audioChannel = nil
     transceiver = nil
     capturer = nil
     loopback = nil
     peerFactory = nil
+  }
+
+  /// Dynamically toggles system audio capture and `"audio"` DataChannel transmission without recreating the PeerConnection.
+  func setAudio(_ enabled: Bool, excludesCurrentProcessAudio: Bool? = nil) {
+    guard !closed else { return }
+    audioEnabled = enabled
+    if let excludesCurrentProcessAudio {
+      self.excludesCurrentProcessAudio = excludesCurrentProcessAudio
+    }
+    if enabled {
+      if let capturer { attachAudio(to: capturer) }
+      else {
+        audioSendLock.lock()
+        _audioSendingEnabled = true
+        audioSendLock.unlock()
+      }
+    } else {
+      audioSendLock.lock()
+      _audioSendingEnabled = false
+      _audioEncoderLocked?.reset()
+      audioSendLock.unlock()
+    }
+    capturer?.setAudio(enabled, excludesCurrentProcessAudio: self.excludesCurrentProcessAudio) { [weak self] error in
+      if let error {
+        DispatchQueue.main.async {
+          self?.link.log("audio toggle failed: \(error)")
+        }
+      }
+    }
+  }
+
+  private func attachAudio(to capturer: ScreenCapturer) {
+    let encoder: ScreenAudioEncoder
+    if let existing = audioEncoder {
+      existing.reset()
+      encoder = existing
+    } else {
+      encoder = ScreenAudioEncoder(preferOpus: true)
+      audioEncoder = encoder
+    }
+    encoder.onPacket = { [weak self] packet in
+      self?.sendAudioPacket(packet)
+    }
+    audioSendLock.lock()
+    _audioEncoderLocked = encoder
+    _audioSendingEnabled = true
+    audioSendLock.unlock()
+    capturer.onAudio = { [weak self] sampleBuffer in
+      self?.handleCapturedAudio(sampleBuffer)
+    }
+  }
+
+  private func handleCapturedAudio(_ sampleBuffer: CMSampleBuffer) {
+    audioSendLock.lock()
+    let active = _audioSendingEnabled
+    let encoder = _audioEncoderLocked
+    audioSendLock.unlock()
+    guard active, let encoder else { return }
+    encoder.append(sampleBuffer: sampleBuffer)
+  }
+
+  private func sendAudioPacket(_ packet: Data) {
+    audioSendLock.lock()
+    let active = _audioSendingEnabled
+    let channel = _audioChannelLocked
+    audioSendLock.unlock()
+    guard active, let channel, channel.readyState == .open else { return }
+    guard channel.bufferedAmount < 262_144 else { return }
+    channel.sendData(RTCDataBuffer(data: packet, isBinary: true))
   }
 
   /// Replaces only the capture. The negotiated track, channels and ICE path remain in place.
@@ -391,6 +497,7 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
     capturer = nil
     previous?.onStop = nil
     previous?.onPicture = nil
+    previous?.onAudio = nil
     strip?.hide(); strip = nil
     motion?.hide(); motion = nil
     stripCheck = nil
@@ -460,7 +567,21 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
         else { self.fail("the capture stopped: \(reason)") }
       }
     }
-    capturer.start(display: display, width: size.width, height: size.height, fps: frameRate) { [weak self, weak capturer] error in
+    if audioEnabled {
+      attachAudio(to: capturer)
+    } else {
+      audioSendLock.lock()
+      _audioSendingEnabled = false
+      audioSendLock.unlock()
+    }
+    capturer.start(
+      display: display,
+      width: size.width,
+      height: size.height,
+      fps: frameRate,
+      audio: audioEnabled,
+      excludesCurrentProcessAudio: excludesCurrentProcessAudio
+    ) { [weak self, weak capturer] error in
       DispatchQueue.main.async {
         guard let self, let capturer, !self.closed, self.captureGeneration == generation, self.capturer === capturer else { return }
         self.finishConfiguration(work, error: error.map { "屏幕捕获失败：\($0)" })

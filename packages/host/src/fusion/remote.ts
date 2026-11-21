@@ -1,6 +1,16 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { open, stat } from "node:fs/promises";
 import type { Server } from "node:tls";
-import { FUSION_MAX_CLIPBOARD, FUSION_PORT, FUSION_PROTO } from "@linkshell/wire";
+import { tmpdir } from "node:os";
+import { basename, join, resolve, sep } from "node:path";
+import {
+  FUSION_FILE_CLIPBOARD_CHUNK_BYTES,
+  FUSION_MAX_CLIPBOARD,
+  FUSION_MAX_FILE_CLIPBOARD,
+  FUSION_PORT,
+  FUSION_PROTO,
+} from "@linkshell/wire";
 import { FusionNodeMedia, type FusionLayout } from "./media.js";
 import type { FusionClip, FusionPlatform, FusionWindowInfo } from "./platform.js";
 import { listenFusion, type FusionConnection, type FusionMessage } from "./wire.js";
@@ -26,9 +36,41 @@ const APP_EXIT_EXPLICIT_MS = 200;
  * No `keys`: the Windows helper types named keys and text, not physical key codes. `clipboard`
  * where the platform has one to share (text and pictures; no RTF).
  */
-const features = (platform: FusionPlatform): string[] => (platform.setClipboard ? ["clipboard"] : []);
+const features = (platform: FusionPlatform): string[] => (platform.setClipboard ? ["clipboard", "file-clipboard"] : []);
 /** Hardware encoders run only so many sessions at once (consumer NVENC: a handful). */
 const MAX_WINDOW_STREAMS = 6;
+const MAX_CONCURRENT_FILE_TRANSFERS = 4;
+
+interface IncomingClipFile {
+  index: number;
+  name: string;
+  expectedSize: number;
+  path: string;
+  receivedBytes: number;
+  nextSeq: number;
+}
+
+interface IncomingFileTransfer {
+  transferId: string;
+  stageDir: string;
+  files: Map<number, IncomingClipFile>;
+  orderedFiles: IncomingClipFile[];
+  totalExpectedBytes: number;
+  totalReceivedBytes: number;
+  failed: boolean;
+  queue: Promise<void>;
+}
+
+/** Resolves a staged file path strictly under `stageDir/<index>/`, rejecting traversal or control chars. */
+export function resolveSafeClipFilePath(stageDir: string, index: number, rawName: string): string | null {
+  if (!rawName || rawName.length > 255) return null;
+  if (rawName === "." || rawName === "..") return null;
+  if (/[/\\\0]/.test(rawName) || /[\x00-\x1f]/.test(rawName)) return null;
+  const subDir = resolve(stageDir, String(index));
+  const resolved = resolve(subDir, rawName);
+  if (!resolved.startsWith(`${subDir}${sep}`) || basename(resolved) !== rawName) return null;
+  return resolved;
+}
 
 type Rect = { x: number; y: number; w: number; h: number };
 type LocalDisplay = { frame: Rect; visible: Rect; scale: number };
@@ -176,6 +218,12 @@ export class FusionNodeSession {
   private clipboardArmed = false;
   /** The local side said it shares its clipboard (`hello.features`). */
   private localClipboard = false;
+  /** The local side supports chunked file-clipboard (`hello.features`). */
+  private localFileClipboard = false;
+  private readonly incomingFileTransfers = new Map<string, IncomingFileTransfer>();
+  private readonly stagingDirs = new Set<string>();
+  private outgoingFileEpoch = 0;
+  private outgoingFileQueue: Promise<void> = Promise.resolve();
   private media?: FusionNodeMedia;
   private displays: LocalDisplay[] = [];
   private localPlatform = "macos";
@@ -229,6 +277,9 @@ export class FusionNodeSession {
         return;
       }
       case "clip": return this.pasted(m);
+      case "clip.file.start": return this.handleClipFileStart(m);
+      case "clip.file.chunk": return this.handleClipFileChunk(m);
+      case "clip.file.end": return void this.handleClipFileEnd(m);
       case "place": return this.place(m);
       case "wclose.req": {
         const id = Number(m.id);
@@ -286,15 +337,257 @@ export class FusionNodeSession {
 
   /** A fused app copied something. */
   private copied(clip: FusionClip): void {
-    if (!this.clipboardArmed || !this.authenticated || this.ended || !this.localClipboard) return;
-    if (Buffer.byteLength(clip.text ?? "") + (clip.png?.length ?? 0) > FUSION_MAX_CLIPBOARD) return;
-    this.send({ t: "clip", ...(clip.text ? { text: clip.text } : {}), ...(clip.png ? { png: clip.png.toString("base64") } : {}) });
+    if (!this.clipboardArmed || !this.authenticated || this.ended) return;
+    if (this.localClipboard && (clip.text || clip.png)) {
+      if (Buffer.byteLength(clip.text ?? "") + (clip.png?.length ?? 0) <= FUSION_MAX_CLIPBOARD) {
+        this.send({ t: "clip", ...(clip.text ? { text: clip.text } : {}), ...(clip.png ? { png: clip.png.toString("base64") } : {}) });
+      }
+    }
+    if (this.localFileClipboard && clip.files?.length) {
+      const epoch = this.outgoingFileEpoch;
+      const files = [...clip.files];
+      this.outgoingFileQueue = this.outgoingFileQueue
+        .then(() => this.sendFileClipboard(files, epoch))
+        .catch((error) => this.log(`[fusion] file-clipboard send failed: ${error instanceof Error ? error.message : String(error)}`));
+    }
+  }
+
+  private async sendFileClipboard(paths: string[], epoch: number): Promise<void> {
+    if (epoch !== this.outgoingFileEpoch || !this.clipboardArmed || !this.authenticated || this.ended || this.paused) return;
+    const entries: { path: string; index: number; name: string; size: number }[] = [];
+    let totalBytes = 0;
+    for (const filePath of paths.slice(0, 256)) {
+      const info = await stat(filePath).catch(() => null);
+      if (!info || !info.isFile()) continue;
+      if (totalBytes + info.size > FUSION_MAX_FILE_CLIPBOARD) {
+        this.log(`[fusion] skipping outgoing file-clipboard: total bytes exceed ${FUSION_MAX_FILE_CLIPBOARD}`);
+        return;
+      }
+      const name = basename(filePath);
+      if (!name || name.length > 255) continue;
+      entries.push({ path: filePath, index: entries.length, name, size: info.size });
+      totalBytes += info.size;
+    }
+    if (entries.length === 0 || epoch !== this.outgoingFileEpoch || this.ended || this.paused) return;
+
+    const transferId = randomUUID();
+    this.send({
+      t: "clip.file.start",
+      transferId,
+      files: entries.map(({ index, name, size }) => ({ index, name, size })),
+      totalBytes,
+    });
+
+    const chunkBuf = Buffer.allocUnsafe(FUSION_FILE_CLIPBOARD_CHUNK_BYTES);
+    for (const entry of entries) {
+      if (epoch !== this.outgoingFileEpoch || this.ended || this.paused) {
+        this.send({ t: "clip.file.end", transferId, ok: false, error: "aborted" });
+        return;
+      }
+      let handle;
+      try {
+        handle = await open(entry.path, "r");
+        let seq = 0;
+        let offset = 0;
+        while (offset < entry.size) {
+          if (epoch !== this.outgoingFileEpoch || this.ended || this.paused) {
+            this.send({ t: "clip.file.end", transferId, ok: false, error: "aborted" });
+            return;
+          }
+          const toRead = Math.min(FUSION_FILE_CLIPBOARD_CHUNK_BYTES, entry.size - offset);
+          const { bytesRead } = await handle.read(chunkBuf, 0, toRead, offset);
+          if (bytesRead <= 0) break;
+          this.send({
+            t: "clip.file.chunk",
+            transferId,
+            index: entry.index,
+            seq: seq++,
+            data: chunkBuf.subarray(0, bytesRead).toString("base64"),
+          });
+          offset += bytesRead;
+        }
+        if (offset !== entry.size) {
+          this.send({ t: "clip.file.end", transferId, ok: false, error: "file size changed during read" });
+          return;
+        }
+      } catch (error) {
+        this.send({ t: "clip.file.end", transferId, ok: false, error: error instanceof Error ? error.message : String(error) });
+        return;
+      } finally {
+        await handle?.close().catch(() => {});
+      }
+    }
+    this.send({ t: "clip.file.end", transferId, ok: true });
+  }
+
+  private handleClipFileStart(m: FusionMessage): void {
+    if (!this.clipboardArmed || !this.platform.setClipboard) return;
+    const transferId = typeof m.transferId === "string" ? m.transferId : "";
+    const rawFiles = Array.isArray(m.files) ? (m.files as Array<{ index?: unknown; name?: unknown; size?: unknown }>) : null;
+    const totalBytes = typeof m.totalBytes === "number" ? m.totalBytes : -1;
+    if (!transferId || transferId.length > 128 || !rawFiles || rawFiles.length === 0 || rawFiles.length > 256) return;
+    if (!Number.isInteger(totalBytes) || totalBytes < 0 || totalBytes > FUSION_MAX_FILE_CLIPBOARD) {
+      this.send({ t: "clip.file.end", transferId, ok: false, error: "totalBytes exceeds limit" });
+      return;
+    }
+    if (this.incomingFileTransfers.has(transferId) || this.incomingFileTransfers.size >= MAX_CONCURRENT_FILE_TRANSFERS) {
+      this.send({ t: "clip.file.end", transferId, ok: false, error: "transfer busy or duplicate" });
+      return;
+    }
+
+    const stageDir = mkdtempSync(join(tmpdir(), "linkshell-fusion-clip-"));
+    this.stagingDirs.add(stageDir);
+    const files = new Map<number, IncomingClipFile>();
+    const orderedFiles: IncomingClipFile[] = [];
+    let declaredSum = 0;
+
+    for (const raw of rawFiles) {
+      const index = typeof raw?.index === "number" ? raw.index : -1;
+      const name = typeof raw?.name === "string" ? raw.name : "";
+      const size = typeof raw?.size === "number" ? raw.size : -1;
+      if (!Number.isInteger(index) || index < 0 || index >= 256 || files.has(index)) {
+        this.cleanupStageDir(stageDir);
+        this.send({ t: "clip.file.end", transferId, ok: false, error: "invalid file index" });
+        return;
+      }
+      if (!Number.isInteger(size) || size < 0 || size > FUSION_MAX_FILE_CLIPBOARD) {
+        this.cleanupStageDir(stageDir);
+        this.send({ t: "clip.file.end", transferId, ok: false, error: "invalid file size" });
+        return;
+      }
+      declaredSum += size;
+      if (declaredSum > FUSION_MAX_FILE_CLIPBOARD) {
+        this.cleanupStageDir(stageDir);
+        this.send({ t: "clip.file.end", transferId, ok: false, error: "totalBytes exceeds limit" });
+        return;
+      }
+      const safePath = resolveSafeClipFilePath(stageDir, index, name);
+      if (!safePath) {
+        this.cleanupStageDir(stageDir);
+        this.send({ t: "clip.file.end", transferId, ok: false, error: "invalid file name" });
+        return;
+      }
+      mkdirSync(join(stageDir, String(index)), { recursive: true });
+      const entry: IncomingClipFile = { index, name, expectedSize: size, path: safePath, receivedBytes: 0, nextSeq: 0 };
+      files.set(index, entry);
+      orderedFiles.push(entry);
+    }
+
+    if (declaredSum !== totalBytes) {
+      this.cleanupStageDir(stageDir);
+      this.send({ t: "clip.file.end", transferId, ok: false, error: "totalBytes mismatch" });
+      return;
+    }
+
+    const transfer: IncomingFileTransfer = {
+      transferId,
+      stageDir,
+      files,
+      orderedFiles,
+      totalExpectedBytes: totalBytes,
+      totalReceivedBytes: 0,
+      failed: false,
+      queue: Promise.resolve(),
+    };
+    // Pre-create empty files so zero-byte files are valid without waiting for a chunk.
+    transfer.queue = transfer.queue.then(async () => {
+      for (const entry of orderedFiles) {
+        const fh = await open(entry.path, "w");
+        await fh.close();
+      }
+    }).catch(() => { transfer.failed = true; });
+    this.incomingFileTransfers.set(transferId, transfer);
+  }
+
+  private handleClipFileChunk(m: FusionMessage): void {
+    const transferId = typeof m.transferId === "string" ? m.transferId : "";
+    const transfer = this.incomingFileTransfers.get(transferId);
+    if (!transfer || transfer.failed) return;
+    const index = typeof m.index === "number" ? m.index : -1;
+    const seq = typeof m.seq === "number" ? m.seq : -1;
+    const data = typeof m.data === "string" ? m.data : "";
+    const entry = transfer.files.get(index);
+    if (!entry || seq !== entry.nextSeq) {
+      this.failIncomingTransfer(transfer, "invalid chunk sequence");
+      return;
+    }
+    const chunk = Buffer.from(data, "base64");
+    if (
+      chunk.length > FUSION_FILE_CLIPBOARD_CHUNK_BYTES ||
+      entry.receivedBytes + chunk.length > entry.expectedSize ||
+      transfer.totalReceivedBytes + chunk.length > FUSION_MAX_FILE_CLIPBOARD
+    ) {
+      this.failIncomingTransfer(transfer, "chunk exceeds size limit");
+      return;
+    }
+    entry.nextSeq += 1;
+    entry.receivedBytes += chunk.length;
+    transfer.totalReceivedBytes += chunk.length;
+    transfer.queue = transfer.queue.then(async () => {
+      if (transfer.failed || this.ended) return;
+      const fh = await open(entry.path, "a");
+      try {
+        await fh.write(chunk, 0, chunk.length);
+      } finally {
+        await fh.close();
+      }
+    }).catch(() => { transfer.failed = true; });
+  }
+
+  private async handleClipFileEnd(m: FusionMessage): Promise<void> {
+    const transferId = typeof m.transferId === "string" ? m.transferId : "";
+    const transfer = this.incomingFileTransfers.get(transferId);
+    if (!transfer) return;
+    this.incomingFileTransfers.delete(transferId);
+    await transfer.queue.catch(() => {});
+
+    const allMatched = transfer.orderedFiles.every((entry) => entry.receivedBytes === entry.expectedSize)
+      && transfer.totalReceivedBytes === transfer.totalExpectedBytes;
+    if (m.ok !== true || transfer.failed || !allMatched || this.ended || !this.clipboardArmed) {
+      this.cleanupStageDir(transfer.stageDir);
+      return;
+    }
+    // Remove superseded completed staging dirs before handing over the new batch.
+    const activeDirs = new Set([...this.incomingFileTransfers.values()].map((t) => t.stageDir));
+    for (const dir of [...this.stagingDirs]) {
+      if (dir !== transfer.stageDir && !activeDirs.has(dir)) this.cleanupStageDir(dir);
+    }
+    this.platform.setClipboard?.({ files: transfer.orderedFiles.map((entry) => entry.path) });
+  }
+
+  private failIncomingTransfer(transfer: IncomingFileTransfer, reason: string): void {
+    transfer.failed = true;
+    this.incomingFileTransfers.delete(transfer.transferId);
+    void transfer.queue.finally(() => this.cleanupStageDir(transfer.stageDir));
+    this.send({ t: "clip.file.end", transferId: transfer.transferId, ok: false, error: reason });
+  }
+
+  private abortAllIncomingTransfers(): void {
+    for (const transfer of this.incomingFileTransfers.values()) {
+      transfer.failed = true;
+      void transfer.queue.finally(() => this.cleanupStageDir(transfer.stageDir));
+    }
+    this.incomingFileTransfers.clear();
+  }
+
+  private cleanupStageDir(dir: string): void {
+    this.stagingDirs.delete(dir);
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // Best-effort temp cleanup.
+    }
+  }
+
+  private cleanupAllStagingDirs(): void {
+    for (const dir of [...this.stagingDirs]) this.cleanupStageDir(dir);
   }
 
   private adopt(m: FusionMessage): void {
     this.displays = Array.isArray(m.displays) ? (m.displays as LocalDisplay[]) : [];
     this.localPlatform = m.platform === "windows" ? "windows" : "macos";
     this.localClipboard = Array.isArray(m.features) && m.features.includes("clipboard");
+    this.localFileClipboard = Array.isArray(m.features) && m.features.includes("file-clipboard");
   }
 
   private welcome(resumed: boolean): void {
@@ -555,6 +848,8 @@ export class FusionNodeSession {
   /** The connection dropped without a `bye`: pictures stop, windows stay, for a while. */
   suspend(onExpired: () => void): void {
     this.paused = true;
+    this.outgoingFileEpoch += 1;
+    this.abortAllIncomingTransfers();
     this.clearAllExitTimers();
     this.media?.end();
     this.media = undefined;
@@ -568,6 +863,8 @@ export class FusionNodeSession {
     this.connection.onClose = undefined;
     this.connection.close("replaced");
     this.paused = true;
+    this.outgoingFileEpoch += 1;
+    this.abortAllIncomingTransfers();
     this.clearAllExitTimers();
     this.media?.end();
     this.media = undefined;
@@ -602,6 +899,9 @@ export class FusionNodeSession {
   end(): void {
     if (this.ended) return;
     this.ended = true;
+    this.outgoingFileEpoch += 1;
+    this.abortAllIncomingTransfers();
+    this.cleanupAllStagingDirs();
     clearTimeout(this.grace);
     this.clearAllExitTimers();
     this.media?.end();

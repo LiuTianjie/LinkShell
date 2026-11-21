@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
-  AppWindowMac,
   ArrowLeft,
   Check,
   ChevronDown,
@@ -15,6 +14,10 @@ import {
   MousePointerClick,
   RotateCw,
   SlidersHorizontal,
+  Upload,
+  Volume2,
+  VolumeX,
+  X,
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import {
@@ -29,13 +32,13 @@ import {
 } from "../components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
 import { cn } from "../lib/utils";
-import { ErrorNotice, useClient, useConnection, useJob, useLoad } from "./common";
-import { DESKTOP_FULLSCREEN_EVENT, DESKTOP_LOCAL, isWindowsDesktop, reportDesktopError, setDesktopScreenFullScreen, setDesktopScreenKeys } from "./desktop";
-import { canUseFusionMode, startComputerFusion } from "./fusion";
-import { useDesktopVisibility } from "./desktop-visibility";
+import { ErrorNotice, messageOf, useClient, useConnection, useJob, useLoad } from "./common";
+import { MAX_ATTACHMENT_LABEL } from "./attachments";
+import { supportsScreenAudio } from "./screen-audio";
+import { formatScreenUploadSummary, uploadScreenFiles, type ScreenUploadProgress } from "./screen-upload";
 import { readLocal, saveLocal } from "./storage";
 import { ScreenConnectionLoading } from "./ScreenConnectionLoading";
-import { askFullscreen, fullscreenShown, idleFullscreen, shouldRevealFullscreenBar, windowFullscreen, type FullscreenState } from "./screen-fullscreen";
+import { askFullscreen, fullscreenShown, idleFullscreen, shouldRevealFullscreenBar, type FullscreenState } from "./screen-fullscreen";
 import {
   chosenScreenWidth,
   fittedRect,
@@ -55,9 +58,6 @@ import { ScreenReceiver, type ReceiverState } from "./screen-receiver";
 import { ScreenToolsMenu } from "./Video";
 import "../styles/remote-screen.css";
 import { remoteShortcuts, shortcutSign, type RemoteShortcut } from "./screen-shortcuts";
-
-/** The window's own full screen, as the shell reports it (entered by the window's controls or its menu). */
-const DESKTOP_WINDOW_EVENT = "linkshell-desktop-window";
 
 const QUALITY = [
   { value: "auto", label: "随窗口", detail: "按显示的大小取清晰度" },
@@ -86,26 +86,32 @@ function hevcReceivable(): boolean {
 }
 
 /**
- * The Windows desktop window's receiver, and the Mac's when its native video can't get through
- * (MacScreen): the local keyboard decides how modifiers map to the remote computer's.
+ * Browser WebRTC receiver of a computer's screen: the local keyboard decides how modifiers map to the remote computer's.
  */
-const LOCAL_PLATFORM = isWindowsDesktop ? "windows" : /Mac/i.test(typeof navigator === "undefined" ? "" : navigator.platform) ? "mac" : "other";
+const LOCAL_PLATFORM = /Mac/i.test(typeof navigator === "undefined" ? "" : navigator.platform) ? "mac" : /Win/i.test(typeof navigator === "undefined" ? "" : navigator.platform) ? "windows" : "other";
 
 /**
- * The remote screen in the desktop window. The picture is the video track itself, in the page:
+ * Direct WebRTC remote screen view. The picture is the video track itself, in the page:
  * mouse and keyboard go straight to the computer, its pointer becomes this one's, and the picture
  * is asked for at the size it is shown (sharper in full screen, lighter in a small window).
  */
-export function RemoteScreen({ title, active = true, back }: { title: string; active?: boolean; back?: () => void }) {
-  const { link, streams, computer } = useConnection();
+export function RemoteScreen({ title, active = true, back, uploadDir }: { title: string; active?: boolean; back?: () => void; uploadDir?: string }) {
+  const { link, streams } = useConnection();
   const machine = useClient((state) => state.machine);
   const remote = screenPlatform(machine?.platform);
-  const fusionAvailable = canUseFusionMode(computer.key, machine?.platform);
-  const visible = useDesktopVisibility();
   const access = useLoad(() => link.call("screen.access", {}), [link]);
   const job = useJob();
-  const fusionJob = useJob();
+  const uploadJob = useJob();
   const [preferences, setPreferences] = useState(readPreferences);
+  const audioSupported = supportsScreenAudio();
+  const [audio, setAudio] = useState(() => readLocal<boolean>("remoteScreenAudio", false) === true);
+  const audioRef = useRef(audio);
+  audioRef.current = audio;
+  const [dragging, setDragging] = useState(false);
+  const dragDepth = useRef(0);
+  const [uploadProgress, setUploadProgress] = useState<ScreenUploadProgress>();
+  const [uploadNotice, setUploadNotice] = useState<string>();
+  const [uploadError, setUploadError] = useState<string>();
   const [display, setDisplay] = useState(() => readLocal<number>("remoteScreenDisplay", 0));
   const [revision, setRevision] = useState(0);
   const [state, setState] = useState<ReceiverState>();
@@ -130,7 +136,7 @@ export function RemoteScreen({ title, active = true, back }: { title: string; ac
   const placeCursorRef = useRef<() => void>(() => {});
   const activeRef = useRef(active);
   activeRef.current = active;
-  const running = active && visible;
+  const running = active;
   const allowed = access.value?.supported !== false && access.value?.recording !== false;
 
   // ── The connection ───────────────────────────────────────────────────────────────────────
@@ -147,8 +153,9 @@ export function RemoteScreen({ title, active = true, back }: { title: string; ac
       target: { display, width: startWidth.current, maxFps: Number(preferences.maxFps) },
       active: running,
       control: preferences.control,
+      audio: audioRef.current,
       hevc: preferences.codec === "auto" && hevcReceivable(),
-      relayed: computer.gateway !== DESKTOP_LOCAL && streams.path !== "direct",
+      relayed: streams.path !== "direct",
       // After an idle end, back the way the picture came: no waiting for a video track that didn't get through.
       videoTrack: resumeOnSocket.current ? false : undefined,
       video: video.current,
@@ -196,6 +203,40 @@ export function RemoteScreen({ title, active = true, back }: { title: string; ac
   const chooseDisplay = (index: number) => {
     try { saveLocal("remoteScreenDisplay", index); } catch { /* As above. */ }
     setDisplay(index);
+  };
+  useEffect(() => {
+    if (!uploadNotice) return;
+    const timer = setTimeout(() => setUploadNotice(undefined), 4500);
+    return () => clearTimeout(timer);
+  }, [uploadNotice]);
+  const toggleAudio = () => {
+    const next = !audioRef.current;
+    audioRef.current = next;
+    setAudio(next);
+    try { saveLocal("remoteScreenAudio", next); } catch { /* A preference: the screen still works without it. */ }
+    receiver.current?.setAudio(next);
+  };
+  const handleDropFiles = (fileList: FileList | null) => {
+    const files = Array.from(fileList ?? []);
+    if (!files.length || uploadJob.busy) return;
+    setUploadNotice(undefined);
+    setUploadError(undefined);
+    void uploadJob.run(async () => {
+      try {
+        const result = await uploadScreenFiles({
+          link,
+          files,
+          preferredDir: uploadDir,
+          onProgress: (progress) => setUploadProgress(progress),
+        });
+        setUploadNotice(formatScreenUploadSummary(result));
+      } catch (error) {
+        setUploadError(messageOf(error));
+        throw error;
+      } finally {
+        setUploadProgress(undefined);
+      }
+    });
   };
 
   // ── Layout: where the picture is, on whole device pixels ─────────────────────────────────
@@ -250,28 +291,18 @@ export function RemoteScreen({ title, active = true, back }: { title: string; ac
     fullscreenRef.current = next;
     setFullscreenState(next);
     if (request === undefined) return;
-    // Outside the desktop app the page's own full screen stands in for the window's.
-    if (!setDesktopScreenFullScreen(request, { immersive: true })) {
-      if (request) void root.current?.requestFullscreen?.().catch(() => {});
-      else if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
-    }
+    if (request) void root.current?.requestFullscreen?.().catch(() => {});
+    else if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
   }, []);
   useEffect(() => {
-    const changed = (fullscreen: boolean, adopt: boolean) => {
-      const next = windowFullscreen(fullscreenRef.current, fullscreen, adopt);
+    const changed = (nextFullscreen: boolean) => {
+      const next = askFullscreen(fullscreenRef.current, nextFullscreen).next;
       fullscreenRef.current = next;
       setFullscreenState(next);
     };
-    // The answer to this screen's own request, and the window's own control (green button, menu).
-    const answer = (event: Event) => changed((event as CustomEvent<{ fullscreen?: unknown }>).detail?.fullscreen === true, false);
-    const windowChanged = (event: Event) => changed((event as CustomEvent<{ fullscreen?: unknown }>).detail?.fullscreen === true, activeRef.current && !document.querySelector(".terminal-fullscreen"));
-    const page = () => changed(document.fullscreenElement === root.current, false);
-    window.addEventListener(DESKTOP_FULLSCREEN_EVENT, answer);
-    window.addEventListener(DESKTOP_WINDOW_EVENT, windowChanged);
+    const page = () => changed(document.fullscreenElement === root.current);
     document.addEventListener("fullscreenchange", page);
     return () => {
-      window.removeEventListener(DESKTOP_FULLSCREEN_EVENT, answer);
-      window.removeEventListener(DESKTOP_WINDOW_EVENT, windowChanged);
       document.removeEventListener("fullscreenchange", page);
       // Leaving the page leaves its full screen.
       if (fullscreenRef.current.owns) requestFullscreen(false);
@@ -295,14 +326,10 @@ export function RemoteScreen({ title, active = true, back }: { title: string; ac
   const focusStage = useCallback(() => { ime.current?.focus({ preventScroll: true }); }, []);
   useEffect(() => { if (canInput && shown) focusStage(); }, [canInput, shown, focusStage]);
   useEffect(() => {
-    // The keys belong to the computer while the stage has them: the shell's shortcuts and the
-    // window's menu stand aside (⌘W, ⌘Q, ⌘H go over too, as in any remote desktop).
     const captured = focused && canInput;
     document.documentElement.toggleAttribute("data-remote-keys", captured);
-    setDesktopScreenKeys(captured);
     return () => {
       document.documentElement.removeAttribute("data-remote-keys");
-      if (captured) setDesktopScreenKeys(false);
     };
   }, [focused, canInput]);
   useEffect(() => {
@@ -464,17 +491,6 @@ export function RemoteScreen({ title, active = true, back }: { title: string; ac
         {live && <span className="remote-screen-path" data-path={stats?.path}>{pathLabel}{stats?.fps !== undefined ? ` · ${Math.round(stats.fps)} 帧` : ""}</span>}
       </div>
       <div className="remote-screen-actions">
-        {fusionAvailable && (
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={access.value?.recording === false || fusionJob.busy}
-            onClick={() => void fusionJob.run(() => startComputerFusion({ computerKey: computer.key, name: title, link, streams }).catch((err) => { reportDesktopError(err); throw err; }))}
-          >
-            <AppWindowMac data-icon="inline-start" aria-hidden="true" />
-            {fusionJob.busy ? "正在启动…" : "融合模式"}
-          </Button>
-        )}
         {(state?.displays.length ?? 0) > 1 && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -497,6 +513,17 @@ export function RemoteScreen({ title, active = true, back }: { title: string; ac
         >
           {preferences.control ? <MousePointerClick data-icon="inline-start" /> : <MousePointer2 data-icon="inline-start" />}
           {preferences.control ? "控制中" : "只看"}
+        </Button>
+        <Button
+          variant={audio ? "secondary" : "ghost"}
+          size="sm"
+          aria-pressed={audio}
+          title={audio ? "关闭桌面声音" : "开启桌面声音"}
+          disabled={!audioSupported && !audio}
+          onClick={toggleAudio}
+        >
+          {audio ? <Volume2 data-icon="inline-start" /> : <VolumeX data-icon="inline-start" />}
+          {audio ? "声音" : "静音"}
         </Button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -626,9 +653,42 @@ export function RemoteScreen({ title, active = true, back }: { title: string; ac
       onPointerMove={onPointerMove}
       // A relayed picture is ended when no one uses it; looking around it with the pointer counts.
       onPointerMoveCapture={() => receiver.current?.used()}
-      onPointerDownCapture={() => receiver.current?.used()}
+      onPointerDownCapture={() => {
+        receiver.current?.used();
+        receiver.current?.unlockAudio();
+      }}
       onWheelCapture={() => receiver.current?.used()}
-      onKeyDownCapture={() => receiver.current?.used()}
+      onKeyDownCapture={() => {
+        receiver.current?.used();
+        receiver.current?.unlockAudio();
+      }}
+      onDragEnter={(event) => {
+        if (!event.dataTransfer.types.includes("Files")) return;
+        event.preventDefault();
+        dragDepth.current++;
+        setDragging(true);
+      }}
+      onDragOver={(event) => {
+        if (!event.dataTransfer.types.includes("Files")) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = uploadJob.busy ? "none" : "copy";
+      }}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          dragDepth.current = 0;
+          setDragging(false);
+          return;
+        }
+        dragDepth.current = Math.max(0, dragDepth.current - 1);
+        if (!dragDepth.current) setDragging(false);
+      }}
+      onDrop={(event) => {
+        if (!event.dataTransfer.files.length) return;
+        event.preventDefault();
+        dragDepth.current = 0;
+        setDragging(false);
+        handleDropFiles(event.dataTransfer.files);
+      }}
     >
       {shown && !barVisible && <div className="remote-screen-pull" aria-hidden="true" />}
       {toolbar}
@@ -685,6 +745,42 @@ export function RemoteScreen({ title, active = true, back }: { title: string; ac
           }}
         />
         {overlay && <div className="remote-screen-overlay">{overlay}</div>}
+        {dragging && (
+          <div className="screen-drop-overlay" role="status" aria-live="polite">
+            <Upload size={24} />
+            <strong>{uploadJob.busy ? "正在上传文件…" : "松开以上传到电脑"}</strong>
+            <span>
+              {uploadDir ? `保存到当前目录 · 单个文件最大 ${MAX_ATTACHMENT_LABEL}` : `保存到电脑桌面或主目录 · 单个文件最大 ${MAX_ATTACHMENT_LABEL}`}
+            </span>
+          </div>
+        )}
+        {(uploadProgress || uploadNotice || uploadError) && (
+          <div className="screen-upload-toast" data-tone={uploadError ? "error" : undefined} role="status">
+            {uploadProgress ? (
+              <>
+                <LoaderCircle className="animate-spin" size={14} />
+                <span>
+                  正在上传 {uploadProgress.done + 1} / {uploadProgress.total}：{uploadProgress.name}
+                </span>
+              </>
+            ) : (
+              <>
+                <span>{uploadError ?? uploadNotice}</span>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label="关闭上传提示"
+                  onClick={() => {
+                    setUploadError(undefined);
+                    setUploadNotice(undefined);
+                  }}
+                >
+                  <X />
+                </Button>
+              </>
+            )}
+          </div>
+        )}
         {live && phase === "recovering" && <div className="remote-screen-toast"><LoaderCircle className="animate-spin" size={14} />正在恢复画面…</div>}
         {live && !overlay && (state?.notice || controlProblem) && (
           <div className="remote-screen-toast" data-tone={controlProblem ? "warning" : undefined}>

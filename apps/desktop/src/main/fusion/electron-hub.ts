@@ -1,9 +1,18 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { BrowserWindow, ClipboardItem, Menu, clipboard, nativeImage, screen, shell, type MenuItemConstructorOptions, type WebContents } from "electron";
 import { connectFusion, type FusionConnection, type FusionMessage } from "./wire.js";
-import { FusionClipboard, type ClipboardPort } from "./clipboard.js";
+import {
+  FusionClipboard,
+  buildMacNsFilenamesPlist,
+  buildWindowsDropFiles,
+  parseMacNsFilenamesPlist,
+  parseWindowsDropFiles,
+  parseWindowsFileNameW,
+  type ClipboardPort,
+} from "./clipboard.js";
 import { fusionAppId, fusionIconFile, pngToIco } from "./naming.js";
 
 export { fusionAppId, fusionIconFile, pngToIco };
@@ -18,8 +27,7 @@ export { fusionAppId, fusionIconFile, pngToIco };
  */
 export const FUSION_PROTO = 2;
 const RESUME_GRACE_MS = 30_000;
-// No `clipboard` yet: syncing it from the desktop app is a follow-up.
-const LOCAL_FEATURES = ["keys", "clipboard"];
+const LOCAL_FEATURES = ["keys", "clipboard", "file-clipboard"];
 /** What a taskbar and the app grid need; a Mac's Dock icon (1024) is thirty times the bytes. */
 const ICON_PIXELS = 256;
 
@@ -75,6 +83,86 @@ const rect = (value: unknown): Rect => {
 /** Raw clipboard formats password managers set on what must not be watched (Windows, macOS). */
 const CONCEALED = ["ExcludeClipboardContentFromMonitorProcessing", "org.nspasteboard.ConcealedType"];
 
+const osClipboardFormat = (format: string) => `electron application/osclipboard;format="${format}"`;
+
+async function readOsFormatBuffer(
+  item: Electron.ClipboardItem | undefined,
+  format: string,
+): Promise<Buffer | undefined> {
+  const mime = osClipboardFormat(format);
+  try {
+    if (item && (await clipboard.has(mime).catch(() => false))) {
+      const blob = await item.getType(mime);
+      if (blob instanceof Blob) {
+        return Buffer.from(await blob.arrayBuffer());
+      }
+    }
+  } catch {
+    // Format may not be readable through ClipboardItem.
+  }
+  const legacy = clipboard as unknown as { readBuffer?: (fmt: string) => Buffer };
+  if (typeof legacy.readBuffer === "function") {
+    try {
+      const buf = legacy.readBuffer(format);
+      return buf && buf.length > 0 ? buf : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
+function parseFileUrlsText(raw: string): string[] {
+  const resolved: string[] = [];
+  for (const line of raw.split(/\r?\n/).map((part: string) => part.trim())) {
+    if (!line || line.startsWith("#") || !line.startsWith("file://")) continue;
+    try {
+      resolved.push(fileURLToPath(line));
+    } catch {
+      // Ignore malformed file URLs on pasteboard.
+    }
+  }
+  return resolved;
+}
+
+async function readOsClipboardFiles(item: Electron.ClipboardItem | undefined): Promise<string[] | undefined> {
+  try {
+    if (process.platform === "darwin") {
+      const plistBuf = await readOsFormatBuffer(item, "NSFilenamesPboardType");
+      if (plistBuf) {
+        const fromPlist = parseMacNsFilenamesPlist(plistBuf);
+        if (fromPlist.length > 0) return fromPlist;
+      }
+      const urlBuf = await readOsFormatBuffer(item, "public.file-url");
+      if (urlBuf && urlBuf.length > 0) {
+        const resolved = parseFileUrlsText(urlBuf.toString("utf8"));
+        if (resolved.length > 0) return resolved;
+      }
+    } else if (process.platform === "win32") {
+      const hdrop = await readOsFormatBuffer(item, "CF_HDROP");
+      if (hdrop) {
+        const fromDrop = parseWindowsDropFiles(hdrop);
+        if (fromDrop.length > 0) return fromDrop;
+      }
+      const fileNameW = await readOsFormatBuffer(item, "FileNameW");
+      if (fileNameW) {
+        const fromWide = parseWindowsFileNameW(fileNameW);
+        if (fromWide.length > 0) return fromWide;
+      }
+    }
+    if (item && item.types.includes("text/uri-list")) {
+      const blob = await item.getType("text/uri-list");
+      if (blob instanceof Blob) {
+        const resolved = parseFileUrlsText(await blob.text());
+        if (resolved.length > 0) return resolved;
+      }
+    }
+  } catch {
+    // Clipboard reads can transiently fail while held by another process.
+  }
+  return undefined;
+}
+
 const systemClipboard: ClipboardPort = {
   async read() {
     const item = (await clipboard.read())[0];
@@ -82,10 +170,12 @@ const systemClipboard: ClipboardPort = {
     const text = item && types.includes("text/plain") ? await (await item.getType("text/plain")).text() : "";
     let concealed = false;
     for (const format of CONCEALED) {
-      concealed ||= await clipboard.has(`electron application/osclipboard;format="${format}"`).catch(() => false);
+      concealed ||= await clipboard.has(osClipboardFormat(format)).catch(() => false);
     }
+    const files = concealed ? undefined : await readOsClipboardFiles(item);
     return {
       text, types: types.join(","), concealed,
+      ...(files ? { files } : {}),
       png: async () => (item && types.includes("image/png") ? Buffer.from(await (await item.getType("image/png")).arrayBuffer()) : undefined),
     };
   },
@@ -93,6 +183,39 @@ const systemClipboard: ClipboardPort = {
     ...(clip.text ? { "text/plain": clip.text } : {}),
     ...(clip.png ? { "image/png": new Blob([new Uint8Array(clip.png)], { type: "image/png" }) } : {}),
   })]),
+  async writeFiles(paths) {
+    if (paths.length === 0) return;
+    const uriList = paths.map((p) => pathToFileURL(p).href).join("\r\n");
+    if (process.platform === "darwin") {
+      const plist = buildMacNsFilenamesPlist(paths);
+      const entries: Record<string, string | Blob> = {
+        [osClipboardFormat("NSFilenamesPboardType")]: new Blob([new Uint8Array(plist)]),
+        "text/uri-list": uriList,
+      };
+      if (paths.length === 1) {
+        entries[osClipboardFormat("public.file-url")] = new Blob([
+          Buffer.from(pathToFileURL(paths[0]!).href, "utf8"),
+        ]);
+      }
+      await clipboard.write([new ClipboardItem(entries)]).catch(() => {
+        const legacy = clipboard as unknown as { writeBuffer?: (fmt: string, buf: Buffer) => void };
+        clipboard.clear();
+        legacy.writeBuffer?.("NSFilenamesPboardType", plist);
+      });
+    } else if (process.platform === "win32") {
+      const hdrop = buildWindowsDropFiles(paths);
+      await clipboard.write([new ClipboardItem({
+        [osClipboardFormat("CF_HDROP")]: new Blob([new Uint8Array(hdrop)]),
+        "text/uri-list": uriList,
+      })]).catch(() => {
+        const legacy = clipboard as unknown as { writeBuffer?: (fmt: string, buf: Buffer) => void };
+        clipboard.clear();
+        legacy.writeBuffer?.("CF_HDROP", hdrop);
+      });
+    } else {
+      await clipboard.write([new ClipboardItem({ "text/uri-list": uriList })]);
+    }
+  },
 };
 
 export class FusionElectronHub {
@@ -110,7 +233,17 @@ export class FusionElectronHub {
   private suspendTimer?: ReturnType<typeof setTimeout>;
   private pingTimer?: ReturnType<typeof setInterval>;
   private clipboardTimer?: ReturnType<typeof setInterval>;
-  private readonly clipboard = new FusionClipboard(systemClipboard, (message) => { if (this.remoteFeatures.has("clipboard")) this.send(message); });
+  private readonly clipboard = new FusionClipboard(
+    systemClipboard,
+    (message) => {
+      if (message.t === "clip") {
+        if (this.remoteFeatures.has("clipboard")) this.send(message);
+      } else if (this.remoteFeatures.has("file-clipboard")) {
+        this.send(message);
+      }
+    },
+    { canSendFiles: () => this.remoteFeatures.has("file-clipboard") },
+  );
   private rtt = 0;
   private apps: AppEntry[] = [];
   private windows = new Map<number, WindowRecord>();
@@ -207,6 +340,11 @@ export class FusionElectronHub {
       case "icon": return this.icon(m);
       case "menu": return this.menuReply(m);
       case "clip": return void this.clipboard.received(m);
+      case "clip.file.start":
+      case "clip.file.chunk":
+      case "clip.file.end":
+        if (this.remoteFeatures.has("file-clipboard")) return void this.clipboard.receivedFileMessage(m);
+        return;
       case "pong": this.rtt = Date.now() - num(m.ts); return;
       case "alert": {
         const key = `${m.kind}:${m.subject ?? ""}`;
@@ -228,7 +366,10 @@ export class FusionElectronHub {
     clearTimeout(this.suspendTimer);
     this.suspended = false;
     this.alerts.delete("reconnecting:");
-    if (!resumed) this.dropWindows();
+    if (!resumed) {
+      this.clipboard.abortTransfers();
+      this.dropWindows();
+    }
     // A fresh peer connection on either path: the old one belonged to the old control connection.
     this.toPage({ t: "reset", remote: this.remotePlatform, local: process.platform === "win32" ? "windows" : "macos" });
     this.options.log(`[fusion] welcome ${this.sessionID ?? "?"}${resumed ? " (resumed)" : ""}`);
@@ -244,6 +385,7 @@ export class FusionElectronHub {
   private closed(reason: string): void {
     this.connected = false;
     clearInterval(this.pingTimer);
+    this.clipboard.abortTransfers();
     this.toPage({ t: "pause" });
     if (!this.stopping && (this.welcomed || this.suspended) && this.sessionID && reason !== "proto" && reason !== "token") {
       this.welcomed = false;
@@ -271,6 +413,7 @@ export class FusionElectronHub {
     clearInterval(this.pingTimer);
     clearInterval(this.clipboardTimer);
     this.clipboardTimer = undefined;
+    this.clipboard.dispose();
     const connection = this.connection;
     this.connection = undefined;
     connection?.close(reason === "user" ? "bye" : reason);

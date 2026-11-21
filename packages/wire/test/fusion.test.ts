@@ -1,6 +1,14 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { FUSION_DIRECTION, FUSION_MAX_CLIPBOARD, FUSION_MAX_FRAME, fusionMessageSchema, fusionStartResultSchema } from "../src/index.js";
+import {
+  FUSION_DIRECTION,
+  FUSION_FILE_CLIPBOARD_CHUNK_BYTES,
+  FUSION_MAX_CLIPBOARD,
+  FUSION_MAX_FILE_CLIPBOARD,
+  FUSION_MAX_FRAME,
+  fusionMessageSchema,
+  fusionStartResultSchema,
+} from "../src/index.js";
 
 // The same files are read by apps/mac/Tests/LinkShellTests/FusionProtocolTests.swift.
 const fixture = (name: string) => JSON.parse(readFileSync(new URL(`./fixtures/fusion/${name}`, import.meta.url), "utf8")) as unknown[];
@@ -30,6 +38,8 @@ describe("fusion protocol fixtures", () => {
   it("fits the largest clipboard in one frame after base64", () => {
     // text + rtf + png share the raw budget; base64 is 4/3 plus JSON overhead.
     expect(Math.ceil(FUSION_MAX_CLIPBOARD / 3) * 4 + 4096).toBeLessThan(FUSION_MAX_FRAME);
+    expect(Math.ceil(FUSION_FILE_CLIPBOARD_CHUNK_BYTES / 3) * 4 + 4096).toBeLessThan(FUSION_MAX_FRAME);
+    expect(FUSION_MAX_FILE_CLIPBOARD).toBe(50 << 20);
   });
 
   it("requires the remote's protocol and platform from fusion.start", () => {

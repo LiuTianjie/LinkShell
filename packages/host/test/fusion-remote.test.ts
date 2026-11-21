@@ -1,7 +1,11 @@
 import { execFileSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { FUSION_FILE_CLIPBOARD_CHUNK_BYTES, FUSION_MAX_FILE_CLIPBOARD } from "@linkshell/wire";
 import { RTCPeerConnection, useH264, type RTCDataChannel } from "werift";
-import { FusionNodeRemote } from "../src/fusion/remote.js";
+import { FusionNodeRemote, resolveSafeClipFilePath } from "../src/fusion/remote.js";
 import { SIMULATED_APP, SimulatedFusionPlatform } from "../src/fusion/simulated.js";
 import { connectFusion, type FusionConnection, type FusionMessage } from "../src/fusion/wire.js";
 
@@ -302,4 +306,122 @@ describe("Fusion remote in the host (simulated platform)", () => {
     expect(browserWin).toMatchObject({ id: 5002, app: SIMULATED_APP, title: "新标签页 - Google Chrome" });
     expect(local.messages.some((m) => m.t === "app.exited")).toBe(false);
   });
+
+  it("relays chunked file-clipboard transfers, enforces 50 MiB cap, rejects path traversal, and cleans staging on abort/disconnect", async () => {
+    expect(resolveSafeClipFilePath("/tmp/stage", 0, "../../etc/passwd")).toBeNull();
+    expect(resolveSafeClipFilePath("/tmp/stage", 0, "sub\\evil.txt")).toBeNull();
+    expect(resolveSafeClipFilePath("/tmp/stage", 0, "valid-name.txt")).toContain("valid-name.txt");
+
+    const platform = new SimulatedFusionPlatform();
+    const remote = new FusionNodeRemote(platform, { log: () => {}, port: 0 });
+    cleanups.push(() => remote.stop());
+    const local = new Local(await remote.issue("tok-files", []), "tok-files", {
+      features: ["clipboard", "file-clipboard", "keys"],
+    });
+    cleanups.push(() => local.close());
+
+    const welcome = await local.next((m) => m.t === "welcome");
+    expect(welcome.features).toContain("clipboard");
+    expect(welcome.features).toContain("file-clipboard");
+    await local.next((m) => m.t === "ready");
+    local.connection.send({ t: "launch", app: SIMULATED_APP });
+    const opened = await local.next((m) => m.t === "wopen");
+    local.connection.send({ t: "focus", id: opened.id });
+
+    // 1. Incoming path-traversal filename is rejected and staged files are cleaned up.
+    local.connection.send({
+      t: "clip.file.start",
+      transferId: "t-traversal",
+      files: [{ index: 0, name: "../escape.txt", size: 4 }],
+      totalBytes: 4,
+    });
+    const badEnd = await local.next((m) => m.t === "clip.file.end" && m.transferId === "t-traversal");
+    expect(badEnd.ok).toBe(false);
+    expect(platform.clipboard?.files).toBeUndefined();
+
+    // 2. Incoming multi-chunk valid transfer stages files safely and delivers paths to platform clipboard.
+    const bigPayload = Buffer.alloc(FUSION_FILE_CLIPBOARD_CHUNK_BYTES + 123, 0x41);
+    const secondPayload = Buffer.from("hello-file-2");
+    local.connection.send({
+      t: "clip.file.start",
+      transferId: "t-ok",
+      files: [
+        { index: 0, name: "big.bin", size: bigPayload.length },
+        { index: 1, name: "note.txt", size: secondPayload.length },
+      ],
+      totalBytes: bigPayload.length + secondPayload.length,
+    });
+    local.connection.send({
+      t: "clip.file.chunk",
+      transferId: "t-ok",
+      index: 0,
+      seq: 0,
+      data: bigPayload.subarray(0, FUSION_FILE_CLIPBOARD_CHUNK_BYTES).toString("base64"),
+    });
+    local.connection.send({
+      t: "clip.file.chunk",
+      transferId: "t-ok",
+      index: 0,
+      seq: 1,
+      data: bigPayload.subarray(FUSION_FILE_CLIPBOARD_CHUNK_BYTES).toString("base64"),
+    });
+    local.connection.send({
+      t: "clip.file.chunk",
+      transferId: "t-ok",
+      index: 1,
+      seq: 0,
+      data: secondPayload.toString("base64"),
+    });
+    local.connection.send({ t: "clip.file.end", transferId: "t-ok", ok: true });
+
+    await vi.waitFor(() => expect(platform.clipboard?.files).toHaveLength(2));
+    const stagedFiles = platform.clipboard!.files!;
+    const stageRoot = dirname(dirname(stagedFiles[0]!));
+    expect(readFileSync(stagedFiles[0]!).equals(bigPayload)).toBe(true);
+    expect(readFileSync(stagedFiles[1]!, "utf8")).toBe("hello-file-2");
+
+    // 3. Outgoing multi-chunk file clipboard sends start -> chunks -> end; >50 MiB batch is skipped.
+    const outDir = mkdtempSync(join(tmpdir(), "lsh-fusion-out-"));
+    try {
+      const outPath = join(outDir, "outgoing.bin");
+      const outBytes = Buffer.alloc(FUSION_FILE_CLIPBOARD_CHUNK_BYTES + 42, 0x62);
+      writeFileSync(outPath, outBytes);
+      platform.copy({ files: [outPath] });
+
+      const startMsg = await local.next((m) => m.t === "clip.file.start");
+      const outTid = startMsg.transferId as string;
+      expect(startMsg.totalBytes).toBe(outBytes.length);
+      const endMsg = await local.next((m) => m.t === "clip.file.end" && m.transferId === outTid);
+      expect(endMsg.ok).toBe(true);
+      const chunks = local.messages.filter((m) => m.t === "clip.file.chunk" && m.transferId === outTid);
+      expect(chunks).toHaveLength(2);
+      const reassembled = Buffer.concat(chunks.map((c) => Buffer.from(c.data as string, "base64")));
+      expect(reassembled.equals(outBytes)).toBe(true);
+
+      // Oversized file (>50 MiB) must not start a transfer.
+      const hugePath = join(outDir, "huge.bin");
+      const { truncateSync } = await import("node:fs");
+      writeFileSync(hugePath, "");
+      truncateSync(hugePath, FUSION_MAX_FILE_CLIPBOARD + 1);
+      const countBefore = local.messages.filter((m) => m.t === "clip.file.start").length;
+      platform.copy({ files: [hugePath] });
+      await new Promise((r) => setTimeout(r, 150));
+      expect(local.messages.filter((m) => m.t === "clip.file.start").length).toBe(countBefore);
+    } finally {
+      rmSync(outDir, { recursive: true, force: true });
+    }
+
+    // 4. Aborted incoming transfer & session disconnect clean up staging directories.
+    local.connection.send({
+      t: "clip.file.start",
+      transferId: "t-abort",
+      files: [{ index: 0, name: "abort.txt", size: 5 }],
+      totalBytes: 5,
+    });
+    local.connection.send({ t: "clip.file.end", transferId: "t-abort", ok: false });
+    await new Promise((r) => setTimeout(r, 80));
+
+    local.connection.send({ t: "bye", reason: "done" });
+    await vi.waitFor(() => expect(existsSync(stageRoot)).toBe(false));
+  }, 30_000);
 });

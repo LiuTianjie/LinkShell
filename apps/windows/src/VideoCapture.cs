@@ -165,5 +165,314 @@ namespace LinkShell.Windows {
             // Bounds matching also rejects removal or a rotation while this helper owns a capture.
             return !System.Windows.Forms.Screen.AllScreens.Any(s => s.Bounds == bounds);
         }
+
+        [ComImport, Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        interface IMMDeviceEnumerator {
+            [PreserveSig] int EnumAudioEndpoints(int dataFlow, uint stateMask, out IntPtr devices);
+            [PreserveSig] int GetDefaultAudioEndpoint(int dataFlow, int role, out IMMDevice endpoint);
+            [PreserveSig] int GetDevice([MarshalAs(UnmanagedType.LPWStr)] string id, out IMMDevice device);
+            [PreserveSig] int RegisterEndpointNotificationCallback(IntPtr client);
+            [PreserveSig] int UnregisterEndpointNotificationCallback(IntPtr client);
+        }
+
+        [ComImport, Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        interface IMMDevice {
+            [PreserveSig] int Activate(ref Guid iid, uint clsCtx, IntPtr activationParams, [MarshalAs(UnmanagedType.IUnknown)] out object interfacePtr);
+            [PreserveSig] int OpenPropertyStore(uint stgmAccess, out IntPtr properties);
+            [PreserveSig] int GetId([MarshalAs(UnmanagedType.LPWStr)] out string id);
+            [PreserveSig] int GetState(out uint state);
+        }
+
+        [ComImport, Guid("1CB9AD4C-DBFA-4c32-B178-C2F568A703B2"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        interface IAudioClient {
+            [PreserveSig] int Initialize(int shareMode, uint streamFlags, long bufferDuration, long periodicity, IntPtr format, IntPtr audioSessionGuid);
+            [PreserveSig] int GetBufferSize(out uint numBufferFrames);
+            [PreserveSig] int GetStreamLatency(out long latency);
+            [PreserveSig] int GetCurrentPadding(out uint numPaddingFrames);
+            [PreserveSig] int IsFormatSupported(int shareMode, IntPtr format, out IntPtr closestMatch);
+            [PreserveSig] int GetMixFormat(out IntPtr deviceFormatPointer);
+            [PreserveSig] int GetDevicePeriod(out long defaultPeriod, out long minimumPeriod);
+            [PreserveSig] int Start();
+            [PreserveSig] int Stop();
+            [PreserveSig] int Reset();
+            [PreserveSig] int SetEventHandle(IntPtr eventHandle);
+            [PreserveSig] int GetService(ref Guid riid, [MarshalAs(UnmanagedType.IUnknown)] out object interfacePtr);
+        }
+
+        [ComImport, Guid("C8ADBD64-E71E-48a0-A4DE-185C395CD317"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        interface IAudioCaptureClient {
+            [PreserveSig] int GetBuffer(out IntPtr data, out uint numFramesToRead, out uint flags, out ulong devicePosition, out ulong qpcPosition);
+            [PreserveSig] int ReleaseBuffer(uint numFramesRead);
+            [PreserveSig] int GetNextPacketSize(out uint numFramesInNextPacket);
+        }
+
+        /// <summary>
+        /// Captures Windows system loopback audio via WASAPI COM (FFmpeg on Windows has no wasapi input)
+        /// and writes 48 kHz stereo PCM16 20 ms frames to stdout as [u32 length][u32 timestampMs][payload].
+        /// </summary>
+        static void CaptureAudio() {
+            var input = new Thread(() => { try { while (Console.ReadLine() != null) {} } finally { ended = true; } }) { IsBackground = true };
+            input.Start();
+
+            const int targetRate = 48000;
+            const int frameSamples = 960;
+            const int frameBytes = frameSamples * 2 * 2;
+            const uint audclntStreamFlagsLoopback = 0x00020000;
+            const uint audclntBufferFlagsSilent = 0x2;
+            const int audclntDeviceInvalidated = unchecked((int)0x88890004);
+            const int errNotFound = unchecked((int)0x80070490);
+            var clsidEnumerator = new Guid("BCDE0395-E52F-467C-8E3D-C4579291692E");
+            var iidAudioClient = new Guid("1CB9AD4C-DBFA-4c32-B178-C2F568A703B2");
+            var iidAudioCaptureClient = new Guid("C8ADBD64-E71E-48a0-A4DE-185C395CD317");
+            var subtypePcm = new Guid("00000001-0000-0010-8000-00aa00389b71");
+            var subtypeFloat = new Guid("00000003-0000-0010-8000-00aa00389b71");
+
+            var clock = Stopwatch.StartNew();
+            byte[] packetBuf = new byte[0];
+            float[] leftBuf = new float[0];
+            float[] rightBuf = new float[0];
+            byte[] outFrame = new byte[8 + frameBytes];
+            outFrame[0] = (byte)(frameBytes & 0xff);
+            outFrame[1] = (byte)((frameBytes >> 8) & 0xff);
+            outFrame[2] = (byte)((frameBytes >> 16) & 0xff);
+            outFrame[3] = (byte)((frameBytes >> 24) & 0xff);
+
+            using (var destination = Console.OpenStandardOutput()) {
+                while (!ended) {
+                    EnsureDesktop();
+                    IMMDeviceEnumerator enumerator = null;
+                    IMMDevice device = null;
+                    IAudioClient audioClient = null;
+                    IAudioCaptureClient captureClient = null;
+                    IntPtr mixPtr = IntPtr.Zero;
+                    try {
+                        enumerator = (IMMDeviceEnumerator)Activator.CreateInstance(Type.GetTypeFromCLSID(clsidEnumerator, true));
+                        int hr = enumerator.GetDefaultAudioEndpoint(0, 0, out device);
+                        if (hr == errNotFound || device == null) {
+                            Thread.Sleep(500);
+                            continue;
+                        }
+                        if (hr < 0) Marshal.ThrowExceptionForHR(hr);
+
+                        object rawClient;
+                        hr = device.Activate(ref iidAudioClient, 23, IntPtr.Zero, out rawClient);
+                        if (hr < 0) Marshal.ThrowExceptionForHR(hr);
+                        audioClient = (IAudioClient)rawClient;
+
+                        hr = audioClient.GetMixFormat(out mixPtr);
+                        if (hr < 0 || mixPtr == IntPtr.Zero) Marshal.ThrowExceptionForHR(hr < 0 ? hr : unchecked((int)0x80004005));
+
+                        ushort formatTag = unchecked((ushort)Marshal.ReadInt16(mixPtr, 0));
+                        ushort channels = unchecked((ushort)Marshal.ReadInt16(mixPtr, 2));
+                        uint sampleRate = unchecked((uint)Marshal.ReadInt32(mixPtr, 4));
+                        ushort blockAlign = unchecked((ushort)Marshal.ReadInt16(mixPtr, 12));
+                        ushort bitsPerSample = unchecked((ushort)Marshal.ReadInt16(mixPtr, 14));
+                        ushort cbSize = unchecked((ushort)Marshal.ReadInt16(mixPtr, 16));
+                        bool isFloat = formatTag == 3;
+                        if (formatTag == 0xFFFE && cbSize >= 22) {
+                            byte[] guidBytes = new byte[16];
+                            Marshal.Copy(new IntPtr(mixPtr.ToInt64() + 24), guidBytes, 0, 16);
+                            var subFormat = new Guid(guidBytes);
+                            if (subFormat == subtypeFloat) isFloat = true;
+                            else if (subFormat == subtypePcm) isFloat = false;
+                            else throw new NotSupportedException("Unsupported WASAPI audio subformat: " + subFormat);
+                        } else if (formatTag != 1 && formatTag != 3) {
+                            throw new NotSupportedException("Unsupported WASAPI audio format tag: " + formatTag);
+                        }
+                        if (channels == 0 || sampleRate == 0 || blockAlign == 0) throw new InvalidOperationException("Invalid WASAPI mix format");
+
+                        // 100 ms shared loopback buffer (10,000,000 ticks = 1 second).
+                        hr = audioClient.Initialize(0, audclntStreamFlagsLoopback, 1000000, 0, mixPtr, IntPtr.Zero);
+                        if (hr == audclntDeviceInvalidated) { Thread.Sleep(200); continue; }
+                        if (hr < 0) Marshal.ThrowExceptionForHR(hr);
+
+                        object rawCapture;
+                        hr = audioClient.GetService(ref iidAudioCaptureClient, out rawCapture);
+                        if (hr < 0) Marshal.ThrowExceptionForHR(hr);
+                        captureClient = (IAudioCaptureClient)rawCapture;
+
+                        hr = audioClient.Start();
+                        if (hr < 0) Marshal.ThrowExceptionForHR(hr);
+
+                        int framePos = 0;
+                        int silentFrames = 0;
+                        double srcPos = 0.0;
+                        double step = (double)sampleRate / targetRate;
+                        float prevL = 0.0f, prevR = 0.0f;
+                        bool hasPrev = false;
+                        long desktopCheckedAt = clock.ElapsedMilliseconds;
+
+                        while (!ended) {
+                            long nowMs = clock.ElapsedMilliseconds;
+                            if (nowMs - desktopCheckedAt >= 250) {
+                                EnsureDesktop();
+                                desktopCheckedAt = nowMs;
+                            }
+
+                            uint packetFrames;
+                            hr = captureClient.GetNextPacketSize(out packetFrames);
+                            if (hr == audclntDeviceInvalidated) break;
+                            if (hr < 0) Marshal.ThrowExceptionForHR(hr);
+                            if (packetFrames == 0) {
+                                Thread.Sleep(10);
+                                continue;
+                            }
+
+                            while (packetFrames > 0 && !ended) {
+                                IntPtr data;
+                                uint numFrames;
+                                uint flags;
+                                ulong devPos, qpcPos;
+                                hr = captureClient.GetBuffer(out data, out numFrames, out flags, out devPos, out qpcPos);
+                                if (hr == audclntDeviceInvalidated) { packetFrames = 0; break; }
+                                if (hr < 0) Marshal.ThrowExceptionForHR(hr);
+                                if (hr != 0) { packetFrames = 0; break; }
+
+                                try {
+                                    bool silent = (flags & audclntBufferFlagsSilent) != 0 || data == IntPtr.Zero;
+                                    int count = checked((int)numFrames);
+                                    if (silent) {
+                                        if (silentFrames < 5) {
+                                            int outSamples = Math.Max(1, (int)Math.Round(count / step));
+                                            long baseTs = clock.ElapsedMilliseconds;
+                                            int emitted = 0;
+                                            for (int i = 0; i < outSamples; i++) {
+                                                outFrame[8 + framePos++] = 0; outFrame[8 + framePos++] = 0;
+                                                outFrame[8 + framePos++] = 0; outFrame[8 + framePos++] = 0;
+                                                if (framePos == frameBytes) {
+                                                    EmitAudioFrame(destination, outFrame, unchecked((uint)(baseTs + emitted * 20)));
+                                                    framePos = 0;
+                                                    emitted++;
+                                                    silentFrames++;
+                                                    if (silentFrames >= 5) break;
+                                                }
+                                            }
+                                        }
+                                        prevL = 0.0f; prevR = 0.0f; hasPrev = false; srcPos = 0.0;
+                                    } else if (count > 0) {
+                                        silentFrames = 0;
+                                        int byteCount = checked(count * blockAlign);
+                                        if (packetBuf.Length < byteCount) packetBuf = new byte[byteCount];
+                                        if (leftBuf.Length < count) { leftBuf = new float[count]; rightBuf = new float[count]; }
+                                        Marshal.Copy(data, packetBuf, 0, byteCount);
+
+                                        for (int i = 0; i < count; i++) {
+                                            int off = i * blockAlign;
+                                            float s0 = ReadSample(packetBuf, off, isFloat, bitsPerSample);
+                                            float l, r;
+                                            if (channels == 1) {
+                                                l = s0; r = s0;
+                                            } else {
+                                                int stride = bitsPerSample / 8;
+                                                float s1 = ReadSample(packetBuf, off + stride, isFloat, bitsPerSample);
+                                                if (channels >= 6) {
+                                                    float fc = ReadSample(packetBuf, off + stride * 2, isFloat, bitsPerSample);
+                                                    float bl = ReadSample(packetBuf, off + stride * 4, isFloat, bitsPerSample);
+                                                    float br = ReadSample(packetBuf, off + stride * 5, isFloat, bitsPerSample);
+                                                    l = s0 + 0.7071f * fc + 0.5f * bl;
+                                                    r = s1 + 0.7071f * fc + 0.5f * br;
+                                                } else {
+                                                    l = s0; r = s1;
+                                                }
+                                            }
+                                            leftBuf[i] = l;
+                                            rightBuf[i] = r;
+                                        }
+
+                                        long baseTs = clock.ElapsedMilliseconds;
+                                        int emitted = 0;
+                                        while (srcPos < count && !ended) {
+                                            float lSample, rSample;
+                                            if (sampleRate == targetRate) {
+                                                int idx = (int)srcPos;
+                                                lSample = leftBuf[idx];
+                                                rSample = rightBuf[idx];
+                                                srcPos += 1.0;
+                                            } else {
+                                                int idx = (int)Math.Floor(srcPos);
+                                                double frac = srcPos - idx;
+                                                float l0, r0, l1, r1;
+                                                if (idx < 0) {
+                                                    l0 = hasPrev ? prevL : leftBuf[0];
+                                                    r0 = hasPrev ? prevR : rightBuf[0];
+                                                    l1 = leftBuf[0];
+                                                    r1 = rightBuf[0];
+                                                } else if (idx + 1 < count) {
+                                                    l0 = leftBuf[idx]; r0 = rightBuf[idx];
+                                                    l1 = leftBuf[idx + 1]; r1 = rightBuf[idx + 1];
+                                                } else {
+                                                    l0 = leftBuf[count - 1]; r0 = rightBuf[count - 1];
+                                                    l1 = l0; r1 = r0;
+                                                }
+                                                lSample = (float)(l0 + (l1 - l0) * frac);
+                                                rSample = (float)(r0 + (r1 - r0) * frac);
+                                                srcPos += step;
+                                            }
+                                            WriteInt16(outFrame, 8 + framePos, lSample);
+                                            WriteInt16(outFrame, 8 + framePos + 2, rSample);
+                                            framePos += 4;
+                                            if (framePos == frameBytes) {
+                                                EmitAudioFrame(destination, outFrame, unchecked((uint)(baseTs + emitted * 20)));
+                                                framePos = 0;
+                                                emitted++;
+                                            }
+                                        }
+                                        srcPos -= count;
+                                        prevL = leftBuf[count - 1];
+                                        prevR = rightBuf[count - 1];
+                                        hasPrev = true;
+                                    }
+                                } finally {
+                                    captureClient.ReleaseBuffer(numFrames);
+                                }
+
+                                if (hr == audclntDeviceInvalidated) break;
+                                hr = captureClient.GetNextPacketSize(out packetFrames);
+                                if (hr == audclntDeviceInvalidated) break;
+                                if (hr < 0) Marshal.ThrowExceptionForHR(hr);
+                            }
+                            if (hr == audclntDeviceInvalidated) break;
+                        }
+                    } finally {
+                        if (captureClient != null) Marshal.ReleaseComObject(captureClient);
+                        if (audioClient != null) { try { audioClient.Stop(); } catch {} Marshal.ReleaseComObject(audioClient); }
+                        if (device != null) Marshal.ReleaseComObject(device);
+                        if (enumerator != null) Marshal.ReleaseComObject(enumerator);
+                        if (mixPtr != IntPtr.Zero) Marshal.FreeCoTaskMem(mixPtr);
+                    }
+                    if (!ended) Thread.Sleep(200);
+                }
+            }
+        }
+
+        static void EmitAudioFrame(Stream destination, byte[] outFrame, uint timestampMs) {
+            outFrame[4] = (byte)(timestampMs & 0xff);
+            outFrame[5] = (byte)((timestampMs >> 8) & 0xff);
+            outFrame[6] = (byte)((timestampMs >> 16) & 0xff);
+            outFrame[7] = (byte)((timestampMs >> 24) & 0xff);
+            destination.Write(outFrame, 0, outFrame.Length);
+            destination.Flush();
+        }
+
+        static float ReadSample(byte[] buf, int offset, bool isFloat, ushort bits) {
+            if (isFloat && bits == 32) return BitConverter.ToSingle(buf, offset);
+            if (!isFloat && bits == 16) return BitConverter.ToInt16(buf, offset) / 32768.0f;
+            if (!isFloat && bits == 32) return BitConverter.ToInt32(buf, offset) / 2147483648.0f;
+            if (!isFloat && bits == 24) {
+                int v = buf[offset] | (buf[offset + 1] << 8) | ((sbyte)buf[offset + 2] << 16);
+                return v / 8388608.0f;
+            }
+            return 0.0f;
+        }
+
+        static void WriteInt16(byte[] buf, int offset, float sample) {
+            if (sample > 1.0f) sample = 1.0f;
+            else if (sample < -1.0f) sample = -1.0f;
+            int scaled = (int)Math.Round(sample * 32767.0f);
+            if (scaled > 32767) scaled = 32767;
+            else if (scaled < -32768) scaled = -32768;
+            buf[offset] = (byte)(scaled & 0xff);
+            buf[offset + 1] = (byte)((scaled >> 8) & 0xff);
+        }
     }
 }

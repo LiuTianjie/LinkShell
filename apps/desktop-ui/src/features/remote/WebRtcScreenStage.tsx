@@ -48,10 +48,12 @@ export function WebRtcScreenStage({
   matchResolution,
   transportMode,
   controlWanted,
+  audioEnabled = false,
   remotePlatform,
   revision,
   onDisplayChange,
   onStatusChange,
+  onRegisterAudioUnlock,
 }: SharedStageProps): JSX.Element {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const frameRef = useRef<HTMLDivElement | null>(null);
@@ -129,7 +131,9 @@ export function WebRtcScreenStage({
     maxFps: targetMaxFps,
     active,
     controlWanted,
+    audioEnabled,
     onDisplayChange,
+    onRegisterAudioUnlock,
   });
   latestTargetRef.current = {
     display,
@@ -137,7 +141,9 @@ export function WebRtcScreenStage({
     maxFps: targetMaxFps,
     active,
     controlWanted,
+    audioEnabled,
     onDisplayChange,
+    onRegisterAudioUnlock,
   };
 
   // Create & manage ScreenReceiver instance.
@@ -159,6 +165,7 @@ export function WebRtcScreenStage({
       },
       active: initial.active,
       control: initial.controlWanted,
+      audio: initial.audioEnabled,
       hevc: codecChoice === "auto",
       match: matchResolution ? viewerScreenMatch() : undefined,
       relayed: false,
@@ -180,8 +187,10 @@ export function WebRtcScreenStage({
       },
     });
     receiverRef.current = receiver;
+    latestTargetRef.current.onRegisterAudioUnlock?.(() => receiver.unlockAudio());
 
     return () => {
+      latestTargetRef.current.onRegisterAudioUnlock?.(undefined);
       clearTimeout(echoClearTimer);
       receiver.stop();
       if (receiverRef.current === receiver) receiverRef.current = null;
@@ -209,6 +218,10 @@ export function WebRtcScreenStage({
   useEffect(() => {
     receiverRef.current?.setControl(controlWanted);
   }, [controlWanted]);
+
+  useEffect(() => {
+    receiverRef.current?.setAudio(audioEnabled);
+  }, [audioEnabled]);
 
   // Report structured status upward to unified RemoteScreenWorkspace chrome.
   useEffect(() => {

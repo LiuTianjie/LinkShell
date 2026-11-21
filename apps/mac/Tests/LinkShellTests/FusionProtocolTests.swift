@@ -92,4 +92,29 @@ final class FusionProtocolTests: XCTestCase {
     XCTAssertEqual(FusionProtocol.iconFile("com.apple.Safari"), "com.apple.Safari")
     XCTAssertEqual(FusionProtocol.iconFile("Microsoft.WindowsCalculator_8wekyb3d8bbwe!App"), "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App")
   }
+
+  func testFileClipboardFeatureAndFixturesMatchSchema() throws {
+    XCTAssertTrue(FusionProtocol.remoteFeatures.contains("file-clipboard"))
+    XCTAssertTrue(FusionProtocol.localFeatures.contains("file-clipboard"))
+
+    let messages = try fixture("messages.json")
+    let startMsg = try XCTUnwrap(messages.first { $0["t"] as? String == "clip.file.start" })
+    let chunkMsg = try XCTUnwrap(messages.first { $0["t"] as? String == "clip.file.chunk" })
+    let endMsg = try XCTUnwrap(messages.first { $0["t"] as? String == "clip.file.end" })
+
+    let start = try XCTUnwrap(FusionFileClipboardStart(message: startMsg))
+    XCTAssertEqual(start.transferId, "fc-1")
+    XCTAssertEqual(start.totalBytes, 1024)
+    XCTAssertEqual(start.files.count, 1)
+    XCTAssertEqual(start.files[0], FusionFileClipboardFile(index: 0, name: "spec.pdf", size: 1024, mime: "application/pdf"))
+
+    let chunk = try XCTUnwrap(FusionFileClipboardChunk(message: chunkMsg))
+    XCTAssertEqual(chunk.transferId, "fc-1")
+    XCTAssertEqual(chunk.index, 0)
+    XCTAssertEqual(chunk.seq, 0)
+    XCTAssertEqual(chunk.decodedData(), Data("%PDF-1.4".utf8))
+
+    let end = try XCTUnwrap(FusionFileClipboardEnd(message: endMsg))
+    XCTAssertEqual(end, FusionFileClipboardEnd(transferId: "fc-1", ok: true))
+  }
 }

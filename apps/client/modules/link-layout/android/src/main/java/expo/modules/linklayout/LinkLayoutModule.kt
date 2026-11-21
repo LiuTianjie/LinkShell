@@ -1,16 +1,10 @@
 package expo.modules.linklayout
 
 import android.app.Activity
-import android.app.Notification
-import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.Context
-import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
-import android.net.Uri
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.speech.tts.TextToSpeech
@@ -35,16 +29,29 @@ class LinkLayoutModule : Module() {
   private var previousOrientation: Int? = null
   private var fullscreenActivity: WeakReference<Activity>? = null
   private var fullscreenOrientation: Int? = null
+  private var lanDiscovery: LanDiscoveryAndroid? = null
 
   companion object {
-    private const val ATTENTION_CHANNEL_ID = "linkshell_attention"
-    private const val PROGRESS_CHANNEL_ID = "linkshell_progress"
-    private const val STATUS_NOTIFICATION_ID = 4210
+    private const val STATUS_NOTIFICATION_ID = ActiveSessionForegroundService.STATUS_NOTIFICATION_ID
   }
 
   override fun definition() = ModuleDefinition {
     Name("LinkLayout")
-    Events("onSpeechResult", "onSpeechLevel", "onSpeechError")
+    Events("onSpeechResult", "onSpeechLevel", "onSpeechError", "onNotificationAction", "onLanHosts")
+    OnCreate {
+      NotificationActionQueue.onActionEnqueued = { id ->
+        sendEvent("onNotificationAction", mapOf("id" to id))
+      }
+      val context = appContext.reactContext
+      val initialIntent = appContext.currentActivity?.intent
+      if (context != null && initialIntent != null) {
+        NotificationActionQueue.extractFromIntent(context, initialIntent)
+      }
+    }
+    OnNewIntent { intent ->
+      val context = appContext.reactContext ?: return@OnNewIntent
+      NotificationActionQueue.extractFromIntent(context, intent)
+    }
     AsyncFunction("startSpeech") { localeId: String? ->
       val input = speech ?: SpeechInput(appContext.reactContext ?: throw Exceptions.ReactContextLost()) { event, body -> sendEvent(event, body) }.also { speech = it }
       input.start(localeId)
@@ -67,10 +74,30 @@ class LinkLayoutModule : Module() {
     AsyncFunction("cancelStatusNotification") {
       cancelStatusNotification()
     }.runOnQueue(Queues.MAIN)
+    AsyncFunction("pendingNotificationActionId") {
+      val context = appContext.reactContext ?: return@AsyncFunction null
+      NotificationActionQueue.pendingId(context)
+    }
+    AsyncFunction("consumeNotificationAction") { id: String ->
+      val context = appContext.reactContext ?: return@AsyncFunction null
+      NotificationActionQueue.consume(context, id)
+    }
+    AsyncFunction("startLanDiscovery") {
+      startLanDiscovery()
+    }.runOnQueue(Queues.MAIN)
+    AsyncFunction("stopLanDiscovery") {
+      lanDiscovery?.stop()
+    }.runOnQueue(Queues.MAIN)
+    AsyncFunction("getLanHosts") {
+      lanDiscovery?.getHosts() ?: emptyList<Map<String, Any?>>()
+    }.runOnQueue(Queues.MAIN)
     AsyncFunction("requestLandscape") { requestLandscape() }.runOnQueue(Queues.MAIN)
     AsyncFunction("clearOrientationRequest") { restoreOrientation() }.runOnQueue(Queues.MAIN)
     OnActivityEntersBackground { onMain { clearRequest(); speech?.cancel() } }
     OnDestroy {
+      NotificationActionQueue.onActionEnqueued = null
+      lanDiscovery?.destroy()
+      lanDiscovery = null
       onMain {
         clearRequest()
         speech?.cancel()
@@ -116,25 +143,12 @@ class LinkLayoutModule : Module() {
     engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, "linkshell-summary")
   }
 
-  private fun ensureNotificationChannels(manager: NotificationManager) {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-    val attentionChannel = NotificationChannel(
-      ATTENTION_CHANNEL_ID,
-      "LinkShell Attention",
-      NotificationManager.IMPORTANCE_HIGH
-    ).apply {
-      description = "Approvals, questions, and failed agent turns"
-    }
-    val progressChannel = NotificationChannel(
-      PROGRESS_CHANNEL_ID,
-      "LinkShell Background Progress",
-      NotificationManager.IMPORTANCE_LOW
-    ).apply {
-      description = "Ongoing remote coding session progress"
-      setShowBadge(false)
-    }
-    manager.createNotificationChannel(attentionChannel)
-    manager.createNotificationChannel(progressChannel)
+  private fun startLanDiscovery(): Boolean {
+    val context = appContext.reactContext ?: return false
+    val discovery = lanDiscovery ?: LanDiscoveryAndroid(context) { hosts ->
+      sendEvent("onLanHosts", mapOf("hosts" to hosts))
+    }.also { lanDiscovery = it }
+    return discovery.start()
   }
 
   private fun syncStatusNotification(payload: Map<String, Any?>): Boolean {
@@ -142,53 +156,56 @@ class LinkLayoutModule : Module() {
     val active = payload["active"] as? Boolean ?: false
     val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return false
     if (!active) {
+      ActiveSessionForegroundService.stop(context, removeNotification = true)
       manager.cancel(STATUS_NOTIFICATION_ID)
       return true
     }
-    ensureNotificationChannels(manager)
+    ActiveSessionForegroundService.ensureChannels(context)
     val urgent = payload["urgent"] as? Boolean ?: false
     val ongoing = payload["ongoing"] as? Boolean ?: false
+    val foregroundService = payload["foregroundService"] as? Boolean ?: false
     val title = (payload["title"] as? String)?.takeIf { it.isNotBlank() } ?: "LinkShell"
     val subtitle = (payload["subtitle"] as? String) ?: ""
     val computerName = (payload["computerName"] as? String)?.takeIf { it.isNotBlank() }
-    val deepLink = (payload["deepLink"] as? String)?.takeIf { it.startsWith("linkshell:///") } ?: "linkshell:///"
-    val channelId = if (urgent) ATTENTION_CHANNEL_ID else PROGRESS_CHANNEL_ID
+    val deepLink = (payload["deepLink"] as? String)?.takeIf { it.startsWith("linkshell") } ?: "linkshell:///"
+    val actionsJson = ActiveSessionForegroundService.actionsToJson(payload["actions"] as? List<*>)
 
-    val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-      Notification.Builder(context, channelId)
-    } else {
-      @Suppress("DEPRECATION")
-      Notification.Builder(context)
+    if (foregroundService) {
+      if (ActiveSessionForegroundService.startOrUpdate(
+          context = context,
+          title = title,
+          subtitle = subtitle,
+          computerName = computerName,
+          urgent = urgent,
+          ongoing = ongoing,
+          deepLink = deepLink,
+          actionsJson = actionsJson,
+        )
+      ) {
+        return true
+      }
+    } else if (ActiveSessionForegroundService.isRunning) {
+      // Detach rather than remove so the replacement regular notification appears seamlessly.
+      ActiveSessionForegroundService.stop(context, removeNotification = false)
     }
-    val iconRes = context.applicationInfo.icon.takeIf { it != 0 } ?: android.R.drawable.stat_notify_sync
-    val launchIntent = Intent(Intent.ACTION_VIEW, Uri.parse(deepLink)).apply {
-      setPackage(context.packageName)
-      addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-    }
-    val pendingFlags = PendingIntent.FLAG_UPDATE_CURRENT or
-      (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
-    val contentIntent = PendingIntent.getActivity(context, STATUS_NOTIFICATION_ID, launchIntent, pendingFlags)
 
-    builder
-      .setSmallIcon(iconRes)
-      .setContentTitle(title)
-      .setContentText(subtitle)
-      .setContentIntent(contentIntent)
-      .setOngoing(ongoing)
-      .setAutoCancel(!ongoing)
-      .setOnlyAlertOnce(!urgent)
-    if (computerName != null) {
-      builder.setSubText(computerName)
-    }
-    if (subtitle.length > 48) {
-      builder.setStyle(Notification.BigTextStyle().bigText(subtitle))
-    }
-    manager.notify(STATUS_NOTIFICATION_ID, builder.build())
+    val notification = ActiveSessionForegroundService.buildNotification(
+      context = context,
+      title = title,
+      subtitle = subtitle,
+      computerName = computerName,
+      urgent = urgent,
+      ongoing = ongoing,
+      deepLink = deepLink,
+      actionsJson = actionsJson,
+    )
+    manager.notify(STATUS_NOTIFICATION_ID, notification)
     return true
   }
 
   private fun cancelStatusNotification() {
     val context = appContext.reactContext ?: return
+    ActiveSessionForegroundService.stop(context, removeNotification = true)
     val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
     manager.cancel(STATUS_NOTIFICATION_ID)
   }

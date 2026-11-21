@@ -12,6 +12,27 @@ let visible = boot?.visible !== false;
 type Flush = () => Promise<{ saved: boolean; pending: number }>;
 let flush: Flush | undefined;
 
+function invokeMain<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+  const id = crypto.randomUUID();
+  return new Promise<T>((resolve, reject) => {
+    const onReply = (_event: unknown, name: unknown, detail: unknown) => {
+      if (name !== "linkshell-desktop-reply" || !detail || typeof detail !== "object") return;
+      const reply = detail as { id?: unknown; result?: unknown; error?: unknown };
+      if (reply.id !== id) return;
+      clearTimeout(timer);
+      ipcRenderer.removeListener("linkshell:event", onReply);
+      if (typeof reply.error === "string" && reply.error) reject(new Error(reply.error));
+      else resolve(reply.result as T);
+    };
+    const timer = setTimeout(() => {
+      ipcRenderer.removeListener("linkshell:event", onReply);
+      reject(new Error("操作超时，请重试"));
+    }, 15_000);
+    ipcRenderer.on("linkshell:event", onReply);
+    ipcRenderer.send("linkshell:message", { action: "invoke", id, method, params });
+  });
+}
+
 contextBridge.exposeInMainWorld("linkshellDesktop", {
   postMessage(message: unknown) {
     if (!message || typeof message !== "object") return;
@@ -27,6 +48,18 @@ contextBridge.exposeInMainWorld("linkshellDesktop", {
   /** The page's save barrier: what the main process waits for before the window goes. */
   setFlush(next: unknown) {
     flush = typeof next === "function" ? (next as Flush) : undefined;
+  },
+  setSystemShortcutCapture(enabled: boolean): Promise<boolean> {
+    return invokeMain<boolean>("setSystemShortcutCapture", { enabled: Boolean(enabled) }).catch(() => false);
+  },
+  startLanDiscovery(): Promise<unknown[]> {
+    return invokeMain<unknown[]>("startLanDiscovery", {}).catch(() => []);
+  },
+  stopLanDiscovery(): Promise<void> {
+    return invokeMain("stopLanDiscovery", {}).then(() => undefined, () => undefined);
+  },
+  getLanHosts(): Promise<unknown[]> {
+    return invokeMain<unknown[]>("getLanHosts", {}).catch(() => []);
   },
 });
 
