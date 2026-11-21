@@ -29,7 +29,7 @@ namespace LinkShell.Windows {
         static readonly AutoResetEvent CaptureWake = new AutoResetEvent(false);
         static readonly AutoResetEvent ShapeWake = new AutoResetEvent(false);
         static readonly Dictionary<string, CursorShapeSnapshot> CursorShapeCache = new Dictionary<string, CursorShapeSnapshot>();
-        sealed class CursorShapeSnapshot {
+        internal sealed class CursorShapeSnapshot {
             public string Id, Png;
             public double Width, Height, HotX, HotY, Scale;
         }
