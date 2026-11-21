@@ -228,6 +228,8 @@
     .lead { max-width: 34em; margin-top: 28px; color: var(--text-sec); font-size: var(--lead); line-height: 1.6; }
     .hero .lead { max-width: 30em; margin-top: 32px; font-size: 21px; }
     .hero .btns { margin-top: 40px; }
+    .hero-proof { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+    .hero-proof span { display: inline-flex; align-items: center; padding: 5px 10px; border: 1px solid var(--border); border-radius: 6px; color: var(--text-sec); font-size: 13px; line-height: 1.3; }
     .hero .stage { margin-top: 96px; }
     @media (max-width: 960px) { .hero-top { grid-template-columns: minmax(0, 1fr); gap: 40px; } }
 
@@ -332,6 +334,8 @@
     footer nav { display: flex; flex-wrap: wrap; gap: 8px 24px; }
     footer nav a { color: var(--text-sec); }
     footer nav a:hover { color: var(--text); text-decoration: none; }
+    .footer-companion { width: 100%; padding-top: 12px; border-top: 1px solid var(--border); color: var(--text-sec); font-size: var(--small); }
+    .footer-companion a { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
     .wordmark { margin: 48px 0 0; color: var(--surface-2); font-size: clamp(88px, 19.5vw, 300px); font-weight: 700; letter-spacing: -.06em; line-height: .78; text-align: center; white-space: nowrap; user-select: none; }
 
     /* docs: a quiet contents column, the text at reading measure, sections apart by space */
@@ -367,14 +371,19 @@
     html[lang^="zh"] .pricing h1 { letter-spacing: -.03em; line-height: 1.1; }
     .pricing .lead { margin-top: 28px; }
     .plans { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 80px; margin-top: 64px; }
-    .plan { max-width: none; padding: 32px 0 0; border-top: 1px solid var(--border-strong); background: none; }
+    .plans.plans-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 48px; margin-bottom: 56px; }
+    .plan { max-width: none; padding: 32px 0 0; border-top: 1px solid var(--border-strong); background: none; display: flex; flex-direction: column; }
     .plan.pro { border-top-color: var(--accent); }
-    .sec .plan h2 { margin: 0; font-size: var(--lead); letter-spacing: -.015em; }
+    .plan .btn { margin-top: auto; align-self: flex-start; }
+    .sec .plan h2, .pricing .plan h2 { margin: 0; font-size: var(--lead); letter-spacing: -.015em; }
     .price { margin-top: 18px; font-size: clamp(56px, 6vw, 84px); font-weight: 600; letter-spacing: -.05em; line-height: 1; font-variant-numeric: tabular-nums; }
+    .plans.plans-3 .price { font-size: clamp(44px, 4.4vw, 64px); }
     .price small { margin-left: 8px; font-size: var(--body); font-weight: 400; letter-spacing: 0; color: var(--text-sec); }
     .per { margin-top: 12px; color: var(--text-sec); }
     .plan ul { margin: 28px 0 32px; padding-left: 20px; color: var(--text-sec); }
     .plan li + li { margin-top: 8px; }
+    .plan-alt { margin-top: 12px; font-size: var(--small); color: var(--text-sec); }
+    .plan-alt a { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
     #pricing-buy { max-width: 420px; }
     #pricing-buy ol { margin: 0 0 20px; padding-left: 22px; color: var(--text-sec); }
     #pricing-buy li + li { margin-top: 8px; }
@@ -387,7 +396,7 @@
 
     body { overflow-x: clip; }
     @media (max-width: 960px) {
-      .feature.split, .sec#setup .text, .more, .more.points, .plans { grid-template-columns: minmax(0, 1fr); }
+      .feature.split, .sec#setup .text, .more, .more.points, .plans, .plans.plans-3 { grid-template-columns: minmax(0, 1fr); }
       .feature.split { gap: 48px; }
       .feature.split.flip > .text, .feature.split.flip > .feature-stage { order: 0; }
       .feature.split > .feature-stage { justify-content: flex-start; }
@@ -699,11 +708,16 @@
           <div>
             <a class="news" href="#fusion"><span lang="zh"><b>新增融合模式</b>：把另一台 Mac 的应用，开在这台 Mac 上</span><span lang="en"><b>New: Fusion Mode.</b> Open another Mac&#39;s apps on this one</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
             <h1><span lang="zh"><span class="nb">离开电脑，</span><span class="nb">Agent 接着干。</span></span><span lang="en">Leave your desk. <span class="nb">Your agents keep going.</span></span></h1>
-            <p class="lead"><span lang="zh">Claude Code 和 Codex 在电脑上埋头写代码，你该吃饭吃饭，该开会开会。它要权限，手机震一下；你有想法，随时插一句。</span><span lang="en">Claude Code and Codex keep their heads down on your computer while you get on with lunch, or the meeting. When they need a yes, your phone buzzes; when you have a thought, you cut in.</span></p>
+            <p class="lead"><span lang="zh">Claude Code 和 Codex 留在你自己的电脑上跑本地代码、终端与预览；你在手机、手表或锁屏上实时审批、插话、接管 120fps Mac 桌面，端到端加密。</span><span lang="en">Your local Claude Code, Codex, terminal, localhost previews, and 120fps Mac screen — end-to-end encrypted in your pocket. Approve from the Lock Screen or Apple Watch, steer mid-turn, and never stop shipping.</span></p>
             <div class="btns">
               <a class="btn btn-p" href="https://apps.apple.com/cn/app/linkshell/id6761547516"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.37 12.62c-.02-2.3 1.88-3.4 1.96-3.46-1.07-1.56-2.73-1.78-3.32-1.8-1.41-.14-2.76.83-3.47.83-.72 0-1.82-.81-3-.79-1.54.02-2.96.9-3.76 2.28-1.6 2.78-.41 6.9 1.15 9.16.76 1.1 1.67 2.34 2.86 2.3 1.15-.05 1.58-.74 2.97-.74 1.38 0 1.77.74 2.98.72 1.23-.02 2.01-1.12 2.76-2.23.87-1.28 1.23-2.52 1.25-2.58-.03-.01-2.4-.92-2.38-3.69ZM14.1 5.86c.63-.77 1.06-1.83.94-2.89-.91.04-2.01.61-2.66 1.37-.58.67-1.09 1.75-.96 2.79 1.02.08 2.05-.51 2.68-1.27Z"/></svg><span lang="zh">iPhone 下载</span><span lang="en">Get it for iPhone</span></a>
               <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/latest"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.6 9.48l1.84-3.18a.38.38 0 0 0-.65-.38l-1.87 3.23a11.4 11.4 0 0 0-9.84 0L5.2 5.92a.38.38 0 0 0-.65.38L6.4 9.48A10.8 10.8 0 0 0 1 18h22a10.8 10.8 0 0 0-5.4-8.52ZM7 15.25a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Zm10 0a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Z"/></svg>Android APK</a>
               <a class="btn btn-s" href="#install"><span lang="zh">电脑端</span><span lang="en">For your computer</span></a>
+            </div>
+            <div class="hero-proof">
+              <span><span lang="zh">端到端加密</span><span lang="en">End-to-End Encrypted</span></span>
+              <span><span lang="zh">120fps 原生屏幕 + 融合模式</span><span lang="en">120fps Metal Screen + Fusion Mode</span></span>
+              <span><span lang="zh">自建免费 · 官方网关 ¥9.9/月</span><span lang="en">Self-Host Free · Cloud Relay $12/mo</span></span>
             </div>
           </div>
           <div class="ask" id="ask" data-ui data-state="waiting" role="group" aria-label="手机上收到的审批请求 / A request on your phone">
@@ -902,7 +916,7 @@
     <section class="back">
       <div class="wrap">
         <h2><span lang="zh">回到桌前，<span class="nb">按任意键，</span><span class="nb">接着来。</span></span><span lang="en">Back at your desk? <span class="nb">Press any key.</span> <span class="nb">Carry on.</span></span></h2>
-        <p><span lang="zh">全部功能免费。可以一条命令自建网关，或用 iTool 会员直接连官方网关。</span><span lang="en">Every feature is free. Run your own gateway with one command, or use the official gateway with an iTool membership.</span></p>
+        <p><span lang="zh">全部功能免费。可以一条命令自建网关，或开通官方中继网关（¥9.9/月起）。</span><span lang="en">Every feature is free with your own gateway, or let us run the encrypted relay and TURN streaming from $12/mo.</span></p>
         <div class="btns">
           <a class="btn btn-p" href="https://apps.apple.com/cn/app/linkshell/id6761547516"><span lang="zh">iPhone 下载</span><span lang="en">Get it for iPhone</span></a>
           <a class="btn btn-s" href="https://github.com/LiuTianjie/LinkShell/releases/latest">Android APK</a>
@@ -1075,14 +1089,51 @@
   <main class="page" data-page="pricing">
     <div class="wrap pricing">
       <div class="text">
-        <h1><span lang="zh">官方网关，按需购买。</span><span lang="en">Your gateway. Your choice.</span></h1>
-        <p class="lead"><span lang="zh">LinkShell 全部功能可通过自建网关免费使用。购买 LinkShell 单品会员即可使用官方网关；也可选择全产品年包。</span><span lang="en">Every LinkShell feature is free with a self-hosted gateway. Get LinkShell membership for the official gateway, or choose the all-products bundle.</span></p>
+        <h1><span lang="zh">自建免费，官方网关按需开通。</span><span lang="en">Self-host free, or let us run the relay.</span></h1>
+        <p class="lead"><span lang="zh">LinkShell 全部功能可通过自建网关免费使用。开通 LinkShell Pro 即可使用官方端到端加密中继与 TURN 转发；也可选择包含 8 款产品的全产品年包。</span><span lang="en">Every LinkShell feature is free with your own gateway. LinkShell Pro runs the end-to-end encrypted relay and TURN screen streaming for you — or unlock all 7 iTool apps with the All-Access Pass.</span></p>
       </div>
-      <div data-itool-store="linkshell"><a href="https://www.itool.tech/pro?product=linkshell">¥49 / year · ¥9.9 / month · Purchase</a></div>
+      <div class="plans plans-3">
+        <section class="plan">
+          <h2><span lang="zh">自建网关</span><span lang="en">Self-Hosted</span></h2>
+          <div class="price"><span lang="zh">¥0</span><span lang="en">$0</span></div>
+          <p class="per"><span lang="zh">全部客户端功能，自带服务器</span><span lang="en">Every feature, bring your own gateway</span></p>
+          <ul>
+            <li><span lang="zh">全部 Agent、终端、localhost 预览与 120fps 屏幕</span><span lang="en">All agents, terminal, localhost previews &amp; 120fps screen</span></li>
+            <li><span lang="zh">一条命令或 Docker 部署私有中继网关</span><span lang="en">One-command CLI or Docker relay deployment</span></li>
+            <li><span lang="zh">MIT 开源，连接始终保持端到端加密</span><span lang="en">MIT licensed, always end-to-end encrypted</span></li>
+          </ul>
+          <a href="docs/#d-gateway" class="btn btn-s"><span lang="zh">查看自建指南</span><span lang="en">Self-hosting guide</span></a>
+        </section>
+        <section class="plan pro">
+          <h2>LinkShell Pro</h2>
+          <div class="price"><span lang="zh">¥9.9</span><span lang="en">$12</span><small><span lang="zh">/月起</span><span lang="en">/mo</span></small></div>
+          <p class="per"><span lang="zh">或 ¥49/年 · 官方加密中继与 TURN</span><span lang="en">or $99/yr · Managed E2E relay &amp; TURN</span></p>
+          <ul>
+            <li><span lang="zh">官方端到端加密中继网关，免服务器、免维护</span><span lang="en">Managed end-to-end encrypted relay — zero server setup</span></li>
+            <li><span lang="zh">全球 TURN 兜底转发，外出弱网也能看 120fps 屏幕</span><span lang="en">Global TURN relay fallback for 120fps Mac streaming</span></li>
+            <li><span lang="zh">同账号登录即连多台电脑，免扫码配对</span><span lang="en">Same-account multi-machine sync with no QR pairing</span></li>
+          </ul>
+          <a lang="zh" href="https://www.itool.tech/zh/pro?product=linkshell&amp;checkout=yearly" target="_blank" rel="noopener noreferrer" class="btn btn-p">开通 LinkShell Pro ↗</a>
+          <a lang="en" href="https://www.itool.tech/en/pro?product=linkshell&amp;checkout=yearly&amp;method=creem" target="_blank" rel="noopener noreferrer" class="btn btn-p">Get LinkShell Pro ↗</a>
+        </section>
+        <section class="plan">
+          <h2><span lang="zh">全产品年包</span><span lang="en">All-Access Pass</span></h2>
+          <div class="price"><span lang="zh">¥99</span><span lang="en">$199</span><small><span lang="zh">/年</span><span lang="en">/yr</span></small></div>
+          <p class="per"><span lang="zh">含 StupidMirror + LinkShell 等全部 8 款产品</span><span lang="en">Includes LinkShell Pro + StupidMirror Pro ($149/yr) + 5 more apps</span></p>
+          <ul>
+            <li><span lang="zh">解锁 LinkShell 官方网关与 StupidMirror 真机 MCP</span><span lang="en">Unlocks LinkShell Pro relay &amp; StupidMirror real-device MCP</span></li>
+            <li><span lang="zh">含 Transeen、Saylane、BarIsland、VibeCheck 等全套工具</span><span lang="en">Plus Transeen, Saylane, BarIsland, VibeCheck &amp; iTool Web</span></li>
+            <li><span lang="zh">已含税，支持支付宝或国际信用卡账单管理</span><span lang="en">Tax included · Expense-ready billing · Save $49+/yr</span></li>
+          </ul>
+          <a lang="zh" href="https://www.itool.tech/zh/pro?product=bundle&amp;checkout=yearly" target="_blank" rel="noopener noreferrer" class="btn btn-s">开通全产品年包 ↗</a>
+          <a lang="en" href="https://www.itool.tech/en/pro?product=bundle&amp;checkout=yearly&amp;method=creem" target="_blank" rel="noopener noreferrer" class="btn btn-s">Get All-Access Pass ↗</a>
+        </section>
+      </div>
+      <div data-itool-store="linkshell"><a href="https://www.itool.tech/en/pro?product=linkshell&amp;method=creem"><span lang="zh">¥49 / 年 · ¥9.9 / 月 · 购买 LinkShell Pro</span><span lang="en">$99 / year · $12 / month · Get LinkShell Pro</span></a></div>
       <script src="https://www.itool.tech/purchase.js" defer></script>
       <section class="faq text">
-        <h3><span lang="zh">单品与年包有什么区别？</span><span lang="en">One product or the collection?</span></h3>
-        <p><span lang="zh">LinkShell 单品：¥49/年或 ¥9.9/月（US$13.49/年或 US$3.19/月），仅含 LinkShell。全产品年包：¥99/年（US$26.49/年），含全部 8 款产品。所有价格已含税。支付宝单次付款；国际卡自动续订，可随时取消后续续费。</span><span lang="en">LinkShell only: $13.49/year or $3.19/month (¥49/year or ¥9.9/month). All-products bundle: $26.49/year (¥99/year), including all 8 products. Tax is included. Alipay payments are one-time; card subscriptions renew automatically and can be canceled at any time.</span></p>
+        <h3><span lang="zh">单品与全产品年包有什么区别？</span><span lang="en">LinkShell Pro or the All-Access Pass?</span></h3>
+        <p><span lang="zh">LinkShell 单品：¥49/年或 ¥9.9/月（海外 US$99/年或 US$12/月），仅含 LinkShell。全产品年包：¥99/年（海外 US$199/年），含 StupidMirror 与 LinkShell 在内的全部 8 款产品。所有价格已含税。支付宝单次付款；国际卡自动续订，可随时取消后续续费。</span><span lang="en">LinkShell Pro is $12/month or $99/year (¥9.9/month or ¥49/year via Alipay) for LinkShell only. The All-Access Annual Pass is $199/year (¥99/year via Alipay) and unlocks all 7 overseas iTool apps including StupidMirror Pro ($149/yr). Tax is included. Card subscriptions renew automatically and can be canceled any time; Alipay is a one-time payment.</span></p>
         <p><span lang="zh">用同一个 iTool 账号登录 LinkShell 即可使用已购权益。自建网关仍可免费配对。</span><span lang="en">Sign in to LinkShell with the same iTool account to use your purchase. Self-hosted gateways remain free.</span></p>
       </section>
     </div>
@@ -1273,17 +1324,17 @@
         <a href="docs/#d-gateway" class="btn btn-s"><span lang="zh">自建网关指南</span><span lang="en">Self-hosting guide</span><span lang="ja">セルフホストの手順（英語）</span></a>
       </section>
       <section class="plan pro">
-        <h2><span lang="zh">iTool 会员</span><span lang="en">iTool membership</span><span lang="ja">iTool メンバーシップ</span></h2>
-        <div class="price">¥9.9<small><span lang="zh">/月起</span><span lang="en">/mo</span><span lang="ja">/月から</span></small></div>
-        <p class="per"><span lang="zh">国际信用卡 US$3.19/月 · US$26.49/年</span><span lang="en">US$3.19/mo or US$26.49/yr by international card</span><span lang="ja">海外カード US$3.19/月・US$26.49/年</span></p>
+        <h2><span lang="zh">LinkShell Pro 官方网关</span><span lang="en">LinkShell Pro</span><span lang="ja">LinkShell Pro</span></h2>
+        <div class="price"><span lang="zh">¥9.9</span><span lang="en">$12</span><span lang="ja">$12</span><small><span lang="zh">/月起</span><span lang="en">/mo</span><span lang="ja">/月から</span></small></div>
+        <p class="per"><span lang="zh">单品 ¥49/年 · 全产品年包 ¥99/年</span><span lang="en">$99/yr billed annually · All-Access Pass $199/yr</span><span lang="ja">年額 $99 · 全製品パス $199/年</span></p>
         <ul>
-          <li><span lang="zh">官方网关，同账号登录即可连接，免扫码、免部署</span><span lang="en">The official gateway: one account, no server or QR codes</span><span lang="ja">公式ゲートウェイ：同じアカウントでログインするだけ（サーバー・QR 不要）</span></li>
+          <li><span lang="zh">官方端到端加密中继 + TURN 转发，免部署、免扫码</span><span lang="en">Managed E2E encrypted relay &amp; TURN streaming — zero server setup</span><span lang="ja">公式 E2E 暗号化リレー &amp; TURN：サーバー・QR 不要</span></li>
           <li><span lang="zh">邀请好友开通，双方各得 14 / 30 天会员</span><span lang="en">Invite a friend: both get 14 / 30 days</span><span lang="ja">友だち招待で双方に 14 / 30 日間プレゼント</span></li>
-          <li><span lang="zh">年度 ¥99（US$26.49）：含全部 iTool 产品</span><span lang="en">Yearly (¥99 / US$26.49): every iTool product</span><span lang="ja">年額 ¥99（US$26.49）：全 iTool 製品</span></li>
+          <li><span lang="zh">全产品年包 ¥99（海外 $199/年）：含 StupidMirror 与全部 8 款产品</span><span lang="en">All-Access Pass ($199/yr): unlocks StupidMirror Pro &amp; all 7 iTool apps</span><span lang="ja">全製品パス（$199/年）：StupidMirror Pro を含む全 7 製品</span></li>
         </ul>
-        <a lang="zh" href="https://www.itool.tech/zh/pro?from=linkshell" target="_blank" rel="noopener noreferrer" class="btn btn-p">开通会员 ↗</a>
-        <a lang="en" href="https://www.itool.tech/en/pro?from=linkshell" target="_blank" rel="noopener noreferrer" class="btn btn-p">Get iTool membership ↗</a>
-        <a lang="ja" href="https://www.itool.tech/en/pro?from=linkshell" target="_blank" rel="noopener noreferrer" class="btn btn-p">メンバーシップに登録 ↗</a>
+        <a lang="zh" href="https://www.itool.tech/zh/pro?product=linkshell" target="_blank" rel="noopener noreferrer" class="btn btn-p">开通 LinkShell Pro ↗</a>
+        <a lang="en" href="https://www.itool.tech/en/pro?product=linkshell&amp;method=creem" target="_blank" rel="noopener noreferrer" class="btn btn-p">Get LinkShell Pro ↗</a>
+        <a lang="ja" href="https://www.itool.tech/en/pro?product=linkshell&amp;method=creem" target="_blank" rel="noopener noreferrer" class="btn btn-p">LinkShell Pro を入手 ↗</a>
       </section>
       </div>
       </div>
@@ -1301,7 +1352,7 @@
         <h3><span lang="zh">Android 能用吗？</span><span lang="en">Does it work on Android?</span><span lang="ja">Android でも使えますか？</span></h3>
         <p><span lang="zh">能。Android 版 APK 在 GitHub Releases 下载；浏览器里也有网页版。</span><span lang="en">Yes. The Android APK is on GitHub Releases, and there is a browser client too.</span><span lang="ja">はい。Android 版の APK は GitHub Releases から入手できます。ブラウザ版もあります。</span></p>
         <h3><span lang="zh">要多少钱？</span><span lang="en">What does it cost?</span><span lang="ja">料金はかかりますか？</span></h3>
-        <p><span lang="zh">自建网关（一条命令或 Docker）就能免费使用全部功能。想免部署用官方网关，可开通 LinkShell 单品会员（¥9.9/月、¥49/年，或 US$3.19/月、US$13.49/年，均已含税），或全产品年包（¥99 / US$26.49 每年），邀请好友首次开通双方各得 14 / 30 天。</span><span lang="en">Every feature is free with your own gateway (one command or Docker). For the hosted official gateway, iTool membership is $3.19/mo or $13.49/yr for LinkShell, or $26.49/yr for all products by international card via Creem (¥9.9/mo, ¥49/yr, or ¥99/yr via Alipay, tax included), and inviting a friend gives both of you 14 or 30 days.</span><span lang="ja">ゲートウェイを自分で立てれば（コマンド 1 つか Docker）、全機能を無料で使えます。公式ゲートウェイは iTool メンバーシップ（海外カード US$3.19/月・US$13.49/年・全製品 US$26.49/年、Alipay ¥9.9/月・¥49/年・全製品 ¥99/年）で利用できます。友だち招待で双方に 14 / 30 日間が付与されます。</span></p>
+        <p><span lang="zh">自建网关（一条命令或 Docker）就能免费使用全部功能。想免部署用官方网关，可开通 LinkShell Pro（¥9.9/月、¥49/年，海外 US$12/月、US$99/年），或全产品年包（¥99/年、海外 US$199/年，含 StupidMirror 等 8 款产品），邀请好友首次开通双方各得 14 / 30 天。</span><span lang="en">Every feature is free with your own gateway (one command or Docker). For the managed official relay and TURN streaming, LinkShell Pro is $12/mo or $99/yr by card via Creem (¥9.9/mo or ¥49/yr via Alipay), or choose the All-Access Pass at $199/yr (¥99/yr) covering all 7 overseas iTool apps. Tax is included, and inviting a friend gives both of you 14 or 30 days.</span><span lang="ja">ゲートウェイを自分で立てれば（コマンド 1 つか Docker）、全機能を無料で使えます。公式リレーを使う LinkShell Pro は US$12/月・US$99/年（Alipay ¥9.9/月・¥49/年）、全 7 製品を含む全製品パスは US$199/年（Alipay ¥99/年）です。友だち招待で双方に 14 / 30 日間が付与されます。</span></p>
       </section>
     </div>
 
@@ -1481,17 +1532,17 @@
         <a href="docs/#d-gateway" class="btn btn-s"><span lang="zh">自建网关指南</span><span lang="en">Self-hosting guide</span><span lang="ja">セルフホストの手順（英語）</span></a>
       </section>
       <section class="plan pro">
-        <h2><span lang="zh">iTool 会员</span><span lang="en">iTool membership</span><span lang="ja">iTool メンバーシップ</span></h2>
-        <div class="price">¥9.9<small><span lang="zh">/月起</span><span lang="en">/mo</span><span lang="ja">/月から</span></small></div>
-        <p class="per"><span lang="zh">国际信用卡 US$3.19/月 · US$26.49/年</span><span lang="en">US$3.19/mo or US$26.49/yr by international card</span><span lang="ja">海外カード US$3.19/月・US$26.49/年</span></p>
+        <h2><span lang="zh">LinkShell Pro 官方网关</span><span lang="en">LinkShell Pro</span><span lang="ja">LinkShell Pro</span></h2>
+        <div class="price"><span lang="zh">¥9.9</span><span lang="en">$12</span><span lang="ja">$12</span><small><span lang="zh">/月起</span><span lang="en">/mo</span><span lang="ja">/月から</span></small></div>
+        <p class="per"><span lang="zh">单品 ¥49/年 · 全产品年包 ¥99/年</span><span lang="en">$99/yr billed annually · All-Access Pass $199/yr</span><span lang="ja">年額 $99 · 全製品パス $199/年</span></p>
         <ul>
-          <li><span lang="zh">官方网关，同账号登录即可连接，免扫码、免部署</span><span lang="en">The official gateway: one account, no server or QR codes</span><span lang="ja">公式ゲートウェイ：同じアカウントでログインするだけ（サーバー・QR 不要）</span></li>
+          <li><span lang="zh">官方端到端加密中继 + TURN 转发，免部署、免扫码</span><span lang="en">Managed E2E encrypted relay &amp; TURN streaming — zero server setup</span><span lang="ja">公式 E2E 暗号化リレー &amp; TURN：サーバー・QR 不要</span></li>
           <li><span lang="zh">邀请好友开通，双方各得 14 / 30 天会员</span><span lang="en">Invite a friend: both get 14 / 30 days</span><span lang="ja">友だち招待で双方に 14 / 30 日間プレゼント</span></li>
-          <li><span lang="zh">年度 ¥99（US$26.49）：含全部 iTool 产品</span><span lang="en">Yearly (¥99 / US$26.49): every iTool product</span><span lang="ja">年額 ¥99（US$26.49）：全 iTool 製品</span></li>
+          <li><span lang="zh">全产品年包 ¥99（海外 $199/年）：含 StupidMirror 与全部 8 款产品</span><span lang="en">All-Access Pass ($199/yr): unlocks StupidMirror Pro &amp; all 7 iTool apps</span><span lang="ja">全製品パス（$199/年）：StupidMirror Pro を含む全 7 製品</span></li>
         </ul>
-        <a lang="zh" href="https://www.itool.tech/zh/pro?from=linkshell" target="_blank" rel="noopener noreferrer" class="btn btn-p">开通会员 ↗</a>
-        <a lang="en" href="https://www.itool.tech/en/pro?from=linkshell" target="_blank" rel="noopener noreferrer" class="btn btn-p">Get iTool membership ↗</a>
-        <a lang="ja" href="https://www.itool.tech/en/pro?from=linkshell" target="_blank" rel="noopener noreferrer" class="btn btn-p">メンバーシップに登録 ↗</a>
+        <a lang="zh" href="https://www.itool.tech/zh/pro?product=linkshell" target="_blank" rel="noopener noreferrer" class="btn btn-p">开通 LinkShell Pro ↗</a>
+        <a lang="en" href="https://www.itool.tech/en/pro?product=linkshell&amp;method=creem" target="_blank" rel="noopener noreferrer" class="btn btn-p">Get LinkShell Pro ↗</a>
+        <a lang="ja" href="https://www.itool.tech/en/pro?product=linkshell&amp;method=creem" target="_blank" rel="noopener noreferrer" class="btn btn-p">LinkShell Pro を入手 ↗</a>
       </section>
       </div>
       </div>
@@ -1509,7 +1560,7 @@
         <h3><span lang="zh">不打开 App 能批准请求吗？</span><span lang="en">Can I approve a request without opening the app?</span><span lang="ja">アプリを開かずにリクエストを承認できますか？</span></h3>
         <p><span lang="zh">能。iPhone 锁屏的实时活动带「拒绝」和「允许」按钮（iOS 17 及以上），Apple Watch 上也能回复请求（watchOS 10 及以上）。</span><span lang="en">Yes. The Live Activity on the iPhone Lock Screen carries Deny and Allow (iOS 17 or later), and Apple Watch can answer requests too (watchOS 10 or later).</span><span lang="ja">はい。iPhone のロック画面のライブアクティビティに「拒否」「許可」ボタンが出ます（iOS 17 以降）。Apple Watch からもリクエストに応答できます（watchOS 10 以降）。</span></p>
         <h3><span lang="zh">要多少钱？</span><span lang="en">What does it cost?</span><span lang="ja">料金はかかりますか？</span></h3>
-        <p><span lang="zh">自建网关（一条命令或 Docker）就能免费使用全部功能。想免部署用官方网关，可开通 LinkShell 单品会员（¥9.9/月、¥49/年，或 US$3.19/月、US$13.49/年，均已含税），或全产品年包（¥99 / US$26.49 每年），邀请好友首次开通双方各得 14 / 30 天。</span><span lang="en">Every feature is free with your own gateway (one command or Docker). For the hosted official gateway, iTool membership is $3.19/mo or $13.49/yr for LinkShell, or $26.49/yr for all products by international card via Creem (¥9.9/mo, ¥49/yr, or ¥99/yr via Alipay, tax included), and inviting a friend gives both of you 14 or 30 days.</span><span lang="ja">ゲートウェイを自分で立てれば（コマンド 1 つか Docker）、全機能を無料で使えます。公式ゲートウェイは iTool メンバーシップ（海外カード US$3.19/月・US$13.49/年・全製品 US$26.49/年、Alipay ¥9.9/月・¥49/年・全製品 ¥99/年）で利用できます。友だち招待で双方に 14 / 30 日間が付与されます。</span></p>
+        <p><span lang="zh">自建网关（一条命令或 Docker）就能免费使用全部功能。想免部署用官方网关，可开通 LinkShell Pro（¥9.9/月、¥49/年，海外 US$12/月、US$99/年），或全产品年包（¥99/年、海外 US$199/年，含 StupidMirror 等 8 款产品），邀请好友首次开通双方各得 14 / 30 天。</span><span lang="en">Every feature is free with your own gateway (one command or Docker). For the managed official relay and TURN streaming, LinkShell Pro is $12/mo or $99/yr by card via Creem (¥9.9/mo or ¥49/yr via Alipay), or choose the All-Access Pass at $199/yr (¥99/yr) covering all 7 overseas iTool apps. Tax is included, and inviting a friend gives both of you 14 or 30 days.</span><span lang="ja">ゲートウェイを自分で立てれば（コマンド 1 つか Docker）、全機能を無料で使えます。公式リレーを使う LinkShell Pro は US$12/月・US$99/年（Alipay ¥9.9/月・¥49/年）、全 7 製品を含む全製品パスは US$199/年（Alipay ¥99/年）です。友だち招待で双方に 14 / 30 日間が付与されます。</span></p>
       </section>
     </div>
 
@@ -1542,6 +1593,11 @@
         <a href="codex/">Codex</a>
         <a href="https://www.producthunt.com/products/linkshell">Product Hunt</a>
       </nav>
+      <div class="footer-companion">
+        <span lang="zh">想让 Agent 直接看屏幕、操控真机 iPhone/Android？试试 <a href="https://stupidmirror.itool.tech/zh/" target="_blank" rel="noopener noreferrer">StupidMirror →</a></span>
+        <span lang="en">Need your agent to see and tap a real iPhone or Android? <a href="https://stupidmirror.itool.tech/" target="_blank" rel="noopener noreferrer">StupidMirror →</a></span>
+        <span lang="ja">エージェントに実機の iPhone・Android 画面を見せて操作させるには <a href="https://stupidmirror.itool.tech/" target="_blank" rel="noopener noreferrer">StupidMirror →</a></span>
+      </div>
     </div>
     <p class="wordmark" aria-hidden="true">LinkShell</p>
   </footer>

@@ -75,7 +75,7 @@ META = {
     },
     ("en", "home"): {
         "title": "LinkShell: Control Claude Code and Codex from Your Phone",
-        "description": "Follow, approve and steer Claude Code, Codex and other coding agents on your computer from iPhone or Android. Remote Mac desktop, Fusion Mode between Macs, end-to-end encrypted.",
+        "description": "Your local Claude Code, Codex, terminal, localhost previews, and 120fps Mac screen — end-to-end encrypted in your pocket. Approve from the Lock Screen or Apple Watch, steer mid-turn, or self-host the relay free.",
         "keywords": "LinkShell, Claude Code mobile, Codex on phone, remote control coding agent, AI coding agent, remote desktop, remote Mac, Fusion Mode, remote Mac apps, remote terminal, iOS, Android, end-to-end encryption, self-hosted gateway",
         "image_alt": "LinkShell's home page: leave your desk, your agents keep going, with a request from Claude on the phone",
     },
@@ -86,9 +86,9 @@ META = {
         "image_alt": "LinkShell: follow the coding agents on your computer from your phone",
     },
     ("en", "pricing"): {
-        "title": "LinkShell Pricing: Free, or the iTool Membership from $3.19 a Month",
-        "description": "Every LinkShell feature is free with your own gateway. The iTool membership adds the official gateway: $3.19/month or $13.49/year for LinkShell, or $26.49/year for all products. Tax included. Purchase on the iTool website.",
-        "keywords": "LinkShell pricing, iTool membership, official gateway, free, self-hosted gateway",
+        "title": "LinkShell Pricing: Free Self-Hosted, or Cloud Relay from $12/mo",
+        "description": "Every LinkShell feature is free with your own gateway. LinkShell Pro adds the managed end-to-end encrypted relay and TURN screen streaming for $12/month or $99/year — or unlock all 7 iTool apps with the $199/year All-Access Pass. Tax included.",
+        "keywords": "LinkShell pricing, LinkShell Pro, official gateway, free self-hosted, All-Access Pass",
         "image_alt": "LinkShell: follow the coding agents on your computer from your phone",
     },
     ("zh", "claude-code"): {
@@ -256,6 +256,7 @@ def structured_data(lang: str, view: str, page: str) -> dict:
     meta, here = META[(lang, view)], url(lang, view)
     org = {"@id": BASE + "#organization"}
     software_id = BASE + "#software"
+    store_url = APP_STORE if lang == "zh" else APP_STORE_ANY
     graph = [
         {
             "@type": "Organization",
@@ -263,7 +264,13 @@ def structured_data(lang: str, view: str, page: str) -> dict:
             "name": "LinkShell",
             "url": BASE,
             "logo": {"@type": "ImageObject", "url": BASE + "assets/icon-512.png", "width": 512, "height": 512},
-            "sameAs": [GITHUB, PRODUCT_HUNT, APP_STORE],
+            "sameAs": [
+                GITHUB,
+                PRODUCT_HUNT,
+                store_url,
+                "https://www.itool.tech/en",
+                "https://stupidmirror.itool.tech/",
+            ],
         },
         {
             "@type": "WebSite",
@@ -282,6 +289,7 @@ def structured_data(lang: str, view: str, page: str) -> dict:
         "description": meta["description"],
         "inLanguage": LANGS[lang]["html"],
         "isPartOf": {"@id": BASE + "#website"},
+        "speakable": {"@type": "SpeakableSpecification", "cssSelector": ["h1", ".hero .lead"]},
         "primaryImageOfPage": {"@type": "ImageObject", "url": BASE + LANGS[lang]["og_image"], "width": 1200, "height": 630},
     }
     if view == "home":
@@ -305,9 +313,10 @@ def structured_data(lang: str, view: str, page: str) -> dict:
         pricing = site("pricing")
         # www and a locale up front: the bare domain costs two redirects. itool.tech has no Japanese.
         # checkout= opens that plan's payment once the visitor is signed in.
-        buy = f"https://www.itool.tech/{'zh' if lang == 'zh' else 'en'}/pro?from=linkshell&checkout="
-        # USD list prices verified against iTool's live /api/pay/creem/config on 2026-11-11.
-        currency, monthly_price, yearly_price = ("USD", "3.19", "13.49") if lang == "en" and view == "pricing" else ("CNY", "9.9", "49")
+        buy = f"https://www.itool.tech/{'zh' if lang == 'zh' else 'en'}/pro?product=linkshell&{'method=creem&' if lang != 'zh' else ''}checkout="
+        buy_bundle = f"https://www.itool.tech/{'zh' if lang == 'zh' else 'en'}/pro?product=bundle&{'method=creem&' if lang != 'zh' else ''}checkout=yearly"
+        currency, monthly_price, yearly_price, bundle_price = ("USD", "12", "99", "199") if lang != "zh" else ("CNY", "9.9", "49", "99")
+        store_url = APP_STORE if lang == "zh" else APP_STORE_ANY
         graph.append({
             "@type": "SoftwareApplication",
             "@id": software_id,
@@ -317,7 +326,7 @@ def structured_data(lang: str, view: str, page: str) -> dict:
             "operatingSystem": "iOS, Android, macOS, Windows, Linux",
             "url": site("home"),
             "downloadUrl": site("docs") + "#d-install",
-            "installUrl": APP_STORE_ANY if view in LANDING else APP_STORE,
+            "installUrl": store_url,
             "softwareHelp": {"@type": "CreativeWork", "url": site("docs")},
             "image": BASE + LANGS[lang]["og_image"],
             "screenshot": [BASE + p for p in ("assets/promo/clip-follow.jpg", "assets/promo/lock-screen.jpg", "assets/promo/clip-queue.jpg", "assets/promo/clip-screen.jpg")],
@@ -325,28 +334,33 @@ def structured_data(lang: str, view: str, page: str) -> dict:
             "isAccessibleForFree": True,
             "publisher": org,
             "offers": [
-                {"@type": "Offer", "name": "Free", "price": "0", "priceCurrency": currency, "url": pricing},
+                {"@type": "Offer", "name": "Free (Self-Hosted)", "price": "0", "priceCurrency": currency, "url": pricing},
                 {
-                    "@type": "Offer", "name": "LinkShell (monthly)", "price": monthly_price, "priceCurrency": currency, "url": buy + "monthly",
+                    "@type": "Offer", "name": "LinkShell Pro (monthly)", "price": monthly_price, "priceCurrency": currency, "url": buy + "monthly",
                     "priceSpecification": {"@type": "UnitPriceSpecification", "price": monthly_price, "priceCurrency": currency, "billingDuration": "P1M", "valueAddedTaxIncluded": True},
                 },
                 {
-                    "@type": "Offer", "name": "LinkShell (yearly)", "price": yearly_price, "priceCurrency": currency, "url": buy + "yearly",
+                    "@type": "Offer", "name": "LinkShell Pro (yearly)", "price": yearly_price, "priceCurrency": currency, "url": buy + "yearly",
                     "priceSpecification": {"@type": "UnitPriceSpecification", "price": yearly_price, "priceCurrency": currency, "billingDuration": "P1Y", "valueAddedTaxIncluded": True},
+                },
+                {
+                    "@type": "Offer", "name": "All-Access Annual Pass", "price": bundle_price, "priceCurrency": currency, "url": buy_bundle,
+                    "priceSpecification": {"@type": "UnitPriceSpecification", "price": bundle_price, "priceCurrency": currency, "billingDuration": "P1Y", "valueAddedTaxIncluded": True},
                 },
             ],
         })
     if view == "home":
+        store_url = APP_STORE if lang == "zh" else APP_STORE_ANY
         graph.append({
             "@type": "MobileApplication",
             "@id": BASE + "#ios-app",
             "name": "LinkShell",
             "operatingSystem": "iOS 16.4 or later",
             "applicationCategory": "UtilitiesApplication",
-            "installUrl": APP_STORE,
-            "url": APP_STORE,
+            "installUrl": store_url,
+            "url": store_url,
             "isPartOf": {"@id": software_id},
-            "offers": {"@type": "Offer", "price": "0", "priceCurrency": "CNY"},
+            "offers": {"@type": "Offer", "price": "0", "priceCurrency": "CNY" if lang == "zh" else "USD"},
         })
         film = FILM[lang]
         still_alt = re.search(r'<img src="[^"]*film[^"]*"[^>]*alt="([^"]*)"', page)
@@ -441,6 +455,7 @@ def build(source: str, lang: str, view: str) -> str:
     if lang != "zh":
         # English stills (Japanese pages have none of their own).
         page = re.sub(r'(src|srcset)="([^"]*)" data-en="([^"]*)"', r'\1="\3"', page)
+        page = page.replace(APP_STORE, APP_STORE_ANY)
     else:
         page = re.sub(r' data-en="[^"]*"', "", page)
     # Rewrite all internal page links to root-relative paths (/docs/, /en/docs/, ...) so

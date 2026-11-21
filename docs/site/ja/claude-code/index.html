@@ -53,7 +53,9 @@
       "sameAs": [
         "https://github.com/LiuTianjie/LinkShell",
         "https://www.producthunt.com/products/linkshell",
-        "https://apps.apple.com/cn/app/linkshell/id6761547516"
+        "https://apps.apple.com/app/id6761547516",
+        "https://www.itool.tech/en",
+        "https://stupidmirror.itool.tech/"
       ]
     },
     {
@@ -97,6 +99,13 @@
       "isPartOf": {
         "@id": "https://linkshell.itool.tech/#website"
       },
+      "speakable": {
+        "@type": "SpeakableSpecification",
+        "cssSelector": [
+          "h1",
+          ".hero .lead"
+        ]
+      },
       "primaryImageOfPage": {
         "@type": "ImageObject",
         "url": "https://linkshell.itool.tech/assets/og-en.png",
@@ -139,35 +148,49 @@
       "offers": [
         {
           "@type": "Offer",
-          "name": "Free",
+          "name": "Free (Self-Hosted)",
           "price": "0",
-          "priceCurrency": "CNY",
+          "priceCurrency": "USD",
           "url": "https://linkshell.itool.tech/en/pricing/"
         },
         {
           "@type": "Offer",
-          "name": "LinkShell (monthly)",
-          "price": "9.9",
-          "priceCurrency": "CNY",
-          "url": "https://www.itool.tech/en/pro?from=linkshell&checkout=monthly",
+          "name": "LinkShell Pro (monthly)",
+          "price": "12",
+          "priceCurrency": "USD",
+          "url": "https://www.itool.tech/en/pro?product=linkshell&method=creem&checkout=monthly",
           "priceSpecification": {
             "@type": "UnitPriceSpecification",
-            "price": "9.9",
-            "priceCurrency": "CNY",
+            "price": "12",
+            "priceCurrency": "USD",
             "billingDuration": "P1M",
             "valueAddedTaxIncluded": true
           }
         },
         {
           "@type": "Offer",
-          "name": "LinkShell (yearly)",
-          "price": "49",
-          "priceCurrency": "CNY",
-          "url": "https://www.itool.tech/en/pro?from=linkshell&checkout=yearly",
+          "name": "LinkShell Pro (yearly)",
+          "price": "99",
+          "priceCurrency": "USD",
+          "url": "https://www.itool.tech/en/pro?product=linkshell&method=creem&checkout=yearly",
           "priceSpecification": {
             "@type": "UnitPriceSpecification",
-            "price": "49",
-            "priceCurrency": "CNY",
+            "price": "99",
+            "priceCurrency": "USD",
+            "billingDuration": "P1Y",
+            "valueAddedTaxIncluded": true
+          }
+        },
+        {
+          "@type": "Offer",
+          "name": "All-Access Annual Pass",
+          "price": "199",
+          "priceCurrency": "USD",
+          "url": "https://www.itool.tech/en/pro?product=bundle&method=creem&checkout=yearly",
+          "priceSpecification": {
+            "@type": "UnitPriceSpecification",
+            "price": "199",
+            "priceCurrency": "USD",
             "billingDuration": "P1Y",
             "valueAddedTaxIncluded": true
           }
@@ -216,7 +239,7 @@
           "name": "料金はかかりますか？",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "ゲートウェイを自分で立てれば（コマンド 1 つか Docker）、全機能を無料で使えます。公式ゲートウェイは iTool メンバーシップ（海外カード US$3.19/月・US$13.49/年・全製品 US$26.49/年、Alipay ¥9.9/月・¥49/年・全製品 ¥99/年）で利用できます。友だち招待で双方に 14 / 30 日間が付与されます。"
+            "text": "ゲートウェイを自分で立てれば（コマンド 1 つか Docker）、全機能を無料で使えます。公式リレーを使う LinkShell Pro は US$12/月・US$99/年（Alipay ¥9.9/月・¥49/年）、全 7 製品を含む全製品パスは US$199/年（Alipay ¥99/年）です。友だち招待で双方に 14 / 30 日間が付与されます。"
           }
         }
       ]
@@ -442,6 +465,8 @@
     .lead { max-width: 34em; margin-top: 28px; color: var(--text-sec); font-size: var(--lead); line-height: 1.6; }
     .hero .lead { max-width: 30em; margin-top: 32px; font-size: 21px; }
     .hero .btns { margin-top: 40px; }
+    .hero-proof { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+    .hero-proof span { display: inline-flex; align-items: center; padding: 5px 10px; border: 1px solid var(--border); border-radius: 6px; color: var(--text-sec); font-size: 13px; line-height: 1.3; }
     .hero .stage { margin-top: 96px; }
     @media (max-width: 960px) { .hero-top { grid-template-columns: minmax(0, 1fr); gap: 40px; } }
 
@@ -546,6 +571,8 @@
     footer nav { display: flex; flex-wrap: wrap; gap: 8px 24px; }
     footer nav a { color: var(--text-sec); }
     footer nav a:hover { color: var(--text); text-decoration: none; }
+    .footer-companion { width: 100%; padding-top: 12px; border-top: 1px solid var(--border); color: var(--text-sec); font-size: var(--small); }
+    .footer-companion a { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
     .wordmark { margin: 48px 0 0; color: var(--surface-2); font-size: clamp(88px, 19.5vw, 300px); font-weight: 700; letter-spacing: -.06em; line-height: .78; text-align: center; white-space: nowrap; user-select: none; }
 
     /* docs: a quiet contents column, the text at reading measure, sections apart by space */
@@ -581,14 +608,19 @@
     html[lang^="zh"] .pricing h1 { letter-spacing: -.03em; line-height: 1.1; }
     .pricing .lead { margin-top: 28px; }
     .plans { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 80px; margin-top: 64px; }
-    .plan { max-width: none; padding: 32px 0 0; border-top: 1px solid var(--border-strong); background: none; }
+    .plans.plans-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 48px; margin-bottom: 56px; }
+    .plan { max-width: none; padding: 32px 0 0; border-top: 1px solid var(--border-strong); background: none; display: flex; flex-direction: column; }
     .plan.pro { border-top-color: var(--accent); }
-    .sec .plan h2 { margin: 0; font-size: var(--lead); letter-spacing: -.015em; }
+    .plan .btn { margin-top: auto; align-self: flex-start; }
+    .sec .plan h2, .pricing .plan h2 { margin: 0; font-size: var(--lead); letter-spacing: -.015em; }
     .price { margin-top: 18px; font-size: clamp(56px, 6vw, 84px); font-weight: 600; letter-spacing: -.05em; line-height: 1; font-variant-numeric: tabular-nums; }
+    .plans.plans-3 .price { font-size: clamp(44px, 4.4vw, 64px); }
     .price small { margin-left: 8px; font-size: var(--body); font-weight: 400; letter-spacing: 0; color: var(--text-sec); }
     .per { margin-top: 12px; color: var(--text-sec); }
     .plan ul { margin: 28px 0 32px; padding-left: 20px; color: var(--text-sec); }
     .plan li + li { margin-top: 8px; }
+    .plan-alt { margin-top: 12px; font-size: var(--small); color: var(--text-sec); }
+    .plan-alt a { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
     #pricing-buy { max-width: 420px; }
     #pricing-buy ol { margin: 0 0 20px; padding-left: 22px; color: var(--text-sec); }
     #pricing-buy li + li { margin-top: 8px; }
@@ -601,7 +633,7 @@
 
     body { overflow-x: clip; }
     @media (max-width: 960px) {
-      .feature.split, .sec#setup .text, .more, .more.points, .plans { grid-template-columns: minmax(0, 1fr); }
+      .feature.split, .sec#setup .text, .more, .more.points, .plans, .plans.plans-3 { grid-template-columns: minmax(0, 1fr); }
       .feature.split { gap: 48px; }
       .feature.split.flip > .text, .feature.split.flip > .feature-stage { order: 0; }
       .feature.split > .feature-stage { justify-content: flex-start; }
@@ -860,17 +892,17 @@
         <a href="/en/docs/#d-gateway" class="btn btn-s">セルフホストの手順（英語）</a>
       </section>
       <section class="plan pro">
-        <h2>iTool メンバーシップ</h2>
-        <div class="price">¥9.9<small>/月から</small></div>
-        <p class="per">海外カード US$3.19/月・US$26.49/年</p>
+        <h2>LinkShell Pro</h2>
+        <div class="price">$12<small>/月から</small></div>
+        <p class="per">年額 $99 · 全製品パス $199/年</p>
         <ul>
-          <li>公式ゲートウェイ：同じアカウントでログインするだけ（サーバー・QR 不要）</li>
+          <li>公式 E2E 暗号化リレー &amp; TURN：サーバー・QR 不要</li>
           <li>友だち招待で双方に 14 / 30 日間プレゼント</li>
-          <li>年額 ¥99（US$26.49）：全 iTool 製品</li>
+          <li>全製品パス（$199/年）：StupidMirror Pro を含む全 7 製品</li>
         </ul>
         
         
-        <a href="https://www.itool.tech/en/pro?from=linkshell" target="_blank" rel="noopener noreferrer" class="btn btn-p">メンバーシップに登録 ↗</a>
+        <a href="https://www.itool.tech/en/pro?product=linkshell&amp;method=creem" target="_blank" rel="noopener noreferrer" class="btn btn-p">LinkShell Pro を入手 ↗</a>
       </section>
       </div>
       </div>
@@ -888,7 +920,7 @@
         <h3>Android でも使えますか？</h3>
         <p>はい。Android 版の APK は GitHub Releases から入手できます。ブラウザ版もあります。</p>
         <h3>料金はかかりますか？</h3>
-        <p>ゲートウェイを自分で立てれば（コマンド 1 つか Docker）、全機能を無料で使えます。公式ゲートウェイは iTool メンバーシップ（海外カード US$3.19/月・US$13.49/年・全製品 US$26.49/年、Alipay ¥9.9/月・¥49/年・全製品 ¥99/年）で利用できます。友だち招待で双方に 14 / 30 日間が付与されます。</p>
+        <p>ゲートウェイを自分で立てれば（コマンド 1 つか Docker）、全機能を無料で使えます。公式リレーを使う LinkShell Pro は US$12/月・US$99/年（Alipay ¥9.9/月・¥49/年）、全 7 製品を含む全製品パスは US$199/年（Alipay ¥99/年）です。友だち招待で双方に 14 / 30 日間が付与されます。</p>
       </section>
     </div>
 
@@ -921,6 +953,11 @@
         <a href="/ja/codex/">Codex</a>
         <a href="https://www.producthunt.com/products/linkshell">Product Hunt</a>
       </nav>
+      <div class="footer-companion">
+        
+        
+        エージェントに実機の iPhone・Android 画面を見せて操作させるには <a href="https://stupidmirror.itool.tech/" target="_blank" rel="noopener noreferrer">StupidMirror →</a>
+      </div>
     </div>
     <p class="wordmark" aria-hidden="true">LinkShell</p>
   </footer>

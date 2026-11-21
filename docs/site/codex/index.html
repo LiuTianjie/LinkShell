@@ -53,7 +53,9 @@
       "sameAs": [
         "https://github.com/LiuTianjie/LinkShell",
         "https://www.producthunt.com/products/linkshell",
-        "https://apps.apple.com/cn/app/linkshell/id6761547516"
+        "https://apps.apple.com/cn/app/linkshell/id6761547516",
+        "https://www.itool.tech/en",
+        "https://stupidmirror.itool.tech/"
       ]
     },
     {
@@ -97,6 +99,13 @@
       "isPartOf": {
         "@id": "https://linkshell.itool.tech/#website"
       },
+      "speakable": {
+        "@type": "SpeakableSpecification",
+        "cssSelector": [
+          "h1",
+          ".hero .lead"
+        ]
+      },
       "primaryImageOfPage": {
         "@type": "ImageObject",
         "url": "https://linkshell.itool.tech/assets/og.png",
@@ -119,7 +128,7 @@
       "operatingSystem": "iOS, Android, macOS, Windows, Linux",
       "url": "https://linkshell.itool.tech/",
       "downloadUrl": "https://linkshell.itool.tech/docs/#d-install",
-      "installUrl": "https://apps.apple.com/app/id6761547516",
+      "installUrl": "https://apps.apple.com/cn/app/linkshell/id6761547516",
       "softwareHelp": {
         "@type": "CreativeWork",
         "url": "https://linkshell.itool.tech/docs/"
@@ -139,17 +148,17 @@
       "offers": [
         {
           "@type": "Offer",
-          "name": "Free",
+          "name": "Free (Self-Hosted)",
           "price": "0",
           "priceCurrency": "CNY",
           "url": "https://linkshell.itool.tech/pricing/"
         },
         {
           "@type": "Offer",
-          "name": "LinkShell (monthly)",
+          "name": "LinkShell Pro (monthly)",
           "price": "9.9",
           "priceCurrency": "CNY",
-          "url": "https://www.itool.tech/zh/pro?from=linkshell&checkout=monthly",
+          "url": "https://www.itool.tech/zh/pro?product=linkshell&checkout=monthly",
           "priceSpecification": {
             "@type": "UnitPriceSpecification",
             "price": "9.9",
@@ -160,13 +169,27 @@
         },
         {
           "@type": "Offer",
-          "name": "LinkShell (yearly)",
+          "name": "LinkShell Pro (yearly)",
           "price": "49",
           "priceCurrency": "CNY",
-          "url": "https://www.itool.tech/zh/pro?from=linkshell&checkout=yearly",
+          "url": "https://www.itool.tech/zh/pro?product=linkshell&checkout=yearly",
           "priceSpecification": {
             "@type": "UnitPriceSpecification",
             "price": "49",
+            "priceCurrency": "CNY",
+            "billingDuration": "P1Y",
+            "valueAddedTaxIncluded": true
+          }
+        },
+        {
+          "@type": "Offer",
+          "name": "All-Access Annual Pass",
+          "price": "99",
+          "priceCurrency": "CNY",
+          "url": "https://www.itool.tech/zh/pro?product=bundle&checkout=yearly",
+          "priceSpecification": {
+            "@type": "UnitPriceSpecification",
+            "price": "99",
             "priceCurrency": "CNY",
             "billingDuration": "P1Y",
             "valueAddedTaxIncluded": true
@@ -216,7 +239,7 @@
           "name": "要多少钱？",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "自建网关（一条命令或 Docker）就能免费使用全部功能。想免部署用官方网关，可开通 LinkShell 单品会员（¥9.9/月、¥49/年，或 US$3.19/月、US$13.49/年，均已含税），或全产品年包（¥99 / US$26.49 每年），邀请好友首次开通双方各得 14 / 30 天。"
+            "text": "自建网关（一条命令或 Docker）就能免费使用全部功能。想免部署用官方网关，可开通 LinkShell Pro（¥9.9/月、¥49/年，海外 US$12/月、US$99/年），或全产品年包（¥99/年、海外 US$199/年，含 StupidMirror 等 8 款产品），邀请好友首次开通双方各得 14 / 30 天。"
           }
         }
       ]
@@ -442,6 +465,8 @@
     .lead { max-width: 34em; margin-top: 28px; color: var(--text-sec); font-size: var(--lead); line-height: 1.6; }
     .hero .lead { max-width: 30em; margin-top: 32px; font-size: 21px; }
     .hero .btns { margin-top: 40px; }
+    .hero-proof { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+    .hero-proof span { display: inline-flex; align-items: center; padding: 5px 10px; border: 1px solid var(--border); border-radius: 6px; color: var(--text-sec); font-size: 13px; line-height: 1.3; }
     .hero .stage { margin-top: 96px; }
     @media (max-width: 960px) { .hero-top { grid-template-columns: minmax(0, 1fr); gap: 40px; } }
 
@@ -546,6 +571,8 @@
     footer nav { display: flex; flex-wrap: wrap; gap: 8px 24px; }
     footer nav a { color: var(--text-sec); }
     footer nav a:hover { color: var(--text); text-decoration: none; }
+    .footer-companion { width: 100%; padding-top: 12px; border-top: 1px solid var(--border); color: var(--text-sec); font-size: var(--small); }
+    .footer-companion a { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
     .wordmark { margin: 48px 0 0; color: var(--surface-2); font-size: clamp(88px, 19.5vw, 300px); font-weight: 700; letter-spacing: -.06em; line-height: .78; text-align: center; white-space: nowrap; user-select: none; }
 
     /* docs: a quiet contents column, the text at reading measure, sections apart by space */
@@ -581,14 +608,19 @@
     html[lang^="zh"] .pricing h1 { letter-spacing: -.03em; line-height: 1.1; }
     .pricing .lead { margin-top: 28px; }
     .plans { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 80px; margin-top: 64px; }
-    .plan { max-width: none; padding: 32px 0 0; border-top: 1px solid var(--border-strong); background: none; }
+    .plans.plans-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 48px; margin-bottom: 56px; }
+    .plan { max-width: none; padding: 32px 0 0; border-top: 1px solid var(--border-strong); background: none; display: flex; flex-direction: column; }
     .plan.pro { border-top-color: var(--accent); }
-    .sec .plan h2 { margin: 0; font-size: var(--lead); letter-spacing: -.015em; }
+    .plan .btn { margin-top: auto; align-self: flex-start; }
+    .sec .plan h2, .pricing .plan h2 { margin: 0; font-size: var(--lead); letter-spacing: -.015em; }
     .price { margin-top: 18px; font-size: clamp(56px, 6vw, 84px); font-weight: 600; letter-spacing: -.05em; line-height: 1; font-variant-numeric: tabular-nums; }
+    .plans.plans-3 .price { font-size: clamp(44px, 4.4vw, 64px); }
     .price small { margin-left: 8px; font-size: var(--body); font-weight: 400; letter-spacing: 0; color: var(--text-sec); }
     .per { margin-top: 12px; color: var(--text-sec); }
     .plan ul { margin: 28px 0 32px; padding-left: 20px; color: var(--text-sec); }
     .plan li + li { margin-top: 8px; }
+    .plan-alt { margin-top: 12px; font-size: var(--small); color: var(--text-sec); }
+    .plan-alt a { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
     #pricing-buy { max-width: 420px; }
     #pricing-buy ol { margin: 0 0 20px; padding-left: 22px; color: var(--text-sec); }
     #pricing-buy li + li { margin-top: 8px; }
@@ -601,7 +633,7 @@
 
     body { overflow-x: clip; }
     @media (max-width: 960px) {
-      .feature.split, .sec#setup .text, .more, .more.points, .plans { grid-template-columns: minmax(0, 1fr); }
+      .feature.split, .sec#setup .text, .more, .more.points, .plans, .plans.plans-3 { grid-template-columns: minmax(0, 1fr); }
       .feature.split { gap: 48px; }
       .feature.split.flip > .text, .feature.split.flip > .feature-stage { order: 0; }
       .feature.split > .feature-stage { justify-content: flex-start; }
@@ -836,15 +868,15 @@
         <a href="/docs/#d-gateway" class="btn btn-s">自建网关指南</a>
       </section>
       <section class="plan pro">
-        <h2>iTool 会员</h2>
+        <h2>LinkShell Pro 官方网关</h2>
         <div class="price">¥9.9<small>/月起</small></div>
-        <p class="per">国际信用卡 US$3.19/月 · US$26.49/年</p>
+        <p class="per">单品 ¥49/年 · 全产品年包 ¥99/年</p>
         <ul>
-          <li>官方网关，同账号登录即可连接，免扫码、免部署</li>
+          <li>官方端到端加密中继 + TURN 转发，免部署、免扫码</li>
           <li>邀请好友开通，双方各得 14 / 30 天会员</li>
-          <li>年度 ¥99（US$26.49）：含全部 iTool 产品</li>
+          <li>全产品年包 ¥99（海外 $199/年）：含 StupidMirror 与全部 8 款产品</li>
         </ul>
-        <a href="https://www.itool.tech/zh/pro?from=linkshell" target="_blank" rel="noopener noreferrer" class="btn btn-p">开通会员 ↗</a>
+        <a href="https://www.itool.tech/zh/pro?product=linkshell" target="_blank" rel="noopener noreferrer" class="btn btn-p">开通 LinkShell Pro ↗</a>
         
         
       </section>
@@ -864,7 +896,7 @@
         <h3>不打开 App 能批准请求吗？</h3>
         <p>能。iPhone 锁屏的实时活动带「拒绝」和「允许」按钮（iOS 17 及以上），Apple Watch 上也能回复请求（watchOS 10 及以上）。</p>
         <h3>要多少钱？</h3>
-        <p>自建网关（一条命令或 Docker）就能免费使用全部功能。想免部署用官方网关，可开通 LinkShell 单品会员（¥9.9/月、¥49/年，或 US$3.19/月、US$13.49/年，均已含税），或全产品年包（¥99 / US$26.49 每年），邀请好友首次开通双方各得 14 / 30 天。</p>
+        <p>自建网关（一条命令或 Docker）就能免费使用全部功能。想免部署用官方网关，可开通 LinkShell Pro（¥9.9/月、¥49/年，海外 US$12/月、US$99/年），或全产品年包（¥99/年、海外 US$199/年，含 StupidMirror 等 8 款产品），邀请好友首次开通双方各得 14 / 30 天。</p>
       </section>
     </div>
 
@@ -897,6 +929,11 @@
         <a href="/codex/">Codex</a>
         <a href="https://www.producthunt.com/products/linkshell">Product Hunt</a>
       </nav>
+      <div class="footer-companion">
+        想让 Agent 直接看屏幕、操控真机 iPhone/Android？试试 <a href="https://stupidmirror.itool.tech/zh/" target="_blank" rel="noopener noreferrer">StupidMirror →</a>
+        
+        
+      </div>
     </div>
     <p class="wordmark" aria-hidden="true">LinkShell</p>
   </footer>

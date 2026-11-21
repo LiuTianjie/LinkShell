@@ -51,7 +51,9 @@
       "sameAs": [
         "https://github.com/LiuTianjie/LinkShell",
         "https://www.producthunt.com/products/linkshell",
-        "https://apps.apple.com/cn/app/linkshell/id6761547516"
+        "https://apps.apple.com/app/id6761547516",
+        "https://www.itool.tech/en",
+        "https://stupidmirror.itool.tech/"
       ]
     },
     {
@@ -94,6 +96,13 @@
       "inLanguage": "en",
       "isPartOf": {
         "@id": "https://linkshell.itool.tech/#website"
+      },
+      "speakable": {
+        "@type": "SpeakableSpecification",
+        "cssSelector": [
+          "h1",
+          ".hero .lead"
+        ]
       },
       "primaryImageOfPage": {
         "@type": "ImageObject",
@@ -357,6 +366,8 @@
     .lead { max-width: 34em; margin-top: 28px; color: var(--text-sec); font-size: var(--lead); line-height: 1.6; }
     .hero .lead { max-width: 30em; margin-top: 32px; font-size: 21px; }
     .hero .btns { margin-top: 40px; }
+    .hero-proof { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+    .hero-proof span { display: inline-flex; align-items: center; padding: 5px 10px; border: 1px solid var(--border); border-radius: 6px; color: var(--text-sec); font-size: 13px; line-height: 1.3; }
     .hero .stage { margin-top: 96px; }
     @media (max-width: 960px) { .hero-top { grid-template-columns: minmax(0, 1fr); gap: 40px; } }
 
@@ -461,6 +472,8 @@
     footer nav { display: flex; flex-wrap: wrap; gap: 8px 24px; }
     footer nav a { color: var(--text-sec); }
     footer nav a:hover { color: var(--text); text-decoration: none; }
+    .footer-companion { width: 100%; padding-top: 12px; border-top: 1px solid var(--border); color: var(--text-sec); font-size: var(--small); }
+    .footer-companion a { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
     .wordmark { margin: 48px 0 0; color: var(--surface-2); font-size: clamp(88px, 19.5vw, 300px); font-weight: 700; letter-spacing: -.06em; line-height: .78; text-align: center; white-space: nowrap; user-select: none; }
 
     /* docs: a quiet contents column, the text at reading measure, sections apart by space */
@@ -496,14 +509,19 @@
     html[lang^="zh"] .pricing h1 { letter-spacing: -.03em; line-height: 1.1; }
     .pricing .lead { margin-top: 28px; }
     .plans { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 80px; margin-top: 64px; }
-    .plan { max-width: none; padding: 32px 0 0; border-top: 1px solid var(--border-strong); background: none; }
+    .plans.plans-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 48px; margin-bottom: 56px; }
+    .plan { max-width: none; padding: 32px 0 0; border-top: 1px solid var(--border-strong); background: none; display: flex; flex-direction: column; }
     .plan.pro { border-top-color: var(--accent); }
-    .sec .plan h2 { margin: 0; font-size: var(--lead); letter-spacing: -.015em; }
+    .plan .btn { margin-top: auto; align-self: flex-start; }
+    .sec .plan h2, .pricing .plan h2 { margin: 0; font-size: var(--lead); letter-spacing: -.015em; }
     .price { margin-top: 18px; font-size: clamp(56px, 6vw, 84px); font-weight: 600; letter-spacing: -.05em; line-height: 1; font-variant-numeric: tabular-nums; }
+    .plans.plans-3 .price { font-size: clamp(44px, 4.4vw, 64px); }
     .price small { margin-left: 8px; font-size: var(--body); font-weight: 400; letter-spacing: 0; color: var(--text-sec); }
     .per { margin-top: 12px; color: var(--text-sec); }
     .plan ul { margin: 28px 0 32px; padding-left: 20px; color: var(--text-sec); }
     .plan li + li { margin-top: 8px; }
+    .plan-alt { margin-top: 12px; font-size: var(--small); color: var(--text-sec); }
+    .plan-alt a { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
     #pricing-buy { max-width: 420px; }
     #pricing-buy ol { margin: 0 0 20px; padding-left: 22px; color: var(--text-sec); }
     #pricing-buy li + li { margin-top: 8px; }
@@ -516,7 +534,7 @@
 
     body { overflow-x: clip; }
     @media (max-width: 960px) {
-      .feature.split, .sec#setup .text, .more, .more.points, .plans { grid-template-columns: minmax(0, 1fr); }
+      .feature.split, .sec#setup .text, .more, .more.points, .plans, .plans.plans-3 { grid-template-columns: minmax(0, 1fr); }
       .feature.split { gap: 48px; }
       .feature.split.flip > .text, .feature.split.flip > .feature-stage { order: 0; }
       .feature.split > .feature-stage { justify-content: flex-start; }
@@ -609,7 +627,7 @@
 <span class="pr">$ </span>brew install LiuTianjie/linkshell/linkshell
 <span class="cm"># or</span>
 <span class="pr">$ </span>curl -fsSL https://liutianjie.github.io/LinkShell/install.sh | sh</code></pre>
-        <p>Install and sign in to the agents you want to use on the computer yourself (for example <code>claude</code>, <code>codex login</code>, <code>gemini</code>, <code>copilot login</code>). Phone app: <a href="https://apps.apple.com/cn/app/linkshell/id6761547516">iPhone</a> · <a href="https://github.com/LiuTianjie/LinkShell/releases/latest">Android APK</a>.</p>
+        <p>Install and sign in to the agents you want to use on the computer yourself (for example <code>claude</code>, <code>codex login</code>, <code>gemini</code>, <code>copilot login</code>). Phone app: <a href="https://apps.apple.com/app/id6761547516">iPhone</a> · <a href="https://github.com/LiuTianjie/LinkShell/releases/latest">Android APK</a>.</p>
 
         <h2 id="d-desktop">Mac desktop app and updates</h2>
         <p>Overview and Settings include sign-in, account status and sign-out. Sign-in opens your browser and refreshes automatically when complete; the official gateway requires an iTool membership. Account sign-in and gateway connectivity are separate states. Closing the window leaves the app in the menu bar; quitting the UI keeps the Host running.</p>
@@ -746,6 +764,11 @@
         <a href="/en/codex/">Codex</a>
         <a href="https://www.producthunt.com/products/linkshell">Product Hunt</a>
       </nav>
+      <div class="footer-companion">
+        
+        Need your agent to see and tap a real iPhone or Android? <a href="https://stupidmirror.itool.tech/" target="_blank" rel="noopener noreferrer">StupidMirror →</a>
+        
+      </div>
     </div>
     <p class="wordmark" aria-hidden="true">LinkShell</p>
   </footer>
