@@ -400,6 +400,8 @@ describe("AgentMark & SubagentGlyph parity and scoped SVG <defs>", () => {
       "copilot",
       "grok",
       "antigravity",
+      "agy",
+      "antigravity-cli",
       "qwen",
       "kimi",
       "codebuddy",

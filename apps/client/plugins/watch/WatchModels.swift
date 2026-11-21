@@ -225,6 +225,7 @@ public struct WatchAgent: Identifiable, Hashable {
     case "claude": return "Claude"
     case "codex": return "Codex"
     case "antigravity": return "Antigravity"
+    case "agy": return "AGY"
     case "cursor": return "Cursor"
     case "gemini": return "Gemini"
     case "copilot": return "Copilot"
@@ -251,7 +252,7 @@ public struct WatchAgent: Identifiable, Hashable {
     switch id {
     case "claude": return Color(red: 0.85, green: 0.47, blue: 0.34)
     case "codex": return Color(red: 0.39, green: 0.40, blue: 0.95)
-    case "antigravity": return Color(red: 0.26, green: 0.52, blue: 0.96)
+    case "antigravity", "agy": return Color(red: 0.26, green: 0.52, blue: 0.96)
     case "cursor": return Color(red: 0.13, green: 0.77, blue: 0.69)
     case "gemini": return Color(red: 0.31, green: 0.55, blue: 0.97)
     case "copilot": return Color(red: 0.55, green: 0.36, blue: 0.96)
@@ -306,7 +307,7 @@ public struct WatchAgent: Identifiable, Hashable {
   }()
 
   public var iconImage: UIImage? {
-    Self.icons[id]
+    Self.icons[id] ?? (id == "agy" ? Self.icons["antigravity"] : nil)
   }
 }
 

@@ -7,6 +7,7 @@ const BUILTIN_AGENT_IDS = [
   "claude",
   "gemini",
   "antigravity",
+  "agy",
   "copilot",
   "grok",
   "opencode",

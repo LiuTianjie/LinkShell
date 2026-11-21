@@ -39,6 +39,12 @@ const looks: Record<string, AgentLook> = {
     login: "agy-acp",
     group: "global",
   },
+  agy: {
+    name: "Antigravity CLI",
+    short: "AGY",
+    login: "agy acp --login",
+    group: "global",
+  },
   copilot: {
     name: "GitHub Copilot",
     short: "Copilot",

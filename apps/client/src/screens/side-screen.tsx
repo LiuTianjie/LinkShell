@@ -32,6 +32,7 @@ const QUOTE_SUGGESTIONS = ["解释一下这段", "为什么这样做？", "这�
 /** How the agent answers a side question, in a line. */
 function howItAnswers(agent: string, name: string): string {
   if (agent === "codex") return `${name} 在只读的临时分叉里回答，可以查看文件，不会改动任何东西。`;
+  if (agent === "agy" || agent === "antigravity") return `${name} 在只读沙箱里基于会话上下文回答，可以查看文件，不会改动当前会话。`;
   return `${name} 依据会话到现在为止的内容回答，不使用工具。`;
 }
 

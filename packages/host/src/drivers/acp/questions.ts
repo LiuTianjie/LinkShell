@@ -15,7 +15,7 @@ export function questionMethod(agent: string, method: string, params?: unknown):
   if (agent === "cursor" && (method === "cursor/ask_question" || method === "_cursor/ask_question")) return "cursor";
   if (agent === "grok" && (method === "x.ai/ask_user_question" || method === "_x.ai/ask_user_question")) return "grok";
   if (agent === "grok" && (method === "x.ai/mcp/elicit" || method === "_x.ai/mcp/elicit")) return "grok-form";
-  if (agent === "antigravity" && method === "session/request_permission") {
+  if ((agent === "antigravity" || agent === "agy") && method === "session/request_permission") {
     const toolCallId = (params as { toolCall?: { toolCallId?: unknown } } | undefined)?.toolCall?.toolCallId;
     if (typeof toolCallId === "string" && toolCallId.startsWith("interaction_")) return "antigravity-interaction";
   }

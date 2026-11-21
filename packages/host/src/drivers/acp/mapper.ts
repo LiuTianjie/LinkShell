@@ -192,7 +192,7 @@ function normalizeRawInput(rawInput: unknown): unknown {
   if (!input) return rawInput;
   const command = str(input.command) ?? str(input.CommandLine) ?? str(input.command_line) ?? str(input.commandLine);
   const cwd = str(input.cwd) ?? str(input.Cwd) ?? str(input.WorkingDirectory) ?? str(input.working_dir) ?? str(input.workingDirectory);
-  const path = str(input.path) ?? str(input.file_path) ?? str(input.AbsolutePath) ?? str(input.TargetFile);
+  const path = str(input.path) ?? str(input.Path) ?? str(input.file_path) ?? str(input.AbsolutePath) ?? str(input.TargetFile);
   const url = str(input.url) ?? str(input.Url);
   if (
     (command && input.command === undefined) ||
@@ -235,7 +235,11 @@ function isAntigravitySubagentCall(update: Record<string, unknown>): boolean {
     title === "Running start_subagent" ||
     title === "Run start_subagent?" ||
     name === "start_subagent" ||
-    name === "invoke_subagent"
+    name === "invoke_subagent" ||
+    name === "swarm" ||
+    name === "send_message" ||
+    name === "manage_subagents" ||
+    name === "run_workflow"
   );
 }
 
@@ -245,17 +249,72 @@ function toolDetail(update: Record<string, unknown>): ToolDetail | undefined {
   // Claude's adapter reports `/compact` (and compacting by itself) as a call of no tool.
   if (update.kind === "think" && str(update.title) === "Compact conversation") return { type: "compaction" };
   if (isAntigravitySubagentCall(update)) {
+    const name = str(update.name)?.trim();
     const input = obj(update.rawInput);
+    if (name === "swarm") {
+      const action = str(input?.action);
+      const workerName = str(input?.name) ?? str(input?.title);
+      const brief = str(input?.brief);
+      const model = str(input?.model);
+      if (action === "kill") {
+        return { type: "subagent", action: "stop", ...(workerName ? { name: workerName } : {}) };
+      }
+      if (action === "status" || action === "models") {
+        return { type: "subagent", action: "list" };
+      }
+      if (action === "model" || action === "title") {
+        return {
+          type: "subagent",
+          action: "message",
+          ...(workerName ? { name: workerName } : {}),
+          ...(model ? { model } : {}),
+          ...(str(input?.title) ? { task: str(input?.title) } : {}),
+        };
+      }
+      return {
+        type: "subagent",
+        action: "spawn",
+        agentType: "swarm",
+        ...(workerName ? { name: workerName } : {}),
+        ...(brief ? { task: brief.slice(0, 2000) } : {}),
+        ...(model ? { model } : {}),
+      };
+    }
+    if (name === "send_message") {
+      const recipient = str(input?.Recipient);
+      const msg = str(input?.Message);
+      return {
+        type: "subagent",
+        action: "message",
+        ...(recipient ? { nativeSessionId: recipient } : {}),
+        ...(msg ? { task: msg.slice(0, 2000) } : {}),
+      };
+    }
+    if (name === "manage_subagents") {
+      const action = str(input?.Action);
+      return { type: "subagent", action: action === "list" ? "list" : "stop" };
+    }
+    if (name === "run_workflow") {
+      const description = str(input?.Description);
+      return {
+        type: "subagent",
+        action: "spawn",
+        agentType: "workflow",
+        ...(description ? { name: description.slice(0, 80), task: description.slice(0, 2000) } : { name: "Workflow" }),
+      };
+    }
     const firstSubagent = obj(arr(input?.Subagents)[0]);
     const agentType = str(input?.subagent_type) ?? str(input?.agent_name) ?? str(input?.TypeName) ?? str(firstSubagent?.TypeName);
-    const name = str(input?.Role) ?? str(firstSubagent?.Role) ?? agentType;
+    const roleName = str(input?.Role) ?? str(firstSubagent?.Role) ?? agentType;
     const task = str(input?.task) ?? str(input?.task_description) ?? str(input?.prompt) ?? str(input?.Prompt) ?? str(firstSubagent?.Prompt);
+    const model = str(input?.Model) ?? str(firstSubagent?.Model);
     return {
       type: "subagent",
       action: "spawn",
       ...(agentType ? { agentType } : {}),
-      ...(name ? { name } : {}),
+      ...(roleName ? { name: roleName } : {}),
       ...(task ? { task } : {}),
+      ...(model ? { model } : {}),
     };
   }
   return undefined;

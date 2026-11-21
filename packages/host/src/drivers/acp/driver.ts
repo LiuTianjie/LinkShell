@@ -110,6 +110,8 @@ export interface AcpSessionState {
   /** Set while a session/load replays history. */
   replaying?: SessionUpdate[];
   turnActive: boolean;
+  /** True after an explicit cancel / interrupt-and-send until the active prompt settles. */
+  cancelling?: boolean;
   usageTurnId?: string;
   /** session/prompt requests in flight; with steering, a turn spans several. */
   inflight: number;
@@ -213,7 +215,7 @@ export class AcpDriver implements AgentDriver {
   /** The models the agent gave its latest session here (see listModels); read from the host's record once. */
   private reportedModels?: MethodResult<"agents.models">;
   /** The launch candidate found by `detectVersion` (primary spec by default). */
-  private resolvedLaunch?: AcpLaunchCandidate;
+  protected resolvedLaunch?: AcpLaunchCandidate;
 
   constructor(
     protected readonly spec: AcpAgentSpec,
@@ -512,7 +514,7 @@ export class AcpDriver implements AgentDriver {
     return this.knownModels() ?? { models: [] };
   }
 
-  private knownModels(): MethodResult<"agents.models"> | undefined {
+  protected knownModels(): MethodResult<"agents.models"> | undefined {
     if (this.reportedModels) return this.reportedModels;
     try {
       const saved = this.host?.agentState?.(this.id).get("models");
@@ -675,6 +677,7 @@ export class AcpDriver implements AgentDriver {
   async cancel(nativeId: string): Promise<void> {
     const state = this.sessions.get(nativeId);
     if (!state) return;
+    if (state.turnActive) state.cancelling = true;
     // Stopping stops what's waiting too; the apps put queued text back in the composer.
     state.queue = [];
     this.reportQueue(nativeId, state);
@@ -692,6 +695,7 @@ export class AcpDriver implements AgentDriver {
   async sendQueuedNow(nativeId: string): Promise<void> {
     const state = this.sessions.get(nativeId);
     if (!state?.turnActive || state.queue.length === 0) return;
+    state.cancelling = true;
     this.cancelPermissions(state);
     this.connection?.notify("session/cancel", { sessionId: nativeId });
   }
@@ -1240,6 +1244,7 @@ export class AcpDriver implements AgentDriver {
 
   protected startTurn(nativeId: string, state: AcpSessionState, content: ContentBlock[], clientMessageId: string, context?: string): void {
     state.turnActive = true;
+    state.cancelling = false;
     state.usageTurnId = clientMessageId;
     state.reportedState = undefined; state.idleReason = undefined;
     this.echoUserMessage(nativeId, content, clientMessageId);
@@ -1269,10 +1274,18 @@ export class AcpDriver implements AgentDriver {
       const usage = completion !== "state-update" && result.usage ? this.accountedUsage(result.usage, state, clientMessageId) : undefined;
       if (usage) this.emit(nativeId, usage);
     } catch (error) {
-      stopReason = "error";
-      const described = describeAgentError(this.label, error instanceof Error ? error.message : String(error));
-      this.closeMessage(nativeId);
-      this.emit(nativeId, { sessionUpdate: "ls_error", code: "turn_failed", message: described.message, hint: described.hint });
+      const rawMessage = error instanceof Error ? error.message : String(error);
+      const isExpectedCancel =
+        state.cancelling &&
+        ((error instanceof RpcError && error.code === -32800) || /\bcancel(?:led|ed)?\b|\babort(?:ed)?\b/i.test(rawMessage));
+      if (isExpectedCancel) {
+        stopReason = "cancelled";
+      } else {
+        stopReason = "error";
+        const described = describeAgentError(this.label, rawMessage);
+        this.closeMessage(nativeId);
+        this.emit(nativeId, { sessionUpdate: "ls_error", code: "turn_failed", message: described.message, hint: described.hint });
+      }
     }
     state.inflight -= 1;
     // A steered prompt settles the earlier one; the turn ends with the last.
@@ -1286,6 +1299,7 @@ export class AcpDriver implements AgentDriver {
     if (!state.turnActive) return;
     this.closeMessage(nativeId);
     state.turnActive = false;
+    state.cancelling = false;
     state.reportedState = stopReason === "error" ? "error" : "idle";
     state.idleReason = undefined;
     state.toolCalls.clear();

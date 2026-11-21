@@ -10,7 +10,7 @@ describe("Agent marks & Chinese coding agent coverage", () => {
     "utf8",
   );
   const acpIds = [...registrySource.matchAll(/\{\s*id:\s*"([a-z0-9-]+)"/g)].map((m) => m[1]!);
-  const builtInIds = ["codex", "claude", "antigravity", ...acpIds];
+  const builtInIds = ["codex", "claude", "antigravity", "agy", ...acpIds];
 
   it("covers every built-in agent from packages/host registry (including all Chinese agents, cline, and kilo)", () => {
     expect(builtInIds).toEqual(
@@ -19,6 +19,7 @@ describe("Agent marks & Chinese coding agent coverage", () => {
         "claude",
         "gemini",
         "antigravity",
+        "agy",
         "copilot",
         "grok",
         "opencode",
@@ -37,7 +38,7 @@ describe("Agent marks & Chinese coding agent coverage", () => {
         "comate",
       ]),
     );
-    expect(new Set(builtInIds).size).toBe(20);
+    expect(new Set(builtInIds).size).toBe(21);
 
     for (const id of builtInIds) {
       const label = agentLabel(id);
@@ -66,6 +67,7 @@ describe("Agent marks & Chinese coding agent coverage", () => {
       ["iflow-cli", "iflow", "iFlow"],
       ["comate-acp", "comate", "Comate"],
       ["kilocode", "kilo", "Kilo Code"],
+      ["antigravity-cli", "agy", "AGY"],
     ];
 
     for (const [alias, canonical, expectedLabel] of aliases) {

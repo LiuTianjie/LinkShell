@@ -22,8 +22,9 @@ import {
 } from "@linkshell/wire";
 import { QUESTION_OPTIONS } from "../../questions.js";
 import type { DriverBehavior } from "../behavior.js";
-import type { AttachContext, DiscoveredSession, ForkOptions, HistoryItem } from "../types.js";
+import type { AttachContext, DiscoveredSession, ForkOptions, HistoryItem, SideOutput, SideRequest } from "../types.js";
 import { nestUnder } from "../nesting.js";
+import { AgySideRunner, resolveAgyBinary } from "./agy-side.js";
 import { AcpDriver, type AcpAgentSpec } from "./driver.js";
 
 const execFileAsync = promisify(execFile);
@@ -576,12 +577,12 @@ const MAX_DIFF_CHARS = 200_000;
 
 function editContent(name: string, path: string, args: Record<string, unknown>): ToolCallContent[] | undefined {
   const diffs: ToolCallContent[] = [];
-  if (name === "write_to_file") {
-    const newText = typeof args.CodeContent === "string" ? args.CodeContent : undefined;
+  if (name === "write_to_file" || name === "write_file") {
+    const newText = typeof args.CodeContent === "string" ? args.CodeContent : typeof args.Content === "string" ? args.Content : undefined;
     if (newText !== undefined) diffs.push({ type: "diff", path, oldText: null, newText });
-  } else if (name === "replace_file_content") {
-    const oldText = typeof args.TargetContent === "string" ? args.TargetContent : undefined;
-    const newText = typeof args.ReplacementContent === "string" ? args.ReplacementContent : undefined;
+  } else if (name === "replace_file_content" || name === "edit_file") {
+    const oldText = typeof args.TargetContent === "string" ? args.TargetContent : typeof args.Target === "string" ? args.Target : undefined;
+    const newText = typeof args.ReplacementContent === "string" ? args.ReplacementContent : typeof args.Replacement === "string" ? args.Replacement : undefined;
     if (oldText !== undefined && newText !== undefined) diffs.push({ type: "diff", path, oldText, newText });
   } else if (name === "multi_replace_file_content") {
     const chunks = Array.isArray(args.ReplacementChunks) ? args.ReplacementChunks : [];
@@ -597,39 +598,62 @@ function editContent(name: string, path: string, args: Record<string, unknown>):
   return diffs.length > 0 && size <= MAX_DIFF_CHARS ? diffs : undefined;
 }
 
-/** The sub-agent conversations a tool output names (invoke_subagent answers with their ids). */
+/** The sub-agent or swarm worker conversations a tool output names. */
 function subagentIdsFromOutput(output: string | undefined): string[] {
   if (!output) return [];
-  return [...output.matchAll(/"conversationId":\s*"([0-9a-f-]{36})"/gi)].map((match) => match[1]!);
+  const seen = new Set<string>();
+  const ids: string[] = [];
+  for (const match of output.matchAll(/"(?:conversationId|conversation_id|sessionId|session_id)":\s*"([0-9a-f-]{36})"/gi)) {
+    const id = match[1]!;
+    if (!seen.has(id)) {
+      seen.add(id);
+      ids.push(id);
+    }
+  }
+  return ids;
 }
 
 /**
- * invoke_subagent can start several sub-agents at once; the call itself carries
- * the first, and each further one gets a call of its own so its work nests apart.
+ * `invoke_subagent` and `swarm` (`action: "add"`) can start several workers at
+ * once; the call itself carries the first, and each further one gets a call of
+ * its own so its work nests apart.
  */
 function extraSpawns(call: TranscriptToolCall, toolCallId: string, output: string | undefined): SessionUpdate[] {
-  if (call.name !== "invoke_subagent") return [];
+  if (call.name !== "invoke_subagent" && call.name !== "swarm" && call.name !== "run_workflow") return [];
+  const args = parseToolArgs(call.args);
+  if (call.name === "swarm" && str(args.action) !== "add") return [];
   const ids = subagentIdsFromOutput(output);
-  const specs = (() => {
-    const args = parseToolArgs(call.args);
-    return Array.isArray(args.Subagents) ? (args.Subagents as Record<string, unknown>[]) : [];
-  })();
+  if (ids.length <= 1) return [];
+  const specs = Array.isArray(args.Subagents) ? (args.Subagents as Record<string, unknown>[]) : [];
+  const tasks = Array.isArray(args.tasks) ? (args.tasks as unknown[]).map((entry) => str(entry)) : [];
+  const baseName = str(args.name);
+  const brief = str(args.brief);
+  const model = str(args.model);
   return ids.slice(1).map((nativeSessionId, offset) => {
     const spec = specs[offset + 1] ?? {};
-    const role = str(spec.Role);
+    const workerIndex = offset + 2;
+    const role =
+      str(spec.Role) ??
+      (call.name === "swarm" && baseName ? `${baseName}-${workerIndex}` : undefined);
+    const task =
+      str(spec.Prompt) ??
+      (call.name === "swarm" ? [tasks[offset + 1], brief].filter(Boolean).join("\n\n") || undefined : undefined);
+    const agentType = str(spec.TypeName) ?? (call.name === "swarm" ? "swarm" : call.name === "run_workflow" ? "workflow" : undefined);
+    const workerModel = str(spec.Model) ?? model;
     return {
       sessionUpdate: "tool_call",
       toolCallId: `${toolCallId}#${offset + 1}`,
-      title: role ?? "Sub-agent",
-      name: "invoke_subagent",
+      title: role ?? (call.name === "swarm" ? `Swarm Worker ${workerIndex}` : "Sub-agent"),
+      name: call.name ?? "invoke_subagent",
       kind: "other",
       status: "completed",
       detail: {
         type: "subagent",
         action: "spawn",
-        ...(str(spec.Prompt) ? { task: str(spec.Prompt)!.slice(0, 2000) } : {}),
-        ...(str(spec.TypeName) ? { agentType: str(spec.TypeName) } : {}),
+        ...(task ? { task: task.slice(0, 2000) } : {}),
+        ...(agentType ? { agentType } : {}),
         ...(role ? { name: role } : {}),
+        ...(workerModel ? { model: workerModel } : {}),
         nativeSessionId,
         canCancel: true,
       },
@@ -664,9 +688,9 @@ function mapAntigravityToolCall(
       command: typeof args.CommandLine === "string" ? args.CommandLine : summary,
       cwd: typeof args.Cwd === "string" ? args.Cwd : undefined,
     };
-  } else if (name === "view_file" || name === "view_code_item") {
+  } else if (name === "view_file" || name === "view_code_item" || name === "read_file") {
     kind = "read";
-    const path = str(args.AbsolutePath) ?? str(args.File);
+    const path = str(args.AbsolutePath) ?? str(args.File) ?? str(args.Path);
     const line = typeof args.StartLine === "number" ? args.StartLine : undefined;
     if (path) {
       rawInput = { file_path: path };
@@ -687,9 +711,9 @@ function mapAntigravityToolCall(
       ...(path ? { path } : {}),
     };
     if (path) locations = [{ path }];
-  } else if (name === "replace_file_content" || name === "multi_replace_file_content" || name === "write_to_file") {
+  } else if (name === "replace_file_content" || name === "multi_replace_file_content" || name === "write_to_file" || name === "write_file" || name === "edit_file") {
     kind = "edit";
-    const path = typeof args.TargetFile === "string" ? args.TargetFile : undefined;
+    const path = str(args.TargetFile) ?? str(args.Path);
     const line = typeof args.StartLine === "number" ? args.StartLine : undefined;
     if (path) {
       rawInput = { file_path: path };
@@ -712,12 +736,60 @@ function mapAntigravityToolCall(
   } else if (name === "invoke_subagent") {
     const first = Array.isArray(args.Subagents) ? (args.Subagents[0] as Record<string, unknown> | undefined) : undefined;
     const nativeSessionId = subagentIdsFromOutput(output?.text)[0];
+    const prompt = str(first?.Prompt) ?? str(args.Prompt);
+    const agentType = str(first?.TypeName) ?? str(args.TypeName);
+    const role = str(first?.Role) ?? str(args.Role);
+    const model = str(first?.Model) ?? str(args.Model);
     detail = {
       type: "subagent",
       action: "spawn",
-      ...(str(first?.Prompt) ? { task: str(first?.Prompt)!.slice(0, 2000) } : {}),
-      ...(str(first?.TypeName) ? { agentType: str(first?.TypeName) } : {}),
-      ...(str(first?.Role) ? { name: str(first?.Role) } : {}),
+      ...(prompt ? { task: prompt.slice(0, 2000) } : {}),
+      ...(agentType ? { agentType } : {}),
+      ...(role ? { name: role } : {}),
+      ...(model ? { model } : {}),
+      ...(nativeSessionId ? { nativeSessionId, canCancel: true } : {}),
+    };
+  } else if (name === "swarm") {
+    const action = str(args.action);
+    const workerName = str(args.name) ?? str(args.title);
+    const brief = str(args.brief);
+    const model = str(args.model);
+    const nativeSessionId = subagentIdsFromOutput(output?.text)[0];
+    if (action === "kill") {
+      detail = { type: "subagent", action: "stop", ...(workerName ? { name: workerName } : {}) };
+    } else if (action === "status" || action === "models") {
+      detail = { type: "subagent", action: "list" };
+    } else if (action === "model" || action === "title") {
+      detail = {
+        type: "subagent",
+        action: "message",
+        ...(workerName ? { name: workerName } : {}),
+        ...(model ? { model } : {}),
+        ...(str(args.title) ? { task: str(args.title) } : {}),
+      };
+    } else {
+      const sharded = Array.isArray(args.tasks) && args.tasks.length > 0 ? str(args.tasks[0]) : undefined;
+      const count = typeof args.n === "number" && args.n > 1 ? args.n : Array.isArray(args.tasks) && args.tasks.length > 1 ? args.tasks.length : 1;
+      const firstWorkerName = workerName && count > 1 ? `${workerName}-1` : workerName;
+      const task = [sharded, brief].filter(Boolean).join("\n\n") || undefined;
+      detail = {
+        type: "subagent",
+        action: "spawn",
+        agentType: "swarm",
+        ...(firstWorkerName ? { name: firstWorkerName } : {}),
+        ...(task ? { task: task.slice(0, 2000) } : {}),
+        ...(model ? { model } : {}),
+        ...(nativeSessionId ? { nativeSessionId, canCancel: true } : {}),
+      };
+    }
+  } else if (name === "run_workflow") {
+    const description = str(args.Description);
+    const nativeSessionId = subagentIdsFromOutput(output?.text)[0];
+    detail = {
+      type: "subagent",
+      action: "spawn",
+      agentType: "workflow",
+      ...(description ? { name: description.slice(0, 80), task: description.slice(0, 2000) } : { name: "Workflow" }),
       ...(nativeSessionId ? { nativeSessionId, canCancel: true } : {}),
     };
   } else if (name === "send_message") {
@@ -1403,9 +1475,28 @@ export class AntigravityDriver extends AcpDriver {
   private readonly generatorCache = new Map<string, { at: number; info: Promise<GeneratorInfo> }>();
   private archivedCache?: { at: number; ids: string[] };
   private readonly untitledCache = new Map<string, { mtimeMs: number; title?: string }>();
+  private readonly sideRunner: AgySideRunner;
 
   constructor(options: { env?: NodeJS.ProcessEnv; hostVersion: string }) {
     super(antigravitySpec(), options);
+    this.sideRunner = new AgySideRunner(
+      () => resolveAgyBinary(this.env),
+      () => this.env,
+      (message) => this.host?.log(message),
+    );
+  }
+
+  protected override hasSide(): boolean {
+    return this.sideRunner.available();
+  }
+
+  override async sideAsk(nativeId: string, request: SideRequest, out: SideOutput, signal: AbortSignal): Promise<void> {
+    if (!this.hasSide()) throw RpcError.app("not_supported", "Antigravity 旁支对话需要安装 agy CLI");
+    await this.sideRunner.ask(nativeId, request, out, signal);
+  }
+
+  async sideClose(nativeId: string, sideId: string): Promise<void> {
+    await this.sideRunner.close(nativeId, sideId);
   }
 
   protected override get env(): NodeJS.ProcessEnv {
@@ -2290,11 +2381,81 @@ export class AntigravityDriver extends AcpDriver {
         collect.push(...this.nestChildItems(parsed.items, follow), this.childTurn(follow, follow.running));
       }
       this.followChildren(watcher, parsed.items, follow.prefix, follow.depth, collect);
+      this.followDbChildren(watcher, spawn.childId, spawn.toolCallId, follow.prefix, follow.depth, collect);
+    }
+  }
+
+  /**
+   * Discovers swarm workers and sub-agent conversations linked via
+   * `parent_conversation_id` in `conversation_summaries.db` even when their
+   * spawning tool output didn't echo a JSON `conversationId`.
+   */
+  private followDbChildren(
+    watcher: DesktopWatcher,
+    parentId: string,
+    parentToolCallId: string | undefined,
+    prefix: string,
+    depth: number,
+    collect?: HistoryItem[],
+  ): void {
+    if (depth >= MAX_SUBAGENT_DEPTH) return;
+    const rows = this.desktopRows();
+    if (!rows) return;
+    const childRows = [...rows.values()]
+      .filter((row) => row.parent === parentId && !row.killed && !watcher.children.has(row.id))
+      .sort((a, b) => a.lastModified - b.lastModified);
+    for (const row of childRows) {
+      const toolCallId = `${prefix}agy:child:${row.id}`;
+      const childTitle = row.title || this.untitledTitle(row.id, this.transcriptPathFor(row.id) ?? "") || "Swarm Worker";
+      const running = this.isConversationRunningInDesktop(row.id);
+      const spawnUpdate: SessionUpdate = {
+        sessionUpdate: "tool_call",
+        toolCallId,
+        ...(parentToolCallId ? { parentToolCallId } : {}),
+        title: childTitle,
+        name: "swarm",
+        kind: "other",
+        status: running ? "in_progress" : "completed",
+        detail: {
+          type: "subagent",
+          action: "spawn",
+          name: childTitle,
+          agentType: "swarm",
+          nativeSessionId: row.id,
+          canCancel: true,
+        },
+      };
+      const follow: ChildFollow = {
+        id: row.id,
+        parentToolCallId: toolCallId,
+        prefix: `${row.id.slice(0, 8)}/`,
+        depth: depth + 1,
+        running,
+      };
+      watcher.children.set(row.id, follow);
+      if (collect) {
+        collect.push({ itemId: `agy:child-spawn:${row.id}`, updates: [spawnUpdate] });
+      }
+      const path = this.transcriptPathFor(row.id);
+      if (path && existsSync(path)) {
+        const parsed = parseAntigravityTranscript(path, 0);
+        follow.tail = new TranscriptTail(path, parsed.state, parsed.endOffset);
+        if (collect) {
+          collect.push(...this.nestChildItems(parsed.items, follow), this.childTurn(follow, follow.running));
+        }
+        this.followChildren(watcher, parsed.items, follow.prefix, follow.depth, collect);
+      } else if (collect) {
+        collect.push(this.childTurn(follow, follow.running));
+      }
+      this.followDbChildren(watcher, row.id, toolCallId, follow.prefix, follow.depth, collect);
     }
   }
 
   /** New work from every followed sub-agent, and when each starts or stops. */
   private tickChildren(nativeId: string, watcher: DesktopWatcher): void {
+    const discovered: HistoryItem[] = [];
+    this.followDbChildren(watcher, nativeId, undefined, "", 0, discovered);
+    if (discovered.length > 0) this.emitTranscriptItems(nativeId, watcher, discovered);
     for (const follow of [...watcher.children.values()]) {
       const path = this.transcriptPathFor(follow.id);
       const out: HistoryItem[] = [];
@@ -2311,6 +2472,7 @@ export class AntigravityDriver extends AcpDriver {
           // ignore unreadable sub-agent transcript
         }
       }
+      this.followDbChildren(watcher, follow.id, follow.parentToolCallId, follow.prefix, follow.depth, out);
       const running = this.isConversationRunningInDesktop(follow.id);
       if (running !== follow.running) {
         follow.running = running;
@@ -2448,6 +2610,7 @@ export class AntigravityDriver extends AcpDriver {
       // Sub-agents' work so far, after the parent's (whose spawning calls it nests under).
       const childItems: HistoryItem[] = [];
       this.followChildren(watcher, parsed?.items ?? [], "", 0, childItems);
+      this.followDbChildren(watcher, nativeId, undefined, "", 0, childItems);
       items.push(...childItems);
       const running = watcher.running;
       const state = watcher.pendingAction ? "waiting" : running ? "running" : "idle";
@@ -2884,42 +3047,57 @@ export class AntigravityDriver extends AcpDriver {
       this.host?.update(this.id, nativeId, { sessionUpdate: "ls_status", state: "running", turnActive: true });
     }
 
+    const sendBody = {
+      cascadeId: nativeId,
+      items,
+      ...(media.length > 0 ? { media } : {}),
+      cascadeConfig: {
+        plannerConfig: {
+          supportsLatexRendering: true,
+          ...(inherited.autoExecutionPolicy
+            ? { toolConfig: { runCommand: { autoCommandConfig: { autoExecutionPolicy: inherited.autoExecutionPolicy } } } }
+            : {}),
+          planModel,
+          useAiCredits: inherited.useAiCredits ?? false,
+        },
+        executorConfig: {
+          useCoreDirect: true,
+        },
+        conversationHistoryConfig: {},
+      },
+      customAgentSpec: {
+        builtinAgent: {
+          defaultAgent: {
+            isGoogle: false,
+            isInteractive: true,
+            surface: "AGENT_SURFACE_HUB",
+          },
+        },
+      },
+    };
+
     try {
-      await callLanguageServer(conn, "SendUserCascadeMessage", {
-        cascadeId: nativeId,
-        items,
-        ...(media.length > 0 ? { media } : {}),
-        cascadeConfig: {
-          plannerConfig: {
-            supportsLatexRendering: true,
-            ...(inherited.autoExecutionPolicy
-              ? { toolConfig: { runCommand: { autoCommandConfig: { autoExecutionPolicy: inherited.autoExecutionPolicy } } } }
-              : {}),
-            planModel,
-            useAiCredits: inherited.useAiCredits ?? false,
-          },
-          executorConfig: {
-            useCoreDirect: true,
-          },
-          conversationHistoryConfig: {},
-        },
-        customAgentSpec: {
-          builtinAgent: {
-            defaultAgent: {
-              isGoogle: false,
-              isInteractive: true,
-              surface: "AGENT_SURFACE_HUB",
-            },
-          },
-        },
-      });
-    } catch (error) {
+      await callLanguageServer(conn, "SendUserCascadeMessage", sendBody);
+    } catch (firstError) {
+      const msg = firstError instanceof Error ? firstError.message : String(firstError);
+      // If steering into a running cascade is rejected as busy, interrupt it cleanly and resend once.
+      const busyRejected = steering && /(?:400|409|412|running|busy|already|in progress|active)/i.test(msg);
+      if (busyRejected) {
+        try {
+          await callLanguageServer(conn, "CancelCascadeInvocation", { cascadeId: nativeId, killBackgroundTasks: false }).catch(() => {});
+          await new Promise((resolve) => setTimeout(resolve, 400));
+          await callLanguageServer(conn, "SendUserCascadeMessage", sendBody);
+          return "steered";
+        } catch (retryError) {
+          firstError = retryError;
+        }
+      }
       const pendingIdx = watcher.pendingClientMessages.findIndex((p) => p.clientMessageId === clientMessageId);
       if (pendingIdx >= 0) watcher.pendingClientMessages.splice(pendingIdx, 1);
       this.host?.update(this.id, nativeId, {
         sessionUpdate: "ls_error",
         code: "send_failed",
-        message: error instanceof Error ? error.message : String(error),
+        message: firstError instanceof Error ? firstError.message : String(firstError),
       });
       if (!steering) {
         watcher.sentAt = undefined;
@@ -2928,7 +3106,7 @@ export class AntigravityDriver extends AcpDriver {
         this.host?.update(this.id, nativeId, { sessionUpdate: "ls_turn", state: "ended", stopReason: "error" });
         this.host?.update(this.id, nativeId, { sessionUpdate: "ls_status", state: "idle", turnActive: false });
       }
-      throw error;
+      throw firstError;
     }
 
     return steering ? "steered" : "started";
@@ -2943,6 +3121,14 @@ export class AntigravityDriver extends AcpDriver {
     if (parent !== nativeId) throw RpcError.app("not_supported", "这个子代理不属于当前会话");
     const conn = await this.requireConnection("停止子代理");
     await callLanguageServer(conn, "CancelCascadeInvocation", { cascadeId: childId, killBackgroundTasks: false });
+  }
+
+  override async sendQueuedNow(nativeId: string): Promise<void> {
+    if (this.isDesktopSession(nativeId)) {
+      await this.cancel(nativeId);
+      return;
+    }
+    await super.sendQueuedNow(nativeId);
   }
 
   override async cancel(nativeId: string): Promise<void> {
