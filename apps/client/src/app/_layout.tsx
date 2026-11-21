@@ -185,6 +185,7 @@ export default function RootLayout() {
                     headerShown: true,
                   }}
                 />
+                <Stack.Screen name="computer-details" options={{ presentation: "formSheet", sheetGrabberVisible: true, sheetAllowedDetents: [0.78, 1], sheetCornerRadius: radius.panel, contentStyle: sheetContent, headerShown: false }} />
                 <Stack.Screen
                   name="computers"
                   options={{

@@ -338,12 +338,17 @@ export const projectSummarySchema = z.object({
 });
 export type ProjectSummary = z.infer<typeof projectSummarySchema>;
 
+/** Enclosure, not OS or a user-editable host name. Older hosts omit it. */
+export const machineFormFactorSchema = z.enum(["notebook", "mac-mini", "desktop", "tower", "all-in-one"]);
+export type MachineFormFactor = z.infer<typeof machineFormFactorSchema>;
+
 export const machineInfoSchema = z.object({
   machineId: z.string().min(1),
   hostname: z.string(),
   /** Host-owned display name; its presence also advertises `machine.rename`. */
   naming: z.object({ defaultName: z.string(), customName: z.string().optional(), configured: z.boolean() }).optional(),
   platform: z.string(),
+  formFactor: machineFormFactorSchema.optional(),
   hostVersion: z.string(),
   /** The host's RPC revision (`HOST_PROTOCOL`); absent from hosts older than it. */
   protocol: z.number().int().nonnegative().optional(),

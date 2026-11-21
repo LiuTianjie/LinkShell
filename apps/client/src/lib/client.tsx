@@ -1,7 +1,7 @@
 import { setHostHome } from "@/lib/format";
 import { sessionPreferences } from "./session-preferences";
 import { deleteSecret, readSecret, writeSecret } from "./secure";
-import { createContext, use, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { createContext, use, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { AppState } from "react-native";
 import { randomUUID } from "expo-crypto";
 import { useStore } from "zustand";
@@ -16,7 +16,7 @@ import {
   type ClientState,
   type ClientStore,
 } from "@linkshell/client-core";
-import { probeRelays, relayFor, reconnectRelays, selectedComputer, startRelays, useComputers, type Computer } from "./computers";
+import { rememberComputerProfile, probeRelays, relayFor, reconnectRelays, selectedComputer, startRelays, useComputers, type Computer } from "./computers";
 import { deviceIdentity } from "./identity";
 import { HybridLanGatewaySocket, LanE2eeSocket } from "./lan-socket";
 import { DEFAULT_HOST_URL } from "./settings";
@@ -134,13 +134,6 @@ function createConnection(computer: Computer): Connection {
   // Paths render as ~/… with this computer's home, set before anything renders them.
   setHostHome(undefined);
   const streams = new HostStreams(link, { connector: directConnector, iceServers: () => store.getState().machine?.direct?.iceServers });
-  store.subscribe((state, previous) => {
-    if (state.machine === previous.machine) return;
-    setHostHome(state.machine?.home);
-    if (state.machine) syncComputerName(computer, state.machine);
-    // The computer just said whether it can go direct, and how.
-    streams.connect();
-  });
   const subscribeSession = createSessionSubscriptions((id) => store.getState().openSession(id), (id) => store.getState().closeSession(id));
   return { key: computer.key, computer, url, link, store, streams, subscribeSession };
 }
@@ -160,8 +153,8 @@ export function ClientProvider({ children }: { children: ReactNode }) {
     startRelays();
   }, []);
 
-  // A different computer selected (or LAN endpoint bound): open a fresh connection.
-  useEffect(() => {
+  // Replace the old store before a newly selected computer can paint or accept input.
+  useLayoutEffect(() => {
     if (connectionSignature(selected) !== connectionSignature(connection.computer)) {
       setConnection(createConnection(selected));
     }
@@ -169,6 +162,16 @@ export function ClientProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const { store, link } = connection;
+    const unwatchMachine = store.subscribe((state, previous) => {
+      if (state.machine === previous.machine) return;
+      setHostHome(state.machine?.home);
+      if (state.machine) {
+        rememberComputerProfile(connection.key, state.machine);
+        syncComputerName(connection.computer, state.machine);
+      }
+      // The computer just said whether it can go direct, and how.
+      connection.streams.connect();
+    });
     const hasComputer = connection.key !== NO_COMPUTER_KEY;
     let recoveryTimer: ReturnType<typeof setTimeout> | undefined;
     const recoveringNow = () => {
@@ -259,6 +262,7 @@ export function ClientProvider({ children }: { children: ReactNode }) {
       clearTimeout(latestTimer);
       clearTimeout(recoveryTimer);
       clearInterval(bgWatchdog);
+      unwatchMachine();
       unwatchStatus();
       unwatchAccount();
       subscription.remove();

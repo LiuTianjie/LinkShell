@@ -1,8 +1,9 @@
+import { reportedComputerProfile } from "./computer-profile";
 import Storage from "expo-sqlite/kv-store";
 import { Platform } from "react-native";
 import * as Device from "expo-device";
 import { create } from "zustand";
-import { RELAY_PATH, RelayClient, type MachineEntry, type PublicIdentity, type RelaySocket, type RelayStatus } from "@linkshell/wire";
+import { RELAY_PATH, RelayClient, type MachineEntry, type MachineInfo, type MachineFormFactor, type PublicIdentity, type RelaySocket, type RelayStatus } from "@linkshell/wire";
 import { useAccount } from "./account";
 import { deviceIdentity } from "./identity";
 import { DEFAULT_HOST_URL } from "./settings";
@@ -63,7 +64,10 @@ export type Computer =
       lanMatchedBy?: LanMatchReason;
     };
 
+export interface ComputerProfile { platform: string; formFactor?: MachineFormFactor }
+
 interface Saved {
+  profiles?: Record<string, ComputerProfile>;
   relay: { gateway: string; machine: Omit<MachineEntry, "online"> }[];
   direct: { url: string; name: string; machine?: PublicIdentity; fallbackGateway?: string }[];
   /** Optional LAN WebSocket URLs bound by computer key or machine id for local Wi-Fi fast-path. */
@@ -399,6 +403,7 @@ export const useComputers = create<ComputersState>((set, get) => ({
       if (relayEntry) delete nextLanUrls[relayEntry.machine.id];
     }
     const saved: Saved = {
+      profiles: Object.fromEntries(Object.entries(current.profiles ?? {}).filter(([id]) => id !== key)),
       relay: current.relay.filter((entry) => relayKey(entry.gateway, entry.machine.id) !== key),
       direct: current.direct.filter((entry) => `direct:${entry.url}` !== key),
       ...(nextLanUrls && Object.keys(nextLanUrls).length > 0 ? { lanUrls: nextLanUrls } : {}),
@@ -567,6 +572,17 @@ export function selectedComputer(
 bindLanHostsSink((hosts) => useComputers.getState().setLanHosts(hosts));
 
 /** Store only display metadata; the paired signing key and selected connection stay intact. */
+export function rememberComputerProfile(key: string, machine: MachineInfo): void {
+  if (machine.locked) return;
+  const { saved } = useComputers.getState();
+  const old = saved.profiles?.[key];
+  const profile = reportedComputerProfile(machine);
+  if (old?.platform === profile.platform && old.formFactor === profile.formFactor) return;
+  const next = { ...saved, profiles: { ...saved.profiles, [key]: profile } };
+  persist(next);
+  useComputers.setState({ saved: next });
+}
+
 export function updateComputerName(computer: Computer, name: string, namingConfigured?: boolean): void {
   const state = useComputers.getState();
   let changed = false;

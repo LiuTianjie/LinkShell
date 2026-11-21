@@ -68,6 +68,7 @@ export interface GatewaySocket {
 
 interface Peer {
   record: PeerRecord;
+  formFactor?: MachineEntry["formFactor"];
   socket: GatewaySocket;
   email?: string;
   admissionCheckedAt: number;
@@ -337,18 +338,19 @@ export class Gateway {
       lastSeen: Date.now(),
     };
     this.store.upsertPeer(record);
+    const formFactor = role === "machine" && !frame.locked ? frame.formFactor : undefined;
     if (role === "machine") {
       const was = this.locked.has(record.id);
       const nameWasConfigured = this.namingConfigured.has(record.id);
       if (frame.locked) this.locked.add(record.id);
       else this.locked.delete(record.id);
       if (frame.namingConfigured) this.namingConfigured.add(record.id);
-      if (was !== Boolean(frame.locked) || nameWasConfigured !== this.namingConfigured.has(record.id) || existing?.name !== record.name) {
+      if (was !== Boolean(frame.locked) || nameWasConfigured !== this.namingConfigured.has(record.id) || existing?.name !== record.name || this.peers.get(record.id)?.formFactor !== formFactor) {
         for (const { peer: device } of this.store.reachable(record.id)) this.event(device.id, "machines.changed", {});
       }
     }
     const previous = this.peers.get(record.id);
-    const peer: Peer = { record, socket, email, admissionCheckedAt: Date.now() };
+    const peer: Peer = { record, socket, email, formFactor, admissionCheckedAt: Date.now() };
     this.peers.set(record.id, peer);
     // One live connection per identity: the newest wins.
     previous?.socket.close(4000, "replaced by a newer connection");
@@ -454,6 +456,7 @@ export class Gateway {
       name: peer.name,
       platform: peer.platform,
       online: this.peers.has(peer.id),
+      formFactor: this.peers.get(peer.id)?.formFactor,
       via,
       ...(this.locked.has(peer.id) ? { locked: true } : {}),
       ...(this.namingConfigured.has(peer.id) ? { namingConfigured: true } : {}),

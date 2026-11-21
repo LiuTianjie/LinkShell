@@ -1,1138 +1,478 @@
-import type { AgentInfo, GatewayStatus, UsageReport } from "@linkshell/wire";
-import { formatConnectionDetail } from "@/components/connection-banner";
-import * as Clipboard from "expo-clipboard";
 import { router, Stack } from "expo-router";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Alert, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useMemo, useState } from "react";
+import { Platform, Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import type { SessionSummary } from "@linkshell/wire";
 import { usePageInsets } from "@/components/adaptive-page";
-import { HeaderActions } from "@/components/header-actions";
-import { hasSideToolbar } from "@/lib/home-layout";
-import { Text } from "@/components/fixed-text";
 import { AgentTile } from "@/components/agent-tile";
 import { Button } from "@/components/button";
-import { Icon, type IconProps } from "@/components/icon";
-import { LinkDot } from "@/components/status";
-import { PressedWash } from "@/components/pressable-feedback";
-import { formatApiComputeValue } from "@/components/usage-dashboard";
-import { useAccount } from "@/lib/account";
-import { computerDisplayName, useComputerNames } from "@/lib/computer-names";
-import {
-  lanHostDisplayName,
-  lanHostUrl,
-  listComputers,
-  matchLanHostToComputer,
-  resolveLanReachabilityHint,
-  useComputers,
-  type DiscoveredLanHost,
-} from "@/lib/computers";
-import { useNativeLanDiscovery } from "@/lib/lan-discovery-native";
-import { useActions, useClient, useConnection, useConnectionStatus, useHasComputer } from "@/lib/client";
-import { Welcome } from "@/components/welcome";
-import { relativeTime } from "@/lib/format";
-import { haptics } from "@/lib/haptics";
-import { deviceIdentity } from "@/lib/identity";
-import { useLocale } from "@/lib/locale";
-import { agentCapabilityTags, agentLook, tierCopy } from "@/theme/agents";
-import { colors } from "@/theme/colors";
-import { mono, radius, type } from "@/theme/type";
-import { useFloatingTabInset } from "@/components/floating-tabs";
-import { ComputerList } from "@/components/computer-list";
 import { ComputerArt } from "@/components/computer-art";
-import { ComputerMetrics } from "@/components/computer-metrics";
-import { PortRow } from "@/components/port-row";
-import { ListRow } from "@/components/session-row";
-import { usePorts } from "@/lib/ports";
-import { PageActionButton, StatusBarFade, type PageAction } from "@/components/page-header";
+import { useComputerPresentation } from "@/components/computer-controls";
+import { formatConnectionDetail } from "@/components/connection-banner";
+import { Text } from "@/components/fixed-text";
+import { IOS_TAB_BAR_HEIGHT, useFloatingTabInset } from "@/components/floating-tabs";
+import { Icon } from "@/components/icon";
+import { isHostLowBattery } from "@/components/computer-metrics";
+import { openPreview } from "@/components/port-row";
+import { openSession } from "@/components/session-row";
+import { LinkDot, StatusDot, stateColor } from "@/components/status";
+import { Welcome } from "@/components/welcome";
+import { useActions, useClient, useConnection, useConnectionStatus, useHasComputer } from "@/lib/client";
+import { platformLabel } from "@/lib/computer-profile";
 import { useContentWidth } from "@/lib/content-width";
+import { needsAttention, sessionTitle } from "@/lib/describe";
+import { baseName } from "@/lib/format";
+import { haptics } from "@/lib/haptics";
+import { useLocale } from "@/lib/locale";
+import { useMachineMetrics } from "@/lib/machine-metrics";
+import { usePorts } from "@/lib/ports";
+import { colors } from "@/theme/colors";
+import { radius, type } from "@/theme/type";
 
-const authMethod: Record<string, string> = {
-  "claude.ai": "Claude",
-  api_key: "API Key",
-  provider: "Provider",
-  access_token: "Access Token",
-  oauth_token: "OAuth",
-  chatgpt: "ChatGPT",
-  bedrock: "Amazon Bedrock",
-  vertex: "Google Vertex",
-};
-
-function platformName(platform: string): {
-  label: string;
-  sf: "laptopcomputer" | "pc" | "server.rack";
-} {
-  if (platform === "darwin") return { label: "macOS", sf: "laptopcomputer" };
-  if (platform === "win32") return { label: "Windows", sf: "pc" };
-  return { label: "Linux", sf: "server.rack" };
+function priority(s: SessionSummary) {
+  return needsAttention(s) ? 2 : s.state === "running" ? 1 : 0;
 }
-
-function hostOf(url: string): string {
-  try {
-    return new URL(url.replace(/^ws/, "http")).host;
-  } catch {
-    return url;
+function featured(sessions: Record<string, SessionSummary>) {
+  let best: SessionSummary | undefined;
+  for (const s of Object.values(sessions)) {
+    if (s.archived) continue;
+    if (!best || priority(s) > priority(best) || (priority(s) === priority(best) && s.updatedAt > best.updatedAt))
+      best = s;
   }
+  return best;
 }
 
-function QuickActionTile({
-  icon,
-  label,
-  badge,
-  onPress,
-}: {
-  icon: Pick<IconProps, "sf" | "md">;
-  label: string;
-  badge?: string;
-  onPress: () => void;
-}) {
+function Workspace() {
+  const sessions = useClient((s) => s.sessions);
+  const loaded = useClient((s) => s.sessionsLoaded);
+  const session = useMemo(() => featured(sessions), [sessions]);
+  const { ports, error } = usePorts();
+  const { t, pick } = useLocale();
+  const active = session && priority(session) > 0;
+  const phase =
+    session &&
+    (needsAttention(session)
+      ? pick({ zh: "等你处理", en: "Needs attention", ja: "対応待ち" })
+      : session.state === "running"
+        ? pick({ zh: "运行中", en: "Running", ja: "実行中" })
+        : session.state === "error"
+          ? pick({ zh: "出错", en: "Error", ja: "エラー" })
+          : pick({ zh: "最近会话", en: "Recent session", ja: "最近のセッション" }));
+  return (
+    <>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+        <Text accessibilityRole="header" style={[type.title, { flex: 1, color: colors.label }]}>
+          {active || !session
+            ? pick({ zh: "当前工作", en: "On this computer", ja: "現在の作業" })
+            : pick({ zh: "最近工作", en: "Recent work", ja: "最近の作業" })}
+        </Text>
+        <TextLink
+          title={pick({ zh: "主机详情", en: "Details", ja: "詳細" })}
+          onPress={() => router.push("/computer-details")}
+        />
+      </View>
+      {session ? (
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => openSession(session.id)}
+          style={({ pressed }) => [styles.workRow, { backgroundColor: pressed ? colors.fill : "transparent" }]}
+        >
+          <AgentTile agent={session.agent} size={36} />
+          <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
+            <Text numberOfLines={2} style={[type.headline, { color: colors.label }]}>
+              {sessionTitle(session)}
+            </Text>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+              <StatusDot color={needsAttention(session) ? colors.waiting : stateColor(session.state)} />
+              <Text numberOfLines={1} style={[type.footnote, { flexShrink: 1, color: colors.secondaryLabel }]}>
+                {[phase, baseName(session.cwd)].filter(Boolean).join(" · ")}
+              </Text>
+            </View>
+          </View>
+          <Chevron />
+        </Pressable>
+      ) : (
+        <Hint
+          text={
+            loaded
+              ? pick({
+                  zh: "这台电脑还没有会话",
+                  en: "No sessions on this computer yet",
+                  ja: "このコンピュータにはまだセッションがありません",
+                })
+              : t("common.loading")
+          }
+        />
+      )}
+      <View
+        style={{ borderTopWidth: StyleSheet.hairlineWidth, borderColor: colors.separator, marginTop: 9, paddingTop: 8 }}
+      >
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <Text style={[type.headline, { flex: 1, color: colors.label }]}>{t("nav.ports")}</Text>
+          <TextLink
+            title={pick({ zh: "全部", en: "All", ja: "すべて" }) + (ports ? ` ${ports.length}` : "")}
+            onPress={() => router.push("/ports")}
+          />
+        </View>
+        {ports?.slice(0, 2).map((port, i) => (
+          <Pressable
+            key={port.port}
+            accessibilityRole="button"
+            onPress={() => openPreview(port.port, port.title)}
+            style={({ pressed }) => ({
+              minHeight: 46,
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 12,
+              paddingVertical: 6,
+              borderTopWidth: i ? StyleSheet.hairlineWidth : 0,
+              borderColor: colors.separator,
+              backgroundColor: pressed ? colors.fill : "transparent",
+            })}
+          >
+            <Icon sf="globe" md="language" size={18} color={colors.secondaryLabel} />
+            <Text numberOfLines={1} style={[type.callout, { flex: 1, color: colors.label }]}>
+              {port.title || "localhost"}
+            </Text>
+            <Text style={[type.footnote, { color: colors.secondaryLabel, fontVariant: ["tabular-nums"] }]}>
+              :{port.port}
+            </Text>
+            <Chevron />
+          </Pressable>
+        ))}
+        {(!ports || !ports.length) && (
+          <Hint
+            text={
+              error ??
+              (ports
+                ? pick({
+                    zh: "未发现可预览的服务",
+                    en: "No preview services found",
+                    ja: "プレビューできるサービスはありません",
+                  })
+                : t("common.loading"))
+            }
+          />
+        )}
+      </View>
+    </>
+  );
+}
+
+/** Only the grabber owns an upward gesture; the session and port rows still scroll normally. */
+function DetailsGrabber() {
+  const open = () => {
+    haptics.selection();
+    router.push("/computer-details");
+  };
+  const gesture = Gesture.Exclusive(
+    Gesture.Pan()
+      .activeOffsetY(-8)
+      .failOffsetX([-18, 18])
+      .runOnJS(true)
+      .onEnd(({ translationY }) => {
+        if (translationY < -18) open();
+      }),
+    Gesture.Tap()
+      .runOnJS(true)
+      .onEnd((_, success) => {
+        if (success) open();
+      }),
+  );
+  return (
+    <GestureDetector gesture={gesture}>
+      <View
+        collapsable={false}
+        accessible={false}
+        importantForAccessibility="no"
+        style={{
+          alignSelf: "center",
+          height: 20,
+          width: 86,
+          marginTop: -8,
+          justifyContent: "center",
+          alignItems: "center",
+        }}
+      >
+        <View style={{ width: 32, height: 4, borderRadius: 2, backgroundColor: colors.separator }} />
+      </View>
+    </GestureDetector>
+  );
+}
+
+function Chevron() {
+  return <Icon sf="chevron.right" md="chevron_right" size={12} color={colors.secondaryLabel} />;
+}
+function TextLink({ title, onPress }: { title: string; onPress: () => void }) {
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={badge ? `${label} ${badge}` : label}
       onPress={() => {
         haptics.selection();
         onPress();
       }}
-      style={{
-        flex: 1,
-        minHeight: 70,
-        borderRadius: radius.card,
-        borderCurve: "continuous",
-        backgroundColor: colors.card,
-        overflow: "hidden",
+      style={({ pressed }) => ({
+        minHeight: 44,
+        flexDirection: "row",
         alignItems: "center",
-        justifyContent: "center",
-        paddingVertical: 11,
-        paddingHorizontal: 6,
-        gap: 6,
-      }}
+        gap: 4,
+        opacity: pressed ? 0.6 : 1,
+      })}
     >
-      {({ pressed }) => (
-        <>
-          <PressedWash pressed={pressed} />
-          <View style={{ position: "relative" }}>
-            <View
-              style={{
-                width: 32,
-                height: 32,
-                borderRadius: 10,
-                borderCurve: "continuous",
-                backgroundColor: colors.accentSoft,
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <Icon sf={icon.sf} md={icon.md} size={17} color={colors.accent} />
-            </View>
-            {badge ? (
-              <View
-                style={{
-                  position: "absolute",
-                  top: -4,
-                  right: -8,
-                  minWidth: 16,
-                  height: 16,
-                  paddingHorizontal: 4,
-                  borderRadius: 8,
-                  backgroundColor: colors.accentFill,
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                <Text style={[type.caption, { fontSize: 10, lineHeight: 12, fontWeight: "700", color: "#ffffff", fontVariant: ["tabular-nums"] }]}>
-                  {badge}
-                </Text>
-              </View>
-            ) : null}
-          </View>
-          <Text numberOfLines={1} style={[type.footnote, { fontWeight: "500", color: colors.label }]}>
-            {label}
-          </Text>
-        </>
-      )}
+      <Text style={[type.subhead, { color: colors.accent }]}>{title}</Text>
+      <Icon sf="chevron.right" md="chevron_right" size={12} color={colors.accent} />
     </Pressable>
   );
 }
+function Hint({ text }: { text: string }) {
+  return <Text style={[type.subhead, { color: colors.secondaryLabel, paddingVertical: 12 }]}>{text}</Text>;
+}
 
-function AgentRow({ agent, first, online }: { agent: AgentInfo; first: boolean; online: boolean }) {
-  const { locale, t, pick } = useLocale();
-  const pending = useClient((state) => state.interactions[agent.id]?.length ?? 0);
-  const look = agentLook(agent.id, agent.label);
-  const missing = agent.auth?.state === "missing";
-  const ready = online && agent.installed && !missing && agent.tier !== "terminal";
-  const login = look.login;
-  const [copied, setCopied] = useState(false);
-  const auth = agent.auth?.state === "ok" && agent.auth.method ? (authMethod[agent.auth.method] ?? agent.auth.method) : null;
-  const capabilities = agentCapabilityTags(agent, locale);
-  const detail = missing
-    ? (agent.auth?.hint ?? pick({ zh: "还没登录", en: "Not signed in", ja: "未ログイン" }))
-    : [agent.version ? `v${agent.version.replace(/^v/i, "")}` : undefined, auth, ...capabilities].filter(Boolean).join(" · ") ||
-      pick({ zh: "可用", en: "Ready", ja: "利用可能" });
-  const tierLabel = tierCopy[agent.tier]?.label;
+export function ComputerScreen() {
+  const { computer } = useConnection();
+  return <ComputerWorkspace key={computer.key} />;
+}
 
+function ComputerWorkspace() {
+  const { t, pick } = useLocale();
+  const { name, profile, transport } = useComputerPresentation();
+  const { link } = useConnection();
+  const { refresh } = useActions();
+  const status = useConnectionStatus();
+  const online = useClient((s) => s.status === "online");
+  const detail = useClient((s) => s.statusDetail);
+  const hasComputer = useHasComputer();
+  const { metrics } = useMachineMetrics();
+  const power = online ? metrics?.power : undefined;
+  const connecting = status === "connecting" || status === "reconnecting";
+  const [refreshing, setRefreshing] = useState(false);
+  const insets = usePageInsets();
+  const bottomTab = useFloatingTabInset();
+  const width = useContentWidth();
+  const wide = width >= 760;
+  const padding = width < 360 ? 16 : 24;
+  const bottom = Platform.OS === "ios" ? insets.bottom + IOS_TAB_BAR_HEIGHT + 12 : bottomTab + 12;
+  const phase = online
+    ? t("connection.online")
+    : status === "locked"
+      ? pick({ zh: "需要访问密码", en: "Access password needed", ja: "パスワードが必要" })
+      : connecting
+        ? t("connection.connecting")
+        : t("connection.offline");
+  const picker = () => {
+    haptics.selection();
+    router.push("/computers");
+  };
+  const doRefresh = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      if (online) await refresh();
+      else link.reconnectNow(true);
+    } finally {
+      setRefreshing(false);
+    }
+  };
   return (
-    <View>
-      {first ? null : <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: colors.separator, marginLeft: 44 }} />}
-      <View style={{ paddingVertical: 10, gap: 10 }}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+    <>
+      <Stack.Screen options={{ headerShown: false }} />
+      <ScrollView
+        contentInsetAdjustmentBehavior="never"
+        style={{ flex: 1, backgroundColor: colors.background }}
+        contentContainerStyle={{ flexGrow: 1, paddingTop: insets.top + 4 }}
+        refreshControl={
+          hasComputer ? (
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => void doRefresh()}
+              progressViewOffset={insets.top}
+            />
+          ) : undefined
+        }
+      >
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            paddingHorizontal: padding,
+            minHeight: 48,
+          }}
+        >
           <Pressable
-            disabled={!ready}
-            accessibilityRole={ready ? "button" : undefined}
-            accessibilityLabel={ready ? `${look.name}，新建会话` : look.name}
-            onPress={() => {
-              haptics.selection();
-              router.push({ pathname: "/new", params: { agent: agent.id } });
-            }}
+            accessibilityRole="button"
+            accessibilityLabel={`${t("nav.computer")} · ${name}`}
+            onPress={picker}
             style={({ pressed }) => ({
-              flex: 1,
-              minWidth: 0,
+              minHeight: 44,
               flexDirection: "row",
               alignItems: "center",
-              gap: 12,
-              opacity: ready && pressed ? 0.65 : 1,
+              gap: 7,
+              opacity: pressed ? 0.6 : 1,
             })}
           >
-            <AgentTile agent={agent.id} size={34} dimmed={!agent.installed} />
-            <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                <Text numberOfLines={1} style={[type.callout, { fontWeight: "600", color: colors.label, flexShrink: 1 }]}>
-                  {look.name}
+            <Icon sf="rectangle.on.rectangle" md="devices" size={18} color={colors.secondaryLabel} />
+            <Text style={[type.subhead, { color: colors.secondaryLabel, fontWeight: "600" }]}>{t("nav.computer")}</Text>
+            <Icon sf="chevron.down" md="expand_more" size={12} color={colors.secondaryLabel} />
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t("nav.account")}
+            onPress={() => router.push("/account")}
+            style={({ pressed }) => ({
+              width: 44,
+              height: 44,
+              alignItems: "center",
+              justifyContent: "center",
+              opacity: pressed ? 0.6 : 1,
+            })}
+          >
+            <View style={{ backgroundColor: colors.fill, padding: 8, borderRadius: 18 }}>
+              <Icon sf="person" md="person_outline" size={18} color={colors.label} />
+            </View>
+          </Pressable>
+        </View>
+        {!hasComputer ? (
+          <View style={{ paddingHorizontal: padding, paddingBottom: bottom }}>
+            <Welcome />
+          </View>
+        ) : (
+          <View
+            style={{
+              flex: 1,
+              flexDirection: wide ? "row" : "column",
+              gap: wide ? 12 : 0,
+              ...(wide ? { alignItems: "flex-start", padding: 16, paddingBottom: bottom } : {}),
+            }}
+          >
+            <View
+              style={{ ...(wide ? { flex: 1 } : {}), paddingHorizontal: padding, paddingTop: 12, paddingBottom: 24 }}
+            >
+              <Text
+                accessibilityRole="header"
+                selectable
+                style={[name.length > 22 ? type.title1 : type.largeTitle, { color: colors.label }]}
+              >
+                {name}
+              </Text>
+              <View style={{ minHeight: 28, flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <LinkDot health={online ? "online" : connecting ? "connecting" : "offline"} />
+                <Text style={[type.footnote, { flex: 1, color: colors.secondaryLabel }]}>
+                  {[phase, platformLabel(profile.platform), online ? transport : undefined].filter(Boolean).join(" · ")}
                 </Text>
-                {tierLabel ? (
+                {typeof power?.percent === "number" ? (
                   <View
-                    style={{
-                      paddingHorizontal: 6,
-                      paddingVertical: 1,
-                      borderRadius: radius.chip,
-                      borderCurve: "continuous",
-                      backgroundColor: agent.tier === "multi_client" ? colors.accentSoft : colors.fill,
-                    }}
+                    accessible
+                    accessibilityLabel={pick({
+                      zh: `电量 ${Math.round(power.percent)}%`,
+                      en: `Battery ${Math.round(power.percent)}%`,
+                      ja: `バッテリー ${Math.round(power.percent)}%`,
+                    })}
+                    style={{ flexDirection: "row", alignItems: "center", gap: 4 }}
                   >
+                    <Icon
+                      sf={
+                        power.charging
+                          ? "battery.100percent.bolt"
+                          : power.percent < 25
+                            ? "battery.25percent"
+                            : power.percent < 60
+                              ? "battery.50percent"
+                              : power.percent < 90
+                                ? "battery.75percent"
+                                : "battery.100percent"
+                      }
+                      md="battery_std"
+                      size={15}
+                      color={colors.secondaryLabel}
+                    />
                     <Text
                       style={[
-                        type.caption,
+                        type.footnote,
                         {
-                          fontSize: 11,
-                          lineHeight: 14,
-                          fontWeight: "600",
-                          color: agent.tier === "multi_client" ? colors.accent : colors.secondaryLabel,
+                          color: isHostLowBattery(power) ? colors.danger : colors.secondaryLabel,
+                          fontVariant: ["tabular-nums"],
                         },
                       ]}
                     >
-                      {tierLabel}
+                      {Math.round(power.percent)}%
                     </Text>
                   </View>
                 ) : null}
               </View>
-              <Text numberOfLines={2} style={[type.footnote, { color: missing ? colors.waiting : colors.secondaryLabel }]}>
-                {detail}
-              </Text>
-            </View>
-          </Pressable>
-          {missing ? <Icon sf="exclamationmark.circle.fill" md="error" size={16} color={colors.waiting} /> : null}
-          {agent.capabilities.acp ? (
-            <Button
-              title={pending ? `${pick({ zh: "等你处理", en: "Needs You", ja: "確認待ち" })} ${pending}` : t("nav.settings")}
-              size="small"
-              variant={pending ? "warning" : "plain"}
-              onPress={() => router.push({ pathname: "/acp", params: { agent: agent.id } })}
-            />
-          ) : ready ? (
-            <Icon sf="chevron.right" md="chevron_right" size={12} color={colors.tertiaryLabel} weight="semibold" />
-          ) : null}
-        </View>
-        {missing && login ? (
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 10,
-              marginLeft: 46,
-              padding: 10,
-              borderRadius: radius.control,
-              borderCurve: "continuous",
-              backgroundColor: colors.code,
-            }}
-          >
-            <Text
-              selectable
-              style={{
-                flex: 1,
-                fontFamily: mono,
-                fontSize: 13,
-                color: colors.codeText,
-              }}
-            >
-              {login}
-            </Text>
-            <Button
-              title={copied ? t("common.copied") : t("common.copy")}
-              size="small"
-              icon={{
-                sf: copied ? "checkmark" : "doc.on.doc",
-                md: copied ? "check" : "content_copy",
-              }}
-              onPress={() => {
-                void Clipboard.setStringAsync(login);
-                haptics.success();
-                setCopied(true);
-                setTimeout(() => setCopied(false), 2000);
-              }}
-            />
-          </View>
-        ) : null}
-      </View>
-    </View>
-  );
-}
-
-function CatalogAgentRow({ agent, first }: { agent: AgentInfo; first: boolean }) {
-  const { t, pick } = useLocale();
-  const look = agentLook(agent.id, agent.label);
-  const [copied, setCopied] = useState(false);
-  const install = look.install;
-
-  return (
-    <View>
-      {first ? null : <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: colors.separator, marginLeft: 38 }} />}
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 8 }}>
-        <AgentTile agent={agent.id} size={28} dimmed />
-        <View style={{ flex: 1, minWidth: 0, gap: 1 }}>
-          <Text numberOfLines={1} style={[type.subhead, { fontWeight: "500", color: colors.label }]}>
-            {look.name}
-          </Text>
-          <Text
-            numberOfLines={1}
-            style={[
-              install ? { fontFamily: mono, fontSize: 11, lineHeight: 15 } : type.caption,
-              { color: colors.tertiaryLabel },
-            ]}
-          >
-            {install ?? pick({ zh: "在电脑安装后自动识别", en: "Auto-detected once installed", ja: "インストール後に自動検出" })}
-          </Text>
-        </View>
-        {install ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`${t("common.copy")} ${look.name}`}
-            hitSlop={8}
-            onPress={() => {
-              void Clipboard.setStringAsync(install);
-              haptics.success();
-              setCopied(true);
-              setTimeout(() => setCopied(false), 1800);
-            }}
-            style={({ pressed }) => ({
-              paddingHorizontal: 9,
-              paddingVertical: 4,
-              borderRadius: radius.chip,
-              borderCurve: "continuous",
-              backgroundColor: copied ? colors.okSoft : colors.fill,
-              opacity: pressed ? 0.65 : 1,
-            })}
-          >
-            <Text style={[type.caption, { fontWeight: "600", color: copied ? colors.ok : colors.secondaryLabel }]}>
-              {copied ? t("common.copied") : t("common.copy")}
-            </Text>
-          </Pressable>
-        ) : null}
-      </View>
-    </View>
-  );
-}
-
-function UninstalledAgentsCatalog({ agents }: { agents: AgentInfo[] }) {
-  const { pick } = useLocale();
-  const [open, setOpen] = useState(false);
-  const domestic = useMemo(() => agents.filter((agent) => agentLook(agent.id, agent.label).group === "domestic"), [agents]);
-  const global = useMemo(() => agents.filter((agent) => agentLook(agent.id, agent.label).group !== "domestic"), [agents]);
-  const preview = useMemo(() => [...domestic, ...global].slice(0, 6), [domestic, global]);
-
-  if (!agents.length) return null;
-
-  return (
-    <View>
-      <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: colors.separator }} />
-      <Pressable
-        accessibilityRole="button"
-        accessibilityState={{ expanded: open }}
-        onPress={() => {
-          haptics.selection();
-          setOpen((value) => !value);
-        }}
-        style={({ pressed }) => ({
-          flexDirection: "row",
-          alignItems: "center",
-          gap: 10,
-          minHeight: 46,
-          paddingVertical: 10,
-          opacity: pressed ? 0.65 : 1,
-        })}
-      >
-        <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
-          <Text numberOfLines={1} style={[type.subhead, { fontWeight: "500", color: colors.secondaryLabel }]}>
-            {pick({
-              zh: `更多支持的 Agent（未安装 ${agents.length}）`,
-              en: `More Supported Agents (${agents.length})`,
-              ja: `その他の対応 Agent（未導入 ${agents.length}）`,
-            })}
-          </Text>
-          {!open ? (
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 5, marginTop: 3 }}>
-              {preview.map((agent) => (
-                <AgentTile key={agent.id} agent={agent.id} size={20} dimmed />
-              ))}
-              {agents.length > preview.length ? (
-                <Text style={[type.caption, { color: colors.tertiaryLabel, marginLeft: 2, fontVariant: ["tabular-nums"] }]}>
-                  +{agents.length - preview.length}
-                </Text>
-              ) : null}
-            </View>
-          ) : null}
-        </View>
-        <Icon sf={open ? "chevron.up" : "chevron.down"} md={open ? "expand_less" : "expand_more"} size={12} color={colors.tertiaryLabel} weight="semibold" />
-      </Pressable>
-
-      {open ? (
-        <View style={{ paddingBottom: 8, gap: 10 }}>
-          {domestic.length > 0 ? (
-            <View style={{ gap: 2 }}>
-              <Text style={[type.caption, { fontWeight: "600", color: colors.tertiaryLabel, paddingTop: 2, paddingBottom: 4 }]}>
-                {pick({ zh: "国产主流", en: "Chinese Coding Agents", ja: "中国主要 Agent" })}
-              </Text>
-              {domestic.map((agent, index) => (
-                <CatalogAgentRow key={agent.id} agent={agent} first={index === 0} />
-              ))}
-            </View>
-          ) : null}
-          {global.length > 0 ? (
-            <View style={{ gap: 2 }}>
-              <Text style={[type.caption, { fontWeight: "600", color: colors.tertiaryLabel, paddingTop: 4, paddingBottom: 4 }]}>
-                {pick({ zh: "国际与开源", en: "Global & Open Source", ja: "グローバル / OSS" })}
-              </Text>
-              {global.map((agent, index) => (
-                <CatalogAgentRow key={agent.id} agent={agent} first={index === 0} />
-              ))}
-            </View>
-          ) : null}
-        </View>
-      ) : null}
-    </View>
-  );
-}
-
-function WorkspaceToolsSection({ roiDetail, portsCount }: { roiDetail: string; portsCount: number }) {
-  const { t, pick } = useLocale();
-  const { ports } = usePorts();
-  const web = ports ?? [];
-  const shown = web.slice(0, 2);
-  const portsSubtitle = shown.length
-    ? web.length > shown.length
-      ? pick({ zh: `全部 ${web.length} 个端口，或输入端口号`, en: `All ${web.length} ports, or enter port`, ja: `全 ${web.length} 件、またはポート番号入力` })
-      : pick({ zh: "查看全部或输入其他端口", en: "Open or enter another port", ja: "別のポートを開く" })
-    : t("ports.openPreview");
-
-  return (
-    <View style={{ gap: 7 }}>
-      <Text style={[type.footnote, { fontWeight: "600", color: colors.secondaryLabel, paddingHorizontal: 12 }]}>
-        {pick({ zh: "屏幕与工具", en: "Screen & Tools", ja: "画面とツール" })}
-      </Text>
-      <View>
-        <ListRow
-          leading={<Icon sf="display" md="desktop_windows" size={20} color={colors.accent} />}
-          title={t("nav.screen")}
-          time=""
-          detail={pick({
-            zh: "实时查看与操控桌面",
-            en: "Live low-latency desktop view & control",
-            ja: "リアルタイム画面表示・操作",
-          })}
-          position="first"
-          onPress={() => router.push("/screen")}
-          accessibilityLabel={t("nav.screen")}
-        />
-        {shown.map((entry) => (
-          <PortRow key={entry.port} entry={entry} position="middle" />
-        ))}
-        <ListRow
-          leading={<Icon sf="globe" md="language" size={20} color={colors.accent} />}
-          title={portsCount > 0 ? `${t("nav.ports")} (${portsCount})` : t("nav.ports")}
-          time=""
-          detail={portsSubtitle}
-          position="middle"
-          onPress={() => router.push("/ports")}
-          accessibilityLabel={t("nav.ports")}
-        />
-        <ListRow
-          leading={<Icon sf="chart.bar" md="bar_chart" size={20} color={colors.accent} />}
-          title={t("nav.usage")}
-          time=""
-          detail={roiDetail}
-          position="last"
-          onPress={() => router.push("/usage")}
-          accessibilityLabel={t("nav.usage")}
-        />
-      </View>
-    </View>
-  );
-}
-
-type PairedDevice = GatewayStatus["devices"][number];
-
-function DeviceRow({ device, own, onRemove }: { device: PairedDevice; own: boolean; onRemove: () => void }) {
-  const { t, pick } = useLocale();
-  return (
-    <View>
-      <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: colors.separator, marginLeft: 44 }} />
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10 }}>
-        <View
-          style={{ width: 32, height: 32, borderRadius: radius.control, borderCurve: "continuous", backgroundColor: colors.fill, alignItems: "center", justifyContent: "center" }}
-        >
-          <Icon sf="iphone" md="smartphone" size={16} color={colors.label} />
-        </View>
-        <View style={{ flex: 1, gap: 1 }}>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-            <Text numberOfLines={1} style={[type.callout, { flexShrink: 1, fontWeight: "500", color: colors.label }]}>
-              {device.name || pick({ zh: "手机", en: "Device", ja: "デバイス" })}
-            </Text>
-            {own ? (
-              <View style={{ paddingHorizontal: 6, paddingVertical: 1, borderRadius: radius.chip, borderCurve: "continuous", backgroundColor: colors.fill }}>
-                <Text style={[type.caption, { color: colors.label, fontWeight: "600" }]}>
-                  {pick({ zh: "本机", en: "This device", ja: "この端末" })}
-                </Text>
+              <View style={{ alignItems: "center", justifyContent: "center", marginVertical: 14 }}>
+                <ComputerArt profile={profile} width={Math.min(292, width * 0.76)} height={width < 360 ? 145 : 185} />
               </View>
-            ) : null}
-          </View>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
-            <LinkDot health={device.online ? "online" : "offline"} />
-            <Text numberOfLines={1} style={[type.footnote, { flex: 1, color: colors.secondaryLabel }]}>
-              {device.online ? t("connection.online") : t("connection.offline")} · {relativeTime(device.pairedAt)}
-            </Text>
-          </View>
-        </View>
-        <Pressable
-          onPress={onRemove}
-          accessibilityRole="button"
-          accessibilityLabel={t("session.delete")}
-          hitSlop={10}
-          style={({ pressed }) => ({ paddingHorizontal: 6, paddingVertical: 6, opacity: pressed ? 0.6 : 1 })}
-        >
-          <Text style={[type.subhead, { color: colors.danger }]}>{pick({ zh: "移除", en: "Remove", ja: "削除" })}</Text>
-        </Pressable>
-      </View>
-    </View>
-  );
-}
-
-function ComputerPanel({
-  title,
-  children,
-  expanded = true,
-  onToggle,
-  onAdd,
-  detail,
-}: {
-  title: string;
-  children: ReactNode;
-  expanded?: boolean;
-  onToggle?: () => void;
-  onAdd?: () => void;
-  detail?: string;
-}) {
-  const control = (icon: ReactNode) => (
-    <View style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: colors.fill, alignItems: "center", justifyContent: "center" }}>
-      {icon}
-    </View>
-  );
-
-  if (onToggle && !expanded) {
-    return (
-      <View style={{ backgroundColor: colors.card, borderRadius: radius.card, borderCurve: "continuous", overflow: "hidden" }}>
-        <View style={{ flexDirection: "row", alignItems: "center", minHeight: 48, paddingHorizontal: 16, gap: 10 }}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityState={{ expanded: false }}
-            onPress={onToggle}
-            style={({ pressed }) => ({ flex: 1, flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 12, opacity: pressed ? 0.6 : 1 })}
-          >
-            <Text accessibilityRole="header" style={[type.callout, { flex: 1, fontWeight: "500", color: colors.label }]}>
-              {title}
-            </Text>
-            {detail ? (
-              <Text style={[type.subhead, { color: colors.secondaryLabel, fontVariant: ["tabular-nums"] }]}>{detail}</Text>
-            ) : null}
-            <Icon sf="chevron.down" md="expand_more" size={12} color={colors.tertiaryLabel} weight="semibold" />
-          </Pressable>
-          {onAdd ? (
-            <Pressable accessibilityRole="button" onPress={onAdd} hitSlop={8} style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}>
-              {control(<Icon sf="plus" md="add" size={14} color={colors.accent} weight="semibold" />)}
-            </Pressable>
-          ) : null}
-        </View>
-      </View>
-    );
-  }
-
-  return (
-    <View style={{ gap: 7 }}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12 }}>
-        <Pressable
-          accessibilityRole={onToggle ? "button" : "header"}
-          accessibilityState={onToggle ? { expanded } : undefined}
-          disabled={!onToggle}
-          onPress={onToggle}
-          hitSlop={6}
-          style={({ pressed }) => ({ flex: 1, flexDirection: "row", alignItems: "center", gap: 6, opacity: onToggle && pressed ? 0.6 : 1 })}
-        >
-          <Text style={[type.footnote, { flex: 1, fontWeight: "600", color: colors.secondaryLabel }]}>{title}</Text>
-          {detail ? <Text style={[type.footnote, { color: colors.tertiaryLabel, fontVariant: ["tabular-nums"] }]}>{detail}</Text> : null}
-          {onToggle ? <Icon sf="chevron.up" md="expand_less" size={11} color={colors.tertiaryLabel} weight="semibold" /> : null}
-        </Pressable>
-        {onAdd ? (
-          <Pressable accessibilityRole="button" onPress={onAdd} hitSlop={8} style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}>
-            {control(<Icon sf="plus" md="add" size={14} color={colors.accent} weight="semibold" />)}
-          </Pressable>
-        ) : null}
-      </View>
-      <View style={{ backgroundColor: colors.card, borderRadius: radius.card, borderCurve: "continuous", paddingHorizontal: 16, paddingVertical: 4 }}>
-        {children}
-      </View>
-    </View>
-  );
-}
-
-function DevicesSection({ defaultExpanded }: { defaultExpanded: boolean }) {
-  const { link } = useConnection();
-  const { t, pick } = useLocale();
-  const online = useClient((state) => state.status === "online");
-  const [gateway, setGateway] = useState<GatewayStatus | null>(null);
-  const [removing, setRemoving] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState(defaultExpanded);
-
-  useEffect(() => {
-    setExpanded(defaultExpanded);
-  }, [defaultExpanded]);
-
-  useEffect(() => {
-    if (!online) return;
-    let cancelled = false;
-    link
-      .call("gateway.status", {})
-      .then((status) => !cancelled && setGateway(status))
-      .catch(() => {});
-    const off = link.on("gateway.changed", setGateway);
-    return () => {
-      cancelled = true;
-      off();
-    };
-  }, [link, online]);
-
-  if (!gateway) return null;
-  const off = gateway.status === "off";
-  const up = gateway.status === "online";
-  const own = deviceIdentity().id;
-  const state = up
-    ? t("connection.online")
-    : gateway.status === "connecting"
-      ? t("connection.connecting")
-      : `${t("connection.offline")}${gateway.error ? ` · ${gateway.error.message}` : ""}`;
-
-  const remove = (device: PairedDevice) => {
-    Alert.alert(
-      pick({
-        zh: `移除「${device.name || "手机"}」？`,
-        en: `Remove "${device.name || "Device"}"?`,
-        ja: `「${device.name || "デバイス"}」を削除しますか？`,
-      }),
-      pick({
-        zh: "移除后这台设备将无法再连接这台电脑。",
-        en: "This device will no longer be able to connect to this computer.",
-        ja: "削除すると、この端末からこの PC へ接続できなくなります。",
-      }),
-      [
-        { text: t("common.cancel"), style: "cancel" },
-        {
-          text: pick({ zh: "移除", en: "Remove", ja: "削除" }),
-          style: "destructive",
-          onPress: () => {
-            setRemoving(device.id);
-            link
-              .call("devices.revoke", { deviceId: device.id })
-              .then(() => link.call("gateway.status", {}).then(setGateway))
-              .then(() => haptics.success())
-              .catch((reason: unknown) => {
-                haptics.error();
-                Alert.alert(
-                  pick({ zh: "移除失败", en: "Remove failed", ja: "削除に失敗しました" }),
-                  reason instanceof Error ? reason.message : String(reason),
-                );
-              })
-              .finally(() => setRemoving(null));
-          },
-        },
-      ],
-    );
-  };
-
-  return (
-    <ComputerPanel
-      title={pick({ zh: "连接与配对设备", en: "Relay & Paired Devices", ja: "中継とペアリング端末" })}
-      expanded={expanded}
-      onToggle={() => {
-        haptics.selection();
-        setExpanded((value) => !value);
-      }}
-      detail={gateway.devices.length > 0 ? String(gateway.devices.length) : state}
-    >
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10 }}>
-        <View
-          style={{ width: 32, height: 32, borderRadius: radius.control, borderCurve: "continuous", backgroundColor: colors.fill, alignItems: "center", justifyContent: "center" }}
-        >
-          <Icon sf="antenna.radiowaves.left.and.right" md="cell_tower" size={16} color={off ? colors.tertiaryLabel : colors.label} />
-        </View>
-        <View style={{ flex: 1, gap: 1 }}>
-          <Text numberOfLines={1} style={[type.callout, { fontWeight: "500", color: colors.label }]}>
-            {off ? t("connection.lanDirect") : hostOf(gateway.url ?? "")}
-          </Text>
-          {off ? (
-            <Text style={[type.footnote, { color: colors.secondaryLabel }]}>
-              {pick({ zh: "仅限同一局域网直连", en: "Local Wi-Fi only", ja: "同一ネットワーク内のみ" })}
-            </Text>
-          ) : (
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
-              <LinkDot health={up ? "online" : gateway.status === "connecting" ? "connecting" : gateway.error ? "error" : "offline"} />
-              <Text numberOfLines={1} style={[type.footnote, { flex: 1, color: colors.secondaryLabel }]}>
-                {state}
-              </Text>
-            </View>
-          )}
-        </View>
-      </View>
-      {gateway.devices.length > 0
-        ? gateway.devices.map((device) => (
-            <View key={device.id} style={{ opacity: removing === device.id ? 0.4 : 1 }}>
-              <DeviceRow device={device} own={device.id === own} onRemove={() => remove(device)} />
-            </View>
-          ))
-        : null}
-    </ComputerPanel>
-  );
-}
-
-export function ComputerScreen() {
-  const insets = usePageInsets();
-  const systemInsets = useSafeAreaInsets();
-  const { t, pick } = useLocale();
-  const inlineControls = Platform.OS !== "ios" || !hasSideToolbar(systemInsets);
-  const contentWidth = useContentWidth();
-  const [dashboardWidth, setDashboardWidth] = useState<number | null>(null);
-  const availableWidth = dashboardWidth ?? Math.max(0, contentWidth - 32);
-  const minimumColumn = 360;
-  const wide = availableWidth >= minimumColumn * 2 + 20;
-  const columnWidth = wide ? (availableWidth - 20) / 2 : "100%";
-  const tabInset = useFloatingTabInset();
-  const machine = useClient((state) => state.machine);
-  const status = useConnectionStatus();
-  const detail = useClient((state) => state.statusDetail);
-  const { refresh } = useActions();
-  const { url, computer, link } = useConnection();
-  const { ports } = usePorts();
-  const savedComputers = useComputers((state) => state.saved);
-  const liveComputers = useComputers((state) => state.live);
-  const lanHosts = useComputers((state) => state.lanHosts);
-  useNativeLanDiscovery(true);
-  const allComputers = useMemo(
-    () => listComputers({ saved: savedComputers, live: liveComputers, lanHosts }),
-    [savedComputers, liveComputers, lanHosts],
-  );
-  const computersCount = allComputers.length;
-  const currentLanHint = useMemo(() => resolveLanReachabilityHint(computer, lanHosts), [computer, lanHosts]);
-  const account = useAccount((state) => state.session);
-  const accountAction: PageAction = {
-    key: "account",
-    icon: account ? { sf: "person.crop.circle.fill", md: "account_circle" } : { sf: "person.crop.circle", md: "account_circle" },
-    label: t("nav.account"),
-    onPress: () => router.push("/account"),
-  };
-  const [computersExpanded, setComputersExpanded] = useState(false);
-  const [agentsExpanded, setAgentsExpanded] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [usageSummary, setUsageSummary] = useState<UsageReport | null>(null);
-  const hasComputer = useHasComputer();
-  const online = status === "online";
-  const platform = platformName(machine?.platform ?? "");
-  const names = useComputerNames((state) => state.names);
-  const title = computerDisplayName(computer, names);
-  const agents = useMemo(() => [...(machine?.agents ?? [])].sort((a, b) => Number(b.installed) - Number(a.installed)), [machine]);
-  const installedAgents = useMemo(() => agents.filter((agent) => agent.installed), [agents]);
-  const uninstalledAgents = useMemo(() => agents.filter((agent) => !agent.installed), [agents]);
-  const portsCount = ports?.length ?? 0;
-
-  useEffect(() => {
-    setUsageSummary(null);
-    if (!online) return;
-    let cancelled = false;
-    link
-      .call("usage.summary", { days: 7, agent: "all" }, 25_000)
-      .then((res) => {
-        if (!cancelled) setUsageSummary(res);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [link, online, computer.key]);
-
-  const roiDetail = usageSummary
-    ? `${formatApiComputeValue(usageSummary.estimatedCostUsd ?? usageSummary.totals.estimatedCostUsd)} · ${t("usage.remoteApprovals")} ${usageSummary.remoteStats?.remoteApprovals ?? 0}`
-    : t("usage.subscriptionReferenceNote");
-
-  const statusSummary = online
-    ? [t("connection.online"), machine ? platform.label : undefined, machine?.hostVersion ? `v${machine.hostVersion}` : undefined]
-        .filter(Boolean)
-        .join(" · ")
-    : status === "connecting"
-      ? t("connection.connecting")
-      : status === "locked"
-        // Reached, and waiting for its password: not "未连接".
-        ? pick({ zh: "需要访问密码", en: "Access password needed", ja: "アクセスパスワードが必要です" })
-        : `${t("connection.offline")}${formatConnectionDetail(detail) ? ` · ${formatConnectionDetail(detail)}` : ""}`;
-
-  const transportSummary =
-    computer.kind === "relay"
-      ? `${computer.lanUrl ? `${t("connection.lanDirect")} + ` : ""}${t("connection.gatewayRelay")}${
-          hostOf(computer.gateway) !== "gateway.itool.tech" ? ` · ${hostOf(computer.gateway)}` : ""
-        }${!computer.lanUrl && currentLanHint ? ` · ${pick({ zh: "局域网可达", en: "LAN available", ja: "LAN 到達可能" })}` : ""}`
-      : `${t("connection.lanDirect")} · ${url.replace(/^wss?:\/\//, "")}`;
-
-  const connectDiscoveredLanHost = (host: DiscoveredLanHost) => {
-    const discoveredUrl = lanHostUrl(host);
-    if (!discoveredUrl) return;
-    haptics.selection();
-    const computers = useComputers.getState();
-    const matched = allComputers.find((item) => Boolean(matchLanHostToComputer(host, item)));
-    if (matched) {
-      if (matched.kind === "relay") {
-        computers.setLanUrl(matched.key, discoveredUrl, { e2ee: matched.lanE2ee });
-      }
-      if (matched.key !== computer.key) {
-        computers.select(matched.key);
-      } else {
-        link.reconnectNow();
-      }
-      return;
-    }
-    computers.select(computers.addDirect(discoveredUrl, lanHostDisplayName(host)));
-  };
-
-  const agentPanel = (
-    <ComputerPanel
-      title="Agent"
-      expanded={agentsExpanded}
-      onToggle={() => {
-        haptics.selection();
-        setAgentsExpanded((value) => !value);
-      }}
-      detail={
-        installedAgents.length > 0
-          ? pick({
-              zh: `已安装 ${installedAgents.length}`,
-              en: `${installedAgents.length} ready`,
-              ja: `${installedAgents.length} 件利用可`,
-            })
-          : online
-            ? "0"
-            : t("connection.offline")
-      }
-    >
-      {installedAgents.length === 0 ? (
-        <Text style={[type.subhead, { color: colors.secondaryLabel, paddingTop: 10, paddingBottom: 14 }]}>
-          {online
-            ? pick({
-                zh: "这台电脑上还没有检测到已安装的 Agent，可展开下方列表复制安装命令。",
-                en: "No coding agents detected yet. Expand the list below for install commands.",
-                ja: "導入済み Agent がありません。下の一覧からインストールコマンドをコピーできます。",
-              })
-            : t("connection.offline")}
-        </Text>
-      ) : (
-        installedAgents.map((agent, index) => <AgentRow key={agent.id} agent={agent} first={index === 0} online={online} />)
-      )}
-
-      <UninstalledAgentsCatalog agents={uninstalledAgents} />
-
-      {online ? (
-        <View>
-          <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: colors.separator }} />
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => {
-              haptics.selection();
-              router.push("/acp");
-            }}
-            style={({ pressed }) => ({
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 10,
-              minHeight: 44,
-              paddingVertical: 10,
-              opacity: pressed ? 0.65 : 1,
-            })}
-          >
-            <Icon sf="plus.circle" md="add_circle_outline" size={18} color={colors.accent} />
-            <Text style={[type.subhead, { flex: 1, fontWeight: "500", color: colors.accent }]}>
-              {pick({ zh: "自定义 ACP 连接", en: "Custom ACP Agents", ja: "カスタム ACP 設定" })}
-            </Text>
-            <Icon sf="chevron.right" md="chevron_right" size={12} color={colors.tertiaryLabel} weight="semibold" />
-          </Pressable>
-        </View>
-      ) : null}
-    </ComputerPanel>
-  );
-
-  const lanPanel = lanHosts.length > 0 ? (
-    <ComputerPanel
-      title={pick({ zh: "局域网发现的电脑", en: "LAN Discovered", ja: "LAN 検出" })}
-      expanded={true}
-      detail={String(lanHosts.length)}
-    >
-      {lanHosts.map((host, index) => {
-        const discoveredUrl = lanHostUrl(host);
-        if (!discoveredUrl) return null;
-        const matched = allComputers.find((item) => Boolean(matchLanHostToComputer(host, item)));
-        const isCurrent = matched?.key === computer.key;
-        const alreadyDirect =
-          (matched?.kind === "relay" && matched.lanUrl === discoveredUrl) ||
-          (matched?.kind === "direct" && matched.url === discoveredUrl);
-        const subtitle = matched
-          ? `${isCurrent ? pick({ zh: "当前电脑", en: "Current", ja: "現在" }) : computerDisplayName(matched, names)} · ${discoveredUrl.replace(/^wss?:\/\//, "")}`
-          : discoveredUrl.replace(/^wss?:\/\//, "");
-        return (
-          <View key={`${discoveredUrl}-${host.machineId ?? host.fingerprint ?? host.name}`}>
-            {index > 0 ? <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: colors.separator }} /> : null}
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => (alreadyDirect ? router.push("/connect") : connectDiscoveredLanHost(host))}
-              style={({ pressed }) => ({
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 10,
-                minHeight: 48,
-                paddingVertical: 10,
-                opacity: pressed ? 0.65 : 1,
-              })}
-            >
-              <Icon sf="wifi" md="wifi" size={16} color={colors.accent} />
-              <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
-                <Text numberOfLines={1} style={[type.callout, { color: colors.label }]}>
-                  {lanHostDisplayName(host)}
-                </Text>
-                <Text numberOfLines={1} style={[type.caption, { color: colors.secondaryLabel }]}>
-                  {subtitle}
-                </Text>
-              </View>
-              <Text style={[type.footnote, { color: colors.accent, fontWeight: "600" }]}>
-                {alreadyDirect
-                  ? pick({ zh: "已绑定", en: "Bound", ja: "設定済み" })
-                  : matched
-                    ? pick({ zh: "局域网直连", en: "Use LAN", ja: "LAN 接続" })
-                    : pick({ zh: "连接", en: "Connect", ja: "接続" })}
-              </Text>
-            </Pressable>
-          </View>
-        );
-      })}
-    </ComputerPanel>
-  ) : null;
-
-  return (
-    <>
-      <Stack.Screen options={{ title: "", headerShown: !inlineControls, headerTransparent: true, headerLargeTitleEnabled: false }} />
-      <ScrollView
-        contentInsetAdjustmentBehavior={!inlineControls && Platform.OS === "ios" ? "automatic" : "never"}
-        style={{ flex: 1, backgroundColor: colors.background }}
-        contentContainerStyle={{
-          paddingHorizontal: 16,
-          paddingTop: inlineControls ? Math.max(insets.top, systemInsets.top) + 8 : 16,
-          paddingBottom: 40 + tabInset + (inlineControls && Platform.OS === "ios" ? Math.max(insets.bottom, systemInsets.bottom) : 0),
-          gap: 16,
-        }}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={async () => {
-              // Out of reach, the calls would wait half a minute for the link: reconnect instead.
-              if (link.status !== "online") {
-                link.reconnectNow(true);
-                return;
-              }
-              setRefreshing(true);
-              await refresh();
-              setRefreshing(false);
-            }}
-          />
-        }
-      >
-        {!inlineControls ? <HeaderActions actions={[{ ...accountAction, kind: "button" }]} /> : null}
-        {hasComputer ? (
-          <View
-            onLayout={(event) => setDashboardWidth(event.nativeEvent.layout.width)}
-            style={{ width: "100%", flexDirection: wide ? "row" : "column", alignItems: "flex-start", gap: 16 }}
-          >
-            <View style={{ width: columnWidth, flexGrow: 0, flexShrink: 0, minWidth: 0, gap: 16 }}>
-              <View
-                style={{
-                  backgroundColor: colors.card,
-                  borderRadius: radius.card,
-                  borderCurve: "continuous",
-                  overflow: "hidden",
-                }}
-              >
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingVertical: 14 }}>
-                  <ComputerArt name={machine?.hostname ?? (computer.kind === "relay" ? computer.machine.name : computer.name)} size={42} />
-                  <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={t("nav.computers")}
-                      onPress={() => {
-                        haptics.selection();
-                        router.push("/computers");
-                      }}
-                      hitSlop={6}
-                      style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 6, opacity: pressed ? 0.6 : 1 })}
-                    >
-                      <Text numberOfLines={1} style={[type.headline, { color: colors.label, flexShrink: 1 }]}>
-                        {title}
-                      </Text>
-                      <Icon sf="chevron.up.chevron.down" md="unfold_more" size={12} color={colors.tertiaryLabel} weight="semibold" />
-                    </Pressable>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                      <LinkDot health={online ? "online" : status === "connecting" ? "connecting" : status === "locked" ? "offline" : detail ? "error" : "offline"} />
-                      <Text numberOfLines={1} style={[type.footnote, { color: colors.secondaryLabel, flex: 1 }]}>
-                        {statusSummary}
-                      </Text>
-                    </View>
-                  </View>
-                  {!online && status !== "connecting" ? (
+              <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: 10 }}>
+                {online ? (
+                  <>
                     <Button
-                      title={pick({ zh: "重连", en: "Retry", ja: "再接続" })}
-                      size="small"
-                      variant="plain"
-                      onPress={() => {
-                        haptics.selection();
-                        link.reconnectNow(true);
-                      }}
+                      title={pick({ zh: "打开远程屏幕", en: "Remote screen", ja: "リモート画面" })}
+                      icon={{ sf: "display", md: "desktop_windows" }}
+                      variant="primary"
+                      onPress={() => router.push("/screen")}
                     />
-                  ) : null}
-                </View>
-
-                <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: colors.separator, marginLeft: 16 }} />
-
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={t("nav.account")}
-                  onPress={() => {
-                    haptics.selection();
-                    router.push("/account");
-                  }}
-                  style={{ flexDirection: "row", alignItems: "center", gap: 10, minHeight: 44, paddingHorizontal: 16, paddingVertical: 9 }}
-                >
-                  {({ pressed }) => (
-                    <>
-                      <PressedWash pressed={pressed} />
-                      <Icon
-                        sf={account ? "person.crop.circle.fill" : "person.crop.circle"}
-                        md="account_circle"
-                        size={18}
-                        color={colors.accent}
-                      />
-                      <View style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                        <Text numberOfLines={1} style={[type.subhead, { color: colors.label, fontWeight: "500", flexShrink: 1 }]}>
-                          {account?.email ?? t("nav.account")}
-                        </Text>
-                        <Text numberOfLines={1} style={[type.caption, { color: colors.secondaryLabel }]}>
-                          {transportSummary}
-                        </Text>
-                      </View>
-                      <Icon sf="chevron.right" md="chevron_right" size={12} color={colors.tertiaryLabel} weight="semibold" />
-                    </>
-                  )}
-                </Pressable>
+                    <Button
+                      title={pick({ zh: "新会话", en: "New session", ja: "新規セッション" })}
+                      icon={{ sf: "square.and.pencil", md: "edit" }}
+                      onPress={() => router.push("/new")}
+                    />
+                  </>
+                ) : status === "locked" ? (
+                  <Button
+                    title={pick({ zh: "解锁电脑", en: "Unlock computer", ja: "ロックを解除" })}
+                    variant="primary"
+                    onPress={() => router.push("/unlock")}
+                  />
+                ) : (
+                  <Button
+                    title={status === "connecting" ? t("connection.connecting") : t("connection.reconnect")}
+                    busy={status === "connecting"}
+                    variant="primary"
+                    onPress={() => link.reconnectNow(true)}
+                  />
+                )}
               </View>
-
+            </View>
+            <View
+              style={{
+                flexGrow: 1,
+                ...(wide
+                  ? { flex: 1.15, borderRadius: radius.panel }
+                  : { borderTopLeftRadius: radius.panel, borderTopRightRadius: radius.panel }),
+                borderCurve: "continuous",
+                paddingHorizontal: padding,
+                paddingTop: 12,
+                paddingBottom: wide ? 20 : bottom,
+                backgroundColor: colors.card,
+              }}
+            >
+              {online && !wide ? <DetailsGrabber /> : null}
               {online ? (
-                <View style={{ flexDirection: "row", gap: 10 }}>
-                  <QuickActionTile
-                    icon={{ sf: "plus.bubble", md: "add_comment" }}
-                    label={pick({ zh: "新会话", en: "New", ja: "新規" })}
-                    onPress={() => router.push("/new")}
+                <Workspace />
+              ) : (
+                <>
+                  <Hint text={formatConnectionDetail(detail) ?? phase} />
+                  <TextLink
+                    title={pick({ zh: "连接设置", en: "Connection settings", ja: "接続設定" })}
+                    onPress={() => router.push("/connect")}
                   />
-                  <QuickActionTile
-                    icon={{ sf: "display", md: "desktop_windows" }}
-                    label={t("nav.screen")}
-                    onPress={() => router.push("/screen")}
-                  />
-                  <QuickActionTile
-                    icon={{ sf: "globe", md: "language" }}
-                    label={t("nav.ports")}
-                    badge={portsCount > 0 ? String(portsCount) : undefined}
-                    onPress={() => router.push("/ports")}
-                  />
-                  <QuickActionTile
-                    icon={{ sf: "chart.bar", md: "bar_chart" }}
-                    label={t("nav.usage")}
-                    onPress={() => router.push("/usage")}
-                  />
-                </View>
-              ) : null}
-
-              {!wide ? agentPanel : null}
-              {online ? <WorkspaceToolsSection roiDetail={roiDetail} portsCount={portsCount} /> : null}
-              <ComputerMetrics key={computer.key} />
+                </>
+              )}
             </View>
-
-            <View style={{ width: columnWidth, flexGrow: 0, flexShrink: 0, minWidth: 0, gap: 12 }}>
-              {wide ? agentPanel : null}
-              <ComputerPanel
-                title={t("nav.computers")}
-                expanded={wide || computersExpanded}
-                onToggle={
-                  wide
-                    ? undefined
-                    : () => {
-                        haptics.selection();
-                        setComputersExpanded((value) => !value);
-                      }
-                }
-                detail={computersCount > 0 ? String(computersCount) : undefined}
-                onAdd={() => {
-                  haptics.selection();
-                  router.push("/pair");
-                }}
-              >
-                <ComputerList background={colors.card} />
-              </ComputerPanel>
-
-              {lanPanel}
-
-              {online ? <DevicesSection defaultExpanded={wide} /> : null}
-            </View>
-          </View>
-        ) : (
-          <View style={{ gap: 16 }}>
-            <View>
-              <Welcome />
-              {inlineControls ? (
-                <View style={{ position: "absolute", top: 0, right: 0 }}>
-                  <PageActionButton action={accountAction} />
-                </View>
-              ) : null}
-            </View>
-            {lanPanel}
           </View>
         )}
       </ScrollView>
-      {Platform.OS !== "ios" || inlineControls ? <StatusBarFade /> : null}
     </>
   );
 }
+const styles = StyleSheet.create({
+  workRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    minHeight: 67,
+    paddingVertical: 8,
+    borderRadius: radius.control,
+  },
+});

@@ -1,3 +1,4 @@
+import type { MachineFormFactor } from "./model.js";
 import { gatewayChallengeMessage, publicIdentity, sign, type Identity, type PublicIdentity } from "./crypto.js";
 import {
   serverFrameSchema,
@@ -33,6 +34,7 @@ export interface RelayClientOptions {
   name: string | (() => string);
   namingConfigured?: () => boolean;
   platform?: string;
+  formFactor?: MachineFormFactor;
   /** Account token, fetched fresh for each connection. */
   token?: () => Promise<string | undefined> | string | undefined;
   /** A machine with an access password (read at each connection). */
@@ -445,6 +447,7 @@ export class RelayClient {
     }
     // A token refresh may outlive reauthentication; its nonce belongs to the socket that asked.
     if (this.socket !== socket) return;
+    const locked = this.options.locked?.();
     this.sendFrame({
       t: "auth",
       role: this.options.role,
@@ -453,8 +456,9 @@ export class RelayClient {
       name: (typeof this.options.name === "function" ? this.options.name() : this.options.name).slice(0, 120),
       ...(this.options.namingConfigured?.() ? { namingConfigured: true } : {}),
       platform: this.options.platform,
+      ...(this.options.role === "machine" && this.options.formFactor && !locked ? { formFactor: this.options.formFactor } : {}),
       token,
-      ...(this.options.locked?.() ? { locked: true } : {}),
+      ...(locked ? { locked: true } : {}),
     });
   }
 

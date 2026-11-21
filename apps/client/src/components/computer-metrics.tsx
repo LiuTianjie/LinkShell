@@ -124,10 +124,10 @@ function ResourceRow({
   );
 }
 
-export function ComputerMetrics() {
+export function ComputerMetrics({ data }: { data: ReturnType<typeof useMachineMetrics> }) {
   const { link } = useConnection();
   const { locale, t, pick } = useLocale();
-  const { metrics, history, online, locked, unavailable, error, retry } = useMachineMetrics();
+  const { metrics, history, online, locked, unavailable, error, retry } = data;
   const [expanded, setExpanded] = useState(false);
   const [keepAwakeExpanded, setKeepAwakeExpanded] = useState(false);
   const [keepAwakeOverride, setKeepAwakeOverride] = useState<MachineKeepAwake | null>(null);

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { machineFormFactorSchema } from "./model.js";
 import {
   channelKeys,
   ephemeralKey,
@@ -27,6 +28,7 @@ export const machineEntrySchema = publicIdentitySchema.extend({
   /** An explicit host-owned name/reset supersedes older device-local aliases. */
   namingConfigured: z.boolean().optional(),
   platform: z.string().optional(),
+  formFactor: machineFormFactorSchema.optional(),
   online: z.boolean(),
   /** How this device may reach it: it paired, or both belong to the same account. */
   via: z.enum(["paired", "account"]),
@@ -54,6 +56,7 @@ export const clientFrameSchema = z.discriminatedUnion("t", [
     name: z.string().max(120),
     namingConfigured: z.boolean().optional(),
     platform: z.string().max(40).optional(),
+    formFactor: machineFormFactorSchema.optional(),
     /** Account access token, when signed in. */
     token: z.string().optional(),
     /** A machine with an access password, so devices can show a lock. Older gateways drop it. */

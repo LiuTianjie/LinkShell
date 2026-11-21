@@ -55,6 +55,7 @@ vi.mock("react", () => ({
   createContext: () => ({}),
   use: () => null,
   useEffect: (fn: () => void | (() => void)) => harness.effects.push(fn),
+  useLayoutEffect: (fn: () => void | (() => void)) => harness.effects.push(fn),
   useMemo: <T>(fn: () => T) => fn(),
   useRef: <T>(initial: T) => ({ current: initial }),
   useState: <T>(initial: T | (() => T)) => [typeof initial === "function" ? (initial as () => T)() : initial, vi.fn()],

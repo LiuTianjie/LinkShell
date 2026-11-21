@@ -13,3 +13,7 @@ Use case: product-mockup. A production UI asset for a mobile computer selector. 
 ## computer.png
 
 Use case: product-mockup. A production UI asset for a mobile computer selector. One isolated computer, front view slightly elevated, centered, fills 85% of a square canvas. Refined realistic miniature product rendering, silver aluminum, soft studio lighting from upper left, clearly readable silhouette at 64px. Transparent background with genuine alpha. No floor, no backdrop, no circle, no text, no logo, no watermark, no separate accessories. Subject: standalone modern silver desktop monitor on short silver stand, muted midnight blue screen, dark thin bezel, nearly straight-on symmetric view.
+
+## Host workspace artwork
+
+`notebook.webp` and `mini.webp` are the transparent, tightly cropped originals for the approved mobile computer workspace. `tower.webp` is an original, offline-rendered generic PC (separate display and tower), not a capture of a user's screen. Share the same artwork between the overview, details and picker. Operating system alone is not an enclosure type.

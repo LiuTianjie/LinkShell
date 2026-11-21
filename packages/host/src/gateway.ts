@@ -1,3 +1,4 @@
+import type { MachineFormFactor } from "@linkshell/wire";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { hostname, platform } from "node:os";
 import { join } from "node:path";
@@ -68,6 +69,7 @@ export interface GatewayLinkOptions {
   token?: () => Promise<string | undefined> | string | undefined;
   name?: string;
   namingConfigured?: boolean;
+  formFactor?: MachineFormFactor;
   /** This computer has an access password: devices see a lock before they connect. */
   locked?: () => boolean;
   /** Serves a decrypted channel as a client connection. */
@@ -135,6 +137,7 @@ export class GatewayLink {
       name: () => this.name,
       namingConfigured: () => this.namingConfigured,
       platform: platform(),
+      formFactor: options.formFactor,
       token: options.token,
       locked: options.locked,
       createSocket: (url) => new WebSocket(url, { perMessageDeflate: false }) as unknown as RelaySocket,

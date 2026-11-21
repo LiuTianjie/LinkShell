@@ -1,41 +1,36 @@
+import type { HostLink } from "@linkshell/client-core";
 import type { PortInfo } from "@linkshell/wire";
 import { useFocusEffect } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
-import { useConnection } from "@/lib/client";
+import { useCallback, useState } from "react";
+import { useClient, useConnection } from "@/lib/client";
 import { describeActionError } from "@/lib/locale";
 
-/** How often an open list re-checks what's running (dev servers come and go). */
-const POLL_MS = 10_000;
-
-/** The computer's listening servers, refreshed while the screen is in view. */
+/** A slow reply from the previous computer must never become a link on the new one. */
 export function usePorts(enabled = true) {
   const { link } = useConnection();
-  const [ports, setPorts] = useState<PortInfo[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const refresh = useCallback(async () => {
-    try {
-      const result = await link.call("ports.list", {}, 15_000);
-      setPorts(result.ports);
-      setError(null);
-    } catch (reason) {
-      setError(describeActionError(reason));
-    }
-  }, [link]);
-  // Another computer: its ports, not a moment more of the last one's.
-  useEffect(() => {
-    setPorts(null);
-    setError(null);
-  }, [link]);
-
+  const online = useClient((state) => state.status === "online");
+  const [result, setResult] = useState<{ link: HostLink; ports: PortInfo[] | null; error: string | null } | null>(null);
   useFocusEffect(
     useCallback(() => {
-      if (!enabled) return;
-      void refresh();
-      const timer = setInterval(() => void refresh(), POLL_MS);
-      return () => clearInterval(timer);
-    }, [refresh, enabled]),
+      if (!enabled || !online) return;
+      let done = false;
+      let timer: ReturnType<typeof setTimeout>;
+      async function poll() {
+        try {
+          const { ports } = await link.call("ports.list", {}, 15_000);
+          if (!done) setResult({ link, ports, error: null });
+        } catch (reason) {
+          if (!done) setResult({ link, ports: null, error: describeActionError(reason) });
+        }
+        if (!done) timer = setTimeout(() => void poll(), 10_000);
+      }
+      void poll();
+      return () => {
+        done = true;
+        clearTimeout(timer);
+      };
+    }, [link, enabled, online]),
   );
-
-  return { ports, error, refresh };
+  const current = enabled && online && result?.link === link ? result : null;
+  return { ports: current?.ports ?? null, error: current?.error ?? null };
 }
