@@ -159,9 +159,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32.png" />
   <link rel="icon" type="image/png" sizes="192x192" href="/assets/icon-192.png" />
   <link rel="apple-touch-icon" sizes="180x180" href="/assets/apple-touch-icon.png" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Geist+Mono:wght@400;500;600&amp;family=Instrument+Serif&amp;family=Noto+Serif+SC:wght@600;700&amp;family=Noto+Serif+JP:wght@600;700&amp;display=swap" rel="stylesheet" /> <!-- taste-skill-ignore: Geist Mono sets the commands and code blocks only -->
+  <link rel="preload" href="/assets/fonts/geist-1.8.2.woff2" as="font" type="font/woff2" crossorigin />
   <script>
     // Before first paint: the theme (?theme=, then the saved choice; paper otherwise) and that
     // scripts run. Each language has its own address (against <base>: data-alt is the other of
@@ -190,6 +188,13 @@
   </script>
   <link rel="stylesheet" href="/assets/family.css" />
   <style>
+    @font-face {
+      font-family: "Geist";
+      src: url("assets/fonts/geist-1.8.2.woff2") format("woff2");
+      font-weight: 100 900;
+      font-style: normal;
+      font-display: swap;
+    }
     /* Shapes and motion follow the iTool family skeleton (assets/family.css: 6/8/12 corners, one
        easing, no marquee); the hues stay LinkShell's own. */
     /* LinkShell's site. Dark zinc ground, one teal accent, the product's own recordings as the
@@ -263,10 +268,10 @@
     img { max-width: 100%; height: auto; display: block; }
     h1, h2, h3 { margin: 0; font-weight: 600; line-height: 1.1; letter-spacing: -.035em; text-wrap: balance; }
     html[lang^="zh"] :is(h1, h2, h3) { letter-spacing: -.01em; line-height: 1.22; }
-    /* Headlines are set in a serif: Noto Serif SC / JP for Chinese and Japanese, Instrument Serif for English. */
-    :root { --serif: "Instrument Serif", Georgia, "Times New Roman", serif; --serif-w: 400; }
-    html[lang^="zh"] { --serif: "Noto Serif SC", "Songti SC", "STSong", serif; --serif-w: 700; }
-    html[lang="ja"] { --serif: "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif; --serif-w: 700; }
+    /* Headlines use clean system serif fallbacks to avoid render-blocking external font downloads. */
+    :root { --serif: Georgia, "Times New Roman", serif; --serif-w: 400; }
+    html[lang^="zh"] { --serif: "Songti SC", "STSong", serif; --serif-w: 700; }
+    html[lang="ja"] { --serif: "Hiragino Mincho ProN", "Yu Mincho", serif; --serif-w: 700; }
     :is(h1, h2, .day-say, .clock .now, .three > div > b, .step::before, .price) { font-family: var(--serif); font-weight: var(--serif-w); }
     html[lang="en"] :is(h1, h2, .day-say) { letter-spacing: -.015em; line-height: 1.02; }
     html[lang^="zh"] :is(h1, h2, .day-say), html[lang="ja"] :is(h1, h2, .day-say) { letter-spacing: 0; }
