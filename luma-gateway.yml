@@ -4,7 +4,8 @@ build:
   dockerfile: packages/gateway/Dockerfile
   platform: linux/amd64
 region: cn
-exposure: cn-edge
+node: aly
+exposure: node-edge
 domain: gateway.itool.tech
 port: 8787
 publishPort: 8787
