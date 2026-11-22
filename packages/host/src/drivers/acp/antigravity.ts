@@ -1205,14 +1205,21 @@ async function lookupLanguageServer(desktop: ResolvedAntigravityDesktop, logPath
     try {
       fd = openSync(descriptor, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
       const file = fstatSync(fd);
-      if (!file.isFile() || file.size > 4096 || (process.getuid && (file.uid !== process.getuid() || (file.mode & 0o077) !== 0))) return undefined;
+      if (!file.isFile() || file.size > 4096 || (process.getuid && (file.uid !== process.getuid() || (file.mode & 0o077) !== 0))) {
+        lsCache = undefined;
+        return undefined;
+      }
       const hub = JSON.parse(readFileSync(fd, "utf8"));
-      if (hub.httpPort !== httpPort || httpPort < 1 || httpPort > 65535 || !Number.isSafeInteger(hub.pid) || hub.pid < 1 || typeof hub.csrfToken !== "string" || !hub.csrfToken.trim()) return undefined;
+      if (hub.httpPort !== httpPort || httpPort < 1 || httpPort > 65535 || !Number.isSafeInteger(hub.pid) || hub.pid < 1 || typeof hub.csrfToken !== "string" || !hub.csrfToken.trim()) {
+        lsCache = undefined;
+        return undefined;
+      }
       process.kill(hub.pid, 0); // A descriptor can outlive its desktop.
       const conn = { httpPort, csrfToken: hub.csrfToken };
       lsCache = { logPath, at: Date.now(), conn };
       return conn;
     } catch {
+      lsCache = undefined;
       return undefined;
     } finally {
       if (fd !== undefined) closeSync(fd);
@@ -1350,7 +1357,7 @@ interface DesktopWatcher {
   selectedModel?: string;
   lastModelLabel?: string;
   goal?: SessionGoal | null;
-  pendingClientMessages: { clientMessageId: string; text: string }[];
+  pendingClientMessages: { clientMessageId: string; texts: string[]; confirm?: () => void }[];
   /** When the phone last started a turn, until the desktop is first seen running it. */
   sentAt?: number;
   /** Sub-agent conversations (and theirs) whose work is shown under the call that spawned them. */
@@ -2345,8 +2352,12 @@ export class AntigravityDriver extends AcpDriver {
 
   private emitTranscriptItems(nativeId: string, watcher: DesktopWatcher, items: HistoryItem[]): void {
     for (const item of items) {
-      if (item.itemId.startsWith("agy:user:") && watcher.pendingClientMessages.length > 0) {
-        const pending = watcher.pendingClientMessages.shift()!;
+      const userText = item.itemId.startsWith("agy:user:") ? item.updates.flatMap((update) =>
+        update.sessionUpdate === "user_message_chunk" && update.content.type === "text" ? [update.content.text] : []).join("\n").trim() : undefined;
+      const match = userText === undefined ? -1 : watcher.pendingClientMessages.findIndex((p) => p.texts.includes(userText));
+      if (match >= 0) {
+        const pending = watcher.pendingClientMessages.splice(match, 1)[0]!;
+        pending.confirm?.();
         const aliases = this.desktopAliasesFor(nativeId);
         aliases.set(item.itemId, `local-${pending.clientMessageId}`);
         this.saveDesktopAliases(nativeId, aliases);
@@ -3057,8 +3068,16 @@ export class AntigravityDriver extends AcpDriver {
       items.push({ text: "请查看附图" });
     }
 
-    watcher.pendingClientMessages.push({ clientMessageId, text });
-    this.echoDesktopMessage(nativeId, clientMessageId, displayBlocks);
+    // Only an acknowledgment or the matching native transcript can confirm this outbox entry.
+    // Echoing before the request succeeds removes the phone's ability to retry a rejected send.
+    const displayText = displayBlocks.flatMap((b) => b.type === "text" ? [b.text] : []).join("\n").trim();
+    const sentText = items.flatMap((i) => typeof i.text === "string" ? [i.text] : []).join("").trim();
+    const pending: DesktopWatcher["pendingClientMessages"][number] = { clientMessageId, texts: [text, displayText, sentText] };
+    pending.confirm = () => {
+      pending.confirm = undefined;
+      this.echoDesktopMessage(nativeId, clientMessageId, displayBlocks);
+    };
+    watcher.pendingClientMessages.push(pending);
 
     const steering = watcher.running || this.isConversationRunningInDesktop(nativeId);
     if (!steering) {
@@ -3101,26 +3120,15 @@ export class AntigravityDriver extends AcpDriver {
 
     try {
       await callLanguageServer(conn, "SendUserCascadeMessage", sendBody);
-    } catch (firstError) {
-      const msg = firstError instanceof Error ? firstError.message : String(firstError);
-      // If steering into a running cascade is rejected as busy, interrupt it cleanly and resend once.
-      const busyRejected = steering && /(?:400|409|412|running|busy|already|in progress|active)/i.test(msg);
-      if (busyRejected) {
-        try {
-          await callLanguageServer(conn, "CancelCascadeInvocation", { cascadeId: nativeId, killBackgroundTasks: false }).catch(() => {});
-          await new Promise((resolve) => setTimeout(resolve, 400));
-          await callLanguageServer(conn, "SendUserCascadeMessage", sendBody);
-          return "steered";
-        } catch (retryError) {
-          firstError = retryError;
-        }
-      }
+    } catch (error) {
+      // A native echo may arrive before the HTTP response (or instead of a lost response).
+      if (!pending.confirm) return steering ? "steered" : "started";
       const pendingIdx = watcher.pendingClientMessages.findIndex((p) => p.clientMessageId === clientMessageId);
       if (pendingIdx >= 0) watcher.pendingClientMessages.splice(pendingIdx, 1);
       this.host?.update(this.id, nativeId, {
         sessionUpdate: "ls_error",
         code: "send_failed",
-        message: firstError instanceof Error ? firstError.message : String(firstError),
+        message: error instanceof Error ? error.message : String(error),
       });
       if (!steering) {
         watcher.sentAt = undefined;
@@ -3129,9 +3137,10 @@ export class AntigravityDriver extends AcpDriver {
         this.host?.update(this.id, nativeId, { sessionUpdate: "ls_turn", state: "ended", stopReason: "error" });
         this.host?.update(this.id, nativeId, { sessionUpdate: "ls_status", state: "idle", turnActive: false });
       }
-      throw firstError;
+      throw error;
     }
 
+    pending.confirm?.();
     return steering ? "steered" : "started";
   }
 

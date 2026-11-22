@@ -1,7 +1,8 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import type { HostLink } from "@linkshell/client-core";
 import type { MachineInfo } from "@linkshell/wire";
-import type { Computer } from "../src/lib/computers";
+import { computerProfile, computerDescription } from "../src/lib/computer-profile";
+import type { Computer, SavedComputerProfile } from "../src/lib/computers";
 
 const mocks = vi.hoisted(() => ({ value: "{}", write: vi.fn(), subscribe: vi.fn(), updateComputerName: vi.fn() }));
 vi.mock("expo-sqlite/kv-store", () => ({ default: {
@@ -90,4 +91,17 @@ it("accepts a successful host rename even when the phone cannot persist its loca
   expect(names.computerDisplayName(computer, names.useComputerNames.getState().names)).toBe("新共享名");
   expect(names.useComputerNames.getState().names[computer.key]).toBeUndefined();
   expect(mocks.updateComputerName).toHaveBeenCalledWith(computer, "新共享名", true);
+});
+
+
+it("treats names as labels, ignores legacy guesses and restores only this peer's reported hardware", () => {
+  const renamed = { ...computer, machine: { ...computer.machine, name: "MacBook-Pro", platform: "darwin", namingConfigured: false } };
+  const legacy = { platform: "darwin", formFactor: "notebook" } as SavedComputerProfile;
+  expect(computerProfile(renamed, legacy).formFactor).toBeUndefined();
+  const info: MachineInfo = { ...machineInfo("air3"), naming: { defaultName: "MacBook-Air", configured: true }, formFactor: "mac-mini", hardwareModel: { family: "Mac mini" } };
+  const verified = { ...computerProfile(renamed, legacy, info), peerId: renamed.machine.id };
+  expect(computerDescription(computerProfile(renamed, verified), "zh")).toBe("macOS · Mac mini");
+  expect(computerProfile(renamed, { ...verified, peerId: "different" }).hardwareModel).toBeUndefined();
+  expect(computerProfile(renamed, verified, { ...info, locked: true }).hardwareModel).toBeUndefined();
+  expect(computerProfile(renamed, verified, machineInfo("MacBook-Air")).formFactor).toBeUndefined();
 });

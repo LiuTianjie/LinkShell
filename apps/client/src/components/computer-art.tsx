@@ -1,46 +1,48 @@
 import { Image } from "expo-image";
 import { View } from "react-native";
+import { SvgXml } from "react-native-svg";
 import type { ComputerProfile } from "@/lib/computers";
+import { useComputerArtwork } from "@/lib/use-computer-artwork";
+import { computerIllustrations } from "./computer-illustrations";
 
 const art = {
   notebook: require("../../assets/computers/notebook.webp"),
   mini: require("../../assets/computers/mini.webp"),
   tower: require("../../assets/computers/tower.webp"),
-  computer: require("../../assets/computers/computer.png"),
+  allInOne: require("../../assets/computers/computer.png"),
 };
-const proportions = { notebook: [0.84, 1], mini: [0.68, 0.72], tower: [0.98, 0.98], computer: [0.78, 0.88] } as const;
 
-export function ComputerArt({
-  profile,
-  width = 68,
-  height = 54,
-}: {
-  profile?: ComputerProfile;
-  width?: number;
-  height?: number;
-}) {
-  const kind =
-    profile?.formFactor === "mac-mini"
-      ? "mini"
-      : profile?.formFactor === "notebook"
-        ? "notebook"
-        : profile?.platform === "win32" && (profile.formFactor === "tower" || profile.formFactor === "desktop")
-          ? "tower"
-          : "computer";
-  const [w, h] = proportions[kind];
+function illustration(profile?: ComputerProfile) {
+  switch (profile?.hardwareModel?.family) {
+    case "MacBook Air": return "air";
+    case "MacBook Pro": return "pro";
+    case "Mac Studio": return "studio";
+  }
+  switch (profile?.formFactor) {
+    case "mac-mini": return "mini";
+    case "notebook": return "notebook";
+    case "all-in-one": return "allInOne";
+    case "tower": if (profile.platform === "win32") return "tower";
+  }
+  return "unknown";
+}
+
+const proportions = { air: .94, pro: .94, studio: .78, notebook: .84, mini: .68, tower: .98, allInOne: .78, unknown: .9 };
+export function ComputerArt({ profile, width = 68, height = 54 }: { profile?: ComputerProfile; width?: number; height?: number }) {
+  const kind = illustration(profile);
+  const official = useComputerArtwork(profile?.hardwareModel?.artworkId);
+  const w = width * proportions[kind];
   return (
-    <View
-      accessible={false}
-      importantForAccessibility="no-hide-descendants"
-      style={{ width, height, maxWidth: "100%", alignItems: "center", justifyContent: "center" }}
-    >
-      <Image
-        accessible={false}
-        recyclingKey={kind}
-        source={art[kind]}
-        contentFit="contain"
-        style={{ width: `${w * 100}%`, height: `${h * 100}%` }}
-      />
+    <View accessible={false} accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
+      style={{ width, height, maxWidth: "100%", alignItems: "center", justifyContent: "center" }}>
+      {official ? (
+        <Image accessible={false} recyclingKey={profile?.hardwareModel?.artworkId} source={{ uri: official }} contentFit="contain"
+          style={{ width: width * (kind === "mini" ? .70 : .94), height: height * .92 }} />
+      ) : kind === "air" || kind === "pro" || kind === "studio" || kind === "unknown" ? (
+        <SvgXml xml={computerIllustrations[kind]} width={w} height={height} />
+      ) : (
+        <Image accessible={false} recyclingKey={kind} source={art[kind]} contentFit="contain" style={{ width: w, height: kind === "mini" ? height * .72 : height }} />
+      )}
     </View>
   );
 }

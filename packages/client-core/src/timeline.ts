@@ -42,6 +42,7 @@ export type TimelineItem =
       /** The host took it: it shows as said while the agent's own copy is on its way. */
       accepted?: boolean;
       failed?: boolean;
+      failureReason?: string;
     }
   | {
       kind: "agent";
@@ -747,9 +748,9 @@ export function addOptimisticMessage(view: SessionView, clientMessageId: string,
   return upsert(view, { kind: "user", id: `local-${clientMessageId}`, blocks, ts, pending: true, ...(accepted ? { accepted: true } : {}) });
 }
 
-export function markMessageFailed(view: SessionView, clientMessageId: string): SessionView {
+export function markMessageFailed(view: SessionView, clientMessageId: string, failureReason?: string): SessionView {
   const item = get(view, `local-${clientMessageId}`, "user");
-  return item && item.pending ? upsert(view, { ...item, pending: false, failed: true }) : view;
+  return item && item.pending ? upsert(view, { ...item, pending: false, failed: true, ...(failureReason ? { failureReason } : {}) }) : view;
 }
 
 export function markMessageAccepted(view: SessionView, clientMessageId: string): SessionView {

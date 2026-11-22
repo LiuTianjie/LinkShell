@@ -307,7 +307,7 @@ export function SessionContent({
       const clientMessageId = item.id.replace(/^local-/, "");
       Alert.alert(
         pick({ zh: "消息没发出去", en: "Message not sent", ja: "メッセージを送信できませんでした" }),
-        pick({ zh: "要重新发送吗？", en: "Would you like to retry?", ja: "再送信しますか？" }),
+        item.failureReason || pick({ zh: "要重新发送吗？", en: "Would you like to retry?", ja: "再送信しますか？" }),
         [
           { text: t("common.cancel"), style: "cancel" },
           // Only this unsent message goes, not the session.

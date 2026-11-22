@@ -358,7 +358,7 @@ function ComputerWorkspace() {
               <View style={{ minHeight: 28, flexDirection: "row", alignItems: "center", gap: 6 }}>
                 <LinkDot health={online ? "online" : connecting ? "connecting" : "offline"} />
                 <Text style={[type.footnote, { flex: 1, color: colors.secondaryLabel }]}>
-                  {[phase, platformLabel(profile.platform), online ? transport : undefined].filter(Boolean).join(" · ")}
+                  {[phase, profile.hardwareModel?.family ?? (profile.formFactor === "mac-mini" ? "Mac mini" : platformLabel(profile.platform)), online ? transport : undefined].filter(Boolean).join(" · ")}
                 </Text>
                 {typeof power?.percent === "number" ? (
                   <View

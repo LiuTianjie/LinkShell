@@ -2,7 +2,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgyDriver, agySpec, parseAgyModelsOutput } from "../src/drivers/acp/agy.js";
 import { AntigravityDriver, parseAntigravityTranscript } from "../src/drivers/acp/antigravity.js";
 import { normalizeAcpUpdate } from "../src/drivers/acp/mapper.js";
@@ -312,6 +312,42 @@ describe("parseAgyModelsOutput", () => {
 });
 
 describe("AgyDriver registration & protocol parity", () => {
+  it("retries a rejected Desktop send on its own published hub without confirming or interrupting it first", async () => {
+    const home = makeTempDir("ls-desktop-hub-");
+    const data = join(home, ".gemini", "antigravity");
+    const logDir = process.platform === "darwin" ? join(home, "Library", "Logs", "Antigravity") : join(home, ".config", "Antigravity", "logs");
+    mkdirSync(logDir, { recursive: true });
+    mkdirSync(join(data, "brain", "existing"), { recursive: true });
+    mkdirSync(join(data, "daemon"));
+    writeFileSync(join(logDir, "language_server.log"), "Language server listening on random port at 55201 for HTTP\n");
+    for (const port of [55201, 55202]) {
+      writeFileSync(join(data, "daemon", `hub_${port}.json`), JSON.stringify({ pid: process.pid, httpPort: port, csrfToken: `fixture-${port}` }), { mode: 0o600 });
+    }
+    writeFileSync(join(data, "antigravity_state.pbtxt"), "last_selected_agent_model: MODEL_TEST\n");
+    const driver = new AntigravityDriver({ hostVersion: "test", env: { PATH: "", HOME: home, LINKSHELL_HOME: home, ANTIGRAVITY_APP_DATA_DIR: data } });
+    const { host, updates } = makeMockHost();
+    let attempts = 0;
+    const request = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+      expect(new URL(String(url)).port).toBe("55201");
+      expect(new Headers(init?.headers).get("x-codeium-csrf-token")).toBe("fixture-55201");
+      if (String(url).endsWith("/SendUserCascadeMessage") && ++attempts === 1) return Response.json({ message: "busy" }, { status: 409 });
+      return Response.json({});
+    });
+    try {
+      await driver.start(host);
+      const send = () => driver.prompt("existing", [{ type: "text", text: "follow up" }], "same-id");
+      const echoes = () => updates.filter(({ update }) => (update as { sessionUpdate: string }).sessionUpdate === "user_message_chunk");
+      await expect(send()).rejects.toThrow("busy");
+      expect(echoes()).toHaveLength(0);
+      await expect(send()).resolves.toBe("started");
+      expect(echoes()).toHaveLength(1);
+      expect(request.mock.calls.some(([url]) => String(url).endsWith("/CancelCascadeInvocation"))).toBe(false);
+    } finally {
+      await driver.stop();
+      request.mockRestore();
+    }
+  });
+
   it("registers agy separately from antigravity desktop with no login gate", () => {
     const byId = new Map(ACP_AGENTS.map((spec) => [spec.id, spec]));
     expect(byId.has("antigravity")).toBe(true);

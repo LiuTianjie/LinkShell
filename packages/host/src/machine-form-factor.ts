@@ -1,3 +1,4 @@
+import { readSystemArtwork } from "./machine-artwork.js";
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { promisify } from "node:util";
@@ -71,5 +72,9 @@ async function detect(): Promise<Hardware> {
   return {};
 }
 
-let cached: ReturnType<typeof detect> | undefined;
-export const readMachineHardware = () => (cached ??= detect());
+let cached: Promise<Hardware> | undefined;
+export const readMachineHardware = () => (cached ??= detect().then(async (hardware) => {
+  if (!hardware.hardwareModel) return hardware;
+  const artwork = await readSystemArtwork();
+  return artwork ? { ...hardware, hardwareModel: { ...hardware.hardwareModel, artworkId: artwork.id } } : hardware;
+}));

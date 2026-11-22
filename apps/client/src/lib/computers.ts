@@ -3,7 +3,7 @@ import Storage from "expo-sqlite/kv-store";
 import { Platform } from "react-native";
 import * as Device from "expo-device";
 import { create } from "zustand";
-import { RELAY_PATH, RelayClient, type MachineEntry, type MachineInfo, type MachineFormFactor, type PublicIdentity, type RelaySocket, type RelayStatus } from "@linkshell/wire";
+import { RELAY_PATH, RelayClient, type MachineEntry, type MachineInfo, type PublicIdentity, type RelaySocket, type RelayStatus } from "@linkshell/wire";
 import { useAccount } from "./account";
 import { deviceIdentity } from "./identity";
 import { DEFAULT_HOST_URL } from "./settings";
@@ -64,10 +64,11 @@ export type Computer =
       lanMatchedBy?: LanMatchReason;
     };
 
-export interface ComputerProfile { platform: string; formFactor?: MachineFormFactor }
+export type ComputerProfile = Pick<MachineInfo, "platform" | "formFactor" | "hardwareModel">;
+export type SavedComputerProfile = ComputerProfile & { peerId: string };
 
 interface Saved {
-  profiles?: Record<string, ComputerProfile>;
+  profiles?: Record<string, SavedComputerProfile>;
   relay: { gateway: string; machine: Omit<MachineEntry, "online"> }[];
   direct: { url: string; name: string; machine?: PublicIdentity; fallbackGateway?: string }[];
   /** Optional LAN WebSocket URLs bound by computer key or machine id for local Wi-Fi fast-path. */
@@ -572,13 +573,17 @@ export function selectedComputer(
 bindLanHostsSink((hosts) => useComputers.getState().setLanHosts(hosts));
 
 /** Store only display metadata; the paired signing key and selected connection stay intact. */
-export function rememberComputerProfile(key: string, machine: MachineInfo): void {
-  if (machine.locked) return;
+export function rememberComputerProfile(computer: Computer, machine: MachineInfo): void {
+  const peerId = computer.machine?.id;
+  if (machine.locked || !peerId) return;
+  const key = computer.key;
   const { saved } = useComputers.getState();
   const old = saved.profiles?.[key];
   const profile = reportedComputerProfile(machine);
-  if (old?.platform === profile.platform && old.formFactor === profile.formFactor) return;
-  const next = { ...saved, profiles: { ...saved.profiles, [key]: profile } };
+  if (old?.peerId === peerId && old.platform === profile.platform && old.formFactor === profile.formFactor &&
+      old.hardwareModel?.family === profile.hardwareModel?.family && old.hardwareModel?.productName === profile.hardwareModel?.productName &&
+      old.hardwareModel?.artworkId === profile.hardwareModel?.artworkId) return;
+  const next = { ...saved, profiles: { ...saved.profiles, [key]: { ...profile, peerId } } };
   persist(next);
   useComputers.setState({ saved: next });
 }

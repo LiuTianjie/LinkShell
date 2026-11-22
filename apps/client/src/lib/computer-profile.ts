@@ -1,43 +1,23 @@
 import type { MachineInfo } from "@linkshell/wire";
-import type { Computer, ComputerProfile } from "./computers";
+import type { Computer, ComputerProfile, SavedComputerProfile } from "./computers";
 import type { Locale } from "@linkshell/client-core";
 
-function legacyMacHint(platform: string, defaultName?: string) {
-  if (platform !== "darwin" || !defaultName) return undefined;
-  if (/mac[\s_-]*mini/i.test(defaultName)) return "mac-mini" as const;
-  if (/macbook/i.test(defaultName)) return "notebook" as const;
-  return undefined;
-}
-
 export function reportedComputerProfile(machine: MachineInfo): ComputerProfile {
-  return {
-    platform: machine.platform,
-    formFactor: machine.formFactor ?? legacyMacHint(machine.platform, machine.naming?.defaultName),
-  };
+  return { platform: machine.platform, formFactor: machine.formFactor, hardwareModel: machine.platform === "darwin" ? machine.hardwareModel : undefined };
 }
 
-export function computerProfile(
-  computer: Computer,
-  cached?: ComputerProfile,
-  machine?: MachineInfo | null,
-): ComputerProfile {
+export function computerProfile(computer: Computer, cached?: SavedComputerProfile, machine?: MachineInfo | null): ComputerProfile {
   const peer = computer.kind === "relay" ? computer.machine : undefined;
-  const platform = machine?.platform ?? peer?.platform ?? cached?.platform ?? "";
-  // A live host wins over data cached for a LAN address another machine may have inherited.
-  const known =
-    machine && !machine.locked
-      ? reportedComputerProfile(machine).formFactor
-      : cached?.platform === platform
-        ? cached.formFactor
-        : undefined;
-  return {
-    platform,
-    formFactor:
-      machine?.formFactor ??
-      peer?.formFactor ??
-      known ??
-      legacyMacHint(platform, peer?.namingConfigured === false ? peer.name : undefined),
-  };
+  const peerId = computer.machine?.id;
+  const retained = peerId && cached?.peerId === peerId ? cached : undefined;
+  const platform = machine?.platform ?? peer?.platform ?? retained?.platform ?? "";
+  if (machine?.locked || (!machine && peer?.locked)) return { platform };
+  // Never fill holes in a live report from the previous occupant of a LAN address.
+  if (machine) return reportedComputerProfile(machine);
+  // Old app versions cached guesses based on names. Only new entries bound to a peer are evidence.
+  const verified = retained?.platform === platform ? retained : undefined;
+  const formFactor = peer?.formFactor ?? verified?.formFactor;
+  return { platform, formFactor, hardwareModel: verified?.formFactor === formFactor ? verified?.hardwareModel : undefined };
 }
 
 export function platformLabel(platform: string) {
@@ -49,13 +29,14 @@ export function platformLabel(platform: string) {
 
 const chassis = {
   notebook: { zh: "笔记本", en: "Notebook", ja: "ノート" },
-  "mac-mini": { zh: "迷你主机", en: "Mac mini", ja: "ミニデスクトップ" },
+  "mac-mini": { zh: "Mac mini", en: "Mac mini", ja: "Mac mini" },
   tower: { zh: "塔式台式机", en: "Tower", ja: "タワー" },
   desktop: { zh: "台式机", en: "Desktop", ja: "デスクトップ" },
   "all-in-one": { zh: "一体机", en: "All-in-one", ja: "一体型" },
 };
-export function computerDescription(profile: ComputerProfile, locale: Locale): string {
-  return [platformLabel(profile.platform), profile.formFactor && chassis[profile.formFactor]?.[locale]]
+export function computerDescription(profile: ComputerProfile, locale: Locale, detailed = false): string {
+  const model = (detailed ? profile.hardwareModel?.productName : undefined) ?? profile.hardwareModel?.family;
+  return [platformLabel(profile.platform), model ?? (profile.formFactor && chassis[profile.formFactor]?.[locale])]
     .filter(Boolean)
     .join(" · ");
 }

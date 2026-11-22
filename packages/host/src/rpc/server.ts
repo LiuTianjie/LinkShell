@@ -1,3 +1,4 @@
+import { readSystemArtwork } from "../machine-artwork.js";
 import { UsageStatistics } from "../usage.js";
 import { execFile } from "node:child_process";
 import { randomBytes, timingSafeEqual } from "node:crypto";
@@ -346,6 +347,10 @@ export class HostRpcServer {
         }
         void hub.refreshAuthIfStale();
         return options.machineInfo();
+      },
+      "machine.artwork": async ({ id }: P<"machine.artwork">) => {
+        const artwork = await readSystemArtwork();
+        return artwork?.id === id ? { webp: artwork.webp } : {};
       },
       "machine.rename": (params: P<"machine.rename">) => {
         if (!options.renameMachine) throw RpcError.app("not_supported", "请更新电脑端 LinkShell 后同步名称");

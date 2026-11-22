@@ -499,9 +499,20 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
           return { outbox };
         });
         return result.delivery;
-      } catch {
+      } catch (error) {
+        flushEvents();
         finish();
-        updateView(pending.sessionId, (view) => markMessageFailed(view, clientMessageId));
+        if (!(clientMessageId in get().outbox)) {
+          const view = get().views[pending.sessionId];
+          const idx = view?.index[`local-${clientMessageId}`];
+          const item = idx === undefined ? undefined : view?.items[idx];
+          if (item?.kind === "user" && !item.failed) return "duplicate" as const;
+          return "failed" as const;
+        }
+        const reason = error instanceof Error ? error.message.trim().slice(0, 320) : undefined;
+        // A failed enqueue may not have an optimistic bubble yet.
+        updateView(pending.sessionId, (view) => markMessageFailed(view.index[`local-${clientMessageId}`] === undefined
+          ? addOptimisticMessage(view, clientMessageId, pending.content) : view, clientMessageId, reason));
         return "failed" as const;
       }
     };
@@ -647,7 +658,7 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
           return { queueing };
         });
         // The turn ended meanwhile and it went straight out, or it didn't go at all: a message like any other.
-        if (delivery === "started" || delivery === "steered" || delivery === "duplicate" || delivery === "failed") {
+        if (delivery === "started" || delivery === "steered" || delivery === "duplicate" || (delivery === "failed" && clientMessageId in get().outbox)) {
           updateView(sessionId, (view) => (view.index[`local-${clientMessageId}`] === undefined ? addOptimisticMessage(view, clientMessageId, content, Date.now(), delivery !== "failed") : view));
           if (delivery === "failed") updateView(sessionId, (view) => markMessageFailed(view, clientMessageId));
         }

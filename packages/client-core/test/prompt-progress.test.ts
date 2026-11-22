@@ -72,7 +72,7 @@ describe("prompt feedback across delivery and turn events", () => {
     call.mockRejectedValueOnce(new Error("connection closed"));
     await expect(store.getState().send(session.id, content)).resolves.toBe("failed");
     expect(progress()).toBeUndefined();
-    expect(store.getState().views[session.id]?.items[0]).toMatchObject({ failed: true });
+    expect(store.getState().views[session.id]?.items[0]).toMatchObject({ failed: true, failureReason: "connection closed" });
     const retry = store.getState().retry("message-1");
     expect(progress()?.phase).toBe("sending");
     await retry;
@@ -141,5 +141,32 @@ describe("prompt feedback across delivery and turn events", () => {
     event(1, { sessionUpdate: "ls_notice", level: "info", title: "/status", detail: "Ready" });
     vi.advanceTimersByTime(16);
     expect(progress()).toBeUndefined();
+  });
+
+  it("does not resurrect a discarded message when its in-flight prompt rejects later", async () => {
+    const { store, call } = setup();
+    let rejectPrompt!: (error: Error) => void;
+    call.mockReturnValueOnce(new Promise((_, reject) => { rejectPrompt = reject; }));
+    const sent = store.getState().send(session.id, content);
+    store.getState().discard("message-1");
+    rejectPrompt(new Error("late failure"));
+    await expect(sent).resolves.toBe("failed");
+    expect(store.getState().views[session.id]?.items).toEqual([]);
+    expect(store.getState().outbox["message-1"]).toBeUndefined();
+  });
+
+  it("treats a late RPC rejection as duplicate when the native echo already confirmed the message", async () => {
+    const { store, call, event } = setup();
+    let rejectPrompt!: (error: Error) => void;
+    call.mockReturnValueOnce(new Promise((_, reject) => { rejectPrompt = reject; }));
+    const sent = store.getState().send(session.id, content);
+    event(1, { sessionUpdate: "user_message_chunk", messageId: "local-message-1", content: content[0]! });
+    vi.advanceTimersByTime(16);
+    rejectPrompt(new Error("gateway timeout"));
+    await expect(sent).resolves.toBe("duplicate");
+    const items = store.getState().views[session.id]?.items ?? [];
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ kind: "user", id: "local-message-1" });
+    expect((items[0] as { failed?: boolean }).failed).toBeUndefined();
   });
 });

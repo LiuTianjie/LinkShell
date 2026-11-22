@@ -166,7 +166,7 @@ export function ClientProvider({ children }: { children: ReactNode }) {
       if (state.machine === previous.machine) return;
       setHostHome(state.machine?.home);
       if (state.machine) {
-        rememberComputerProfile(connection.key, state.machine);
+        rememberComputerProfile(connection.computer, state.machine);
         syncComputerName(connection.computer, state.machine);
       }
       // The computer just said whether it can go direct, and how.

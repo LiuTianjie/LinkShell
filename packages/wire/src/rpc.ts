@@ -192,6 +192,11 @@ const coreMethods = {
     params: empty,
     result: machineInfoSchema,
   },
+  /** Optional, content-addressed official device art. Never carried in a gateway list or on every handshake. */
+  "machine.artwork": {
+    params: z.object({ id: z.string().regex(/^[a-f0-9]{64}$/) }),
+    result: z.object({ webp: z.string().max(240_000).optional() }),
+  },
   "machine.metrics": { params: empty, result: machineMetricsSnapshotSchema },
   "machine.keepAwake": {
     params: z.object({ mode: keepAwakeModeSchema.optional() }),

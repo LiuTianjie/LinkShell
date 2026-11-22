@@ -29,7 +29,7 @@ export function useComputerPresentation() {
     machine,
     profile,
     name: computerDisplayName(computer, names),
-    description: computerDescription(profile, locale),
+    description: computerDescription(profile, locale, true),
     transport,
   };
 }
