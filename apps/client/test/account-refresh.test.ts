@@ -5,15 +5,19 @@ vi.mock("expo-crypto", () => ({ CryptoDigestAlgorithm: {}, CryptoEncoding: {}, d
 vi.mock("expo-web-browser", () => ({ openAuthSessionAsync: vi.fn() }));
 vi.mock("../src/lib/secure", () => ({ readSecret: () => undefined, writeSecret: secrets.write, deleteSecret: secrets.remove }));
 
-import { useAccount, type AccountSession } from "../src/lib/account";
+import { setAppBackgrounded, useAccount, type AccountSession } from "../src/lib/account";
 
 const expired: AccountSession = { userId: "account-a", accessToken: "old-access", refreshToken: "old-refresh", expiresAt: 0 };
 
 beforeEach(() => {
   vi.clearAllMocks();
+  setAppBackgrounded(false);
   useAccount.setState({ session: { ...expired } });
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  setAppBackgrounded(false);
+  vi.unstubAllGlobals();
+});
 
 it.each(["sign-out", "account-switch"])("does not resurrect an account when its token refresh finishes after %s", async (action) => {
   let respond!: (response: Response) => void;
@@ -73,4 +77,22 @@ it("renews a still-valid token in the background instead of delaying the gateway
   await expect(useAccount.getState().token()).resolves.toBe("old-access");
   respond(Response.json({ access_token: "fresh", refresh_token: "rotated", user: { id: expired.userId } }));
   await vi.waitFor(() => expect(useAccount.getState().session?.accessToken).toBe("fresh"));
+});
+
+it("signs out on nested itool-core invalid_refresh_token errors", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () =>
+    Response.json({ error: { code: "invalid_refresh_token", message: "会话已失效，请重新登录" } }, { status: 401 }),
+  ));
+  await expect(useAccount.getState().token()).resolves.toBeUndefined();
+  expect(useAccount.getState().session).toBeUndefined();
+  expect(secrets.remove).toHaveBeenCalledOnce();
+});
+
+it("does not rotate a refresh token while the app is backgrounded", async () => {
+  const fetch = vi.fn();
+  vi.stubGlobal("fetch", fetch);
+  setAppBackgrounded(true);
+  await expect(useAccount.getState().token()).resolves.toBe("old-access");
+  expect(fetch).not.toHaveBeenCalled();
+  expect(useAccount.getState().session).toEqual(expired);
 });

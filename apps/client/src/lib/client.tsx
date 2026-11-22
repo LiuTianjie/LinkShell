@@ -24,7 +24,7 @@ import { createSocket } from "./socket";
 import { directConnector } from "./direct";
 import { createSessionSubscriptions } from "./session-subscriptions";
 import { syncComputerName } from "./computer-names";
-import { useAccount } from "./account";
+import { setAppBackgrounded, useAccount } from "./account";
 import { outboxStorage } from "./outbox-db";
 
 type Client = ClientState & ClientActions;
@@ -222,7 +222,9 @@ export function ClientProvider({ children }: { children: ReactNode }) {
         link.reconnectNow();
       }
     }, 12_000);
+    setAppBackgrounded(AppState.currentState !== "active");
     const subscription = AppState.addEventListener("change", (state) => {
+      setAppBackgrounded(state !== "active");
       if (state === "active") {
         recoveringNow();
         // Back from the background, sessions show their latest turns at once; earlier ones load

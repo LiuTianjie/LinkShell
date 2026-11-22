@@ -13,7 +13,13 @@ const { url: SUPABASE_URL, anonKey: SUPABASE_ANON_KEY } = accountConfig;
 const KEY = "linkshell.account.v2";
 const AUTH_PROXY_URL = "https://www.itool.tech/api/linkshell/auth";
 const TOKEN_PROXY_URL = "https://www.itool.tech/api/linkshell/token";
-const AUTH_TIMEOUT_MS = 8_000;
+const AUTH_TIMEOUT_MS = 15_000;
+
+let appBackgrounded = false;
+/** Called by AppState listeners so background wakes never rotate a single-use refresh token mid-suspension. */
+export function setAppBackgrounded(backgrounded: boolean): void {
+  appBackgrounded = backgrounded;
+}
 
 export const SIGN_UP_URL = "https://itool.tech/zh/register";
 
@@ -40,11 +46,11 @@ interface AccountState {
   token(): Promise<string | undefined>;
 }
 
-// What Supabase answers for a refresh token that can never work again (reused, revoked, its
+// What the auth service answers for a refresh token that can never work again (reused, revoked, its
 // session or user gone); anything else (rate limits, outages) may pass on a retry.
 const DEAD_REFRESH_TOKEN = new Set([
   "refresh_token_already_used", "refresh_token_not_found", "session_not_found", "session_expired",
-  "user_not_found", "user_banned", "invalid_grant",
+  "user_not_found", "user_banned", "invalid_grant", "invalid_refresh_token", "invalid_session",
 ]);
 
 class AuthRefused extends Error {
@@ -91,8 +97,9 @@ async function auth(path: string, body: unknown): Promise<AccountSession> {
     clearTimeout(timeout);
   }
   if (!response.ok) {
-    const message = String(json.error_description ?? json.msg ?? json.message ?? "登录失败");
-    const final = [400, 401, 403].includes(response.status) && DEAD_REFRESH_TOKEN.has(String(json.error_code ?? json.error ?? json.code));
+    const nested = json.error && typeof json.error === "object" ? (json.error as Record<string, unknown>) : undefined;
+    const message = String(nested?.message ?? json.error_description ?? json.msg ?? json.message ?? "登录失败");
+    const final = [400, 401, 403].includes(response.status) && DEAD_REFRESH_TOKEN.has(String(nested?.code ?? json.error_code ?? json.error ?? json.code));
     // The desktop describes the same refusals with the same table (client-core account-errors).
     const code = tokenErrorCode(response.status, json, grant);
     throw new AuthRefused(code === "unknown" ? message : accountErrorMessage(code), final);
@@ -177,6 +184,9 @@ export const useAccount = create<AccountState>((set, get) => ({
     const session = get().session;
     if (!session) return undefined;
     if (session.expiresAt - Date.now() > 120_000) return session.accessToken;
+    // Never rotate a single-use refresh token while backgrounded: iOS/Android can freeze the app
+    // after the server commits and before Keychain saves the rotated token.
+    if (appBackgrounded) return session.accessToken;
     refreshing ??= auth("token?grant_type=refresh_token", { refresh_token: session.refreshToken })
       .then((next) => {
         // A refresh that outlived sign-out or another login must not restore its old account.

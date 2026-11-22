@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -65,12 +65,48 @@ describe("the account on this computer", () => {
   });
 
   it("signs out when the server says the session is over, instead of staying half signed in", async () => {
-    for (const body of [{ code: 400, error_code: "refresh_token_already_used" }, { error: "invalid_grant" }]) {
+    for (const body of [
+      { code: 400, error_code: "refresh_token_already_used" },
+      { error: "invalid_grant" },
+      { error: { code: "invalid_refresh_token", message: "会话已失效，请重新登录" } },
+    ]) {
       auth.saveAuth(tokens(Date.now() - 1));
-      vi.stubGlobal("fetch", vi.fn(async () => Response.json(body, { status: 400 })));
+      vi.stubGlobal("fetch", vi.fn(async () => Response.json(body, { status: 401 })));
       expect(await auth.getValidToken()).toBeNull();
       expect(auth.loadAuth()).toBeNull();
     }
+  });
+
+  it("waits on auth.lock and reuses tokens rotated by another process without calling fetch", async () => {
+    auth.saveAuth(tokens(Date.now() + 30_000));
+    const lockFile = join(home, "auth.lock");
+    writeFileSync(lockFile, "99999:0\n");
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+
+    const pending = auth.getValidToken();
+    setTimeout(() => {
+      auth.saveAuth({ ...tokens(Date.now() + 3_600_000), accessToken: "access-locked-winner", refreshToken: "refresh-locked-winner" });
+      try { unlinkSync(lockFile); } catch {}
+    }, 80);
+
+    expect(await pending).toBe("access-locked-winner");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("clears a stale auth.lock left by a crashed process", async () => {
+    auth.saveAuth(tokens(Date.now() - 1));
+    const lockFile = join(home, "auth.lock");
+    writeFileSync(lockFile, "99999:0\n");
+    const past = new Date(Date.now() - 30_000);
+    utimesSync(lockFile, past, past);
+    const fetch = vi.fn(async () =>
+      Response.json({ access_token: "access-after-stale", refresh_token: "refresh-after-stale", expires_in: 3600, user: { id: "u1" } }),
+    );
+    vi.stubGlobal("fetch", fetch);
+
+    expect(await auth.getValidToken()).toBe("access-after-stale");
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 
   it("stays signed in when a refusal is not about the token", async () => {

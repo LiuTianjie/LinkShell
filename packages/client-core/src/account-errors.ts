@@ -66,11 +66,12 @@ function text(value: unknown): string {
  */
 export function tokenErrorCode(status: number, body: unknown, grant: "password" | "pkce" | "refresh_token" = "password"): AccountErrorCode {
   const json = record(body);
-  const code = text(json.error_code) || text(json.code) || text(json.error);
-  const detail = `${text(json.msg)} ${text(json.message)} ${text(json.error_description)}`;
+  const nested = record(json.error);
+  const code = text(nested.code) || text(json.error_code) || text(json.code) || text(json.error);
+  const detail = `${text(nested.message)} ${text(json.msg)} ${text(json.message)} ${text(json.error_description)}`;
   if (code === "email_not_confirmed" || /email not confirmed/i.test(detail)) return "email_not_confirmed";
   if (code === "invalid_credentials" || /invalid login credentials/i.test(detail)) return "invalid_credentials";
-  if (["flow_state_not_found", "flow_state_expired", "bad_code_verifier", "bad_oauth_state"].includes(code)) return "oauth_expired";
+  if (["flow_state_not_found", "flow_state_expired", "bad_code_verifier", "bad_oauth_state", "invalid_oauth_exchange", "invalid_refresh_token", "invalid_session"].includes(code)) return "oauth_expired";
   if (code === "invalid_grant") return grant === "password" ? "invalid_credentials" : "oauth_expired";
   if (code === "user_banned") return "user_banned";
   if (code === "over_request_rate_limit" || code === "rate_limited" || status === 429) return "rate_limited";

@@ -167,15 +167,27 @@ function createCoreWebClient(baseUrl: string): WebAccountClient {
     });
   };
 
+  const runExclusiveRefresh = async <T>(work: () => Promise<T>): Promise<T> => {
+    const locks = typeof navigator !== "undefined" ? navigator.locks : undefined;
+    if (locks?.request) {
+      return locks.request("linkshell.web.account.refresh", () => work());
+    }
+    return work();
+  };
+
   const refreshSession = async (): Promise<{
     data: { session: WebAccountSession | null };
     error: Error | null;
   }> => {
     if (inFlightRefresh) return inFlightRefresh;
-    inFlightRefresh = (async () => {
+    inFlightRefresh = runExclusiveRefresh(async () => {
       const current = readStoredSession();
       if (!current?.refresh_token) {
         return { data: { session: null }, error: new Error("登录已失效，请重新登录") };
+      }
+      // Another tab may have already rotated the token while we waited for the lock.
+      if (current.expires_at * 1000 > Date.now() + 120_000) {
+        return { data: { session: current }, error: null };
       }
       try {
         const res = await timedFetch("/auth/v1/token?grant_type=refresh_token", {
@@ -185,26 +197,46 @@ function createCoreWebClient(baseUrl: string): WebAccountClient {
         });
         const body = await res.json().catch(() => null);
         if (!res.ok) {
+          const latest = readStoredSession();
+          if (latest && latest.user.id === current.user.id && latest.refresh_token !== current.refresh_token) {
+            emit("TOKEN_REFRESHED", latest);
+            return { data: { session: latest }, error: null };
+          }
           if (res.status === 400 || res.status === 401) {
-            writeStoredSession(null);
-            emit("SIGNED_OUT", null);
+            if (latest?.refresh_token === current.refresh_token) {
+              writeStoredSession(null);
+              emit("SIGNED_OUT", null);
+            }
           }
           return { data: { session: null }, error: errorFromPayload(res.status, body) };
         }
         const next = normalizeSession(body);
         if (!next) return { data: { session: null }, error: new Error("会话刷新失败，请重试") };
+        const latest = readStoredSession();
+        if (!latest || latest.user.id !== current.user.id || next.user.id !== current.user.id) {
+          return { data: { session: null }, error: new Error("账号状态已更新，请重试") };
+        }
+        if (latest.refresh_token !== current.refresh_token) {
+          emit("TOKEN_REFRESHED", latest);
+          return { data: { session: latest }, error: null };
+        }
         writeStoredSession(next);
         emit("TOKEN_REFRESHED", next);
         return { data: { session: next }, error: null };
       } catch (error) {
+        const latest = readStoredSession();
+        if (latest && latest.user.id === current.user.id && latest.refresh_token !== current.refresh_token) {
+          emit("TOKEN_REFRESHED", latest);
+          return { data: { session: latest }, error: null };
+        }
         return {
           data: { session: null },
           error: error instanceof Error ? error : new Error("网络异常，请重试"),
         };
-      } finally {
-        inFlightRefresh = null;
       }
-    })();
+    }).finally(() => {
+      inFlightRefresh = null;
+    });
     return inFlightRefresh;
   };
 

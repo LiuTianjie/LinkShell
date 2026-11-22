@@ -93,6 +93,7 @@ vi.mock("../src/lib/direct", () => ({ directConnector: {} }));
 vi.mock("../src/lib/session-subscriptions", () => ({ createSessionSubscriptions: () => () => () => {} }));
 vi.mock("../src/lib/computer-names", () => ({ syncComputerName: vi.fn() }));
 vi.mock("../src/lib/account", () => ({
+  setAppBackgrounded: vi.fn(),
   useAccount: { subscribe: () => () => {} },
 }));
 vi.mock("../src/lib/computers", () => ({

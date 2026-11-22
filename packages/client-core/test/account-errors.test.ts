@@ -14,6 +14,8 @@ describe("account sign-in refusals", () => {
     expect(tokenErrorCode(400, { ok: false, code: "email_not_confirmed" })).toBe("email_not_confirmed");
     expect(tokenErrorCode(503, { error: "temporarily_unavailable" })).toBe("unavailable");
     expect(tokenErrorCode(400, { error: "invalid_grant" }, "pkce")).toBe("oauth_expired");
+    expect(tokenErrorCode(401, { error: { code: "invalid_refresh_token", message: "会话已失效，请重新登录" } }, "refresh_token")).toBe("oauth_expired");
+    expect(tokenErrorCode(401, { error: { code: "invalid_oauth_exchange", message: "登录交换码无效或已过期" } }, "pkce")).toBe("oauth_expired");
   });
 
   it("tells a stale PKCE code from a wrong password", () => {
