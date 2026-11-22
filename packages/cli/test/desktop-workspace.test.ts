@@ -19,7 +19,12 @@ import { LoginError } from "../src/commands/login-error.js";
 import { runLogout } from "../src/commands/logout.js";
 import { refreshGateway } from "../src/commands/host.js";
 
-vi.mock("../src/auth.js", () => ({ loadAuth: vi.fn(), getValidToken: vi.fn() }));
+vi.mock("../src/auth.js", () => ({
+  loadAuth: vi.fn(),
+  getValidToken: vi.fn(),
+  SUPABASE_URL: "https://api.itool.tech",
+  SUPABASE_ANON_KEY: "itool-core",
+}));
 vi.mock("../src/commands/login.js", () => ({ runLogin: vi.fn() }));
 vi.mock("../src/commands/sign-in.js", () => ({ loginWithPassword: vi.fn(), loginWithOAuth: vi.fn(), openInBrowser: vi.fn() }));
 vi.mock("../src/commands/logout.js", () => ({ runLogout: vi.fn() }));
@@ -210,6 +215,46 @@ describe("native desktop workspace service", () => {
     expect((await fetch(`${server.origin}/desktop/logout`, { method: "POST", headers: server.headers })).status).toBe(200);
     expect(runLogout).toHaveBeenCalledOnce();
     expect((await readdir(home)).sort()).toEqual(["desktop-client.json"]);
+  });
+
+  it("proxies membership and referral directly to api.itool.tech without exposing cross-origin calls to the WebView", async () => {
+    vi.mocked(loadAuth).mockReturnValue({ userId: "u1", email: "me@example.com", accessToken: "access-current", refreshToken: "refresh-private", expiresAt: Date.now() + 3_600_000 });
+    vi.mocked(getValidToken).mockResolvedValue("access-current");
+    const realFetch = globalThis.fetch;
+    const remoteCalls: string[] = [];
+    const validUntil = new Date(Date.now() + 86_400_000).toISOString();
+    vi.stubGlobal("fetch", async (input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith("http://127.0.0.1:")) return realFetch(input, init);
+      remoteCalls.push(url);
+      if (url === "https://api.itool.tech/rest/v1/rpc/itool_entitlement") {
+        return Response.json({ ok: true, product: "linkshell", active: true, tier: "yearly", valid_until: validUntil, server_time: new Date().toISOString() });
+      }
+      if (url === "https://api.itool.tech/rest/v1/rpc/itool_my_referral") {
+        return Response.json({ ok: true, code: "AB2C3D4E", invited: 2, rewarded: 1, earned_days: 30 });
+      }
+      throw new Error(`unexpected fetch to ${url}`);
+    });
+    try {
+      const server = await workspace();
+      const membershipRes = await realFetch(`${server.origin}/desktop/membership?userId=u1`, { headers: server.headers });
+      expect(membershipRes.status).toBe(200);
+      expect(await membershipRes.json()).toMatchObject({ plan: "pro", tier: "yearly", expiresAt: validUntil });
+
+      const referralRes = await realFetch(`${server.origin}/desktop/referral?userId=u1&locale=en`, { headers: server.headers });
+      expect(referralRes.status).toBe(200);
+      expect(await referralRes.json()).toMatchObject({ code: "AB2C3D4E", invited: 2, rewarded: 1, earnedDays: 30, shareUrl: "https://www.itool.tech/en/pro?product=linkshell&ref=AB2C3D4E" });
+
+      const mismatchRes = await realFetch(`${server.origin}/desktop/membership?userId=other-user`, { headers: server.headers });
+      expect(mismatchRes.status).toBe(409);
+
+      expect(remoteCalls).toEqual([
+        "https://api.itool.tech/rest/v1/rpc/itool_entitlement",
+        "https://api.itool.tech/rest/v1/rpc/itool_my_referral",
+      ]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("signs in with a password from the request body and shows only its own refusals", async () => {
@@ -441,7 +486,7 @@ describe("desktop workspace process ownership", () => {
     await writeFile(join(home, "auth.json"), JSON.stringify({ accessToken: "dummy-access", refreshToken: "dummy-refresh", expiresAt: 0, userId: "dummy-user" }));
     const loader = pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href;
     const entry = new URL("../src/commands/desktop-workspace.ts", import.meta.url).href;
-    const script = `const originalFetch = globalThis.fetch; const stalls = (u) => u.startsWith('https://mkbeusztkzffnzjdwmqk.supabase.co/') || u.startsWith('https://www.itool.tech/api/linkshell/token'); globalThis.fetch = (input, init) => originalFetch(stalls(String(input)) ? 'http://127.0.0.1:${address.port}/never' : input, init); const { runDesktopWorkspace } = await import(${JSON.stringify(entry)}); await runDesktopWorkspace(${JSON.stringify(assets)});`;
+    const script = `const originalFetch = globalThis.fetch; const stalls = (u) => u.startsWith('https://api.itool.tech/') || u.startsWith('https://mkbeusztkzffnzjdwmqk.supabase.co/') || u.startsWith('https://www.itool.tech/api/linkshell/token'); globalThis.fetch = (input, init) => originalFetch(stalls(String(input)) ? 'http://127.0.0.1:${address.port}/never' : input, init); const { runDesktopWorkspace } = await import(${JSON.stringify(entry)}); await runDesktopWorkspace(${JSON.stringify(assets)});`;
     const child = spawn(process.execPath, ["--import", loader, "--input-type=module", "--eval", script], {
       stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, PATH: "/usr/bin:/bin", LINKSHELL_HOME: home },
     });

@@ -53,13 +53,9 @@ async function accountToken(expectedUserId?: string): Promise<{ userId: string; 
   return { userId: auth.userId, accessToken };
 }
 
-/**
- * CLI and desktop often run where supabase.co is blocked: itool.tech first, the RPC after.
- * `LINKSHELL_TOKEN_PROXY=off`, the switch that keeps sign-in off itool.tech, reverses the order.
- */
+/** Looks up LinkShell entitlement directly against the account service (`api.itool.tech`). */
 export async function lookupMembership(accessToken: string, signal?: AbortSignal): Promise<DesktopMembership> {
-  const prefer = process.env.LINKSHELL_TOKEN_PROXY === "off" ? "supabase" : "itool";
-  const membership = await fetchProMembership({ accessToken, supabaseUrl: SUPABASE_URL, anonKey: SUPABASE_ANON_KEY, prefer, signal });
+  const membership = await fetchProMembership({ accessToken, supabaseUrl: SUPABASE_URL, anonKey: SUPABASE_ANON_KEY, signal });
   return {
     plan: membership.plan,
     planExpiresAt: membership.expiresAt ?? null,

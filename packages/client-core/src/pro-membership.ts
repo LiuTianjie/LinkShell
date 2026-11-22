@@ -22,10 +22,10 @@ export interface ProMembershipOptions {
   accessToken: string;
   /** Kept for callers that pass it; the entitlement is read for the token's own user. */
   userId?: string;
-  /** With both, the Supabase RPC is tried when itool.tech can't be reached. */
+  /** Account service base URL (e.g. https://api.itool.tech); called directly by default when set. */
   supabaseUrl?: string;
   anonKey?: string;
-  /** "supabase" skips itool.tech; "itool" (the default) prefers it. */
+  /** "supabase" (default when supabaseUrl+anonKey are set) calls the account service directly; "itool" prefers itool.tech first. */
   prefer?: "itool" | "supabase";
   signal?: AbortSignal;
 }
@@ -235,9 +235,12 @@ async function withFallback<T>(
   viaSupabaseFn?: () => Promise<T>,
 ): Promise<T> {
   if (!options.accessToken.trim()) throw new MembershipError(LOGIN_REQUIRED, "login");
-  const [first, second] = options.prefer === "supabase" && viaSupabaseFn
-    ? [viaSupabaseFn, viaItoolFn]
-    : [viaItoolFn, viaSupabaseFn];
+  // When the direct account API (`api.itool.tech`) is configured, call it directly without hopping
+  // through the itool.tech website unless a caller explicitly opts into `prefer: "itool"`.
+  if (viaSupabaseFn && options.prefer !== "itool") {
+    return viaSupabaseFn();
+  }
+  const [first, second] = [viaItoolFn, viaSupabaseFn];
   try {
     return await first();
   } catch (error) {
@@ -308,7 +311,7 @@ async function referralViaSupabase(options: ReferralOptions & { supabaseUrl: str
 
 /**
  * Reads (or lazily creates) the signed-in user's 8-character invite code and earned reward days,
- * trying `https://itool.tech/api/membership/referral` first with Supabase RPC `itool_my_referral` fallback.
+ * calling the account service RPC `itool_my_referral` directly when `supabaseUrl` is provided.
  */
 export async function fetchReferralSummary(options: ReferralOptions): Promise<ReferralSummary> {
   const supabase = options.supabaseUrl && options.anonKey

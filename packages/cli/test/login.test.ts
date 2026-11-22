@@ -39,7 +39,7 @@ function accountService(plan: { plan: string; plan_expires_at: string | null } |
     const url = String(input);
     if (url.startsWith("http://localhost:")) return realFetch(input, init);
     if (url.includes("/auth/v1/user")) return Promise.resolve(Response.json({ id: "u1", email: "me@example.com" }));
-    if (url.includes("/api/membership/entitlement")) {
+    if (url.includes("/rest/v1/rpc/itool_entitlement")) {
       const until = plan?.plan === "pro" ? plan.plan_expires_at : null;
       const active = !!until && Date.parse(until) > Date.now();
       return Promise.resolve(Response.json({ ok: true, product: "linkshell", required_tier: "monthly", active, valid_until: until, tier: active ? "monthly" : "free", server_time: new Date().toISOString() }));
@@ -133,7 +133,7 @@ describe("linkshell login", () => {
       const url = String(input);
       if (url.startsWith("http://localhost:")) return realFetch(input, init);
       if (url.includes("/auth/v1/user")) return Promise.resolve(Response.json({ id: "u-active", email: "active@example.com" }));
-      if (url.includes("/api/membership/entitlement")) {
+      if (url.includes("/rest/v1/rpc/itool_entitlement")) {
         return Promise.resolve(Response.json({
           ok: true,
           product: "linkshell",

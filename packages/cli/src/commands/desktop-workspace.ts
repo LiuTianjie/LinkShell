@@ -8,7 +8,10 @@ import type { Socket } from "node:net";
 import WebSocket, { WebSocketServer } from "ws";
 import { localWebSocket } from "@linkshell/host/local-transport";
 import { gatewayStatusSchema, isMethodName, machineInfoSchema, rpcMessageSchema, type MachineEntry } from "@linkshell/wire";
-import { getValidToken, loadAuth } from "../auth.js";
+import { getValidToken, loadAuth, SUPABASE_ANON_KEY, SUPABASE_URL } from "../auth.js";
+import { cacheMembership } from "../pro-membership.js";
+import { fetchProMembership, fetchReferralSummary, MembershipError } from "../../../client-core/src/pro-membership.js";
+import type { Locale } from "../../../client-core/src/i18n.js";
 import { runLogin, type LoginResult } from "./login.js";
 import { loginWithOAuth, loginWithPassword, openInBrowser } from "./sign-in.js";
 import { LoginError } from "./login-error.js";
@@ -173,7 +176,7 @@ async function localComputer(
   });
 }
 
-async function account(signal: AbortSignal) {
+async function account(signal: AbortSignal): Promise<{ userId?: string; email?: string; accessToken?: string }> {
   const before = loadAuth()?.userId;
   const accessToken = await getValidToken({ signal });
   const current = loadAuth();
@@ -322,6 +325,63 @@ export async function startDesktopWorkspace(options: { assets: string; home?: st
         }
         if (request.method === "GET" && path === "/desktop/account") {
           json(response, 200, await account(accountAbort.signal)); return;
+        }
+        if (request.method === "GET" && path === "/desktop/membership") {
+          const current = await account(accountAbort.signal);
+          if (!current.userId || !current.accessToken) throw new HttpError(401, "登录已失效，请重新登录");
+          const expectedUserId = url.searchParams.get("userId");
+          if (expectedUserId && current.userId !== expectedUserId) throw new HttpError(409, "账号已切换，请在当前账户下重新操作");
+          const observedAt = Date.now();
+          let membership;
+          try {
+            membership = await fetchProMembership({
+              supabaseUrl: SUPABASE_URL,
+              anonKey: SUPABASE_ANON_KEY,
+              accessToken: current.accessToken,
+              userId: current.userId,
+              signal: accountAbort.signal,
+            });
+          } catch (error) {
+            if (error instanceof MembershipError) {
+              throw new HttpError(error.kind === "login" ? 401 : 503, error.message);
+            }
+            throw new HttpError(503, "暂时无法获取会员状态，请稍后重试");
+          }
+          if (loadAuth()?.userId !== current.userId) throw new HttpError(409, "账号已切换，请在当前账户下重新操作");
+          try {
+            cacheMembership(current.userId, {
+              plan: membership.plan,
+              planExpiresAt: membership.expiresAt ?? null,
+              tier: membership.tier ?? null,
+            }, observedAt);
+          } catch { /* Preserve successful lookup even if cache write fails. */ }
+          json(response, 200, membership); return;
+        }
+        if (request.method === "GET" && path === "/desktop/referral") {
+          const current = await account(accountAbort.signal);
+          if (!current.userId || !current.accessToken) throw new HttpError(401, "登录已失效，请重新登录");
+          const expectedUserId = url.searchParams.get("userId");
+          if (expectedUserId && current.userId !== expectedUserId) throw new HttpError(409, "账号已切换，请在当前账户下重新操作");
+          const rawLocale = url.searchParams.get("locale");
+          const locale: Locale | undefined = rawLocale === "zh" || rawLocale === "en" || rawLocale === "ja" ? rawLocale : undefined;
+          let referral;
+          try {
+            referral = await fetchReferralSummary({
+              supabaseUrl: SUPABASE_URL,
+              anonKey: SUPABASE_ANON_KEY,
+              accessToken: current.accessToken,
+              userId: current.userId,
+              locale,
+              signal: accountAbort.signal,
+            });
+          } catch (error) {
+            if (error instanceof MembershipError) {
+              throw new HttpError(error.kind === "login" ? 401 : 503, error.message);
+            }
+            throw new HttpError(503, "暂时无法获取邀请信息，请稍后重试");
+          }
+          if (loadAuth()?.userId !== current.userId) throw new HttpError(409, "账号已切换，请在当前账户下重新操作");
+          json(response, 200, referral); return;
         }
         if (request.method === "PUT" && path === "/desktop/storage") {
           const input = await body(request);

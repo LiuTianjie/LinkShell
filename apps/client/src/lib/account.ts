@@ -11,8 +11,6 @@ import { deleteSecret, readSecret, writeSecret } from "./secure";
 
 const { url: SUPABASE_URL, anonKey: SUPABASE_ANON_KEY } = accountConfig;
 const KEY = "linkshell.account.v2";
-const AUTH_PROXY_URL = "https://www.itool.tech/api/linkshell/auth";
-const TOKEN_PROXY_URL = "https://www.itool.tech/api/linkshell/token";
 const AUTH_TIMEOUT_MS = 15_000;
 
 let appBackgrounded = false;
@@ -60,39 +58,23 @@ class AuthRefused extends Error {
 async function auth(path: string, body: unknown): Promise<AccountSession> {
   const grant = path.includes("grant_type=pkce") ? "pkce" : path.includes("grant_type=refresh_token") ? "refresh_token" : "password";
   const controller = new AbortController();
-  // One deadline covers the exchange, including any old-server fallback, so an
-  // expired session cannot hold the gateway's 10-second auth challenge forever.
   const timeout = setTimeout(() => controller.abort(), AUTH_TIMEOUT_MS);
-  let response: Response | undefined;
+  let response: Response;
   let json: Record<string, unknown>;
   try {
-   try {
     try {
-      response = await fetch(grant === "refresh_token" ? TOKEN_PROXY_URL : AUTH_PROXY_URL, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(grant === "refresh_token" ? body : { ...body as object, grant_type: grant }),
-        signal: controller.signal,
-      });
-    } catch (error) {
-      // A timeout may have happened after Supabase consumed a one-use code or
-      // refresh token. Only a password can safely be retried at another URL.
-      if (grant !== "password" || controller.signal.aborted) throw error;
-    }
-    if (!response || response.status === 404 || (grant === "password" && response.status >= 500)) {
       response = await fetch(`${SUPABASE_URL}/auth/v1/${path}`, {
         method: "POST",
         headers: { "content-type": "application/json", apikey: SUPABASE_ANON_KEY },
         body: JSON.stringify(body),
         signal: controller.signal,
       });
+      json = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+    } catch {
+      // The platform's own words ("Network request failed", "Aborted") say nothing to the person
+      // signing in. Not final: a refresh that failed this way keeps its session and tries again.
+      throw new AuthRefused(accountErrorMessage(controller.signal.aborted ? "timeout" : "network"), false);
     }
-    json = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-   } catch {
-    // The platform's own words ("Network request failed", "Aborted") say nothing to the person
-    // signing in. Not final: a refresh that failed this way keeps its session and tries again.
-    throw new AuthRefused(accountErrorMessage(controller.signal.aborted ? "timeout" : "network"), false);
-   }
   } finally {
     clearTimeout(timeout);
   }

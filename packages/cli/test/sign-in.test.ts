@@ -14,7 +14,6 @@ const { LoginError } = await import("../src/commands/login-error.js");
 const auth = await import("../src/auth.js");
 afterAll(() => rmSync(home, { recursive: true, force: true }));
 
-const PROXY = "https://www.itool.tech/api/linkshell/auth";
 const SUPABASE = "https://api.itool.tech";
 const realFetch = globalThis.fetch;
 const existing = { accessToken: "existing", refreshToken: "existing-refresh", userId: "existing-user", expiresAt: Date.now() + 3_600_000 };
@@ -24,13 +23,11 @@ const session = (access = "access-new") => ({
 });
 
 beforeEach(() => {
-  delete process.env.LINKSHELL_TOKEN_PROXY;
   auth.saveAuth(existing);
 });
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
-  delete process.env.LINKSHELL_TOKEN_PROXY;
 });
 
 type Handler = (url: string, init?: RequestInit) => Response | Promise<Response>;
@@ -41,7 +38,7 @@ function remote(handler: Handler) {
     const url = String(input);
     if (url.startsWith("http://127.0.0.1:")) return realFetch(input, init);
     calls.push({ url, body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined });
-    if (url.includes("/api/membership/entitlement")) return Response.json({ ok: true, product: "linkshell", active: true, tier: "yearly", valid_until: new Date(Date.now() + 86_400_000).toISOString(), server_time: new Date().toISOString() });
+    if (url.includes("/rest/v1/rpc/itool_entitlement")) return Response.json({ ok: true, product: "linkshell", active: true, tier: "yearly", valid_until: new Date(Date.now() + 86_400_000).toISOString(), server_time: new Date().toISOString() });
     return handler(url, init);
   });
   return calls;
@@ -72,12 +69,13 @@ describe("PKCE", () => {
 });
 
 describe("email and password", () => {
-  it("signs in through the proxy and keeps the session in a private auth.json, without asking who the user is", async () => {
+  it("signs in directly against api.itool.tech and keeps the session in a private auth.json, without asking who the user is", async () => {
     const calls = remote(() => Response.json(session()));
     const result = await signIn.loginWithPassword({ email: "  new@example.com ", password: "secret pw" });
     expect(result).toEqual({ success: true, plan: "pro", tier: "yearly", email: "new@example.com", userId: "u-new", accessToken: "access-new" });
-    expect(calls[0]).toEqual({ url: PROXY, body: { grant_type: "password", email: "new@example.com", password: "secret pw" } });
+    expect(calls[0]).toEqual({ url: `${SUPABASE}/auth/v1/token?grant_type=password`, body: { email: "new@example.com", password: "secret pw" } });
     expect(calls.some(({ url }) => url.includes("/auth/v1/user"))).toBe(false);
+    expect(calls.some(({ url }) => url.includes("www.itool.tech"))).toBe(false);
     const file = join(home, "auth.json");
     const saved = JSON.parse(readFileSync(file, "utf8"));
     expect(saved).toMatchObject({ accessToken: "access-new", refreshToken: "refresh-for-access-new", userId: "u-new", email: "new@example.com" });
@@ -87,40 +85,18 @@ describe("email and password", () => {
     expect(JSON.parse(readFileSync(join(home, "account-pro.json"), "utf8"))).toMatchObject({ userId: "u-new", plan: "pro", tier: "yearly" });
   });
 
-  it("goes to Supabase directly when the proxy is unreachable, missing or temporarily unavailable", async () => {
-    for (const proxy of [
-      () => Promise.reject(new TypeError("fetch failed")),
-      () => new Response("Not Found", { status: 404 }),
-      () => Response.json({ error: "temporarily_unavailable" }, { status: 503 }),
-      () => Response.json({ ok: false, code: "invalid_request" }, { status: 400 }),
-    ]) {
-      const calls = remote((url) => url === PROXY ? proxy() : Response.json(session("direct")));
-      expect((await signIn.loginWithPassword({ email: "new@example.com", password: "pw" })).accessToken).toBe("direct");
-      expect(calls.map(({ url }) => url).slice(0, 2)).toEqual([PROXY, `${SUPABASE}/auth/v1/token?grant_type=password`]);
-      expect(calls[1]!.body).toEqual({ email: "new@example.com", password: "pw" });
-    }
-  });
-
-  it("never retries a refusal from the proxy directly, and keeps the existing login", async () => {
+  it("never retries a refusal and keeps the existing login", async () => {
     for (const [error, code] of [["invalid_credentials", "invalid_credentials"], ["email_not_confirmed", "email_not_confirmed"], ["invalid_grant", "invalid_credentials"]] as const) {
       const calls = remote(() => Response.json({ error }, { status: 400 }));
       const failure = await signIn.loginWithPassword({ email: "new@example.com", password: "wrong" }).catch((reason: unknown) => reason);
       expect(failure).toBeInstanceOf(LoginError);
       expect((failure as InstanceType<typeof LoginError>).code).toBe(code);
-      expect(calls.map(({ url }) => url)).toEqual([PROXY]);
+      expect(calls.map(({ url }) => url)).toEqual([`${SUPABASE}/auth/v1/token?grant_type=password`]);
       expect(auth.loadAuth()?.userId).toBe("existing-user");
     }
   });
 
-  it("skips the proxy entirely with the kill switch", async () => {
-    process.env.LINKSHELL_TOKEN_PROXY = "off";
-    const calls = remote(() => Response.json(session("direct")));
-    await signIn.loginWithPassword({ email: "new@example.com", password: "pw" });
-    expect(calls.filter(({ url }) => !url.includes("/rest/v1/")).map(({ url }) => url)).toEqual([`${SUPABASE}/auth/v1/token?grant_type=password`]);
-  });
-
-  it("explains Supabase's refusals in Chinese, in both of its answer shapes", async () => {
-    process.env.LINKSHELL_TOKEN_PROXY = "off";
+  it("explains account service refusals in Chinese, in both of its answer shapes", async () => {
     const cases: [Response | Error, string][] = [
       [Response.json({ code: 400, error_code: "invalid_credentials", msg: "Invalid login credentials" }, { status: 400 }), "用 GitHub 或 Google 注册的账号没有密码"],
       [Response.json({ error: "invalid_grant", error_description: "Email not confirmed" }, { status: 400 }), "邮箱还没有验证"],
@@ -140,7 +116,7 @@ describe("email and password", () => {
     const controller = new AbortController();
     vi.stubGlobal("fetch", async (input: string | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url === PROXY) return Response.json(session());
+      if (url === `${SUPABASE}/auth/v1/token?grant_type=password`) return Response.json(session());
       // The plan lookup is in flight when the person cancels.
       return new Promise<Response>((_resolve, reject) => {
         init?.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
@@ -176,8 +152,7 @@ describe("GitHub and Google through the loopback", () => {
     expect(answer.headers.get("location")).toBe("/linkshell/done?status=ok");
     expect(await login.result).toMatchObject({ success: true, userId: "u-new", accessToken: "oauth" });
 
-    const exchange = calls.find(({ url }) => url === PROXY)!.body as { grant_type: string; auth_code: string; code_verifier: string };
-    expect(exchange.grant_type).toBe("pkce");
+    const exchange = calls.find(({ url }) => url === `${SUPABASE}/auth/v1/token?grant_type=pkce`)!.body as { auth_code: string; code_verifier: string };
     expect(exchange.auth_code).toBe("one-time-code");
     expect(signIn.pkceChallenge(exchange.code_verifier)).toBe(authorize.searchParams.get("code_challenge"));
     expect(auth.loadAuth()).toMatchObject({ accessToken: "oauth", userId: "u-new" });
@@ -191,24 +166,14 @@ describe("GitHub and Google through the loopback", () => {
     await vi.waitFor(() => expect(realFetch(callback)).rejects.toThrow());
   });
 
-  it("falls back to Supabase's own PKCE grant only when the proxy is not deployed", async () => {
-    const calls = remote((url) => url === PROXY ? new Response("Not Found", { status: 404 }) : Response.json(session("direct")));
-    const login = start({ provider: "google" });
-    const callback = await login.callback;
-    await realFetch(`${callback}?code=c1`, { redirect: "manual" });
-    expect((await login.result).accessToken).toBe("direct");
-    const direct = calls.find(({ url }) => url === `${SUPABASE}/auth/v1/token?grant_type=pkce`)!;
-    expect(direct.body).toMatchObject({ auth_code: "c1" });
-  });
-
-  it("does not repeat a one-use PKCE exchange after an ambiguous proxy failure", async () => {
+  it("does not repeat a one-use PKCE exchange after a network failure", async () => {
     const calls = remote(() => Promise.reject(new TypeError("fetch failed")));
     const login = start({ provider: "google" });
     const failure = login.result.catch((error: unknown) => error);
     const callback = await login.callback;
     await realFetch(`${callback}?code=c1`, { redirect: "manual" });
-    expect(await failure).toMatchObject({ code: "unavailable" });
-    expect(calls.map(({ url }) => url)).toEqual([PROXY]);
+    expect(await failure).toMatchObject({ code: "network" });
+    expect(calls.map(({ url }) => url)).toEqual([`${SUPABASE}/auth/v1/token?grant_type=pkce`]);
   });
 
   it("reports the provider's refusal and keeps the existing login", async () => {

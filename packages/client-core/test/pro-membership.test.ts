@@ -151,7 +151,7 @@ describe("entitlement mapping", () => {
 });
 
 describe("fetchProMembership", () => {
-  it("asks itool.tech with only the user's bearer token", async () => {
+  it("calls the account service RPC directly by default when supabaseUrl is configured", async () => {
     respond(entitlement);
     await expect(fetchProMembership(options)).resolves.toEqual({
       plan: "pro",
@@ -161,38 +161,45 @@ describe("fetchProMembership", () => {
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("https://project.supabase.co/rest/v1/rpc/itool_entitlement");
+    expect(init).toMatchObject({
+      method: "POST",
+      credentials: "omit",
+      headers: { apikey: options.anonKey, Authorization: `Bearer ${options.accessToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ p_product: "linkshell" }),
+    });
+  });
+
+  it("asks itool.tech only when prefer is explicitly set to itool", async () => {
+    respond(entitlement);
+    await fetchProMembership({ ...options, prefer: "itool" });
+    const [url, init] = fetchMock.mock.calls[0]!;
     expect(url).toBe(ITOOL_ENTITLEMENT_URL);
     expect(url).toBe("https://itool.tech/api/membership/entitlement?product=linkshell");
     expect(init).toMatchObject({ credentials: "omit", headers: { Authorization: `Bearer ${options.accessToken}` } });
     expect(init?.method).toBeUndefined();
   });
 
-  it("calls the Supabase RPC directly when asked to prefer it", async () => {
-    respond(entitlement);
-    await fetchProMembership({ ...options, prefer: "supabase" });
-    const [url, init] = fetchMock.mock.calls[0]!;
-    expect(url).toBe("https://project.supabase.co/rest/v1/rpc/itool_entitlement");
-    expect(init).toMatchObject({
-      method: "POST",
-      headers: { apikey: options.anonKey, Authorization: `Bearer ${options.accessToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ p_product: "linkshell" }),
-    });
-  });
-
-  it.each([502, 503])("falls back to the other route when one is unavailable (%i)", async (status) => {
+  it.each([502, 503])("falls back from itool.tech when prefer is itool and it is unavailable (%i)", async (status) => {
     respond({ ok: false, code: "temporarily_unavailable" }, status);
     respond(entitlement);
-    await expect(fetchProMembership(options)).resolves.toMatchObject({ plan: "pro" });
+    await expect(fetchProMembership({ ...options, prefer: "itool" })).resolves.toMatchObject({ plan: "pro" });
     expect(String(fetchMock.mock.calls[1]![0])).toContain("/rest/v1/rpc/itool_entitlement");
   });
 
-  it("falls back when itool.tech can't be reached, and keeps the first error if both fail", async () => {
-    fetchMock.mockRejectedValueOnce(new Error("offline"));
-    respond(entitlement);
-    await expect(fetchProMembership(options)).resolves.toMatchObject({ plan: "pro" });
-    fetchMock.mockRejectedValueOnce(new Error("offline"));
+  it("does not hop to itool.tech when the direct account service fails", async () => {
     fetchMock.mockRejectedValueOnce(new Error("offline"));
     await expect(fetchProMembership(options)).rejects.toThrow("网络连接失败");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back when prefer is itool and itool.tech can't be reached, keeping the first error if both fail", async () => {
+    fetchMock.mockRejectedValueOnce(new Error("offline"));
+    respond(entitlement);
+    await expect(fetchProMembership({ ...options, prefer: "itool" })).resolves.toMatchObject({ plan: "pro" });
+    fetchMock.mockRejectedValueOnce(new Error("offline"));
+    fetchMock.mockRejectedValueOnce(new Error("offline"));
+    await expect(fetchProMembership({ ...options, prefer: "itool" })).rejects.toThrow("网络连接失败");
   });
 
   it("does not retry elsewhere after a refused token or a real answer", async () => {
@@ -235,7 +242,7 @@ describe("fetchReferralSummary & referralFromResponse", () => {
     earned_days: 44,
   };
 
-  it("parses referral summary from itool.tech API and builds localized shareUrl", async () => {
+  it("calls the account service RPC itool_my_referral directly and builds localized shareUrl", async () => {
     respond(referralBody);
     const summary = await fetchReferralSummary({ ...options, locale: "en" });
     expect(summary).toEqual({
@@ -245,16 +252,17 @@ describe("fetchReferralSummary & referralFromResponse", () => {
       earnedDays: 44,
       shareUrl: "https://www.itool.tech/en/pro?product=linkshell&ref=AB2C3D4E",
     });
-    expect(fetchMock.mock.calls[0]![0]).toBe(ITOOL_REFERRAL_URL);
+    expect(fetchMock.mock.calls[0]![0]).toBe("https://project.supabase.co/rest/v1/rpc/itool_my_referral");
   });
 
-  it("falls back to Supabase RPC itool_my_referral when itool.tech is unreachable", async () => {
+  it("falls back to RPC itool_my_referral when prefer is itool and itool.tech is unreachable", async () => {
     fetchMock.mockRejectedValueOnce(new Error("network down"));
     respond(referralBody);
-    const summary = await fetchReferralSummary(options);
+    const summary = await fetchReferralSummary({ ...options, prefer: "itool" });
     expect(summary.code).toBe("AB2C3D4E");
     expect(summary.earnedDays).toBe(44);
     expect(summary.shareUrl).toBe("https://www.itool.tech/pro?product=linkshell&ref=AB2C3D4E");
+    expect(fetchMock.mock.calls[0]![0]).toBe(ITOOL_REFERRAL_URL);
     expect(fetchMock.mock.calls[1]![0]).toBe("https://project.supabase.co/rest/v1/rpc/itool_my_referral");
   });
 

@@ -187,10 +187,6 @@ async function refused(res: Response): Promise<boolean> {
   }
 }
 
-// itool.tech proxies the token exchange for clients in regions that need it.
-// Set LINKSHELL_TOKEN_PROXY=off to skip it (kill switch).
-const TOKEN_PROXY_URL = "https://www.itool.tech/api/linkshell/token";
-
 interface TokenResponse {
   access_token: string;
   refresh_token: string;
@@ -207,17 +203,11 @@ function exchangeSignal(signal?: AbortSignal): AbortSignal {
   return signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000);
 }
 
-/**
- * Tries the itool.tech proxy. Returns an outcome to act on, or null meaning the proxy itself
- * is absent (404) so an older deployment can fall back to Supabase directly.
- * After any other outcome the one-use token may already have rotated: retain
- * it and retry later, rather than consume it twice through a second endpoint.
- */
-async function exchangeViaProxy(refreshToken: string, signal?: AbortSignal): Promise<ExchangeOutcome | null> {
+async function exchangeRefreshToken(refreshToken: string, signal?: AbortSignal): Promise<ExchangeOutcome> {
   try {
-    const res = await fetch(TOKEN_PROXY_URL, {
+    const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", apikey: SUPABASE_ANON_KEY },
       body: JSON.stringify({ refresh_token: refreshToken }),
       signal: exchangeSignal(signal),
     });
@@ -227,36 +217,10 @@ async function exchangeViaProxy(refreshToken: string, signal?: AbortSignal): Pro
           !body.refresh_token || typeof body.user?.id !== "string") return { kind: "retryable" };
       return { kind: "ok", body: body as TokenResponse };
     }
-    if (res.status === 404) return null;
-    const body = (await res.json().catch(() => ({}))) as { code?: string };
-    if (body.code === "invalid_grant") return { kind: "dead" };
-    return { kind: "retryable" };
-  } catch {
-    return { kind: "retryable" };
-  }
-}
-
-async function exchangeDirect(refreshToken: string, signal?: AbortSignal): Promise<ExchangeOutcome> {
-  try {
-    const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", apikey: SUPABASE_ANON_KEY },
-      body: JSON.stringify({ refresh_token: refreshToken }),
-      signal: exchangeSignal(signal),
-    });
-    if (res.ok) return { kind: "ok", body: (await res.json()) as TokenResponse };
     return (await refused(res)) ? { kind: "dead" } : { kind: "retryable" };
   } catch {
     return { kind: "retryable" };
   }
-}
-
-async function exchangeRefreshToken(refreshToken: string, signal?: AbortSignal): Promise<ExchangeOutcome> {
-  if (process.env.LINKSHELL_TOKEN_PROXY !== "off") {
-    const viaProxy = await exchangeViaProxy(refreshToken, signal);
-    if (viaProxy) return viaProxy;
-  }
-  return exchangeDirect(refreshToken, signal);
 }
 
 /**

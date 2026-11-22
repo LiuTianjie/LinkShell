@@ -42,12 +42,12 @@ describe("desktop membership", () => {
     expect(cachedMembership("u1").tier).toBe("monthly");
   });
 
-  it("asks itool.tech's entitlement route with the signed-in user's bearer token", async () => {
+  it("asks api.itool.tech's entitlement RPC directly with the signed-in user's bearer token", async () => {
     const planExpiresAt = expiry();
     const fetch = vi.fn().mockResolvedValueOnce(entitlement(planExpiresAt, "yearly"));
     vi.stubGlobal("fetch", fetch);
     expect(await refreshMembership()).toEqual({ plan: "pro", planExpiresAt, tier: "yearly" });
-    expect(fetch.mock.calls[0]?.[0]).toBe("https://itool.tech/api/membership/entitlement?product=linkshell");
+    expect(fetch.mock.calls[0]?.[0]).toBe("https://api.itool.tech/rest/v1/rpc/itool_entitlement");
     expect(fetch.mock.calls[0]?.[1]?.headers.Authorization).toBe("Bearer u1-access");
     expect(cachedMembership("u1")).toEqual({ plan: "pro", planExpiresAt, tier: "yearly" });
   });

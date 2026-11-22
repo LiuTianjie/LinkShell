@@ -368,7 +368,7 @@ export async function desktopFetch<T = unknown>(
   if (!token) {
     throw new Error("桌面工作台尚未连接，请重新打开窗口");
   }
-  if (!/^\/desktop\/[a-z-]+$/.test(path)) {
+  if (!/^\/desktop\/[a-z-]+(?:\?[a-zA-Z0-9_=&%.-]+)?$/.test(path)) {
     throw new Error("无效的桌面请求");
   }
   const { timeoutMs = 15_000, ...requestInit } = init;

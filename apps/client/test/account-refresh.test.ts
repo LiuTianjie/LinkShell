@@ -49,25 +49,27 @@ it("stays signed in when the refresh fails for another reason", async () => {
   expect(secrets.remove).not.toHaveBeenCalled();
 });
 
-it("uses the domestic refresh proxy without retrying a token after an ambiguous failure", async () => {
+it("refreshes directly against api.itool.tech without hopping through www.itool.tech", async () => {
+  const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+    expect(url).toBe("https://api.itool.tech/auth/v1/token?grant_type=refresh_token");
+    expect(init?.headers).toMatchObject({ "content-type": "application/json", apikey: "itool-core" });
+    return Response.json({ access_token: "fresh", refresh_token: "rotated", user: { id: expired.userId } });
+  });
+  vi.stubGlobal("fetch", fetch);
+  await expect(useAccount.getState().token()).resolves.toBe("fresh");
+  expect(fetch).toHaveBeenCalledOnce();
+  expect(useAccount.getState().session?.refreshToken).toBe("rotated");
+});
+
+it("keeps the session without retrying after a transient failure", async () => {
   const fetch = vi.fn(async (url: string) => {
-    expect(url).toBe("https://www.itool.tech/api/linkshell/token");
+    expect(url).toBe("https://api.itool.tech/auth/v1/token?grant_type=refresh_token");
     return Response.json({ code: "temporarily_unavailable" }, { status: 503 });
   });
   vi.stubGlobal("fetch", fetch);
   await expect(useAccount.getState().token()).resolves.toBeUndefined();
   expect(fetch).toHaveBeenCalledOnce();
   expect(useAccount.getState().session).toEqual(expired);
-});
-
-it("can refresh against an older deployment that has no token proxy", async () => {
-  const fetch = vi.fn(async (url: string) => url.includes("/api/linkshell/token")
-    ? new Response("Not Found", { status: 404 })
-    : Response.json({ access_token: "fresh", refresh_token: "rotated", user: { id: expired.userId } }));
-  vi.stubGlobal("fetch", fetch);
-  await expect(useAccount.getState().token()).resolves.toBe("fresh");
-  expect(fetch).toHaveBeenCalledTimes(2);
-  expect(useAccount.getState().session?.refreshToken).toBe("rotated");
 });
 
 it("renews a still-valid token in the background instead of delaying the gateway handshake", async () => {

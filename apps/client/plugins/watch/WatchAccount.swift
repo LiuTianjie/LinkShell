@@ -67,13 +67,13 @@ final class WatchAccount: ObservableObject {
   private var generation = 0
   private let http: URLSession
   private let authURL: URL
-  private let membershipURL: URL
+  private let membershipURL: URL?
   private let anonKey: String
   private let readSecret: (String) throws -> Data?
   private let writeSecret: (String, Data?) throws -> Void
 
   init(http: URLSession? = nil, authURL: URL? = nil, anonKey: String? = nil,
-       membershipURL: URL = URL(string: "https://itool.tech/api/membership/entitlement?product=linkshell")!,
+       membershipURL: URL? = nil,
        readSecret: @escaping (String) throws -> Data? = WatchKeychain.read,
        writeSecret: @escaping (String, Data?) throws -> Void = { try WatchKeychain.write($0, data: $1) }) throws {
     self.http = http ?? URLSession(configuration: .ephemeral, delegate: WatchHTTPDelegate(), delegateQueue: nil)
@@ -146,11 +146,20 @@ final class WatchAccount: ObservableObject {
       membershipError = Self.message(error)
     }
   }
-  /// itool.tech's entitlement route: reachable where supabase.co is not, same answer as the RPC.
+  /// Calls the account service entitlement RPC directly (`api.itool.tech/rest/v1/rpc/itool_entitlement`).
   private func fetchMembership(epoch: Int, userID: String) async throws -> WatchMembership {
     guard let token = try await token() else { throw WatchLinkError("登录已失效，请重新登录后再试") }
     try checkAccount(epoch, userID)
-    var request = URLRequest(url: membershipURL)
+    var request: URLRequest
+    if let customURL = membershipURL {
+      request = URLRequest(url: customURL)
+    } else {
+      request = URLRequest(url: authURL.appendingPathComponent("rest/v1/rpc/itool_entitlement"))
+      request.httpMethod = "POST"
+      request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+      request.setValue(anonKey, forHTTPHeaderField: "apikey")
+      request.httpBody = try JSONSerialization.data(withJSONObject: ["p_product": "linkshell"])
+    }
     request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     let (data, response) = try await membershipRequest(request)
     try checkAccount(epoch, userID)

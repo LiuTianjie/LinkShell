@@ -91,9 +91,10 @@ final class FakeHTTP: URLProtocol {
     if reply.path != "/auth/v1/token" {
       precondition(request.timeoutInterval == 15 && !request.httpShouldHandleCookies)
     }
-    if reply.path == "/api/membership/entitlement" {
-      precondition(request.url!.absoluteString == "https://itool.tech/api/membership/entitlement?product=linkshell")
-      precondition(request.httpMethod == "GET")
+    if reply.path == "/rest/v1/rpc/itool_entitlement" {
+      precondition(request.url!.absoluteString == "https://example.com/rest/v1/rpc/itool_entitlement")
+      precondition(request.httpMethod == "POST")
+      precondition(request.value(forHTTPHeaderField: "apikey") == "public-test-key")
     }
     if reply.held { Self.lock.lock(); Self.pending = (self, reply); Self.lock.unlock() }
     else { respond(reply) }
@@ -106,7 +107,7 @@ final class FakeHTTP: URLProtocol {
   override func stopLoading() {}
 }
 @main struct Harness {
-  static let entitlement = "/api/membership/entitlement", token = "/auth/v1/token"
+  static let entitlement = "/rest/v1/rpc/itool_entitlement", token = "/auth/v1/token"
   static func answer(active: Bool, until: String?, tier: String = "monthly") -> [String: Any] {
     ["ok": true, "product": "linkshell", "required_tier": "monthly", "active": active, "valid_until": until ?? NSNull(), "tier": active ? tier : "free", "server_time": "2020-01-01T00:00:00.000Z"]
   }

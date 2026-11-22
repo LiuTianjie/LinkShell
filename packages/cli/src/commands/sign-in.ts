@@ -3,7 +3,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { execFile } from "node:child_process";
 import { saveAuth, SUPABASE_ANON_KEY, SUPABASE_URL, type AuthTokens } from "../auth.js";
 import { cacheMembership, lookupMembership, type DesktopMembership } from "../pro-membership.js";
-import { isDefinitiveAccountError, oauthErrorCode, tokenErrorCode } from "../../../client-core/src/account-errors.js";
+import { oauthErrorCode, tokenErrorCode } from "../../../client-core/src/account-errors.js";
 import { LoginError } from "./login-error.js";
 
 /**
@@ -36,15 +36,12 @@ export interface SessionGrant {
 export type OAuthProvider = "github" | "google";
 export const OAUTH_PROVIDERS: readonly OAuthProvider[] = ["github", "google"];
 
-// itool.tech forwards the exchange for places where supabase.co is blocked but itool.tech is
-// not, as it does for refreshes. LINKSHELL_TOKEN_PROXY=off skips it (the same kill switch).
-export const AUTH_PROXY_URL = "https://www.itool.tech/api/linkshell/auth";
-// Must match the Supabase redirect allowlist entry `http://127.0.0.1:*/linkshell/callback`.
+// Must match the redirect allowlist entry `http://127.0.0.1:*/linkshell/callback`.
 // An IP literal rather than `localhost` (RFC 8252 §7.3): nothing can resolve it elsewhere.
 export const OAUTH_CALLBACK_PATH = "/linkshell/callback";
 const OAUTH_DONE_PATH = "/linkshell/done";
 export const OAUTH_TIMEOUT_MS = 5 * 60_000;
-const EXCHANGE_TIMEOUT_MS = 10_000;
+const EXCHANGE_TIMEOUT_MS = 15_000;
 const USER_TIMEOUT_MS = 10_000;
 
 type Grant =
@@ -122,36 +119,9 @@ function parseGrant(body: unknown): SessionGrant | undefined {
   };
 }
 
-/**
- * A session, a refusal to show (never retried directly: a wrong password stays wrong), or
- * undefined when an older proxy is absent, or when a password grant can safely
- * fall back. A PKCE code is never exchanged again after an ambiguous failure.
- */
-async function exchangeViaProxy(grant: Grant, signal?: AbortSignal): Promise<SessionGrant | LoginError | undefined> {
-  let response: Response;
-  try {
-    response = await fetch(AUTH_PROXY_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(grant),
-      signal: bounded(signal, AbortSignal.timeout(EXCHANGE_TIMEOUT_MS)),
-    });
-  } catch {
-    return signal?.aborted ? new LoginError("cancelled") : grant.grant_type === "pkce" ? new LoginError("unavailable") : undefined;
-  }
-  const body = await response.json().catch(() => undefined);
-  if (response.ok) {
-    const parsed = parseGrant(body);
-    return parsed ?? (grant.grant_type === "pkce" ? new LoginError("unavailable") : undefined);
-  }
-  // Older itool.tech deployments have no such route yet.
-  if (response.status === 404) return undefined;
-  const code = tokenErrorCode(response.status, body, grant.grant_type);
-  if (grant.grant_type === "pkce") return new LoginError(code === "unknown" ? "unavailable" : code);
-  return isDefinitiveAccountError(code) ? new LoginError(code) : undefined;
-}
-
-async function exchangeDirect(grant: Grant, signal?: AbortSignal): Promise<SessionGrant> {
+/** Exchanges a password or PKCE grant directly with the account service (`api.itool.tech`). */
+export async function exchangeGrant(grant: Grant, signal?: AbortSignal): Promise<SessionGrant> {
+  if (signal?.aborted) throw new LoginError("cancelled");
   const { grant_type: type, ...fields } = grant;
   const timeout = AbortSignal.timeout(EXCHANGE_TIMEOUT_MS);
   let response: Response;
@@ -170,17 +140,6 @@ async function exchangeDirect(grant: Grant, signal?: AbortSignal): Promise<Sessi
   const parsed = parseGrant(body);
   if (!parsed) throw new LoginError("unavailable");
   return parsed;
-}
-
-/** Proxy first, then Supabase directly, unless the proxy refused outright. */
-export async function exchangeGrant(grant: Grant, signal?: AbortSignal): Promise<SessionGrant> {
-  if (process.env.LINKSHELL_TOKEN_PROXY !== "off") {
-    const viaProxy = await exchangeViaProxy(grant, signal);
-    if (viaProxy instanceof LoginError) throw viaProxy;
-    if (viaProxy) return viaProxy;
-  }
-  if (signal?.aborted) throw new LoginError("cancelled");
-  return exchangeDirect(grant, signal);
 }
 
 export async function loginWithPassword(options: { email: string; password: string; signal?: AbortSignal }): Promise<LoginResult> {

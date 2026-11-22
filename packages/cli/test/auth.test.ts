@@ -13,10 +13,6 @@ afterEach(() => vi.unstubAllGlobals());
 const file = join(home, "auth.json");
 const tokens = (expiresAt: number) => ({ accessToken: "access-1", refreshToken: "refresh-1", expiresAt, userId: "u1", email: "me@example.com" });
 
-// These exercise the direct Supabase exchange; the token proxy is covered in its own block below.
-beforeEach(() => { process.env.LINKSHELL_TOKEN_PROXY = "off"; });
-afterEach(() => { delete process.env.LINKSHELL_TOKEN_PROXY; });
-
 describe("the account on this computer", () => {
   it("is kept in a file only its owner can read", () => {
     auth.saveAuth(tokens(Date.now() + 3_600_000));
@@ -165,14 +161,11 @@ describe("the account on this computer", () => {
   });
 });
 
-const PROXY = "https://www.itool.tech/api/linkshell/token";
-
-describe("refreshing through the itool.tech proxy", () => {
-  beforeEach(() => { delete process.env.LINKSHELL_TOKEN_PROXY; });
-
-  it("refreshes through the proxy without ever touching Supabase directly", async () => {
-    const fetch = vi.fn(async (url: string) => {
-      expect(url).toBe(PROXY);
+describe("direct refresh against api.itool.tech", () => {
+  it("refreshes directly against api.itool.tech without touching www.itool.tech", async () => {
+    const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(url).toBe("https://api.itool.tech/auth/v1/token?grant_type=refresh_token");
+      expect(init?.headers).toMatchObject({ "Content-Type": "application/json", apikey: "itool-core" });
       return Response.json({ access_token: "access-2", refresh_token: "refresh-2", expires_in: 3600, user: { id: "u1", email: "me@example.com" } });
     });
     vi.stubGlobal("fetch", fetch);
@@ -182,56 +175,10 @@ describe("refreshing through the itool.tech proxy", () => {
     expect(auth.loadAuth()).toMatchObject({ accessToken: "access-2", refreshToken: "refresh-2" });
   });
 
-  it("signs out when the proxy says the refresh token is dead", async () => {
+  it("keeps the session when api.itool.tech returns a malformed 200 payload", async () => {
     auth.saveAuth(tokens(Date.now() - 1));
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: false, code: "invalid_grant" }, { status: 401 })));
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ access_token: "only-access" })));
     expect(await auth.getValidToken()).toBeNull();
-    expect(auth.loadAuth()).toBeNull();
-  });
-
-  it("keeps the session without repeating a possibly consumed token when the proxy is unreachable", async () => {
-    auth.saveAuth(tokens(Date.now() - 1));
-    const fetch = vi.fn(async (url: string) => {
-      if (url === PROXY) throw new Error("itool.tech unreachable");
-      return Response.json({ access_token: "access-direct", refresh_token: "refresh-direct", expires_in: 3600, user: { id: "u1" } });
-    });
-    vi.stubGlobal("fetch", fetch);
-    expect(await auth.getValidToken()).toBeNull();
-    expect(fetch).toHaveBeenCalledTimes(1);
     expect(auth.loadAuth()).not.toBeNull();
-  });
-
-  it("keeps the session when the proxy is temporarily unavailable", async () => {
-    auth.saveAuth(tokens(Date.now() - 1));
-    const fetch = vi.fn(async (url: string) => {
-      if (url === PROXY) return Response.json({ ok: false, code: "temporarily_unavailable" }, { status: 503 });
-      return Response.json({ access_token: "access-direct", refresh_token: "refresh-direct", expires_in: 3600, user: { id: "u1" } });
-    });
-    vi.stubGlobal("fetch", fetch);
-    expect(await auth.getValidToken()).toBeNull();
-    expect(fetch).toHaveBeenCalledTimes(1);
-    expect(auth.loadAuth()).not.toBeNull();
-  });
-
-  it("falls back to Supabase directly when the proxy is not deployed", async () => {
-    auth.saveAuth(tokens(Date.now() - 1));
-    const fetch = vi.fn(async (url: string) => url === PROXY
-      ? new Response("Not Found", { status: 404 })
-      : Response.json({ access_token: "access-direct", refresh_token: "refresh-direct", expires_in: 3600, user: { id: "u1" } }));
-    vi.stubGlobal("fetch", fetch);
-    expect(await auth.getValidToken()).toBe("access-direct");
-    expect(fetch).toHaveBeenCalledTimes(2);
-  });
-
-  it("is skipped entirely when the kill switch is off", async () => {
-    process.env.LINKSHELL_TOKEN_PROXY = "off";
-    auth.saveAuth(tokens(Date.now() - 1));
-    const fetch = vi.fn(async (url: string) => {
-      expect(url).toContain("api.itool.tech");
-      return Response.json({ access_token: "access-direct", refresh_token: "refresh-direct", expires_in: 3600, user: { id: "u1" } });
-    });
-    vi.stubGlobal("fetch", fetch);
-    expect(await auth.getValidToken()).toBe("access-direct");
-    expect(fetch).toHaveBeenCalledTimes(1);
   });
 });

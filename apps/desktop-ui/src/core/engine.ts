@@ -4,8 +4,6 @@ import {
   HostStreams,
   TunnelSocket,
   createClientStore,
-  fetchProMembership,
-  fetchReferralSummary,
   pairByCode,
   pairByLink,
   type Locale,
@@ -21,6 +19,7 @@ import {
   type RelaySocket,
 } from "@linkshell/wire";
 import {
+  desktopFetch,
   desktopHostWsUrl,
   desktopPlatform,
   isElectronDesktop,
@@ -59,8 +58,6 @@ export type { Computer, Connection };
 export type GatewaySource = "official" | "self-hosted";
 
 export const OFFICIAL_GATEWAY = "wss://gateway.itool.tech";
-const SUPABASE_URL = "https://api.itool.tech";
-const SUPABASE_ANON_KEY = "itool-core";
 const ACCOUNT_BINDING_ERROR = "网关未确认当前账号，请退出账号后重新登录。";
 
 /** `computer` under the name its host reports: the same object when that is already its name. */
@@ -948,41 +945,15 @@ export class DesktopEngine {
 export const engine = new DesktopEngine();
 
 export async function fetchDesktopProMembership(expectedUserId: string): Promise<ProMembership> {
-  const account = await fetchDesktopAccount();
-  if (!account.userId || account.userId !== expectedUserId || !account.accessToken) {
-    throw new Error("登录已失效，请重新登录");
-  }
-  const membership = await fetchProMembership({
-    supabaseUrl: SUPABASE_URL,
-    anonKey: SUPABASE_ANON_KEY,
-    accessToken: account.accessToken,
-    userId: expectedUserId,
-  });
-  const after = await fetchDesktopAccount();
-  if (!after.userId || after.userId !== expectedUserId) {
-    throw new Error("账号已切换，请在当前账户下重新操作");
-  }
-  return membership;
+  const params = new URLSearchParams({ userId: expectedUserId });
+  return desktopFetch<ProMembership>(`/desktop/membership?${params.toString()}`);
 }
 
 export async function fetchDesktopReferralSummary(
   expectedUserId: string,
   locale?: Locale,
 ): Promise<ReferralSummary> {
-  const account = await fetchDesktopAccount();
-  if (!account.userId || account.userId !== expectedUserId || !account.accessToken) {
-    throw new Error("登录已失效，请重新登录");
-  }
-  const referral = await fetchReferralSummary({
-    supabaseUrl: SUPABASE_URL,
-    anonKey: SUPABASE_ANON_KEY,
-    accessToken: account.accessToken,
-    userId: expectedUserId,
-    locale,
-  });
-  const after = await fetchDesktopAccount();
-  if (!after.userId || after.userId !== expectedUserId) {
-    throw new Error("账号已切换，请在当前账户下重新操作");
-  }
-  return referral;
+  const params = new URLSearchParams({ userId: expectedUserId });
+  if (locale) params.set("locale", locale);
+  return desktopFetch<ReferralSummary>(`/desktop/referral?${params.toString()}`);
 }
