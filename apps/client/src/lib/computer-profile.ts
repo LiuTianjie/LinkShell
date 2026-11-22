@@ -2,6 +2,41 @@ import type { MachineInfo } from "@linkshell/wire";
 import type { Computer, ComputerProfile, SavedComputerProfile } from "./computers";
 import type { Locale } from "@linkshell/client-core";
 
+export type ComputerIllustrationKind =
+  | "air"
+  | "notebook"
+  | "studio"
+  | "mini"
+  | "tower"
+  | "allInOne"
+  | "generic";
+
+export function computerIllustrationKind(profile?: ComputerProfile): ComputerIllustrationKind {
+  switch (profile?.hardwareModel?.family) {
+    case "MacBook Air":
+      return "air";
+    case "MacBook Pro":
+    case "MacBook":
+      return "notebook";
+    case "Mac Studio":
+      return "studio";
+    case "Mac mini":
+      return "mini";
+  }
+  switch (profile?.formFactor) {
+    case "mac-mini":
+      return "mini";
+    case "notebook":
+      return "notebook";
+    case "all-in-one":
+      return "allInOne";
+    case "tower":
+    case "desktop":
+      if (profile.platform === "win32") return "tower";
+  }
+  return "generic";
+}
+
 export function reportedComputerProfile(machine: MachineInfo): ComputerProfile {
   return { platform: machine.platform, formFactor: machine.formFactor, hardwareModel: machine.platform === "darwin" ? machine.hardwareModel : undefined };
 }

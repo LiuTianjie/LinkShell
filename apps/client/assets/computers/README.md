@@ -16,8 +16,14 @@ Use case: product-mockup. A production UI asset for a mobile computer selector. 
 
 ## Host workspace artwork
 
-`notebook.webp` and `mini.webp` are the transparent, tightly cropped originals for the approved mobile computer workspace. `tower.webp` is an original, offline-rendered generic PC (separate display and tower), not a capture of a user's screen. Share the same artwork between the overview, details and picker. Operating system alone is not an enclosure type.
+`notebook.webp`, `air.webp`, `mini.webp`, `studio.webp`, `tower.webp`, and `generic.webp` are transparent, tightly cropped product renders for the mobile computer workspace:
 
-The MacBook Air and MacBook Pro have separate original vector illustrations (thin silver lip / wider graphite keyboard deck), as does Mac Studio. The neutral processor glyph means no verified enclosure; `computer.png` is used only for a reported all-in-one. All three sizes use the same selection code. Finishes are illustrative, not detected colors. Detailed model names are read from `machine.info`, never inferred from the nickname, gateway label or OS.
+- `notebook.webp`: Pro laptop fallback (e.g. `MacBook Pro`, `MacBook`, or generic `notebook` form factor).
+- `air.webp`: Ultra-slim laptop fallback (`MacBook Air`).
+- `mini.webp`: Compact desktop mini (`Mac mini` / `mac-mini` form factor).
+- `studio.webp`: Tall silver workstation cube (`Mac Studio`).
+- `tower.webp`: Generic Windows PC display and tower (`win32` with `tower` or `desktop` form factor).
+- `computer.png`: Reported `all-in-one` desktop display.
+- `generic.webp`: Refined neutral standalone display for hosts whose enclosure is unknown (older hosts before hardware reporting, offline unvisited computers, locked computers, or generic Linux/Mac Pro desktops before `machine.artwork` loads). A computer name or OS alone never implies a specific Apple model.
 
-On a capable Mac the preferred art is AppKit’s `NSImageNameComputer` for that very Mac. Its Host trims the transparent margins and serves a size-limited WebP through authenticated `machine.artwork` on demand. The image hash, not a nickname or asset URL, is cached. No Apple system artwork is bundled or requested from a public image service. Original family illustrations are fallbacks for older hosts and headless systems.
+On a capable Mac the preferred art is AppKit’s `NSImageNameComputer` for that very Mac. Its Host trims the transparent margins and serves a size-limited WebP through authenticated `machine.artwork` on demand. The image hash, not a nickname or asset URL, is cached. No Apple system artwork is bundled or requested from a public image service. Photorealistic product renders above serve as fallbacks for older hosts and headless/non-Apple systems.

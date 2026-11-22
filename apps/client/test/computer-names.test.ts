@@ -1,7 +1,7 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import type { HostLink } from "@linkshell/client-core";
 import type { MachineInfo } from "@linkshell/wire";
-import { computerProfile, computerDescription } from "../src/lib/computer-profile";
+import { computerIllustrationKind, computerProfile, computerDescription } from "../src/lib/computer-profile";
 import type { Computer, SavedComputerProfile } from "../src/lib/computers";
 
 const mocks = vi.hoisted(() => ({ value: "{}", write: vi.fn(), subscribe: vi.fn(), updateComputerName: vi.fn() }));
@@ -104,4 +104,24 @@ it("treats names as labels, ignores legacy guesses and restores only this peer's
   expect(computerProfile(renamed, { ...verified, peerId: "different" }).hardwareModel).toBeUndefined();
   expect(computerProfile(renamed, verified, { ...info, locked: true }).hardwareModel).toBeUndefined();
   expect(computerProfile(renamed, verified, machineInfo("MacBook-Air")).formFactor).toBeUndefined();
+});
+
+it("selects refined fallback artwork by verified hardware and uses generic display when unverified, never by nickname", () => {
+  expect(computerIllustrationKind({ platform: "darwin" })).toBe("generic");
+  expect(computerIllustrationKind({ platform: "linux", formFactor: "desktop" })).toBe("generic");
+  expect(computerIllustrationKind({ platform: "linux", formFactor: "tower" })).toBe("generic");
+  expect(computerIllustrationKind({ platform: "darwin", formFactor: "desktop", hardwareModel: { family: "Mac Studio" } })).toBe("studio");
+  expect(computerIllustrationKind({ platform: "darwin", formFactor: "notebook", hardwareModel: { family: "MacBook Air" } })).toBe("air");
+  expect(computerIllustrationKind({ platform: "darwin", formFactor: "notebook", hardwareModel: { family: "MacBook Pro" } })).toBe("notebook");
+  expect(computerIllustrationKind({ platform: "darwin", formFactor: "notebook", hardwareModel: { family: "MacBook" } })).toBe("notebook");
+  expect(computerIllustrationKind({ platform: "darwin", formFactor: "mac-mini" })).toBe("mini");
+  expect(computerIllustrationKind({ platform: "darwin", formFactor: "all-in-one", hardwareModel: { family: "iMac" } })).toBe("allInOne");
+  expect(computerIllustrationKind({ platform: "win32", formFactor: "tower" })).toBe("tower");
+  expect(computerIllustrationKind({ platform: "win32", formFactor: "desktop" })).toBe("tower");
+  expect(computerIllustrationKind({ platform: "win32" })).toBe("generic");
+
+  // Locked or nickname-only peers never inherit a guess.
+  const locked = { ...computer, machine: { ...computer.machine, name: "MacBook-Pro", platform: "darwin", locked: true } };
+  const verified = { platform: "darwin", formFactor: "mac-mini" as const, hardwareModel: { family: "Mac mini" as const }, peerId: locked.machine.id };
+  expect(computerIllustrationKind(computerProfile(locked, verified))).toBe("generic");
 });
