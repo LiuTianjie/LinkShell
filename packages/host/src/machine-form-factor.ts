@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { promisify } from "node:util";
-import type { MachineFormFactor } from "@linkshell/wire";
+import type { MachineFormFactor, MachineInfo, MacModelFamily } from "@linkshell/wire";
 
 const run = promisify(execFile);
 const opts = { timeout: 2_500, maxBuffer: 128 * 1024, windowsHide: true, encoding: "utf8" as const };
@@ -15,20 +15,39 @@ export function enclosureFormFactor(values: readonly number[]): MachineFormFacto
   return undefined;
 }
 
-export function macFormFactor(model: string): MachineFormFactor | undefined {
-  if (/^MacBook/i.test(model)) return "notebook";
-  if (/^Mac mini/i.test(model)) return "mac-mini";
-  if (/^iMac/i.test(model)) return "all-in-one";
-  if (/^Mac (Studio|Pro)/i.test(model)) return "desktop";
+type Hardware = Pick<MachineInfo, "formFactor" | "hardwareModel">;
+const macEnclosures: Record<MacModelFamily, MachineFormFactor> = {
+  "MacBook Pro": "notebook", "MacBook Air": "notebook", MacBook: "notebook", "Mac mini": "mac-mini",
+  "Mac Studio": "desktop", "Mac Pro": "desktop", "iMac Pro": "all-in-one", iMac: "all-in-one",
+};
+
+/** Accept only system product fields. In particular, Mac15,10 is an opaque ID, not a desktop. */
+export function macHardware(product: unknown, modelId?: unknown): Hardware | undefined {
+  const name = typeof product === "string" && product.length <= 100 ? product.trim() : "";
+  for (const family of Object.keys(macEnclosures) as MacModelFamily[]) {
+    const suffix = name.slice(family.length);
+    if (name.startsWith(family) && (!suffix || /^ \([^()\r\n]+\)$/.test(suffix))) {
+      return { formFactor: macEnclosures[family], hardwareModel: { family, ...(suffix ? { productName: name } : {}) } };
+    }
+  }
+  if (typeof modelId === "string") {
+    const prefix = /^([a-z]+)\d+,\d+$/i.exec(modelId)?.[1]?.toLowerCase();
+    const family = (Object.keys(macEnclosures) as MacModelFamily[]).find((f) => f.toLowerCase().replaceAll(" ", "") === prefix);
+    if (family) return { formFactor: macEnclosures[family], hardwareModel: { family } };
+  }
   return undefined;
 }
 
-async function detect(): Promise<MachineFormFactor | undefined> {
+async function detect(): Promise<Hardware> {
   try {
     if (process.platform === "darwin") {
-      const { stdout } = await run("/usr/sbin/system_profiler", ["-json", "SPHardwareDataType"], opts);
-      const model: unknown = JSON.parse(stdout).SPHardwareDataType?.[0]?.machine_name;
-      return typeof model === "string" ? macFormFactor(model) : undefined;
+      // Apple silicon publishes the actual product name (often including display size) here.
+      const tree = await run("/usr/sbin/ioreg", ["-p", "IODeviceTree", "-r", "-n", "product", "-d", "1"], opts).catch(() => undefined);
+      const product = macHardware(/"product-name"\s*=\s*<"([^"\r\n]+)">/.exec(tree?.stdout ?? "")?.[1]);
+      if (product) return product;
+      const { stdout } = await run("/usr/sbin/system_profiler", ["-json", "SPHardwareDataType"], { ...opts, env: { ...process.env, LC_ALL: "C" } });
+      const hw = JSON.parse(stdout).SPHardwareDataType?.[0];
+      return macHardware(hw?.machine_name, hw?.machine_model) ?? {};
     }
     if (process.platform === "win32") {
       const { stdout } = await run(
@@ -42,15 +61,15 @@ async function detect(): Promise<MachineFormFactor | undefined> {
         ],
         opts,
       );
-      return enclosureFormFactor(stdout.trim().split(/\s+/).map(Number));
+      return { formFactor: enclosureFormFactor(stdout.trim().split(/\s+/).map(Number)) };
     }
     if (process.platform === "linux")
-      return enclosureFormFactor([Number((await readFile("/sys/class/dmi/id/chassis_type", "utf8")).trim())]);
+      return { formFactor: enclosureFormFactor([Number((await readFile("/sys/class/dmi/id/chassis_type", "utf8")).trim())]) };
   } catch {
     /* Restricted hosts still serve every RPC without hardware artwork metadata. */
   }
-  return undefined;
+  return {};
 }
 
 let cached: ReturnType<typeof detect> | undefined;
-export const readMachineFormFactor = () => (cached ??= detect());
+export const readMachineHardware = () => (cached ??= detect());

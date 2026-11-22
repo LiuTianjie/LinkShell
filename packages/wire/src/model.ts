@@ -342,6 +342,11 @@ export type ProjectSummary = z.infer<typeof projectSummarySchema>;
 export const machineFormFactorSchema = z.enum(["notebook", "mac-mini", "desktop", "tower", "all-in-one"]);
 export type MachineFormFactor = z.infer<typeof machineFormFactorSchema>;
 
+/** A manufacturer family, not the host's nickname. Only shared by the unlocked machine.info RPC. */
+export const macModelFamilySchema = z.enum(["MacBook Air", "MacBook Pro", "MacBook", "Mac mini", "Mac Studio", "Mac Pro", "iMac", "iMac Pro"]);
+export type MacModelFamily = z.infer<typeof macModelFamilySchema>;
+const hardwareModelSchema = z.object({ family: macModelFamilySchema, productName: z.string().min(1).max(100).optional() });
+
 export const machineInfoSchema = z.object({
   machineId: z.string().min(1),
   hostname: z.string(),
@@ -349,6 +354,7 @@ export const machineInfoSchema = z.object({
   naming: z.object({ defaultName: z.string(), customName: z.string().optional(), configured: z.boolean() }).optional(),
   platform: z.string(),
   formFactor: machineFormFactorSchema.optional(),
+  hardwareModel: hardwareModelSchema.optional().catch(undefined),
   hostVersion: z.string(),
   /** The host's RPC revision (`HOST_PROTOCOL`); absent from hosts older than it. */
   protocol: z.number().int().nonnegative().optional(),

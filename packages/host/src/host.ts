@@ -1,4 +1,4 @@
-import { readMachineFormFactor } from "./machine-form-factor.js";
+import { readMachineHardware } from "./machine-form-factor.js";
 import { UsageStatistics } from "./usage.js";
 import {
   chmodSync,
@@ -314,7 +314,7 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
       },
     });
     hub = sessionHub;
-    const [formFactor] = await Promise.all([readMachineFormFactor(), sessionHub.start({ discoveryIntervalMs: options.discoveryIntervalMs })]);
+    const [hardware] = await Promise.all([readMachineHardware(), sessionHub.start({ discoveryIntervalMs: options.discoveryIntervalMs })]);
     try {
       hostStore.runMaintenance();
     } catch (error) {
@@ -337,7 +337,7 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
       hostname: machineName.value,
       naming: machineName.info(),
       platform: platform(),
-      ...(formFactor ? { formFactor } : {}),
+      ...hardware,
       hostVersion: options.version,
       protocol: HOST_PROTOCOL,
       home: homedir(),
@@ -467,7 +467,7 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
             token: chosen?.token,
             name: machineName.value,
             namingConfigured: machineName.info().configured,
-            formFactor,
+            formFactor: hardware.formFactor,
             locked: () => access.enabled,
             serve: (transport) => rpcServer.connect(transport),
             // A link that was replaced has nothing more to say.

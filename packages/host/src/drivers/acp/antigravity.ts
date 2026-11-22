@@ -1197,6 +1197,28 @@ async function lookupLanguageServer(desktop: ResolvedAntigravityDesktop, logPath
     lsCache = undefined;
     return undefined;
   }
+  // The desktop and other Google apps can publish hubs in the same directory. Only use
+  // the descriptor for the HTTP listener announced by *this desktop's* launch log.
+  const descriptor = join(desktop.dataDir, "daemon", `hub_${httpPort}.json`);
+  if (existsSync(descriptor)) {
+    let fd: number | undefined;
+    try {
+      fd = openSync(descriptor, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+      const file = fstatSync(fd);
+      if (!file.isFile() || file.size > 4096 || (process.getuid && (file.uid !== process.getuid() || (file.mode & 0o077) !== 0))) return undefined;
+      const hub = JSON.parse(readFileSync(fd, "utf8"));
+      if (hub.httpPort !== httpPort || httpPort < 1 || httpPort > 65535 || !Number.isSafeInteger(hub.pid) || hub.pid < 1 || typeof hub.csrfToken !== "string" || !hub.csrfToken.trim()) return undefined;
+      process.kill(hub.pid, 0); // A descriptor can outlive its desktop.
+      const conn = { httpPort, csrfToken: hub.csrfToken };
+      lsCache = { logPath, at: Date.now(), conn };
+      return conn;
+    } catch {
+      return undefined;
+    } finally {
+      if (fd !== undefined) closeSync(fd);
+    }
+  }
+  // Older desktops did not publish a per-user hub descriptor.
   const tokens: string[] = [];
   try {
     const { stdout } = await execFileAsync("ps", ["-ax", "-o", "args="], { timeout: 3000 });
@@ -1237,6 +1259,7 @@ async function callLanguageServer<T = Record<string, unknown>>(
         "x-codeium-csrf-token": conn.csrfToken,
       },
       body: JSON.stringify(body),
+      redirect: "error",
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {
