@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync, statSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
 // The module reads LINKSHELL_HOME once, as it loads.
 const home = mkdtempSync(join(tmpdir(), "lsh-auth-"));
