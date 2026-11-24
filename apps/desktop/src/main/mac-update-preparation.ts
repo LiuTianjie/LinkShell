@@ -10,7 +10,7 @@ interface Preparation {
 const ZH_TEXT = {
   paused: (why: string) => `更新已暂停：${why}。`,
   recover: (why: string) => `服务恢复需要处理：${why}。`,
-  retry: "可点击下载并更新重试。",
+  retry: "可点击更新并重启重试。",
 };
 
 const reason = (error: unknown) => error instanceof Error ? error.message : String(error);

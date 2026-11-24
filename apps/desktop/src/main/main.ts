@@ -23,6 +23,7 @@ import { WorkspacePolicy } from "./policy.js";
 import { normalizePreviewSubPath, RemotePortProxyManager, validatePreviewPort } from "./remote-port-proxy.js";
 import { launchOptions, Runtime } from "./runtime.js";
 import { WorkspaceServer } from "./workspace.js";
+import { AUTO_UPDATE_CHECK_COOLDOWN_MS, PERIODIC_UPDATE_CHECK_INTERVAL_MS, shouldAutoCheckUpdates } from "./update-policy.js";
 import { checkWindowsRelease, cleanWindowsUpdateDownloads, compareVersions, downloadWindowsInstaller, verifyInstaller, type DownloadedInstaller, type WindowsRelease } from "./windows-update.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -313,6 +314,7 @@ function createWindow() {
     if (WINDOWS) window?.flashFrame(false);
     syncImmersivePresentation();
     updateWindowSurface();
+    maybeAutoCheckUpdates();
   });
   window.on("blur", () => { syncImmersivePresentation(); updateWindowSurface(); });
   window.on("resize", updateWindowSurface);
@@ -865,6 +867,10 @@ async function handle(method: string, params: Record<string, unknown>): Promise<
       await saveSettings();
       if (key === "opaqueWindow") updateWindowSurface();
       if (key === "updateChannel") {
+        if (MAC) {
+          macUpdate = { checking: false, installing: false, available: false, message: t("win.channel") };
+          noteUpdate("current");
+        }
         nativeModule?.updaterChannel(String(params.value));
       }
       return {};
@@ -872,7 +878,9 @@ async function handle(method: string, params: Record<string, unknown>): Promise<
     case "checkUpdates": return checkUpdates();
     case "updateStatus":
       if (WINDOWS && runtime.standalone) return windowsUpdate;
-      // Sparkle keeps no state the page can read back; what it last found is enough after a reload.
+      if (MAC && runtime.standalone && (macUpdate.checking || macUpdate.installing || macUpdate.available || macUpdate.checkedAt)) {
+        return macUpdate;
+      }
       if (MAC && runtime.standalone && updateAvailable !== undefined) {
         return { checking: false, installing: false, available: true, ...(updateAvailable ? { version: updateAvailable } : {}), message: updateAvailable ? t("mac.available", { version: updateAvailable }) : t("update.found").replace(/…$/, "") };
       }
@@ -964,7 +972,7 @@ app.on("before-quit", (event) => {
   });
 });
 
-app.on("activate", () => showWindow());
+app.on("activate", () => { showWindow(); maybeAutoCheckUpdates(); });
 app.on("window-all-closed", () => { /* LinkShell stays in the menu bar. */ });
 app.on("will-quit", () => keepAwake.set(false));
 
@@ -1521,14 +1529,7 @@ function downloadWindowsUpdate() {
         });
       }
       windowsUpdateEvent({ name: "message", message: t("win.downloaded") });
-      showWindow();
-      const options = {
-        type: "question" as const, message: t("win.installTitle", { version: release.version }),
-        detail: t("win.installDetail"),
-        buttons: [t("win.later"), t("win.install")], defaultId: 1, cancelId: 0,
-      };
-      const { response } = window ? await dialog.showMessageBox(window, options) : await dialog.showMessageBox(options);
-      if (response !== 1 || !(await flushOrConfirm(t("flush.install")))) {
+      if (!(await flushOrConfirm(t("flush.install")))) {
         windowsUpdateEvent({ name: "message", message: t("win.postponed") });
         return;
       }
@@ -1557,7 +1558,24 @@ function downloadWindowsUpdate() {
   return { started: true };
 }
 
+let macUpdate: WindowsUpdateState = { checking: false, installing: false, available: false, message: "" };
 let lastUpdateCheck = 0;
+
+function macUpdateBusy(): boolean {
+  return macUpdate.checking || macUpdate.installing;
+}
+
+function recordMacUpdateEvent(name: string, detail: Record<string, unknown>, message: unknown) {
+  const nextMessage = typeof message === "string" ? message : macUpdate.message;
+  const nextVersion = typeof detail.version === "string" ? detail.version : macUpdate.version;
+  macUpdate = { ...macUpdate, message: nextMessage, version: nextVersion };
+  if (name === "checking") macUpdate.checking = true;
+  if (name === "available" || name === "current") { macUpdate.available = name === "available"; macUpdate.checkedAt = Date.now(); }
+  if (name === "current") macUpdate.version = undefined;
+  if (name === "installing") macUpdate.installing = true;
+  if (name === "finished") { macUpdate.checking = false; macUpdate.installing = false; }
+}
+
 function checkUpdates() {
   lastUpdateCheck = Date.now();
   if (WINDOWS && runtime.standalone) { void checkWindowsUpdate(); return { started: true }; }
@@ -1566,13 +1584,25 @@ function checkUpdates() {
   return { started: true };
 }
 
+function maybeAutoCheckUpdates(cooldownMs = AUTO_UPDATE_CHECK_COOLDOWN_MS) {
+  const busy = WINDOWS ? (windowsUpdate.checking || windowsUpdate.installing) : macUpdateBusy();
+  if (!shouldAutoCheckUpdates({
+    enabled: settings.get("autoCheck") !== false,
+    standalone: runtime.standalone,
+    busy,
+    lastCheckAt: lastUpdateCheck,
+    now: Date.now(),
+    cooldownMs,
+  })) return;
+  checkUpdates();
+}
+
 function startUpdater() {
   if (WINDOWS && runtime.standalone) {
     void cleanWindowsUpdateDownloads(windowsUpdateCache());
     setTimeout(() => void cleanWindowsUpdateDownloads(windowsUpdateCache()), 60_000).unref();
-    setInterval(() => {
-      if (settings.get("autoCheck") !== false && Date.now() - lastUpdateCheck > 6 * 3600_000) checkUpdates();
-    }, 60_000).unref();
+    if (!launch.checkUpdates) setTimeout(() => maybeAutoCheckUpdates(), 3_000).unref();
+    setInterval(() => maybeAutoCheckUpdates(PERIODIC_UPDATE_CHECK_INTERVAL_MS), 60_000).unref();
     return;
   }
   if (!nativeModule || !runtime.standalone) return;
@@ -1586,6 +1616,8 @@ function startUpdater() {
       get retry() { return t("mac.retry"); },
     },
     failed: (message) => {
+      recordMacUpdateEvent("message", {}, message);
+      recordMacUpdateEvent("finished", {}, undefined);
       send("linkshell-desktop-update", { name: "message", message });
       send("linkshell-desktop-update", { name: "finished" });
     },
@@ -1602,13 +1634,14 @@ function startUpdater() {
           send("linkshell-desktop-update", { name: "message", message: t("mac.recover", { message: error instanceof Error ? error.message : String(error) }) });
         });
       }
+      const localizedMessage = "message" in detail ? localizeUpdaterMessage(locale, detail.message) : undefined;
+      recordMacUpdateEvent(name, detail, localizedMessage);
       noteUpdate(name, detail?.version);
-      send("linkshell-desktop-update", { name, ...detail, ...("message" in detail ? { message: localizeUpdaterMessage(locale, detail.message) } : {}) });
+      send("linkshell-desktop-update", { name, ...detail, ...("message" in detail ? { message: localizedMessage } : {}) });
     },
   }, String(settings.get("updateChannel") ?? "stable"));
-  setInterval(() => {
-    if (settings.get("autoCheck") !== false && Date.now() - lastUpdateCheck > 6 * 3600_000) checkUpdates();
-  }, 60_000).unref();
+  if (!launch.checkUpdates) setTimeout(() => maybeAutoCheckUpdates(), 3_000).unref();
+  setInterval(() => maybeAutoCheckUpdates(PERIODIC_UPDATE_CHECK_INTERVAL_MS), 60_000).unref();
 }
 
 /** A found update is named in the menu bar item's menu, so it can be installed without opening the window first. */
@@ -1631,7 +1664,7 @@ const trayItems = (): MenuBarEntry[] => [
 function trayClicked(id: string) {
   if (id === "open") { openWorkspace(); showWindow(); }
   else if (id === "manage") { openManagement("settings"); showWindow(); }
-  else if (id === "update") { openManagement("updates"); showWindow(); checkUpdates(); }
+  else if (id === "update") { openManagement("updates"); showWindow(); if (updateAvailable === undefined) checkUpdates(); }
   else if (id === "quit") app.quit();
 }
 

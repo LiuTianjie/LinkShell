@@ -98,10 +98,124 @@ final class Callback {
 
 // MARK: Sparkle
 
+/// Headless Sparkle user driver: LinkShell renders update status in its own UI, so once
+/// the user clicks "Update & Restart" we confirm download and relaunch automatically without
+/// opening duplicate Sparkle windows or asking a second time after extraction.
+@MainActor private final class DirectUpdateUserDriver: NSObject, SPUUserDriver {
+  private let emit: (String, [String: Any]) -> Void
+  private var activeVersion = ""
+  private var expectedBytes: UInt64 = 0
+  private var receivedBytes: UInt64 = 0
+  private var lastProgressEmit = Date.distantPast
+
+  init(emit: @escaping (String, [String: Any]) -> Void) {
+    self.emit = emit
+    super.init()
+  }
+
+  private func resetProgress() {
+    expectedBytes = 0
+    receivedBytes = 0
+    lastProgressEmit = .distantPast
+  }
+
+  func show(_ request: SPUUpdatePermissionRequest, reply: @escaping (SUUpdatePermissionResponse) -> Void) {
+    reply(SUUpdatePermissionResponse(automaticUpdateChecks: false, sendSystemProfile: false))
+  }
+
+  func showUserInitiatedUpdateCheck(cancellation: @escaping () -> Void) {
+    emit("installing", ["message": "正在准备更新…"])
+  }
+
+  func showUpdateFound(with appcastItem: SUAppcastItem, state: SPUUserUpdateState, reply: @escaping (SPUUserUpdateChoice) -> Void) {
+    if appcastItem.isInformationOnlyUpdate {
+      if let url = appcastItem.infoURL, url.scheme?.lowercased() == "https" {
+        NSWorkspace.shared.open(url)
+      }
+      emit("message", ["message": "此版本需要在浏览器中手动下载安装"])
+      reply(.dismiss)
+      return
+    }
+    activeVersion = appcastItem.displayVersionString
+    resetProgress()
+    emit("installing", ["version": activeVersion, "message": "正在下载 LinkShell \(activeVersion)（后台服务保持连接）…"])
+    reply(.install)
+  }
+
+  func showUpdateReleaseNotes(with downloadData: SPUDownloadData) {}
+  func showUpdateReleaseNotesFailedToDownloadWithError(_ error: Error) {}
+
+  func showUpdateNotFoundWithError(_ error: Error, acknowledgement: @escaping () -> Void) {
+    resetProgress()
+    emit("current", ["message": "当前已是此通道的最新版本"])
+    acknowledgement()
+  }
+
+  func showUpdaterError(_ error: Error, acknowledgement: @escaping () -> Void) {
+    resetProgress()
+    acknowledgement()
+  }
+
+  func showDownloadInitiated(cancellation: @escaping () -> Void) {
+    resetProgress()
+  }
+
+  func showDownloadDidReceiveExpectedContentLength(_ expectedContentLength: UInt64) {
+    expectedBytes = expectedContentLength
+  }
+
+  func showDownloadDidReceiveData(ofLength length: UInt64) {
+    receivedBytes &+= length
+    guard expectedBytes > 0 else { return }
+    let now = Date()
+    let percent = min(100, Int((receivedBytes * 100) / expectedBytes))
+    guard percent == 100 || now.timeIntervalSince(lastProgressEmit) >= 0.2 else { return }
+    lastProgressEmit = now
+    let version = activeVersion.isEmpty ? "" : " \(activeVersion)"
+    emit("installing", ["message": "正在下载 LinkShell\(version)… \(percent)%（后台服务保持连接）"])
+  }
+
+  func showDownloadDidStartExtractingUpdate() {
+    lastProgressEmit = .distantPast
+    let version = activeVersion.isEmpty ? "" : " \(activeVersion)"
+    emit("installing", ["message": "正在解压并校验 LinkShell\(version)…"])
+  }
+
+  func showExtractionReceivedProgress(_ progress: Double) {
+    let now = Date()
+    let percent = min(100, max(0, Int((progress * 100).rounded())))
+    guard percent == 100 || now.timeIntervalSince(lastProgressEmit) >= 0.2 else { return }
+    lastProgressEmit = now
+    let version = activeVersion.isEmpty ? "" : " \(activeVersion)"
+    emit("installing", ["message": "正在解压并校验 LinkShell\(version)… \(percent)%"])
+  }
+
+  func showReady(toInstallAndRelaunch reply: @escaping (SPUUserUpdateChoice) -> Void) {
+    emit("installing", ["message": "下载完成，正在准备安装并重启…"])
+    reply(.install)
+  }
+
+  func showInstallingUpdate(withApplicationTerminated applicationTerminated: Bool, retryTerminatingApplication: @escaping () -> Void) {
+    emit("installing", ["message": "正在安装，LinkShell 将重新打开…"])
+  }
+
+  func showUpdateInstalledAndRelaunched(_ relaunched: Bool, acknowledgement: @escaping () -> Void) {
+    resetProgress()
+    acknowledgement()
+  }
+
+  func dismissUpdateInstallation() {
+    resetProgress()
+  }
+
+  func showUpdateInFocus() {}
+}
+
 /// Sparkle owns signature verification and replacement; the CLI (through main.ts) prepares the Host.
 @MainActor final class NativeUpdater: NSObject, SPUUpdaterDelegate {
   static let shared = NativeUpdater()
-  private var controller: SPUStandardUpdaterController?
+  private var updater: SPUUpdater?
+  private var userDriver: DirectUpdateUserDriver?
   private var callback: Callback?
   private var channel = "stable"
   private var waiting: (() -> Void)?
@@ -110,24 +224,35 @@ final class Callback {
   func start(callback: Callback, channel: String) -> Bool {
     self.callback = callback
     self.channel = channel
-    guard controller == nil else { return true }
-    let controller = SPUStandardUpdaterController(startingUpdater: false, updaterDelegate: self, userDriverDelegate: nil)
-    self.controller = controller
+    guard updater == nil else { return true }
+    let driver = DirectUpdateUserDriver { [weak self] name, detail in
+      self?.emit(name, detail)
+    }
+    let updater = SPUUpdater(
+      hostBundle: Bundle.main,
+      applicationBundle: Bundle.main,
+      userDriver: driver,
+      delegate: self
+    )
+    self.userDriver = driver
+    self.updater = updater
     do {
-      try controller.updater.start()
-      // Our timer performs information-only checks. Host stop happens only right before relaunch.
-      controller.updater.automaticallyChecksForUpdates = false
-      controller.updater.automaticallyDownloadsUpdates = false
-      controller.updater.sendsSystemProfile = false
+      try updater.start()
+      // Our main process triggers quiet checks on launch/foreground. Host stop happens only right before relaunch.
+      updater.automaticallyChecksForUpdates = false
+      updater.automaticallyDownloadsUpdates = false
+      updater.sendsSystemProfile = false
       return true
     } catch {
+      self.updater = nil
+      self.userDriver = nil
       emit("message", ["message": "更新服务未就绪：\(error.localizedDescription)"])
       return false
     }
   }
 
   func check() {
-    guard let updater = controller?.updater, updater.canCheckForUpdates, !updater.sessionInProgress else { return }
+    guard let updater, updater.canCheckForUpdates, !updater.sessionInProgress else { return }
     emit("checking", ["message": "正在检查 App 更新…"])
     updater.checkForUpdateInformation()
   }
@@ -138,11 +263,10 @@ final class Callback {
       emit("prepare", [:])
       return
     }
-    guard let controller, controller.updater.canCheckForUpdates else { return }
-    // Sparkle may only be focusing an install whose termination was postponed.
-    if !controller.updater.sessionInProgress { prepared = false }
-    emit("message", ["message": "正在打开更新窗口…"])
-    controller.checkForUpdates(nil)
+    guard let updater, updater.canCheckForUpdates, !updater.sessionInProgress else { return }
+    prepared = false
+    emit("installing", ["message": "正在准备更新…"])
+    updater.checkForUpdates()
   }
 
   func setChannel(_ value: String) { channel = value }
@@ -167,10 +291,10 @@ final class Callback {
   }
   nonisolated func updater(_ updater: SPUUpdater, willDownloadUpdate item: SUAppcastItem, with request: NSMutableURLRequest) {
     let version = item.displayVersionString
-    MainActor.assumeIsolated { emit("message", ["message": "正在下载 LinkShell \(version)（后台服务保持连接）…"]) }
+    MainActor.assumeIsolated { emit("installing", ["version": version, "message": "正在下载 LinkShell \(version)（后台服务保持连接）…"]) }
   }
   nonisolated func updater(_ updater: SPUUpdater, didDownloadUpdate item: SUAppcastItem) {
-    MainActor.assumeIsolated { emit("message", ["message": "下载完成，点击“Install and Relaunch”即可安装并重启"]) }
+    MainActor.assumeIsolated { emit("installing", ["message": "下载完成，正在准备安装并重启…"]) }
   }
   nonisolated func updater(_ updater: SPUUpdater, willInstallUpdate item: SUAppcastItem) {
     MainActor.assumeIsolated { emit("installing", ["message": "正在安装，LinkShell 将重新打开…"]) }

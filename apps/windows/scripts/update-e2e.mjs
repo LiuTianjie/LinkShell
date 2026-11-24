@@ -250,13 +250,7 @@ async function observeNative(pid, name) {
 }
 async function confirm(name) {
   const prior = connection.pid;
-  const previousDialog = (await events()).filter(event => event.pid === prior && event.event === 'dialog').at(-1)?.id ?? 0;
-  await clickControl('button', '下载并更新 App…');
-  const confirmation = await until('native update confirmation', async () => (await events()).find(event => event.pid === prior && event.event === 'dialog' && event.id > previousDialog && event.message === `重启并安装 LinkShell ${nextVersion}？`));
-  assert.deepEqual(confirmation.buttons, ['稍后安装', '安装并重启']);
-  await native(prior, '安装并重启', name + '-confirm', 180, 'LinkShell');
-  const response = await until('native confirmation response', async () => (await events()).find(event => event.pid === prior && event.event === 'dialog-result' && event.id === confirmation.id));
-  assert.equal(response.response, 1, 'The real native confirmation must choose installation.');
+  await clickControl('button', '更新并重启');
   const installerPID = await until('installer ready handshake', async () => {
     const cache = join(profile, 'windows-updates');
     for (const scope of await readdir(cache).catch(() => [])) for (const directory of await readdir(join(cache, scope)).catch(() => [])) {
@@ -264,6 +258,7 @@ async function confirm(name) {
       if (Number.isSafeInteger(pid) && pid > 0 && !result.processes.some(item => item.pid === pid)) return recordPID(pid, 'installer');
     }
   });
+  await observeNative(installerPID, name + '-installer');
   return { prior, installerPID };
 }
 async function processList() {
@@ -311,7 +306,7 @@ try {
     return value;
   });
   await check('SHA-256 failure preserves running Host and never starts installer', async () => {
-    const before = await hostPID(); await available(); await clickControl('button', '下载并更新 App…');
+    const before = await hostPID(); await available(); await clickControl('button', '更新并重启');
     const state = await until('checksum rejection', async () => { const state = await invoke('updateStatus'); return !state.installing && /SHA-256/.test(state.message) && state; });
     assert.equal(await hostPID(), before); assert.equal((await processList()).filter(item => basename(item.ExecutablePath).startsWith('LinkShell-Setup-')).length, 0);
     assert.deepEqual(await preservedState(), baseline); await snapshot(baseVersion);

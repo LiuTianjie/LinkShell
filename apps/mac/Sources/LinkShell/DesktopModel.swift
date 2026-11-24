@@ -242,6 +242,7 @@ enum DesktopCommand {
   }
   private var polling = false
   private var timer: Timer?
+  private var activeObserver: NSObjectProtocol?
   private var lastUpdateCheck = Date.distantPast
   let preview = Launch.has("--dashboard-preview")
   var sessions: [DesktopSession] { snapshot?.sessions ?? [] }
@@ -317,6 +318,19 @@ enum DesktopCommand {
     } else { refresh() }
     timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
       Task { @MainActor in self?.refresh() }
+    }
+    if activeObserver == nil {
+      activeObserver = NotificationCenter.default.addObserver(
+        forName: NSApplication.didBecomeActiveNotification,
+        object: nil,
+        queue: .main
+      ) { [weak self] _ in
+        MainActor.assumeIsolated {
+          guard let self, self.autoCheck, !self.busy,
+                Date().timeIntervalSince(self.lastUpdateCheck) >= 900 else { return }
+          self.checkUpdates()
+        }
+      }
     }
   }
 

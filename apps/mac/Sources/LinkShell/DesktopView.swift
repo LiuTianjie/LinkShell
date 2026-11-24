@@ -370,7 +370,7 @@ struct DesktopView: View {
       HStack(spacing: 12) {
         Button(model.checking ? "正在检查…" : "检查更新") { model.checkUpdates() }.buttonStyle(DesktopButtonStyle(model.newVersion ? .secondary : .primary)).disabled(model.checking || model.preview)
         if model.newVersion {
-          Button(model.standalone ? "下载并更新 App…" : "安装更新…") {
+          Button(model.standalone ? "更新并重启" : "安装更新…") {
             if model.standalone { model.upgrade() } else { confirm = "upgrade" }
           }
             .buttonStyle(DesktopButtonStyle(.primary))

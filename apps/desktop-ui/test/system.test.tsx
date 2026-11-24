@@ -530,7 +530,7 @@ describe("Slice 2B-5: Non-Unmounting SystemHostModal, SignInPairModal & LocalPai
       (btn) => btn.textContent?.trim() === "立即检查",
     );
     const installBtn = buttons.find(
-      (btn) => btn.textContent?.trim() === "下载并更新 App…",
+      (btn) => btn.textContent?.trim() === "更新并重启",
     );
 
     expect(checkBtn).toBeDefined();
@@ -1091,7 +1091,7 @@ describe("Slice 2B-5: Non-Unmounting SystemHostModal, SignInPairModal & LocalPai
         container.querySelectorAll<HTMLButtonElement>("button"),
       ).map((b) => b.textContent?.trim() ?? "");
       expect(updateButtons).toContain("立即检查");
-      expect(updateButtons).toContain("下载并更新 App…");
+      expect(updateButtons).toContain("更新并重启");
 
       // The modal is 设置; its preferences page is 通用. Verify Windows rows + Explorer label (`0` Finder/访达)
       const settingsNav = Array.from(
