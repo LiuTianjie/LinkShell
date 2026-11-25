@@ -197,6 +197,7 @@ describe("Claude transcript telemetry, late-flush dedup, cache eviction, and SIG
     expect(completed).toContainEqual({
       sessionUpdate: "usage_update",
       usedTokens: 570,
+      contextWindow: 200_000,
       tokens: {
         totalTokens: 600,
         inputTokens: 120,

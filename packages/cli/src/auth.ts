@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
@@ -18,11 +18,21 @@ export interface AuthTokens {
   email?: string;
 }
 
+function ensureAuthDir(): void {
+  mkdirSync(AUTH_DIR, { recursive: true, mode: 0o700 });
+  if (process.platform !== "win32") {
+    try { chmodSync(AUTH_DIR, 0o700); } catch {}
+  }
+}
+
 function writeAuthFileAtomic(content: string): void {
-  mkdirSync(AUTH_DIR, { recursive: true });
+  ensureAuthDir();
   const tmp = join(AUTH_DIR, `auth.json.${process.pid}.${randomBytes(4).toString("hex")}.tmp`);
   try {
     writeFileSync(tmp, content, { encoding: "utf8", mode: 0o600 });
+    if (process.platform !== "win32") {
+      try { chmodSync(tmp, 0o600); } catch {}
+    }
     renameSync(tmp, AUTH_FILE);
   } catch (error) {
     try { unlinkSync(tmp); } catch {}
@@ -89,7 +99,7 @@ async function acquireRefreshLock(signal?: AbortSignal): Promise<(() => void) | 
   while (true) {
     if (signal?.aborted) return "aborted";
     try {
-      mkdirSync(AUTH_DIR, { recursive: true });
+      ensureAuthDir();
       const fd = openSync(LOCK_FILE, "wx", 0o600);
       try { writeFileSync(fd, `${process.pid}:${Date.now()}\n`, "utf8"); } catch {}
       try { closeSync(fd); } catch {}

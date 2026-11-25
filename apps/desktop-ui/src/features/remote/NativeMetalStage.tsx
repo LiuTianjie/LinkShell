@@ -611,8 +611,15 @@ export function NativeMetalStage({
       error: error ?? nativeStatus.controlError,
       telemetry: {
         engine: "metal",
-        path: "direct",
+        path:
+          nativeStatus.path ??
+          (nativeStatus.relayed === true
+            ? "relay"
+            : nativeStatus.relayed === false
+              ? "direct"
+              : undefined),
         codec: nativeStatus.codec || (codecChoice === "auto" ? "HEVC" : "H.264"),
+        rttMs: nativeStatus.rttMs,
         hardware: nativeStatus.hardware ?? true,
         displayFps,
       },

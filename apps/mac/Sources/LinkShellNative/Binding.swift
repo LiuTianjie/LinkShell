@@ -289,7 +289,10 @@ final class Callback {
     updater.checkForUpdates()
   }
 
-  func setChannel(_ value: String) { channel = value }
+  func setChannel(_ value: String) {
+    guard updater?.sessionInProgress != true, waiting == nil else { return }
+    channel = value
+  }
   func preparedHost() {
     // The update may have failed while the CLI was still confirming the Host stopped.
     guard let resume = waiting else { emit("recover", [:]); return }
@@ -394,11 +397,31 @@ private func define(_ env: napi_env?, _ exports: napi_value?, _ name: String, _ 
   _ = name.withCString { napi_set_named_property(env, exports, $0, function) }
 }
 
+/// Checks Screen Recording permission. macOS caches a `false` TCC preflight result for the
+/// lifetime of a running process, so once refused we probe a fresh `LinkShell --status` child to
+/// observe newly granted permissions without requiring an app restart.
+private func screenRecordingAllowed() -> Bool {
+  if CGPreflightScreenCaptureAccess() { return true }
+  guard let program = Bundle.main.url(forAuxiliaryExecutable: "LinkShell")?.path,
+        FileManager.default.isExecutableFile(atPath: program) else { return false }
+  let check = Process()
+  check.executableURL = URL(fileURLWithPath: program)
+  check.arguments = ["--status"]
+  let answer = Pipe()
+  check.standardOutput = answer
+  check.standardError = FileHandle.nullDevice
+  guard (try? check.run()) != nil else { return false }
+  let data = answer.fileHandleForReading.readDataToEndOfFile()
+  check.waitUntilExit()
+  guard check.terminationStatus == 0 else { return false }
+  return ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["recording"] as? Bool ?? false
+}
+
 @_cdecl("linkshell_native_init")
 public func linkshellNativeInit(_ env: napi_env?, _ exports: napi_value?) -> napi_value? {
   // permissions(): json {recording, control} — what LinkShell (this bundle id) is allowed.
   define(env, exports, "permissions") { env, _ in
-    make(env, json(["recording": CGPreflightScreenCaptureAccess(), "control": AXIsProcessTrusted()]))
+    make(env, json(["recording": screenRecordingAllowed(), "control": AXIsProcessTrusted()]))
   }
   define(env, exports, "loginItem") { env, _ in
     let status = SMAppService.mainApp.status

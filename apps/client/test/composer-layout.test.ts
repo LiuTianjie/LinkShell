@@ -104,4 +104,11 @@ describe("iPad keyboard intersection", () => {
     const keyboard = { screenX: 0, screenY: 700, width: 1024, height: 324 };
     expect(keyboardOverlap({ x: 350, y: 100, width: 650, height: 600 }, keyboard)).toBe(0);
   });
+  it("ignores floating keyboards dragged into the upper half of the pane", () => {
+    const pane = { x: 0, y: 100, width: 768, height: 900 };
+    expect(keyboardOverlap(pane, { screenX: 200, screenY: 120, width: 320, height: 250 })).toBe(0);
+    expect(keyboardOverlap(pane, { screenX: 200, screenY: 300, width: 320, height: 250 })).toBe(0);
+    // Still avoids a floating keyboard resting in the lower half over the composer.
+    expect(keyboardOverlap(pane, { screenX: 200, screenY: 620, width: 320, height: 250 })).toBe(380);
+  });
 });

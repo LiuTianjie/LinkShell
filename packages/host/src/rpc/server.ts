@@ -3,10 +3,10 @@ import { UsageStatistics } from "../usage.js";
 import { execFile } from "node:child_process";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server } from "node:http";
-import { chmodSync, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { accessSync, chmodSync, constants as fsConstants, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, delimiter, dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import WebSocket, { WebSocketServer } from "ws";
 import {
@@ -36,6 +36,7 @@ import { ScreenShare } from "../screen.js";
 import { FusionShare } from "../fusion.js";
 import { DirectPeer } from "../direct.js";
 import { ComputerPreviewServer } from "../computer-preview.js";
+import { parseBlobUri } from "../blob-store.js";
 import { imageOf, parseImageUri, slimEvent } from "../slim.js";
 import type { OutputListener, TerminalManager } from "../terminals.js";
 import type { LiveActivityRelay } from "../live-activities.js";
@@ -69,11 +70,81 @@ const DEFAULT_HEARTBEAT_MS = 30_000;
 
 export type DesktopOpenApp = "default" | "reveal" | "cursor" | "vscode" | "zed" | "terminal";
 
+const LINUX_TERMINAL_CANDIDATES = [
+  "gnome-terminal",
+  "konsole",
+  "xfce4-terminal",
+  "kitty",
+  "alacritty",
+  "wezterm",
+  "x-terminal-emulator",
+] as const;
+
+function defaultHasCommand(command: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  if (!command) return false;
+  if (command.includes("/")) {
+    try {
+      accessSync(command, fsConstants.X_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  const pathEnv = env.PATH ?? "";
+  for (const dir of pathEnv.split(delimiter)) {
+    if (!dir) continue;
+    try {
+      accessSync(join(dir, command), fsConstants.X_OK);
+      return true;
+    } catch {
+      // Continue searching PATH.
+    }
+  }
+  return false;
+}
+
+function linuxTerminalArgs(command: string, dirTarget: string): string[] {
+  const name = basename(command).toLowerCase();
+  switch (name) {
+    case "konsole":
+      return ["--workdir", dirTarget];
+    case "kitty":
+      return ["--directory", dirTarget];
+    case "wezterm":
+      return ["start", "--cwd", dirTarget];
+    case "gnome-terminal":
+    case "xfce4-terminal":
+    case "alacritty":
+    case "x-terminal-emulator":
+    default:
+      return ["--working-directory", dirTarget];
+  }
+}
+
+export function resolveLinuxTerminalCommand(
+  dirTarget: string,
+  options?: { env?: NodeJS.ProcessEnv; hasCommand?: (cmd: string) => boolean },
+): { command: string; args: string[] } {
+  const env = options?.env ?? process.env;
+  const hasCommand = options?.hasCommand ?? ((cmd: string) => defaultHasCommand(cmd, env));
+  const envTerminal = env.TERMINAL?.trim();
+  if (envTerminal && hasCommand(envTerminal)) {
+    return { command: envTerminal, args: linuxTerminalArgs(envTerminal, dirTarget) };
+  }
+  for (const candidate of LINUX_TERMINAL_CANDIDATES) {
+    if (hasCommand(candidate)) {
+      return { command: candidate, args: linuxTerminalArgs(candidate, dirTarget) };
+    }
+  }
+  return { command: "x-terminal-emulator", args: ["--working-directory", dirTarget] };
+}
+
 export function buildDesktopOpenCommand(
   resolvedPath: string,
   isDirectory: boolean,
   app: DesktopOpenApp = "default",
   platform: NodeJS.Platform = process.platform,
+  options?: { env?: NodeJS.ProcessEnv; hasCommand?: (cmd: string) => boolean },
 ): { command: string; args: string[] } {
   const dirTarget = isDirectory ? resolvedPath : dirname(resolvedPath);
   if (platform === "darwin") {
@@ -118,7 +189,7 @@ export function buildDesktopOpenCommand(
     case "zed":
       return { command: "zed", args: [resolvedPath] };
     case "terminal":
-      return { command: "x-terminal-emulator", args: ["--working-directory", dirTarget] };
+      return resolveLinuxTerminalCommand(dirTarget, options);
     default:
       return { command: "xdg-open", args: [resolvedPath] };
   }
@@ -257,6 +328,7 @@ interface ConnectionContext {
   /** Past the access password (or none is set): anything but `machine.info` and `access.unlock` waits for this. */
   unlocked: boolean;
   deviceId?: string;
+  bufferedAmount?: () => number;
   close: () => void;
 }
 
@@ -340,12 +412,13 @@ export class HostRpcServer {
       "agents.respond": async (params: P<"agents.respond">) => { await hub.respondInteraction(params.agent, params.requestId, params); return {}; },
       "agents.providers": async (params: P<"agents.providers">) => ({ providers: await hub.providers(params.agent, params.operation, params.config) }),
       "agents.custom": async (params: P<"agents.custom">) => ({ agents: await hub.customAgents(params.save, params.remove) }),
-      "machine.info": (_params: P<"machine.info">, context) => {
+      "machine.info": (params: P<"machine.info">, context) => {
         if (!context.unlocked) {
           const info = options.machineInfo();
           return { machineId: info.machineId, hostname: info.hostname, platform: info.platform, hostVersion: info.hostVersion, agents: [], locked: true };
         }
-        void hub.refreshAuthIfStale();
+        // Lightweight heartbeat probes pass `{ ping: true }` so they don't spawn auth subprocesses.
+        if (!(params as { ping?: boolean })?.ping) void hub.refreshAuthIfStale();
         return options.machineInfo();
       },
       "machine.artwork": async ({ id }: P<"machine.artwork">) => {
@@ -389,6 +462,7 @@ export class HostRpcServer {
           notice: (notice) => { if (current()) context.peer.notify("session.notice", { sessionId: params.sessionId, notice }); },
           event: (event) => { if (current()) context.peer.notify("session.event", slimEvent(event, slim)); },
           window: (startSeq) => { if (current()) context.peer.notify("session.window", { sessionId: params.sessionId, startSeq }); },
+          bufferedAmount: context.bufferedAmount,
         };
         context.subscriptions.set(params.sessionId, subscriber);
         try {
@@ -435,6 +509,12 @@ export class HostRpcServer {
         return {};
       },
       "sessions.image": (params: P<"sessions.image">) => {
+        if (parseBlobUri(params.uri)) {
+          hub.getSession(params.sessionId);
+          const data = hub.readBlob(params.uri);
+          if (data !== undefined) return { mimeType: sniffBase64Mime(data), data };
+          throw RpcError.app("not_found", "这张图片已经不在会话记录里");
+        }
         const ref = parseImageUri(params.uri);
         const event = ref && hub.readEvent(params.sessionId, ref.seq);
         const image = event && imageOf(event, ref.index);
@@ -662,6 +742,13 @@ export class HostRpcServer {
       rmSync(this.options.socketPath, { force: true });
     }
     await this.listen((server) => server.listen(this.options.socketPath), undefined, () => true);
+    if (process.platform !== "win32" && !isNamedPipe(this.options.socketPath)) {
+      try {
+        chmodSync(this.options.socketPath, 0o600);
+      } catch {
+        // Ignore chmod failure on exotic filesystems.
+      }
+    }
     this.boundUnixSocket = true;
     if (this.options.tcpPort !== undefined) {
       this.writeDevToken();
@@ -881,6 +968,7 @@ export class HostRpcServer {
     const context: ConnectionContext = {
       local: transport.local,
       deviceId: transport.deviceId,
+      bufferedAmount: transport.bufferedAmount,
       unlocked: transport.local || !this.options.access?.enabled,
       close: () => transport.close(),
       desktops: new Map(),
@@ -964,4 +1052,14 @@ export class HostRpcServer {
       throw error;
     }
   }
+}
+
+function sniffBase64Mime(base64: string): string {
+  const head = Buffer.from(base64.slice(0, 24), "base64");
+  if (head.length >= 8 && head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4e && head[3] === 0x47) return "image/png";
+  if (head.length >= 3 && head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) return "image/jpeg";
+  if (head.length >= 6 && head.subarray(0, 4).toString("ascii") === "GIF8") return "image/gif";
+  if (head.length >= 12 && head.subarray(0, 4).toString("ascii") === "RIFF" && head.subarray(8, 12).toString("ascii") === "WEBP") return "image/webp";
+  if (head.length >= 4 && head.subarray(0, 4).toString("ascii") === "%PDF") return "application/pdf";
+  return "application/octet-stream";
 }

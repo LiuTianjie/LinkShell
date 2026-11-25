@@ -1,7 +1,8 @@
-import { mkdirSync } from "node:fs";
+import { chmodSync, mkdirSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createRequire } from "node:module";
-import { dirname } from "node:path";
+import { tmpdir } from "node:os";
+import { dirname, resolve } from "node:path";
 import { RELAY_PATH } from "@linkshell/wire";
 import { PollRelay, POLL_PATH, type PollLimits } from "./poll.js";
 import { webHandler, type WebOptions } from "./web.js";
@@ -45,7 +46,18 @@ export interface RunningGateway {
  * `RELAY_PATH`, a health check on `/healthz`, and the bundled browser client.
  */
 export async function startGateway(options: StartGatewayOptions): Promise<RunningGateway> {
-  mkdirSync(dirname(options.databasePath), { recursive: true });
+  if (options.databasePath !== ":memory:") {
+    const dataDir = dirname(options.databasePath);
+    mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+    const resolvedDir = resolve(dataDir);
+    if (process.platform !== "win32" && resolvedDir !== "/" && resolvedDir !== "/tmp" && resolvedDir !== resolve(tmpdir())) {
+      try {
+        chmodSync(dataDir, 0o700);
+      } catch {
+        // Best-effort on restricted or shared parent directories.
+      }
+    }
+  }
   const relay = new Gateway({
     port: 0,
     databasePath: options.databasePath,
@@ -135,10 +147,14 @@ export async function startGateway(options: StartGatewayOptions): Promise<Runnin
     poll,
     close: async () => {
       connectLimiter.destroy();
-      poll.close();
-      // The relay drops its peers first: the server only finishes closing once their sockets are gone.
+      // Close every connected socket cleanly (1001 "going away") before closing the HTTP server so
+      // Hosts and Phones auto-reconnect immediately instead of lingering on half-open TCP sockets.
       await relay.stop();
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      poll.close();
+      await new Promise<void>((resolveClose) => {
+        server.close(() => resolveClose());
+        server.closeIdleConnections?.();
+      });
     },
   };
 }

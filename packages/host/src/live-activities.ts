@@ -1,5 +1,6 @@
 import { chmodSync, existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
+import { hostname } from "node:os";
 import {
   buildLiveActivitySnapshot, liveActivityActions, liveActivityContent, liveActivityDetailLink, liveActivityNoticeSchema,
   liveActivityPushToStartSchema, liveActivitySessionTask, liveActivitySubscriptionSchema, liveActivityTerminalTask,
@@ -9,6 +10,8 @@ import {
 } from "@linkshell/wire";
 import type { SessionHub, Subscriber } from "./hub.js";
 import type { TerminalManager } from "./terminals.js";
+
+const DEFAULT_PUSH_TO_START_COOLDOWN_MS = 15 * 60 * 1000;
 
 interface Registration extends LiveActivitySubscription {
   sequence: number; retryAfter?: number; failures?: number;
@@ -27,6 +30,19 @@ interface PushToStartRegistration extends LiveActivityPushToStart {
   retryAfter?: number;
   failures?: number;
   pendingStart?: PendingPushToStart;
+  lastPushToStartAt?: number;
+}
+
+function isSupersededRegistration(existing: Registration, incoming: LiveActivitySubscription): boolean {
+  if (existing.activityId === incoming.activityId) return false;
+  if (existing.computerKey !== incoming.computerKey) return false;
+  if (existing.deviceId && incoming.deviceId) {
+    return existing.deviceId === incoming.deviceId || existing.grant === incoming.grant;
+  }
+  if (existing.grant === incoming.grant) return true;
+  // Legacy subscriptions without deviceId cannot be distinguished per device; supersede
+  // older untagged entries for the same computerKey to stop duplicate APNs fanout.
+  return !existing.deviceId || !incoming.deviceId;
 }
 
 /** Its subscriptions outlive a phone socket; only a device-scoped delivery grant leaves that socket. */
@@ -52,20 +68,44 @@ export class LiveActivityRelay {
     machineId?: () => string;
     onWakeup?: (notice: WakeupNotice) => void;
     serviceUrl?: string;
+    pushToStartCooldownMs?: number;
     request?: typeof fetch;
     log: (message: string) => void;
   }) {}
 
   private get serviceUrl() { return (this.options.serviceUrl ?? "https://push.itool.tech").replace(/\/$/, ""); }
   private get pushToStartPath() { return `${this.options.path.replace(/\.json$/, "")}-push-to-start.json`; }
+  private get pushToStartCooldownMs() { return this.options.pushToStartCooldownMs ?? DEFAULT_PUSH_TO_START_COOLDOWN_MS; }
+  private resolveComputerName() {
+    const configured = this.options.computerName?.()?.trim();
+    return [...(configured || hostname().trim() || "LinkShell")].slice(0, 80).join("") || "LinkShell";
+  }
   private pushToStartKey(item: Pick<LiveActivityPushToStart, "deviceId" | "platform" | "computerKey">) {
     return `${item.deviceId}:${item.platform}:${item.computerKey}`;
   }
-  private hasForegroundFor(computerKey: string, now = Date.now()) {
+  private hasForegroundFor(computerKey: string, deviceId?: string, now = Date.now()) {
     for (const row of this.registrations.values()) {
-      if (row.computerKey === computerKey && row.expiresAt > now) return true;
+      if (row.computerKey !== computerKey || row.expiresAt <= now) continue;
+      if (!row.deviceId || !deviceId || row.deviceId === deviceId) return true;
     }
     return false;
+  }
+  private isPushToStartCoolingDown(row: PushToStartRegistration, now = Date.now()) {
+    const cooldownMs = this.pushToStartCooldownMs;
+    return cooldownMs > 0 && typeof row.lastPushToStartAt === "number" && now - row.lastPushToStartAt < cooldownMs;
+  }
+  private resetPushToStartCooldown(computerKey: string, deviceId?: string, now = Date.now()) {
+    let changed = false;
+    for (const row of this.pushToStart.values()) {
+      if (row.computerKey !== computerKey) continue;
+      if (deviceId && row.deviceId !== deviceId) continue;
+      if (this.hasForegroundFor(computerKey, row.deviceId, now)) continue;
+      if (row.lastPushToStartAt !== undefined) {
+        row.lastPushToStartAt = undefined;
+        changed = true;
+      }
+    }
+    if (changed) this.savePushToStart();
   }
   private hasPendingPushToStart() {
     for (const row of this.pushToStart.values()) {
@@ -85,8 +125,18 @@ export class LiveActivityRelay {
               const result = liveActivityNoticeSchema.safeParse(notice);
               return result.success && Date.now() - result.data.createdAt < 180_000 ? [result.data] : [];
             }).slice(-8);
-            this.registrations.set(parsed.data.activityId, { ...parsed.data, sequence: Number.isSafeInteger(item.sequence) ? item.sequence : 0,
-              notices, lastNoticeId: typeof item.lastNoticeId === "string" ? item.lastNoticeId.slice(0, 128) : undefined });
+            const restored: Registration = {
+              ...parsed.data,
+              sequence: Number.isSafeInteger(item.sequence) ? item.sequence : 0,
+              notices,
+              lastNoticeId: typeof item.lastNoticeId === "string" ? item.lastNoticeId.slice(0, 128) : undefined,
+            };
+            for (const [existingId, existing] of this.registrations) {
+              if (isSupersededRegistration(existing, restored)) {
+                this.registrations.delete(existingId);
+              }
+            }
+            this.registrations.set(parsed.data.activityId, restored);
           }
         }
       }
@@ -99,9 +149,11 @@ export class LiveActivityRelay {
           if (parsed.success && parsed.data.expiresAt > Date.now() && parsed.data.serviceUrl === this.serviceUrl) {
             const key = this.pushToStartKey(parsed.data);
             const seq = (item as { sequence?: unknown }).sequence;
+            const lastSent = (item as { lastPushToStartAt?: unknown }).lastPushToStartAt;
             this.pushToStart.set(key, {
               ...parsed.data,
               sequence: typeof seq === "number" && Number.isSafeInteger(seq) ? seq : 0,
+              lastPushToStartAt: typeof lastSent === "number" && Number.isSafeInteger(lastSent) && lastSent > 0 ? lastSent : undefined,
             });
           }
         }
@@ -121,15 +173,58 @@ export class LiveActivityRelay {
     const data = liveActivitySubscriptionSchema.parse(subscription);
     if (data.serviceUrl !== this.serviceUrl) throw RpcError.app("invalid_params", "实时活动服务地址与电脑配置不一致");
     if (data.expiresAt <= Date.now() || data.expiresAt > Date.now() + 8 * 60 * 60 * 1000) throw RpcError.app("invalid_params", "实时活动授权已过期");
-    if (!this.registrations.has(data.activityId) && this.registrations.size >= 16) throw RpcError.app("busy", "实时活动数量已达上限");
+    const superseded: Registration[] = [];
+    for (const row of this.registrations.values()) {
+      if (isSupersededRegistration(row, data)) superseded.push(row);
+    }
+    const nextSize = this.registrations.size - superseded.length + (this.registrations.has(data.activityId) ? 0 : 1);
+    if (nextSize > 16) throw RpcError.app("busy", "实时活动数量已达上限");
+    for (const old of superseded) {
+      this.registrations.delete(old.activityId);
+      this.options.log(`[live-activity] retiring superseded ${old.activityId} (replaced by ${data.activityId})`);
+      void this.retireSuperseded(old);
+    }
     const previous = this.registrations.get(data.activityId);
     this.registrations.set(data.activityId, { ...previous, ...data, sequence: previous?.sequence ?? 0 });
     if (!previous) this.options.log(`[live-activity] registered ${data.activityId}`);
     for (const row of this.pushToStart.values()) {
-      if (row.computerKey === data.computerKey) row.pendingStart = undefined;
+      if (row.computerKey === data.computerKey && (!data.deviceId || row.deviceId === data.deviceId)) {
+        row.pendingStart = undefined;
+      }
     }
     this.save();
     this.schedule(0);
+  }
+
+  private async retireSuperseded(old: Registration) {
+    if (this.stopped || old.expiresAt <= Date.now()) return;
+    const sequence = Math.max(Date.now(), old.sequence + 1);
+    const contentState = liveActivityContent({
+      active: false,
+      computerName: this.resolveComputerName(),
+      computerKey: old.computerKey,
+      phase: "completed",
+      title: "任务已更新",
+      subtitle: "已在最新实时活动中继续显示",
+      deepLink: `linkshell:///activity?computer=${encodeURIComponent(old.computerKey)}`,
+    });
+    try {
+      const response = await this.request()(`${this.serviceUrl}/v1/activities/${old.activityId}/events`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${old.grant}`, "content-type": "application/json" },
+        body: JSON.stringify({ sequence, event: "end", contentState, notice: null }),
+        signal: AbortSignal.any([this.abort.signal, AbortSignal.timeout(10_000)]),
+        redirect: "error",
+      });
+      if (!response.ok && response.status !== 410 && !this.stopped) {
+        await this.request()(`${this.serviceUrl}/v1/activities/${old.activityId}`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${old.grant}` },
+          signal: AbortSignal.any([this.abort.signal, AbortSignal.timeout(10_000)]),
+          redirect: "error",
+        });
+      }
+    } catch { /* Best-effort cleanup of superseded activity grant. */ }
   }
 
   registerPushToStart(registration: LiveActivityPushToStart): { ok: true } {
@@ -156,7 +251,10 @@ export class LiveActivityRelay {
   async unsubscribe(activityId: string) {
     const registration = this.registrations.get(activityId);
     this.registrations.delete(activityId);
-    if (registration) this.options.log(`[live-activity] revoked by device ${activityId}`);
+    if (registration) {
+      this.options.log(`[live-activity] revoked by device ${activityId}`);
+      this.resetPushToStartCooldown(registration.computerKey, registration.deviceId);
+    }
     this.save();
     if (!this.registrations.size) this.reconcileWatches([]);
     if (!registration) return;
@@ -179,7 +277,6 @@ export class LiveActivityRelay {
       const attention = needsAttention(session) || session.state === "error";
       const attentionTransition = attention && (!before || beforePhase !== task.phase || request(before) !== request(session));
       const completedTransition = session.state === "idle" && !!before && (before.state === "running" || needsAttention(before));
-      const runningTransition = (session.state === "running" || task.phase === "running" || task.phase === "starting") && beforePhase !== task.phase;
 
       if (this.registrations.size) {
         // Discovery can replay existing work after a restart. Alert on a transition
@@ -221,16 +318,17 @@ export class LiveActivityRelay {
         }
       }
 
-      if (this.pushToStart.size && (runningTransition || attentionTransition || completedTransition)) {
+      // Push-to-start wakes idle devices ONLY for actionable/urgent transitions (waiting or error),
+      // never for routine running/starting turns, and respects per-(device, computerKey) cooldown.
+      if (this.pushToStart.size && attentionTransition) {
         let queued = false;
         for (const row of this.pushToStart.values()) {
-          if (row.expiresAt <= now || this.hasForegroundFor(row.computerKey, now)) continue;
-          // Push-to-start wakes idle devices when a session starts running or needs attention
-          // (and sends zero-plaintext completion wakeups on Android when no foreground card exists).
-          if (completedTransition && row.platform === "ios" && !attentionTransition) continue;
+          if (row.expiresAt <= now) continue;
+          if (this.hasForegroundFor(row.computerKey, row.deviceId, now)) continue;
+          if (this.isPushToStartCoolingDown(row, now)) continue;
           row.pendingStart = {
             sessionId: session.id,
-            phase: completedTransition ? "completed" : task.phase,
+            phase: task.phase,
             wakeup,
             createdAt: now,
           };
@@ -348,8 +446,9 @@ export class LiveActivityRelay {
       const sessions = this.options.hub.listSessions({ limit: 200 }).sessions;
       this.reconcileWatches(sessions);
       const terminals = this.options.terminals.list();
+      const computerName = this.resolveComputerName();
       const sends = [...this.registrations.values()].filter((row) => (row.retryAfter ?? 0) <= Date.now()).map(async (row) => {
-        const payload = buildLiveActivitySnapshot(this.options.computerName(), sessions, terminals, true, row.computerKey);
+        const payload = buildLiveActivitySnapshot(computerName, sessions, terminals, true, row.computerKey);
         row.notices = row.notices?.filter((notice) => {
           if (Date.now() - notice.createdAt >= 180_000) return false;
           // Discovery may reconcile removed or stale sessions before this relay starts.
@@ -382,6 +481,7 @@ export class LiveActivityRelay {
           // token. Keep the grant so the next snapshot can recover unattended.
           if (response.status === 410 || (response.ok && event === "end")) {
             this.registrations.delete(row.activityId);
+            this.resetPushToStartCooldown(row.computerKey, row.deviceId);
             this.options.log(`[live-activity] retired ${row.activityId}: ${response.status === 410 ? "registration expired" : "completed"}`);
           } else if (response.ok) {
             row.failures = 0; row.retryAfter = 0;
@@ -406,7 +506,8 @@ export class LiveActivityRelay {
         .map(async ([key, row]) => {
           const pending = row.pendingStart;
           if (!pending) return;
-          if (this.hasForegroundFor(row.computerKey)) {
+          const sendNow = Date.now();
+          if (this.hasForegroundFor(row.computerKey, row.deviceId, sendNow) || this.isPushToStartCoolingDown(row, sendNow)) {
             row.pendingStart = undefined;
             return;
           }
@@ -434,6 +535,7 @@ export class LiveActivityRelay {
                 platform: row.platform,
                 pushToStartToken: row.pushToStartToken,
                 computerKey: row.computerKey,
+                computerName,
                 phase: pending.phase,
                 wakeup,
               }),
@@ -447,6 +549,7 @@ export class LiveActivityRelay {
             } else if (response.ok) {
               row.failures = 0;
               row.retryAfter = 0;
+              row.lastPushToStartAt = Date.now();
               if (row.pendingStart === pending) row.pendingStart = undefined;
             } else {
               this.options.log(`[live-activity] push-to-start HTTP ${response.status} for ${key}; retaining registration`);

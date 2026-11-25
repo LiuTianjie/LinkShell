@@ -58,8 +58,17 @@ export class UpdaterController {
   private windowsInstallerChild?: ChildProcess;
   private macUpdate: UpdateState = { checking: false, installing: false, available: false, message: "" };
   private lastUpdateCheck = 0;
+  private cleanTimer?: ReturnType<typeof setTimeout>;
+  private initialCheckTimer?: ReturnType<typeof setTimeout>;
+  private periodicCheckTimer?: ReturnType<typeof setInterval>;
 
   constructor(private readonly deps: UpdaterDeps) {}
+
+  stop(): void {
+    if (this.cleanTimer) { clearTimeout(this.cleanTimer); this.cleanTimer = undefined; }
+    if (this.initialCheckTimer) { clearTimeout(this.initialCheckTimer); this.initialCheckTimer = undefined; }
+    if (this.periodicCheckTimer) { clearInterval(this.periodicCheckTimer); this.periodicCheckTimer = undefined; }
+  }
 
   private windowsUpdateCache(): string {
     return join(this.deps.userData(), "windows-updates", this.deps.runtime.scope);
@@ -111,7 +120,7 @@ export class UpdaterController {
   }
 
   assertChannelSwitchAllowed(): void {
-    if (this.deps.windows && (this.windowsUpdate.checking || this.windowsUpdate.installing)) {
+    if (this.isBusy()) {
       throw new Error("更新正在进行，请稍后再切换通道");
     }
   }
@@ -153,9 +162,14 @@ export class UpdaterController {
     const { windows, runtime, settings, t } = this.deps;
     if (windows && runtime.standalone) {
       void cleanWindowsUpdateDownloads(this.windowsUpdateCache());
-      setTimeout(() => void cleanWindowsUpdateDownloads(this.windowsUpdateCache()), 60_000).unref();
-      if (!launchCheckUpdates) setTimeout(() => this.maybeAutoCheck(), 3_000).unref();
-      setInterval(() => this.maybeAutoCheck(PERIODIC_UPDATE_CHECK_INTERVAL_MS), 60_000).unref();
+      this.cleanTimer = setTimeout(() => { this.cleanTimer = undefined; void cleanWindowsUpdateDownloads(this.windowsUpdateCache()); }, 60_000);
+      this.cleanTimer.unref();
+      if (!launchCheckUpdates) {
+        this.initialCheckTimer = setTimeout(() => { this.initialCheckTimer = undefined; this.maybeAutoCheck(); }, 3_000);
+        this.initialCheckTimer.unref();
+      }
+      this.periodicCheckTimer = setInterval(() => this.maybeAutoCheck(PERIODIC_UPDATE_CHECK_INTERVAL_MS), 60_000);
+      this.periodicCheckTimer.unref();
       return;
     }
     const native = this.deps.getNative();
@@ -201,8 +215,12 @@ export class UpdaterController {
         this.deps.send("linkshell-desktop-update", { name, ...detail, ...("message" in detail ? { message: localizedMessage } : {}) });
       },
     }, settings.updateChannel());
-    if (!launchCheckUpdates) setTimeout(() => this.maybeAutoCheck(), 3_000).unref();
-    setInterval(() => this.maybeAutoCheck(PERIODIC_UPDATE_CHECK_INTERVAL_MS), 60_000).unref();
+    if (!launchCheckUpdates) {
+      this.initialCheckTimer = setTimeout(() => { this.initialCheckTimer = undefined; this.maybeAutoCheck(); }, 3_000);
+      this.initialCheckTimer.unref();
+    }
+    this.periodicCheckTimer = setInterval(() => this.maybeAutoCheck(PERIODIC_UPDATE_CHECK_INTERVAL_MS), 60_000);
+    this.periodicCheckTimer.unref();
   }
 
   check(): { started: boolean } {

@@ -86,7 +86,72 @@ export const composerDrafts = createTextDrafts({
   write: (key, text) => saveLocal(key, text),
 });
 
-subscribeStorageReady(() => composerDrafts.getState().resetCache());
+const EMPTY_PASTED_BLOCKS: PastedTextBlock[] = [];
+const storedPastedCache = new Map<string, PastedTextBlock[]>();
+
+function pastedStorageKey(key: string): string {
+  return `${key}:pasted`;
+}
+
+function readStoredPastedBlocks(key: string): PastedTextBlock[] {
+  const cached = storedPastedCache.get(key);
+  if (cached) return cached;
+  const raw = readLocal<unknown>(pastedStorageKey(key), EMPTY_PASTED_BLOCKS);
+  if (!Array.isArray(raw) || raw.length === 0) {
+    storedPastedCache.set(key, EMPTY_PASTED_BLOCKS);
+    return EMPTY_PASTED_BLOCKS;
+  }
+  const valid = raw.filter(
+    (item): item is PastedTextBlock =>
+      Boolean(item) &&
+      typeof item === "object" &&
+      typeof (item as PastedTextBlock).id === "string" &&
+      typeof (item as PastedTextBlock).text === "string" &&
+      typeof (item as PastedTextBlock).lines === "number" &&
+      typeof (item as PastedTextBlock).byteLength === "number",
+  );
+  const result = valid.length > 0 ? valid : EMPTY_PASTED_BLOCKS;
+  storedPastedCache.set(key, result);
+  return result;
+}
+
+export type PastedBlocksChange =
+  | PastedTextBlock[]
+  | ((current: PastedTextBlock[]) => PastedTextBlock[]);
+
+export const composerPastedDrafts = createStore<{
+  entries: Record<string, PastedTextBlock[]>;
+  read: (key: string) => PastedTextBlock[];
+  update: (key: string, change: PastedBlocksChange) => void;
+  clear: (key: string) => void;
+  resetCache: () => void;
+}>((set, get) => ({
+  entries: {},
+  read: (key) => get().entries[key] ?? readStoredPastedBlocks(key),
+  update: (key, change) => {
+    const current = get().read(key);
+    const nextRaw = typeof change === "function" ? change(current) : change;
+    const next = nextRaw.length > 0 ? nextRaw : EMPTY_PASTED_BLOCKS;
+    if (next === current) return;
+    storedPastedCache.set(key, next);
+    set((state) => ({ entries: { ...state.entries, [key]: next } }));
+    try {
+      saveLocal(pastedStorageKey(key), next.length > 0 ? next : undefined);
+    } catch {
+      // Large pastes remain preserved in memory across session switches even if localStorage is full.
+    }
+  },
+  clear: (key) => get().update(key, EMPTY_PASTED_BLOCKS),
+  resetCache: () => {
+    storedPastedCache.clear();
+    set({ entries: {} });
+  },
+}));
+
+subscribeStorageReady(() => {
+  composerDrafts.getState().resetCache();
+  composerPastedDrafts.getState().resetCache();
+});
 
 export function useComposerDraft(key: string) {
   const text = useStore(composerDrafts, (state) => state.read(key));
@@ -99,7 +164,24 @@ export function useComposerDraft(key: string) {
     (submitted: string) => composerDrafts.getState().clearSubmitted(key, submitted),
     [key],
   );
-  return { text, setText, readText, clearSubmitted };
+  const pastedBlocks = useStore(composerPastedDrafts, (state) => state.read(key));
+  const setPastedBlocks = useCallback(
+    (change: PastedBlocksChange) => composerPastedDrafts.getState().update(key, change),
+    [key],
+  );
+  const clearPastedBlocks = useCallback(
+    () => composerPastedDrafts.getState().clear(key),
+    [key],
+  );
+  return {
+    text,
+    setText,
+    readText,
+    clearSubmitted,
+    pastedBlocks,
+    setPastedBlocks,
+    clearPastedBlocks,
+  };
 }
 
 export interface PersistedOutboxItem {

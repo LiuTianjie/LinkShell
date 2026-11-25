@@ -67,16 +67,62 @@ public final class WatchSessionStore: NSObject, ObservableObject {
     direct.stop()
     independent = value
     UserDefaults.standard.set(value, forKey: "LinkShellWatch.independent")
+    reportModeToPhone()
+    // Reset in-app state without wiping the Watch face complication snapshot until new data arrives.
     snapshot = .empty
+    lastGeneratedAt = 0
     resetHapticBaseline()
-    if let data = try? JSONEncoder().encode(WatchSnapshot.empty), let json = String(data: data, encoding: .utf8) { applySnapshotJSON(json, force: true) }
     if value { direct.start() } else { requestRefresh(silent: true) }
+  }
+
+  /// Tells the paired iPhone whether this Watch is running independently so the phone can
+  /// pause companion session/terminal streaming and save battery on both devices.
+  private func reportModeToPhone() {
+    #if canImport(WatchConnectivity)
+    guard WCSession.isSupported() else { return }
+    let session = WCSession.default
+    guard session.activationState == .activated else { return }
+    let payload: [String: Any] = [
+      "type": "watchMode",
+      "independent": independent,
+      "updatedAt": Date().timeIntervalSince1970,
+    ]
+    try? session.updateApplicationContext(payload)
+    if session.isReachable {
+      session.sendMessage(payload, replyHandler: nil, errorHandler: nil)
+    }
+    #endif
+  }
+
+  private var lastScenePhase: ScenePhase?
+
+  public func setScenePhase(_ phase: ScenePhase) {
+    let previous = lastScenePhase
+    lastScenePhase = phase
+    if independent {
+      direct.setInactive(phase != .active)
+      setForeground(phase != .background)
+    } else if phase == .active && previous != .active {
+      reportModeToPhone()
+      #if canImport(WatchConnectivity)
+      if WCSession.isSupported(),
+         let json = WCSession.default.receivedApplicationContext["snapshotJSON"] as? String {
+        applySnapshotJSON(json)
+      }
+      #endif
+      if isPhoneReachable {
+        requestRefresh(silent: true)
+      }
+    }
   }
 
   /// `true` for active and inactive alike: lowering the wrist, the Always On dim, a notification
   /// or Control Center only make the app inactive, and it comes straight back.
   public func setForeground(_ value: Bool) {
-    guard independent else { return }
+    if !independent {
+      if value && isPhoneReachable { requestRefresh(silent: true) }
+      return
+    }
     backgroundStop?.cancel(); backgroundStop = nil
     if value { direct.resume(); return }
     let stop = Task { @MainActor [weak self] in
@@ -214,6 +260,10 @@ public final class WatchSessionStore: NSObject, ObservableObject {
   public func applySnapshotJSON(_ json: String, force: Bool = false) {
     guard let data = json.data(using: .utf8),
           let decoded = try? JSONDecoder().decode(WatchSnapshot.self, from: data) else {
+      return
+    }
+    // Reject out-of-order snapshots (e.g. a late applicationContext arriving after a newer message).
+    if !force && lastGeneratedAt > 0 && decoded.generatedAt > 0 && decoded.generatedAt < lastGeneratedAt {
       return
     }
     // Nothing new to show: skip the stores, but let the face's age move on now and then.
@@ -359,11 +409,15 @@ public final class WatchSessionStore: NSObject, ObservableObject {
             if let json = reply["snapshotJSON"] as? String {
               self.applySnapshotJSON(json)
             }
-            self.showNotice(ok: true, text: "已同步最新状态")
+            if !silent {
+              self.showNotice(ok: true, text: "已同步最新状态")
+            }
           }
         } errorHandler: { [weak self] _ in
           Task { @MainActor in
-            self?.showNotice(ok: false, text: "请确认 iPhone 已打开 LinkShell")
+            if !silent {
+              self?.showNotice(ok: false, text: "请确认 iPhone 已打开 LinkShell")
+            }
           }
         }
         return
@@ -373,11 +427,15 @@ public final class WatchSessionStore: NSObject, ObservableObject {
     #if targetEnvironment(simulator)
     Task { @MainActor in
       await pollSimulatorBridge()
-      showNotice(ok: snapshot.online, text: snapshot.online ? "已同步最新状态" : "请在 iPhone 上打开 LinkShell")
+      if !silent {
+        showNotice(ok: snapshot.online, text: snapshot.online ? "已同步最新状态" : "请在 iPhone 上打开 LinkShell")
+      }
     }
     #else
     loadCachedSnapshot()
-    showNotice(ok: snapshot.online, text: snapshot.online ? "已刷新缓存状态" : "请在 iPhone 上打开 LinkShell")
+    if !silent {
+      showNotice(ok: snapshot.online, text: snapshot.online ? "已刷新缓存状态" : "请在 iPhone 上打开 LinkShell")
+    }
     #endif
   }
 
@@ -737,6 +795,7 @@ extension WatchSessionStore: WCSessionDelegate {
     let contextJSON = session.receivedApplicationContext["snapshotJSON"] as? String
     Task { @MainActor in
       self.isPhoneReachable = reachable
+      self.reportModeToPhone()
       guard !self.independent else { return }
       if let contextJSON {
         self.applySnapshotJSON(contextJSON)
@@ -751,6 +810,7 @@ extension WatchSessionStore: WCSessionDelegate {
     let reachable = session.isReachable
     Task { @MainActor in
       self.isPhoneReachable = reachable
+      if reachable { self.reportModeToPhone() }
       guard !self.independent else { return }
       if reachable {
         self.requestRefresh(silent: true)
@@ -782,19 +842,47 @@ extension WatchSessionStore: WCSessionDelegate {
     Task { @MainActor in self.applyBackgroundSnapshot(json) }
   }
 
+  private static func machineId(from computerKey: String) -> String? {
+    guard !computerKey.isEmpty else { return nil }
+    // iPhone relay key: "<gateway>#<machineId>" (or "relay:<gateway>#<machineId>").
+    if let hash = computerKey.lastIndex(of: "#") {
+      let id = String(computerKey[computerKey.index(after: hash)...])
+      return id.isEmpty ? nil : id
+    }
+    // Watch independent key: "watch:<gatewayUrl>:<machineId>".
+    if computerKey.hasPrefix("watch:"), let colon = computerKey.lastIndex(of: ":") {
+      let id = String(computerKey[computerKey.index(after: colon)...])
+      if !id.isEmpty && !id.hasPrefix("//") {
+        return id
+      }
+    }
+    return nil
+  }
+
   private func applyBackgroundSnapshot(_ json: String) {
     if !independent {
       applySnapshotJSON(json)
       return
     }
     // Connected on its own, the app keeps its own picture; the face may still take the phone's,
-    // but only for the computer the watch is following.
+    // matched by stable machineId (falling back to computerName only when neither key carries one).
     guard let data = json.data(using: .utf8),
           let incoming = try? JSONDecoder().decode(WatchSnapshot.self, from: data),
           let current = Self.widgetSnapshot(),
-          current.computerName == incoming.computerName,
           incoming.generatedAt > current.generatedAt else { return }
+    let currentMachineId = Self.machineId(from: current.computerKey) ?? direct.machine?.id
+    let incomingMachineId = Self.machineId(from: incoming.computerKey)
+    let sameComputer: Bool
+    if let currentMachineId, let incomingMachineId {
+      sameComputer = currentMachineId == incomingMachineId
+    } else {
+      sameComputer = current.computerName == incoming.computerName
+    }
+    guard sameComputer else { return }
     Self.defaults.set(json, forKey: WatchSnapshot.widgetCacheKey)
+    if let fileURL = Self.sharedContainerSnapshotURL {
+      try? json.write(to: fileURL, atomically: true, encoding: .utf8)
+    }
     #if canImport(WidgetKit)
     WidgetCenter.shared.reloadAllTimelines()
     #endif

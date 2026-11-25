@@ -202,12 +202,23 @@ export function ConsoleShell({
   const [theme, setTheme] = useState<"system" | "light" | "dark">(() => {
     const saved = readLocal<string>("theme", "");
     if (saved === "light" || saved === "dark" || saved === "system") return saved;
-    return matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    return "system";
   });
+  const [systemDark, setSystemDark] = useState(() =>
+    typeof window !== "undefined" && typeof window.matchMedia === "function"
+      ? window.matchMedia("(prefers-color-scheme: dark)").matches
+      : false,
+  );
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    setSystemDark(media.matches);
+    const onChange = (event: MediaQueryListEvent) => setSystemDark(event.matches);
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, []);
   const resolvedTheme =
-    theme === "system"
-      ? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
-      : theme;
+    theme === "system" ? (systemDark ? "dark" : "light") : theme;
   useEffect(() => {
     document.documentElement.dataset.theme = resolvedTheme;
     saveLocal("theme", theme);
@@ -259,7 +270,7 @@ export function ConsoleShell({
       </a>
       <SidebarProvider
         className="console-body min-h-0"
-        style={{ "--sidebar-width": "232px" } as CSSProperties}
+        style={{ "--sidebar-width": "264px" } as CSSProperties}
       >
         <Navigation
           view={view}

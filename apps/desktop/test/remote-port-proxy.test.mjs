@@ -219,3 +219,98 @@ test("RemotePortProxyManager refuses foreign Host headers (DNS rebinding) and We
   });
   assert.match(upgradeReply, /^HTTP\/1\.1 501/);
 });
+
+test("RemotePortProxyManager streams response chunks incrementally and propagates client aborts via cancel", async (t) => {
+  const cancelled = [];
+  let activeReqId = "";
+  const manager = new RemotePortProxyManager({
+    requestTimeoutMs: 500,
+    dispatch(payload) {
+      activeReqId = payload.reqId;
+      if (payload.path === "/stream") {
+        queueMicrotask(() => {
+          assert.equal(
+            manager.reply({
+              reqId: payload.reqId,
+              phase: "head",
+              status: 200,
+              headers: [["content-type", "text/event-stream"]],
+            }).ok,
+            true,
+          );
+          assert.equal(
+            manager.reply({
+              reqId: payload.reqId,
+              phase: "chunk",
+              bodyBase64: Buffer.from("chunk-1\n").toString("base64"),
+            }).ok,
+            true,
+          );
+          setTimeout(() => {
+            assert.equal(
+              manager.reply({
+                reqId: payload.reqId,
+                phase: "chunk",
+                bodyBase64: Buffer.from("chunk-2\n").toString("base64"),
+              }).ok,
+              true,
+            );
+            assert.equal(manager.reply({ reqId: payload.reqId, phase: "end" }).ok, true);
+          }, 25);
+        });
+        return true;
+      }
+      if (payload.path === "/abort-me") {
+        queueMicrotask(() => {
+          manager.reply({
+            reqId: payload.reqId,
+            phase: "head",
+            status: 200,
+            headers: [["content-type", "text/plain"]],
+          });
+          manager.reply({
+            reqId: payload.reqId,
+            phase: "chunk",
+            bodyBase64: Buffer.from("first").toString("base64"),
+          });
+        });
+        return true;
+      }
+      return false;
+    },
+    cancel(reqId) {
+      cancelled.push(reqId);
+    },
+  });
+  t.after(() => manager.stopAll());
+
+  const port = await manager.ensureProxy("machine:stream", 4000);
+  const res = await fetch(`http://127.0.0.1:${port}/stream`);
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("content-type"), "text/event-stream");
+  assert.equal(await res.text(), "chunk-1\nchunk-2\n");
+  assert.deepEqual(cancelled, []);
+
+  // Abort mid-stream and verify cancel callback propagates the reqId immediately.
+  const abortedReq = new Promise((resolve) => {
+    const req = httpRequest({ host: "127.0.0.1", port, path: "/abort-me" }, (incoming) => {
+      incoming.once("data", () => {
+        req.destroy();
+        resolve();
+      });
+    });
+    req.on("error", () => {});
+    req.end();
+  });
+  await abortedReq;
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.ok(cancelled.includes(activeReqId), `Expected ${activeReqId} in cancelled list: ${JSON.stringify(cancelled)}`);
+  assert.equal(
+    manager.reply({
+      reqId: activeReqId,
+      phase: "chunk",
+      bodyBase64: Buffer.from("late").toString("base64"),
+    }).ok,
+    false,
+  );
+});

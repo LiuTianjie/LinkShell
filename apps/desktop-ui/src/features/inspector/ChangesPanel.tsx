@@ -29,10 +29,12 @@ import type { Connection } from "../../core/connections";
 import {
   changeLines,
   diffLines,
+  diffReviewSessionKey,
   diffReviewStore,
   diffStat,
   formatDiffReviewPrompt,
   hunks,
+  normalizeReviewPath,
   useDiffReviews,
   type DiffLine,
   type DiffReviewComment,
@@ -80,29 +82,7 @@ export interface UnifiedChangeEntry {
  * Strips the session `cwd` prefix (POSIX `/` or Windows `\`) so diff trees and card headers
  * show clean repo-relative paths while preserving raw paths for host RPCs.
  */
-export function toRepoRelativePath(filePath: string, cwd?: string): string {
-  if (!filePath) return filePath;
-  const normPath = filePath.replace(/\\/g, "/");
-  if (!cwd) return normPath;
-  const normCwd = cwd.replace(/\\/g, "/").replace(/\/+$/, "");
-  if (!normCwd) return normPath;
-  if (normPath === normCwd) {
-    const idx = normPath.lastIndexOf("/");
-    return idx >= 0 ? normPath.slice(idx + 1) : normPath;
-  }
-  const prefix = `${normCwd}/`;
-  if (normPath.startsWith(prefix)) {
-    return normPath.slice(prefix.length).replace(/^\/+/, "");
-  }
-  if (
-    /^[a-zA-Z]:\//.test(normPath) &&
-    /^[a-zA-Z]:\//.test(normCwd) &&
-    normPath.slice(0, prefix.length).toLowerCase() === prefix.toLowerCase()
-  ) {
-    return normPath.slice(prefix.length).replace(/^\/+/, "");
-  }
-  return normPath;
-}
+export const toRepoRelativePath = normalizeReviewPath;
 
 function splitDisplayPath(displayPath: string): {
   basename: string;
@@ -375,14 +355,20 @@ function ChangesDirectoryTree({
                 className="inspector-change-tree-chevron"
               />
               <span className="inspector-change-tree-label">{node.label}</span>
-              <span className="inspector-change-tree-stat" data-tabular="">
-                <span className="inspector-diff-stat-add">
-                  +{formatCompactStat(node.added)}
+              {node.added > 0 || node.removed > 0 ? (
+                <span className="inspector-change-tree-stat" data-tabular="">
+                  {node.added > 0 ? (
+                    <span className="inspector-diff-stat-add">
+                      +{formatCompactStat(node.added)}
+                    </span>
+                  ) : null}
+                  {node.removed > 0 ? (
+                    <span className="inspector-diff-stat-del">
+                      -{formatCompactStat(node.removed)}
+                    </span>
+                  ) : null}
                 </span>
-                <span className="inspector-diff-stat-del">
-                  -{formatCompactStat(node.removed)}
-                </span>
-              </span>
+              ) : null}
             </button>
             {!isCollapsed ? renderNodes(node.children, depth + 1) : null}
           </div>
@@ -411,14 +397,20 @@ function ChangesDirectoryTree({
           </button>
 
           <span className="inspector-change-tree-meta">
-            <span className="inspector-change-tree-stat" data-tabular="">
-              <span className="inspector-diff-stat-add">
-                +{formatCompactStat(node.added)}
+            {node.added > 0 || node.removed > 0 ? (
+              <span className="inspector-change-tree-stat" data-tabular="">
+                {node.added > 0 ? (
+                  <span className="inspector-diff-stat-add">
+                    +{formatCompactStat(node.added)}
+                  </span>
+                ) : null}
+                {node.removed > 0 ? (
+                  <span className="inspector-diff-stat-del">
+                    -{formatCompactStat(node.removed)}
+                  </span>
+                ) : null}
               </span>
-              <span className="inspector-diff-stat-del">
-                -{formatCompactStat(node.removed)}
-              </span>
-            </span>
+            ) : null}
 
             {entry.canRevert && onRevertFile ? (
               <IconButton
@@ -496,19 +488,65 @@ function DiffFileCard({
     return out;
   }, [visibleHunks]);
 
-  const codeForShiki = useMemo(() => {
-    if (!isOpen || entry.binary || flattenedLines.length === 0) return "";
-    return flattenedLines
-      .map((row) => (row.kind === "skip" ? "" : row.text))
-      .join("\n");
-  }, [isOpen, entry.binary, flattenedLines]);
+  const splitHunks = useMemo(
+    () =>
+      visibleHunks.map((hunk) => ({
+        skipped: hunk.skipped,
+        pairs: pairDiffLinesForSplit(hunk.lines),
+      })),
+    [visibleHunks],
+  );
+
+  // Tokenize old and new file views independently so deleted multi-line strings or comments
+  // never corrupt Shiki grammar state for subsequent added/context lines.
+  const { oldCode, newCode, lineTokenIndex } = useMemo(() => {
+    const indexMap = new Map<DiffLine, { oldIdx?: number; newIdx?: number }>();
+    if (!isOpen || entry.binary || visibleHunks.length === 0) {
+      return { oldCode: "", newCode: "", lineTokenIndex: indexMap };
+    }
+    const oldLines: string[] = [];
+    const newLines: string[] = [];
+    for (const hunk of visibleHunks) {
+      for (const line of hunk.lines) {
+        let oldIdx: number | undefined;
+        let newIdx: number | undefined;
+        if (line.kind !== "add") {
+          oldIdx = oldLines.length;
+          oldLines.push(line.text);
+        }
+        if (line.kind !== "del") {
+          newIdx = newLines.length;
+          newLines.push(line.text);
+        }
+        indexMap.set(line, { oldIdx, newIdx });
+      }
+    }
+    return {
+      oldCode: oldLines.join("\n"),
+      newCode: newLines.join("\n"),
+      lineTokenIndex: indexMap,
+    };
+  }, [isOpen, entry.binary, visibleHunks]);
 
   const language = useMemo(() => grammarForPath(entry.path), [entry.path]);
-  const highlightedLines = useHighlight(
-    codeForShiki,
+  const oldTokens = useHighlight(
+    oldCode,
     language,
-    isOpen && !entry.binary && codeForShiki.length > 0,
+    isOpen && !entry.binary && oldCode.length > 0,
   );
+  const newTokens = useHighlight(
+    newCode,
+    language,
+    isOpen && !entry.binary && newCode.length > 0,
+  );
+  const tokensForLine = (line: DiffLine, side: "old" | "new") => {
+    const slot = lineTokenIndex.get(line);
+    if (!slot) return undefined;
+    if (side === "old") {
+      return slot.oldIdx !== undefined ? oldTokens?.[slot.oldIdx] : undefined;
+    }
+    return slot.newIdx !== undefined ? newTokens?.[slot.newIdx] : undefined;
+  };
 
   const fileComments = useMemo(
     () => comments.filter((c) => c.path === entry.path),
@@ -673,10 +711,18 @@ function DiffFileCard({
             className="inspector-diff-card__meta"
             onClick={(e) => e.stopPropagation()}
           >
-            <span className="inspector-diff-stat-pill" data-tabular="">
-              <span className="inspector-diff-stat-add">+{entry.added}</span>
-              <span className="inspector-diff-stat-del">-{entry.removed}</span>
-            </span>
+            {entry.added > 0 || entry.removed > 0 ? (
+              <span className="inspector-diff-stat-pill" data-tabular="">
+                {entry.added > 0 ? (
+                  <span className="inspector-diff-stat-add">+{entry.added}</span>
+                ) : null}
+                {entry.removed > 0 ? (
+                  <span className="inspector-diff-stat-del">
+                    -{entry.removed}
+                  </span>
+                ) : null}
+              </span>
+            ) : null}
             <span className="inspector-diff-card__actions">
               {onOpenFile && entry.status !== "deleted" ? (
                 <IconButton
@@ -720,7 +766,7 @@ function DiffFileCard({
                       <span className="inspector-diff-ln">…</span>
                       <span className="inspector-diff-sign">⋮</span>
                       <span className="inspector-diff-code">
-                        {`@@ +${row.count} unchanged lines @@`}
+                        {ti("unchangedLines", { count: row.count })}
                       </span>
                     </div>
                   );
@@ -757,7 +803,7 @@ function DiffFileCard({
                       <span className="inspector-diff-ln">{row.new ?? ""}</span>
                       <span className="inspector-diff-sign">{sign}</span>
                       <span className="inspector-diff-code">
-                        {renderTokenLine(highlightedLines?.[idx], row.text)}
+                        {renderTokenLine(tokensForLine(row, side), row.text)}
                       </span>
                     </div>
                     {renderSavedAndDraft(side, targetLine)}
@@ -769,117 +815,123 @@ function DiffFileCard({
         ) : (
           <div tabIndex={0} className="inspector-diff-scroll">
             <div className="inspector-diff-table">
-              {visibleHunks.map((hunk, hIdx) => {
-                const pairs = pairDiffLinesForSplit(hunk.lines);
-                return (
-                  <div key={`hunk-${hIdx}`}>
-                    {hunk.skipped > 0 ? (
-                      <div className="inspector-diff-row">
-                        <span />
-                        <span className="inspector-diff-ln">…</span>
-                        <span className="inspector-diff-ln">…</span>
-                        <span className="inspector-diff-sign">⋮</span>
-                        <span className="inspector-diff-code">
-                          {`@@ +${hunk.skipped} unchanged lines @@`}
-                        </span>
-                      </div>
-                    ) : null}
-                    {pairs.map((pair, pIdx) => (
-                      <div key={`sp-${hIdx}-${pIdx}`}>
-                        <div className="inspector-diff-split-row">
-                          <div
-                            className="inspector-diff-split-cell"
-                            data-kind={pair.left ? pair.left.kind : "empty"}
-                          >
-                            <span>
-                              {pair.left?.old !== undefined ? (
-                                <button
-                                  type="button"
-                                  className="inspector-diff-comment-btn"
-                                  aria-label={t(
-                                    "desktop.timeline.addLineComment",
-                                  )}
-                                  onClick={() =>
-                                    onOpenDraft({
-                                      path: entry.path,
-                                      side: "old",
-                                      line: pair.left!.old!,
-                                      excerpt: pair.left!.text,
-                                      text: "",
-                                    })
-                                  }
-                                >
-                                  <DesktopIcon name="plus" size="xs" />
-                                </button>
-                              ) : null}
-                            </span>
-                            <span className="inspector-diff-ln">
-                              {pair.left?.old ?? ""}
-                            </span>
-                            <span className="inspector-diff-sign">
-                              {pair.left
-                                ? pair.left.kind === "del"
-                                  ? "-"
-                                  : " "
-                                : ""}
-                            </span>
-                            <span className="inspector-diff-code">
-                              {pair.left?.text ?? ""}
-                            </span>
-                          </div>
-                          <div
-                            className="inspector-diff-split-cell"
-                            data-kind={pair.right ? pair.right.kind : "empty"}
-                          >
-                            <span>
-                              {pair.right?.new !== undefined ? (
-                                <button
-                                  type="button"
-                                  className="inspector-diff-comment-btn"
-                                  aria-label={t(
-                                    "desktop.timeline.addLineComment",
-                                  )}
-                                  onClick={() =>
-                                    onOpenDraft({
-                                      path: entry.path,
-                                      side: "new",
-                                      line: pair.right!.new!,
-                                      excerpt: pair.right!.text,
-                                      text: "",
-                                    })
-                                  }
-                                >
-                                  <DesktopIcon name="plus" size="xs" />
-                                </button>
-                              ) : null}
-                            </span>
-                            <span className="inspector-diff-ln">
-                              {pair.right?.new ?? ""}
-                            </span>
-                            <span className="inspector-diff-sign">
-                              {pair.right
-                                ? pair.right.kind === "add"
-                                  ? "+"
-                                  : " "
-                                : ""}
-                            </span>
-                            <span className="inspector-diff-code">
-                              {pair.right?.text ?? ""}
-                            </span>
-                          </div>
+              {splitHunks.map((hunk, hIdx) => (
+                <div key={`hunk-${hIdx}`}>
+                  {hunk.skipped > 0 ? (
+                    <div className="inspector-diff-row">
+                      <span />
+                      <span className="inspector-diff-ln">…</span>
+                      <span className="inspector-diff-ln">…</span>
+                      <span className="inspector-diff-sign">⋮</span>
+                      <span className="inspector-diff-code">
+                        {ti("unchangedLines", { count: hunk.skipped })}
+                      </span>
+                    </div>
+                  ) : null}
+                  {hunk.pairs.map((pair, pIdx) => (
+                    <div key={`sp-${hIdx}-${pIdx}`}>
+                      <div className="inspector-diff-split-row">
+                        <div
+                          className="inspector-diff-split-cell"
+                          data-kind={pair.left ? pair.left.kind : "empty"}
+                        >
+                          <span>
+                            {pair.left?.old !== undefined ? (
+                              <button
+                                type="button"
+                                className="inspector-diff-comment-btn"
+                                aria-label={t(
+                                  "desktop.timeline.addLineComment",
+                                )}
+                                onClick={() =>
+                                  onOpenDraft({
+                                    path: entry.path,
+                                    side: "old",
+                                    line: pair.left!.old!,
+                                    excerpt: pair.left!.text,
+                                    text: "",
+                                  })
+                                }
+                              >
+                                <DesktopIcon name="plus" size="xs" />
+                              </button>
+                            ) : null}
+                          </span>
+                          <span className="inspector-diff-ln">
+                            {pair.left?.old ?? ""}
+                          </span>
+                          <span className="inspector-diff-sign">
+                            {pair.left
+                              ? pair.left.kind === "del"
+                                ? "-"
+                                : " "
+                              : ""}
+                          </span>
+                          <span className="inspector-diff-code">
+                            {pair.left
+                              ? renderTokenLine(
+                                  tokensForLine(pair.left, "old"),
+                                  pair.left.text,
+                                )
+                              : ""}
+                          </span>
                         </div>
-                        {pair.left?.old !== undefined
-                          ? renderSavedAndDraft("old", pair.left.old)
-                          : null}
-                        {pair.right?.new !== undefined &&
-                        pair.right.kind !== "same"
-                          ? renderSavedAndDraft("new", pair.right.new)
-                          : null}
+                        <div
+                          className="inspector-diff-split-cell"
+                          data-kind={pair.right ? pair.right.kind : "empty"}
+                        >
+                          <span>
+                            {pair.right?.new !== undefined ? (
+                              <button
+                                type="button"
+                                className="inspector-diff-comment-btn"
+                                aria-label={t(
+                                  "desktop.timeline.addLineComment",
+                                )}
+                                onClick={() =>
+                                  onOpenDraft({
+                                    path: entry.path,
+                                    side: "new",
+                                    line: pair.right!.new!,
+                                    excerpt: pair.right!.text,
+                                    text: "",
+                                  })
+                                }
+                              >
+                                <DesktopIcon name="plus" size="xs" />
+                              </button>
+                            ) : null}
+                          </span>
+                          <span className="inspector-diff-ln">
+                            {pair.right?.new ?? ""}
+                          </span>
+                          <span className="inspector-diff-sign">
+                            {pair.right
+                              ? pair.right.kind === "add"
+                                ? "+"
+                                : " "
+                              : ""}
+                          </span>
+                          <span className="inspector-diff-code">
+                            {pair.right
+                              ? renderTokenLine(
+                                  tokensForLine(pair.right, "new"),
+                                  pair.right.text,
+                                )
+                              : ""}
+                          </span>
+                        </div>
                       </div>
-                    ))}
-                  </div>
-                );
-              })}
+                      {pair.left?.old !== undefined
+                        ? renderSavedAndDraft("old", pair.left.old)
+                        : null}
+                      {pair.right?.new !== undefined
+                        ? renderSavedAndDraft("new", pair.right.new)
+                        : null}
+                    </div>
+                  ))}
+                </div>
+              ))}
             </div>
           </div>
         )}
@@ -945,7 +997,8 @@ export function ChangesPanel({
   const userPickedModeRef = useRef(false);
   const loadSeqRef = useRef(0);
 
-  const reviewKey = sessionId ?? (cwd ? `cwd:${cwd}` : "inspector");
+  const reviewKey =
+    diffReviewSessionKey(connection?.computer.key, sessionId, cwd) ?? "inspector";
   const comments = useDiffReviews(reviewKey);
   // A worktree session is compared with the branch it started from, so committed work shows too.
   const worktreeBase = (
@@ -1162,14 +1215,20 @@ export function ChangesPanel({
             </span>
           ) : null}
 
-          <span className="inspector-change-tree-stat" data-tabular="">
-            <span className="inspector-diff-stat-add">
-              +{formatCompactStat(activeStats.added)}
+          {activeStats.added > 0 || activeStats.removed > 0 ? (
+            <span className="inspector-change-tree-stat" data-tabular="">
+              {activeStats.added > 0 ? (
+                <span className="inspector-diff-stat-add">
+                  +{formatCompactStat(activeStats.added)}
+                </span>
+              ) : null}
+              {activeStats.removed > 0 ? (
+                <span className="inspector-diff-stat-del">
+                  -{formatCompactStat(activeStats.removed)}
+                </span>
+              ) : null}
             </span>
-            <span className="inspector-diff-stat-del">
-              -{formatCompactStat(activeStats.removed)}
-            </span>
-          </span>
+          ) : null}
 
           {sessionId ? (
             <div

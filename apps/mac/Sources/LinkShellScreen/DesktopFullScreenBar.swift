@@ -157,6 +157,19 @@ public final class DesktopFullScreenBar: NSVisualEffectView {
     }
   }
 
+  deinit {
+    hideWork?.cancel()
+    if let monitor {
+      if Thread.isMainThread {
+        NSEvent.removeMonitor(monitor)
+      } else {
+        DispatchQueue.main.async {
+          NSEvent.removeMonitor(monitor)
+        }
+      }
+    }
+  }
+
   public func attach(to container: NSView) {
     let attachedBefore = bar.superview === container && monitor != nil
     self.container = container

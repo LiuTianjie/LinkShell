@@ -109,6 +109,8 @@ export interface DriverHost {
   detached(agent: string, nativeId: string): void;
   /** The messages the driver is holding for after the current turn (empty: none). */
   queue(agent: string, nativeId: string, items: QueuedMessage[]): void;
+  /** Releases a previously claimed client message id if a driver's deferred send failed. */
+  releaseClientMessage?(agent: string, nativeId: string, clientMessageId: string): void;
   /** The agent deleted a session itself (e.g. from its own UI). */
   removed(agent: string, nativeId: string): void;
   /** What `lineage` or `appArchive` says of these sessions changed (the agent's records did): the host takes it in and tells clients. */

@@ -183,4 +183,99 @@ describe("client store reliability", () => {
     });
     expect((store3.getState().views[baseSession.id]?.items[0] as { failed?: boolean }).failed).toBeUndefined();
   });
+
+  it("evicts oldest closed views via LRU on closeSession while preserving open and outbox-backed views", () => {
+    const link = new HostLink({ url: "ws://host-lru" });
+    vi.spyOn(link, "subscribe").mockResolvedValue(undefined);
+    vi.spyOn(link, "unsubscribe").mockImplementation(() => {});
+
+    const store = createClientStore(link, { maxClosedViews: 2 });
+    for (const id of ["s1", "s2", "s3", "s4"]) {
+      store.getState().openSession(id);
+      store.getState().closeSession(id);
+    }
+    // Only the 2 most recently closed views remain cached.
+    expect(Object.keys(store.getState().views).sort()).toEqual(["s3", "s4"]);
+
+    // Protect a closed view that still holds an unsent outbox entry from eviction while keeping total closed views capped.
+    store.setState((state) => ({ outbox: { ...state.outbox, "m-keep": { sessionId: "s3", content: text("keep me") } } }));
+    store.getState().openSession("s5");
+    store.getState().closeSession("s5");
+    expect(store.getState().views["s3"]).toBeDefined();
+    expect(store.getState().views["s4"]).toBeUndefined();
+    expect(store.getState().views["s5"]).toBeDefined();
+
+    // Closing s6 evicts s5 (oldest unprotected closed view) while keeping protected s3 and newest s6.
+    store.getState().openSession("s6");
+    store.getState().closeSession("s6");
+    expect(store.getState().views["s3"]).toBeDefined();
+    expect(store.getState().views["s5"]).toBeUndefined();
+    expect(store.getState().views["s6"]).toBeDefined();
+  });
+
+  it("removes the optimistic pending bubble when retry() delivers to the host queue", async () => {
+    const link = new HostLink({ url: "ws://host-retry-queue" });
+    const call = vi.spyOn(link, "call");
+    call.mockRejectedValueOnce(new Error("offline"));
+    call.mockResolvedValueOnce({ delivery: "queued" });
+
+    const store = createClientStore(link, { newId: () => "retry-q1" });
+    store.setState({ sessions: { [baseSession.id]: baseSession } });
+
+    expect(await store.getState().send(baseSession.id, text("Try later"))).toBe("failed");
+    expect(store.getState().views[baseSession.id]?.items).toHaveLength(1);
+
+    await store.getState().retry("retry-q1");
+    expect(store.getState().outbox).toEqual({});
+    expect(store.getState().views[baseSession.id]?.items).toEqual([]);
+  });
+
+  it("clears outbox entries confirmed in summary.queue and deduplicates replayed events on retry", async () => {
+    let summaryListener!: (summary: SessionSummary) => void;
+    let eventListener!: (event: SessionEvent) => void;
+    let restoredListener!: (summary: SessionSummary) => void;
+    const link = new HostLink({ url: "ws://host-summary-dedup" });
+    vi.spyOn(link, "onSummary").mockImplementation((fn) => {
+      summaryListener = fn;
+      return () => {};
+    });
+    vi.spyOn(link, "onEvent").mockImplementation((fn) => {
+      eventListener = fn;
+      return () => {};
+    });
+    vi.spyOn(link, "onRestored").mockImplementation((fn) => {
+      restoredListener = fn;
+      return () => {};
+    });
+    vi.spyOn(link, "call").mockRejectedValueOnce(new Error("timeout")).mockResolvedValue({ tasks: [] });
+
+    const store = createClientStore(link, { newId: () => "q-confirmed" });
+    store.setState({ status: "online", sessions: { [baseSession.id]: baseSession } });
+
+    expect(await store.getState().send(baseSession.id, text("Queued before disconnect"))).toBe("failed");
+    expect(store.getState().outbox["q-confirmed"]).toBeDefined();
+    expect(store.getState().views[baseSession.id]?.items).toHaveLength(1);
+
+    // Host summary announces that `q-confirmed` is already in its queue -> outbox & stale bubble clear immediately.
+    summaryListener({
+      ...baseSession,
+      state: "running",
+      queue: [{ clientMessageId: "q-confirmed", text: "Queued before disconnect", images: 0 }],
+    });
+    expect(store.getState().outbox["q-confirmed"]).toBeUndefined();
+    expect(store.getState().views[baseSession.id]?.items).toEqual([]);
+
+    // Subscribe replay deduplicates events delivered twice on a subscribe retry.
+    store.setState({ open: { [baseSession.id]: true } });
+    const ev1: SessionEvent = {
+      sessionId: baseSession.id,
+      seq: 1,
+      ts: 100,
+      update: { sessionUpdate: "agent_message_chunk", messageId: "a1", content: { type: "text", text: "hello" } },
+    };
+    eventListener(ev1);
+    eventListener(ev1);
+    restoredListener({ ...baseSession, lastSeq: 1 });
+    expect(store.getState().views[baseSession.id]?.items).toMatchObject([{ kind: "agent", id: "a1", text: "hello" }]);
+  });
 });

@@ -19,8 +19,8 @@ public class LinkTerminalModule: Module {
       AsyncFunction("pasteClipboard") { (view: LinkTerminalView) in view.pasteClipboard() }.runOnQueue(.main)
       AsyncFunction("toggleCtrl") { (view: LinkTerminalView) in view.toggleCtrl() }.runOnQueue(.main)
       AsyncFunction("beginReplay") { (view: LinkTerminalView, reset: Bool) in view.beginReplay(reset) }.runOnQueue(.main)
-      AsyncFunction("replay") { (view: LinkTerminalView, data: String, cols: Int, rows: Int) in view.replay(data, cols, rows) }.runOnQueue(.main)
-      AsyncFunction("endReplay") { (view: LinkTerminalView) in view.endReplay() }.runOnQueue(.main)
+      AsyncFunction("replay") { (view: LinkTerminalView, data: String, cols: Int, rows: Int, promise: Promise) in view.replay(data, cols, rows, promise: promise) }.runOnQueue(.main)
+      AsyncFunction("endReplay") { (view: LinkTerminalView, promise: Promise) in view.endReplay(promise: promise) }.runOnQueue(.main)
       AsyncFunction("write") { (view: LinkTerminalView, data: String) in
         view.write(data)
       }.runOnQueue(.main)

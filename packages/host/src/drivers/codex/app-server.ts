@@ -13,11 +13,8 @@ import { macAppCodexCandidates, windowsDesktopCodexCandidates } from "./installa
 // Notifications LinkShell never renders; opting out keeps the socket quiet.
 const OPT_OUT_NOTIFICATIONS = [
   "account/rateLimits/updated",
-  "account/updated",
   "app/list/updated",
   "fs/changed",
-  "hook/started",
-  "hook/completed",
   "mcpServer/startupStatus/updated",
   "rawResponse/completed",
   "rawResponseItem/completed",
@@ -221,10 +218,12 @@ export class CodexAppServer {
     this.stopping = false;
     if (process.platform !== "win32") {
       await stopOrphan(this.options.socketPath, this.options.log);
+      if (this.stopping) throw new Error("codex app-server stopped before spawn");
       if (existsSync(this.options.socketPath)) rmSync(this.options.socketPath, { force: true });
     }
     const command = this.options.command ?? "codex";
     const args = ["app-server", ...(await featureArgs(this.options.command, this.options.env)), "--listen", process.platform === "win32" ? "stdio://" : `unix://${this.options.socketPath}`];
+    if (this.stopping) throw new Error("codex app-server stopped before spawn");
     const grouped = process.platform !== "win32";
     const child = spawn(
       command,
@@ -232,6 +231,10 @@ export class CodexAppServer {
       { env: this.options.env, detached: grouped, windowsHide: true, stdio: [process.platform === "win32" ? "pipe" : "ignore", "pipe", "pipe"] },
     );
     trackChild(child, "codex app-server", command, args, grouped);
+    if (this.stopping) {
+      await stopAgent(child, { group: grouped });
+      throw new Error("codex app-server stopped during spawn");
+    }
     this.child = child;
     let stderrTail = "";
     child.stderr?.on("data", (chunk: Buffer) => {

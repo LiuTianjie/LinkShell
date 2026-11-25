@@ -19,8 +19,14 @@ export function composerCardsKeyboardOffset(inputHeight: number) {
 
 /** Use the pane's actual window position, including floating and undocked keyboards. */
 export function keyboardOverlap(pane: { x: number; y: number; width: number; height: number }, keyboard?: { screenX: number; screenY: number; width: number; height: number }) {
-  if (!keyboard || keyboard.height <= 0 || keyboard.width <= 0) return 0;
+  if (!keyboard || keyboard.height <= 0 || keyboard.width <= 0 || pane.height <= 0 || pane.width <= 0) return 0;
   if (keyboard.screenX >= pane.x + pane.width || keyboard.screenX + keyboard.width <= pane.x) return 0;
   if (keyboard.screenY + keyboard.height <= pane.y) return 0;
-  return Math.min(pane.height, Math.max(0, pane.y + pane.height - keyboard.screenY));
+  // A floating keyboard dragged into the upper half of the pane does not occlude the bottom composer.
+  const paneBottom = pane.y + pane.height;
+  const keyboardBottom = keyboard.screenY + keyboard.height;
+  const paneMidY = pane.y + pane.height / 2;
+  const keyboardMidY = keyboard.screenY + keyboard.height / 2;
+  if (keyboardBottom < paneBottom && keyboardMidY <= paneMidY) return 0;
+  return Math.min(pane.height, Math.max(0, paneBottom - keyboard.screenY));
 }

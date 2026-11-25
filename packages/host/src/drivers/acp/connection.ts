@@ -60,6 +60,9 @@ export interface AcpConnectionOptions {
   onExit: (reason: string) => void;
 }
 
+const MAX_NON_JSON_STDOUT_CHARS = 256 * 1024;
+const MAX_JSON_STDOUT_CHARS = 34 * 1024 * 1024;
+
 function filterJsonStdout(
   source: ReadableStream<Uint8Array>,
   onStdoutLine?: (line: string) => void,
@@ -67,6 +70,7 @@ function filterJsonStdout(
   const decoder = new StringDecoder("utf8");
   const encoder = new TextEncoder();
   let buffer = "";
+  let dropping = false;
   const flushLine = (line: string, controller: TransformStreamDefaultController<Uint8Array>) => {
     const trimmed = line.trim();
     if (!trimmed) return;
@@ -84,16 +88,31 @@ function filterJsonStdout(
         while (newlineIndex >= 0) {
           const line = buffer.slice(0, newlineIndex).replace(/\r$/, "");
           buffer = buffer.slice(newlineIndex + 1);
-          flushLine(line, controller);
+          if (dropping) dropping = false;
+          else flushLine(line, controller);
           newlineIndex = buffer.indexOf("\n");
+        }
+        if (dropping) {
+          buffer = "";
+          return;
+        }
+        // Cap unbounded newline-less stdout so noisy/broken agents cannot trigger OOM.
+        const trimmedStart = buffer.trimStart();
+        const looksJson = trimmedStart.length === 0 || trimmedStart.startsWith("{") || trimmedStart.startsWith("[");
+        const limit = looksJson ? MAX_JSON_STDOUT_CHARS : MAX_NON_JSON_STDOUT_CHARS;
+        if (buffer.length > limit) {
+          if (!looksJson) onStdoutLine?.(trimmedStart.slice(0, 4096));
+          buffer = "";
+          dropping = true;
         }
       },
       flush(controller) {
         buffer += decoder.end();
-        if (buffer.trim()) {
+        if (!dropping && buffer.trim()) {
           flushLine(buffer.replace(/\r$/, ""), controller);
         }
         buffer = "";
+        dropping = false;
       },
     }),
   );
@@ -160,6 +179,7 @@ export class AcpConnection {
       onNotification: (method, params) => this.notification(method, params),
       onRequest: (method, params, id) => this.options.onRequest(method, params, id),
       requestTimeoutMs: 0,
+      cancelMethod: { method: "$/cancel_request", idField: "requestId", inbound: "notify" },
     });
     this.peer = peer;
     void this.read().catch((error: unknown) => this.lost(String(error)));

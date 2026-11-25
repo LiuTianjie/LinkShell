@@ -1,5 +1,8 @@
 import Foundation
 import UserNotifications
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// Persists iOS local approval notification actions so cold-start taps survive app launch until
 /// JS calls `pendingNotificationActionId` + `consumeNotificationAction`.
@@ -8,12 +11,24 @@ final class LocalNotificationActionQueue {
   static let notification = Notification.Name("LinkShellLocalNotificationAction")
   private static let storageKey = "linkshell.localNotificationActions"
   private static let maxItems = 32
+  private static let ttlMilliseconds: Double = 5 * 60 * 1000
+  private static let maxBackgroundSeconds: TimeInterval = 25
+  private static let postConsumeBackgroundGrace: TimeInterval = 12
 
   private let lock = NSLock()
   private let defaults: UserDefaults
+  #if canImport(UIKit)
+  private var backgroundTasks: [String: UIBackgroundTaskIdentifier] = [:]
+  #endif
 
   private init(defaults: UserDefaults = .standard) {
     self.defaults = defaults
+  }
+
+  private static func isFresh(_ item: [String: Any], nowMs: Double) -> Bool {
+    guard let createdAt = item["createdAt"] as? Double, createdAt > 0 else { return false }
+    let age = nowMs - createdAt
+    return age <= ttlMilliseconds && age >= -60_000
   }
 
   @discardableResult
@@ -27,11 +42,12 @@ final class LocalNotificationActionQueue {
     deepLink: String?
   ) -> String {
     let id = UUID().uuidString
+    let nowMs = Date().timeIntervalSince1970 * 1000.0
     var item: [String: Any] = [
       "id": id,
       "actionId": actionId,
       "kind": kind,
-      "createdAt": Date().timeIntervalSince1970 * 1000.0,
+      "createdAt": nowMs,
     ]
     if let computerKey, !computerKey.isEmpty { item["computerKey"] = computerKey }
     if let sessionId, !sessionId.isEmpty { item["sessionId"] = sessionId }
@@ -40,7 +56,8 @@ final class LocalNotificationActionQueue {
     if let deepLink, !deepLink.isEmpty { item["deepLink"] = deepLink }
 
     lock.lock()
-    var queue = defaults.array(forKey: Self.storageKey) as? [[String: Any]] ?? []
+    var queue = (defaults.array(forKey: Self.storageKey) as? [[String: Any]] ?? [])
+      .filter { Self.isFresh($0, nowMs: nowMs) }
     if queue.count >= Self.maxItems {
       queue.removeFirst(queue.count - (Self.maxItems - 1))
     }
@@ -55,38 +72,128 @@ final class LocalNotificationActionQueue {
   }
 
   func pendingId() -> String? {
+    let nowMs = Date().timeIntervalSince1970 * 1000.0
     lock.lock()
     defer { lock.unlock() }
-    let queue = defaults.array(forKey: Self.storageKey) as? [[String: Any]] ?? []
-    return queue.first?["id"] as? String
+    let raw = defaults.array(forKey: Self.storageKey) as? [[String: Any]] ?? []
+    let fresh = raw.filter { Self.isFresh($0, nowMs: nowMs) }
+    if fresh.count != raw.count {
+      defaults.set(fresh, forKey: Self.storageKey)
+    }
+    return fresh.first?["id"] as? String
   }
 
   func consume(id: String) -> [String: Any]? {
+    let nowMs = Date().timeIntervalSince1970 * 1000.0
     lock.lock()
-    defer { lock.unlock() }
-    var queue = defaults.array(forKey: Self.storageKey) as? [[String: Any]] ?? []
-    guard let index = queue.firstIndex(where: { ($0["id"] as? String) == id }) else {
-      return nil
+    let raw = defaults.array(forKey: Self.storageKey) as? [[String: Any]] ?? []
+    var fresh = raw.filter { Self.isFresh($0, nowMs: nowMs) }
+    let matchedIndex = fresh.firstIndex(where: { ($0["id"] as? String) == id })
+    let item = matchedIndex.map { fresh.remove(at: $0) }
+    if matchedIndex != nil || fresh.count != raw.count {
+      defaults.set(fresh, forKey: Self.storageKey)
     }
-    let item = queue.remove(at: index)
-    defaults.set(queue, forKey: Self.storageKey)
+    lock.unlock()
+
+    if item != nil {
+      // Allow JS time to reconnect and deliver the approval RPC after consuming the queued tap.
+      endBackgroundTask(for: id, after: Self.postConsumeBackgroundGrace)
+    } else {
+      endBackgroundTask(for: id, after: 0)
+    }
     return item
+  }
+
+  /// Synchronously acquires a UIKit background task before `didReceive`'s completionHandler returns
+  /// so iOS does not suspend the woken app mid-RPC when the user taps Allow/Deny from the lock screen.
+  func beginBackgroundTask(for id: String) {
+    #if canImport(UIKit)
+    let taskId = UIApplication.shared.beginBackgroundTask(withName: "LinkShell local approval action") { [weak self] in
+      self?.endBackgroundTask(for: id, after: 0)
+    }
+    guard taskId != .invalid else { return }
+    var replaced: UIBackgroundTaskIdentifier?
+    lock.lock()
+    replaced = backgroundTasks.updateValue(taskId, forKey: id)
+    lock.unlock()
+    if let replaced, replaced != .invalid {
+      UIApplication.shared.endBackgroundTask(replaced)
+    }
+    DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + Self.maxBackgroundSeconds) { [weak self] in
+      self?.endBackgroundTask(for: id, after: 0)
+    }
+    #endif
+  }
+
+  func endBackgroundTask(for id: String, after delay: TimeInterval) {
+    #if canImport(UIKit)
+    let finish = { [weak self] in
+      guard let self else { return }
+      self.lock.lock()
+      let taskId = self.backgroundTasks.removeValue(forKey: id)
+      self.lock.unlock()
+      if let taskId, taskId != .invalid {
+        UIApplication.shared.endBackgroundTask(taskId)
+      }
+    }
+    if delay > 0 {
+      DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + delay, execute: finish)
+    } else {
+      finish()
+    }
+    #endif
+  }
+
+  func endAllBackgroundTasks(after delay: TimeInterval) {
+    #if canImport(UIKit)
+    let finish = { [weak self] in
+      guard let self else { return }
+      self.lock.lock()
+      let tasks = Array(self.backgroundTasks.values)
+      self.backgroundTasks.removeAll()
+      self.lock.unlock()
+      for taskId in tasks where taskId != .invalid {
+        UIApplication.shared.endBackgroundTask(taskId)
+      }
+    }
+    if delay > 0 {
+      DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + delay, execute: finish)
+    } else {
+      finish()
+    }
+    #endif
   }
 }
 
 /// Manages the local actionable `UNUserNotificationCenter` approval fallback (`LINKSHELL_APPROVAL`),
 /// chaining onto any existing notification center delegate rather than replacing push handlers.
-final class LocalApprovalNotifications: NSObject, UNUserNotificationCenterDelegate {
-  static let shared = LocalApprovalNotifications()
-  static let categoryIdentifier = "LINKSHELL_APPROVAL"
-  static let allowActionIdentifier = "LINKSHELL_APPROVAL_ALLOW"
-  static let denyActionIdentifier = "LINKSHELL_APPROVAL_DENY"
+public final class LocalApprovalNotifications: NSObject, UNUserNotificationCenterDelegate {
+  public static let shared = LocalApprovalNotifications()
+  public static let categoryIdentifier = "LINKSHELL_APPROVAL"
+  public static let allowActionIdentifier = "LINKSHELL_APPROVAL_ALLOW"
+  public static let denyActionIdentifier = "LINKSHELL_APPROVAL_DENY"
   private static let requestPrefix = "linkshell-local-approval-"
+  private static let activeSessionPrefix = "__active_session__:"
+  private static let staleDeliveredAge: TimeInterval = 5 * 60
 
+  private let stateLock = NSLock()
   private weak var previousDelegate: UNUserNotificationCenterDelegate?
   private var installed = false
+  private var activeSessionKey: String?
 
-  func install() {
+  public func setActiveSession(_ sessionKey: String?) {
+    stateLock.lock()
+    activeSessionKey = (sessionKey?.isEmpty == false) ? sessionKey : nil
+    stateLock.unlock()
+  }
+
+  private func currentActiveSession() -> String? {
+    stateLock.lock()
+    defer { stateLock.unlock() }
+    return activeSessionKey
+  }
+
+  public func install() {
     let center = UNUserNotificationCenter.current()
     registerCategory(on: center)
     if let existing = center.delegate, existing !== self {
@@ -95,7 +202,17 @@ final class LocalApprovalNotifications: NSObject, UNUserNotificationCenterDelega
     if center.delegate !== self {
       center.delegate = self
     }
-    installed = true
+    let firstInstall: Bool = {
+      stateLock.lock()
+      defer { stateLock.unlock() }
+      let wasInstalled = installed
+      installed = true
+      return !wasInstalled
+    }()
+    if firstInstall {
+      // Sweep expired approval notifications left over from prior sessions on startup.
+      clearDeliveredApprovals(olderThan: Self.staleDeliveredAge)
+    }
   }
 
   private func registerCategory(on center: UNUserNotificationCenter) {
@@ -122,8 +239,29 @@ final class LocalApprovalNotifications: NSObject, UNUserNotificationCenterDelega
     }
   }
 
+  /// Requests notification authorization lazily only when local approval fallback is actually needed.
+  private func ensureAuthorized(on center: UNUserNotificationCenter, completion: @escaping (Bool) -> Void) {
+    center.getNotificationSettings { settings in
+      switch settings.authorizationStatus {
+      case .authorized, .provisional, .ephemeral:
+        completion(true)
+      case .notDetermined:
+        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+          completion(granted)
+        }
+      default:
+        completion(false)
+      }
+    }
+  }
+
   func sync(payload: [String: Any], completion: @escaping (Bool) -> Void) {
-    if !installed {
+    let isInstalled: Bool = {
+      stateLock.lock()
+      defer { stateLock.unlock() }
+      return installed
+    }()
+    if !isInstalled {
       DispatchQueue.main.async { self.install() }
     }
     guard let id = payload["id"] as? String, !id.isEmpty,
@@ -136,53 +274,98 @@ final class LocalApprovalNotifications: NSObject, UNUserNotificationCenterDelega
       return
     }
 
-    let content = UNMutableNotificationContent()
-    content.title = title
-    content.body = body
-    content.sound = .default
-    content.categoryIdentifier = Self.categoryIdentifier
-    content.threadIdentifier = "\(computerKey):\(sessionId)"
-    if #available(iOS 15.0, *) {
-      content.interruptionLevel = .active
-    }
+    let center = UNUserNotificationCenter.current()
+    ensureAuthorized(on: center) { granted in
+      guard granted else {
+        completion(false)
+        return
+      }
 
-    var userInfo: [String: Any] = [
-      "linkshellApproval": true,
-      "approvalId": id,
-      "computerKey": computerKey,
-      "sessionId": sessionId,
-      "requestId": requestId,
-    ]
-    if let approveOptionId = payload["approveOptionId"] as? String, !approveOptionId.isEmpty {
-      userInfo["approveOptionId"] = approveOptionId
-    }
-    if let denyOptionId = payload["denyOptionId"] as? String, !denyOptionId.isEmpty {
-      userInfo["denyOptionId"] = denyOptionId
-    }
-    if let deepLink = payload["deepLink"] as? String, !deepLink.isEmpty {
-      userInfo["deepLink"] = deepLink
-    }
-    content.userInfo = userInfo
+      let content = UNMutableNotificationContent()
+      content.title = title
+      content.body = body
+      content.sound = .default
+      content.categoryIdentifier = Self.categoryIdentifier
+      content.threadIdentifier = "\(computerKey):\(sessionId)"
+      if #available(iOS 15.0, *) {
+        content.interruptionLevel = .active
+      }
 
-    let request = UNNotificationRequest(
-      identifier: Self.requestPrefix + id,
-      content: content,
-      trigger: nil
-    )
-    UNUserNotificationCenter.current().add(request) { error in
-      completion(error == nil)
+      var userInfo: [String: Any] = [
+        "linkshellApproval": true,
+        "approvalId": id,
+        "computerKey": computerKey,
+        "sessionId": sessionId,
+        "requestId": requestId,
+      ]
+      if let approveOptionId = payload["approveOptionId"] as? String, !approveOptionId.isEmpty {
+        userInfo["approveOptionId"] = approveOptionId
+      }
+      if let denyOptionId = payload["denyOptionId"] as? String, !denyOptionId.isEmpty {
+        userInfo["denyOptionId"] = denyOptionId
+      }
+      if let deepLink = payload["deepLink"] as? String, !deepLink.isEmpty {
+        userInfo["deepLink"] = deepLink
+      }
+      content.userInfo = userInfo
+
+      let request = UNNotificationRequest(
+        identifier: Self.requestPrefix + id,
+        content: content,
+        trigger: nil
+      )
+      center.add(request) { error in
+        completion(error == nil)
+      }
     }
   }
 
   func cancel(id: String) {
     guard !id.isEmpty else { return }
+    if id.hasPrefix(Self.activeSessionPrefix) {
+      let token = String(id.dropFirst(Self.activeSessionPrefix.count))
+      setActiveSession(token.isEmpty ? nil : token)
+      return
+    }
+    if id == "*" {
+      clearDeliveredApprovals(olderThan: nil)
+      return
+    }
     let requestId = Self.requestPrefix + id
     let center = UNUserNotificationCenter.current()
     center.removePendingNotificationRequests(withIdentifiers: [requestId])
     center.removeDeliveredNotifications(withIdentifiers: [requestId])
+    LocalNotificationActionQueue.shared.endAllBackgroundTasks(after: 1.0)
   }
 
-  func userNotificationCenter(
+  /// Removes delivered (and pending) LinkShell approval notifications via `getDeliveredNotifications`.
+  func clearDeliveredApprovals(olderThan maxAge: TimeInterval?) {
+    let center = UNUserNotificationCenter.current()
+    let now = Date()
+    center.getDeliveredNotifications { delivered in
+      let ids = delivered.compactMap { notification -> String? in
+        let id = notification.request.identifier
+        guard id.hasPrefix(Self.requestPrefix) else { return nil }
+        if let maxAge, now.timeIntervalSince(notification.date) < maxAge {
+          return nil
+        }
+        return id
+      }
+      if !ids.isEmpty {
+        center.removeDeliveredNotifications(withIdentifiers: ids)
+      }
+    }
+    if maxAge == nil {
+      center.getPendingNotificationRequests { pending in
+        let ids = pending.map(\.identifier).filter { $0.hasPrefix(Self.requestPrefix) }
+        if !ids.isEmpty {
+          center.removePendingNotificationRequests(withIdentifiers: ids)
+        }
+      }
+    }
+  }
+
+  public func userNotificationCenter(
     _ center: UNUserNotificationCenter,
     willPresent notification: UNNotification,
     withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
@@ -190,6 +373,16 @@ final class LocalApprovalNotifications: NSObject, UNUserNotificationCenterDelega
     let userInfo = notification.request.content.userInfo
     if (userInfo["linkshellApproval"] as? Bool) == true ||
         notification.request.identifier.hasPrefix(Self.requestPrefix) {
+      let notifSession = userInfo["sessionId"] as? String
+      let notifComputer = userInfo["computerKey"] as? String
+      if let active = currentActiveSession(), let notifSession, !notifSession.isEmpty {
+        let matches = active == notifSession || (notifComputer != nil && active == "\(notifComputer!):\(notifSession)")
+        if matches {
+          // User is already looking at this exact session in the foreground: suppress redundant banner.
+          completionHandler([])
+          return
+        }
+      }
       if #available(iOS 14.0, *) {
         completionHandler([.banner, .list, .sound])
       } else {
@@ -205,7 +398,7 @@ final class LocalApprovalNotifications: NSObject, UNUserNotificationCenterDelega
     }
   }
 
-  func userNotificationCenter(
+  public func userNotificationCenter(
     _ center: UNUserNotificationCenter,
     didReceive response: UNNotificationResponse,
     withCompletionHandler completionHandler: @escaping () -> Void
@@ -237,7 +430,7 @@ final class LocalApprovalNotifications: NSObject, UNUserNotificationCenterDelega
     }
 
     if let resolved {
-      LocalNotificationActionQueue.shared.enqueue(
+      let queuedId = LocalNotificationActionQueue.shared.enqueue(
         actionId: resolved.actionId,
         kind: resolved.kind,
         computerKey: userInfo["computerKey"] as? String,
@@ -246,13 +439,16 @@ final class LocalApprovalNotifications: NSObject, UNUserNotificationCenterDelega
         optionId: resolved.optionId,
         deepLink: userInfo["deepLink"] as? String
       )
+      if resolved.kind == "approve" || resolved.kind == "deny" {
+        LocalNotificationActionQueue.shared.beginBackgroundTask(for: queuedId)
+      }
     }
     center.removeDeliveredNotifications(withIdentifiers: [response.notification.request.identifier])
     completionHandler()
   }
 
   @available(iOS 12.0, *)
-  func userNotificationCenter(
+  public func userNotificationCenter(
     _ center: UNUserNotificationCenter,
     openSettingsFor notification: UNNotification?
   ) {

@@ -123,8 +123,13 @@ class LinkScreenView(
       }
       connection?.setActive(false)
       renderer?.pauseVideo()
+      // Hide SurfaceViewRenderer so its hardware Surface never punches a frozen hole through other screens during the 120s reuse window.
+      renderer?.visibility = View.GONE
+      rendererContainer.visibility = View.GONE
       controlsSession(JSONObject().put("active", false).put("maxFps", receiverRate()))
     } else if (connection != null && applicationActive && isAttachedToWindow) {
+      rendererContainer.visibility = View.VISIBLE
+      renderer?.visibility = View.VISIBLE
       connection?.setActive(true)
       renderer?.disableFpsReduction()
       controlsSession(JSONObject().put("active", true).put("maxFps", receiverRate()))
@@ -206,6 +211,8 @@ class LinkScreenView(
     detachControls()
     if (!active && supportsPause && applicationActive) {
       renderer?.pauseVideo()
+      renderer?.visibility = View.GONE
+      rendererContainer.visibility = View.GONE
     } else {
       disconnect()
     }
@@ -348,6 +355,9 @@ class LinkScreenView(
       },
     )
 
+    val surfaceVisibility = if (active) View.VISIBLE else View.GONE
+    rendererContainer.visibility = surfaceVisibility
+    surfaceRenderer.visibility = surfaceVisibility
     rendererContainer.removeAllViews()
     rendererContainer.addView(
       surfaceRenderer,

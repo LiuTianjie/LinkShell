@@ -296,7 +296,7 @@ export function PreviewContent({
       </>}
 
       {!embedded && Platform.OS === "ios" && !fullscreen && !keyboardOpen ? <Text numberOfLines={1} style={[type.caption, { color: colors.secondaryLabel, paddingHorizontal: 16, paddingBottom: 8 }]}>{shown(nav?.url)}</Text> : null}
-      <KeyboardAvoidingView behavior="padding" automaticOffset={Platform.OS === "ios"} enabled={Platform.OS === "ios"} style={{ flex: 1 }}>
+      <KeyboardAvoidingView behavior="padding" automaticOffset style={{ flex: 1 }}>
         {forward && !failure ? (
           <WebView
             key={`${generation}-${desktop}`}

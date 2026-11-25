@@ -1904,7 +1904,7 @@
   }
 
   .ls-inspector-tab:focus-visible {
-    outline: var(--ls-focus-ring);
+    outline: 2px solid var(--ls-accent);
     outline-offset: 1px;
   }
 
@@ -2225,7 +2225,7 @@
   }
 
   .ls-newtab__action:not(.ls-newtab__tool-card):focus-visible {
-    outline: var(--ls-focus-ring);
+    outline: 2px solid var(--ls-accent);
     outline-offset: 1px;
   }
 
@@ -2278,7 +2278,7 @@
   }
 
   .ls-newtab__tool-card:focus-visible {
-    outline: var(--ls-focus-ring);
+    outline: 2px solid var(--ls-accent);
     outline-offset: 1px;
   }
 
@@ -2350,7 +2350,7 @@
 
   .ls-newtab__subagent-row:focus-visible,
   .ls-newtab__task-row:focus-visible {
-    outline: var(--ls-focus-ring);
+    outline: 2px solid var(--ls-accent);
     outline-offset: 1px;
   }
 
@@ -2918,7 +2918,7 @@
   }
 
   .ls-inspector-tab:has(.ls-inspector-tab__main:focus-visible) {
-    outline: var(--ls-focus-ring);
+    outline: 2px solid var(--ls-accent);
     outline-offset: 1px;
   }
 

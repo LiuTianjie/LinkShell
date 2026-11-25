@@ -110,9 +110,10 @@ private final class ScreenMetalRenderer {
   private let worker = ScreenRenderThread()
   private let lifecycle = ScreenShared((generation: UInt64(0), active: true))
   private let mailbox = ScreenMailbox<ScreenPicture>()
-  private let inFlight = DispatchSemaphore(value: 1)
+  private let inFlight = DispatchSemaphore(value: 2)
   private let timingLock = NSLock()
   private var gpuSeconds = 0.0005
+  private var framesSinceCacheFlush = 0
   private var current: ScreenPicture?
   private var submittedTimestamp: UInt32?
   private var dirty = true
@@ -128,6 +129,14 @@ private final class ScreenMetalRenderer {
   private var metalLink: AnyObject?
   private var legacyLink: CADisplayLink?
 
+  private struct VertexParams {
+    var uvRect: SIMD4<Float>
+    var rotation: UInt32
+    var pad0: UInt32 = 0
+    var pad1: UInt32 = 0
+    var pad2: UInt32 = 0
+  }
+
   init(surface: CAMetalLayer, metrics: ScreenMetrics, picture: @escaping (CGSize) -> Void, failure: @escaping (String) -> Void) {
     self.surface = surface; self.metrics = metrics; onPicture = picture; onFailure = failure
     configureMetal()
@@ -138,7 +147,7 @@ private final class ScreenMetalRenderer {
     surface.device = device
     surface.pixelFormat = .bgra8Unorm
     surface.framebufferOnly = true
-    surface.maximumDrawableCount = 2
+    surface.maximumDrawableCount = 3
     surface.presentsWithTransaction = false
     surface.colorspace = CGColorSpace(name: CGColorSpace.sRGB)
     queue = device.makeCommandQueue()
@@ -210,6 +219,7 @@ private final class ScreenMetalRenderer {
     lifecycle.update { $0.generation &+= 1; $0.active = false }
     worker.perform { [self] in
       stopDisplayLink(); _ = mailbox.take()
+      if let cache { CVMetalTextureCacheFlush(cache, 0) }
     }
   }
 
@@ -218,6 +228,7 @@ private final class ScreenMetalRenderer {
     worker.perform { [self] in
       stopDisplayLink(); _ = mailbox.take(); current = nil
       submittedTimestamp = nil; reportedFrame = false; presentedRevision = nil; dirty = true
+      if let cache { CVMetalTextureCacheFlush(cache, 0) }
     }
   }
 
@@ -253,11 +264,17 @@ private final class ScreenMetalRenderer {
 
   func takeReplacements() -> Int { mailbox.takeReplacements() }
 
-  fileprivate func draw(drawable supplied: CAMetalDrawable?, deadline: Double) {
+  fileprivate func draw(drawable supplied: CAMetalDrawable?, deadline: Double, expectedPresentation: Double? = nil) {
     let life = lifecycle.read()
     guard life.active else { return }
     let view = presentation.read()
-    defer { applySize(view) }
+    // Apply drawableSize BEFORE acquiring a drawable so rotation/resize never renders into a stale-sized texture.
+    let targetSize = applySize(view)
+    if let supplied,
+       (supplied.texture.width != Int(targetSize.width) || supplied.texture.height != Int(targetSize.height)) {
+      dirty = true
+      return
+    }
     timingLock.lock(); let cost = gpuSeconds; timingLock.unlock()
     guard ScreenTiming.canSubmit(now: CACurrentMediaTime(), deadline: deadline, gpuSeconds: cost),
           inFlight.wait(timeout: .now()) == .success else { metrics.missed(); return }
@@ -270,7 +287,23 @@ private final class ScreenMetalRenderer {
     dirty = dirty || presentedRevision != view.revision
     guard dirty, let picture = current, let cache, let queue,
           let command = queue.makeCommandBuffer(), let drawable = supplied ?? surface.nextDrawable() else { return }
-    let pictureSize = CGSize(width: Int(picture.frame.width), height: Int(picture.frame.height))
+    framesSinceCacheFlush += 1
+    if framesSinceCacheFlush >= 120 {
+      framesSinceCacheFlush = 0
+      CVMetalTextureCacheFlush(cache, 0)
+    }
+    let rotationStep: UInt32
+    switch picture.frame.rotation {
+    case ._90: rotationStep = 1
+    case ._180: rotationStep = 2
+    case ._270: rotationStep = 3
+    default: rotationStep = 0
+    }
+    let rotated = rotationStep == 1 || rotationStep == 3
+    let pictureSize = CGSize(
+      width: Int(rotated ? picture.frame.height : picture.frame.width),
+      height: Int(rotated ? picture.frame.width : picture.frame.height)
+    )
     let contentRect = view.contentRect(picture: pictureSize)
     let format = CVPixelBufferGetPixelFormatType(picture.buffer)
     var heldTextures: [CVMetalTexture] = []
@@ -295,24 +328,63 @@ private final class ScreenMetalRenderer {
     pass.colorAttachments[0].storeAction = .store
     pass.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 1)
     guard let encoder = command.makeRenderCommandEncoder(descriptor: pass) else { return }
-    func viewport(_ rect: CGRect) {
+    let drawableBounds = CGRect(
+      x: 0,
+      y: 0,
+      width: min(16384.0, Double(drawable.texture.width)),
+      height: min(16384.0, Double(drawable.texture.height))
+    )
+    // Clip zoomed or off-screen quads to the drawable so MTLViewport is always finite, positive, and <= 16384px.
+    func clippedQuad(_ rect: CGRect, rotation: UInt32) -> (MTLViewport, VertexParams)? {
       let scale = view.scale
-      encoder.setViewport(MTLViewport(originX: rect.minX * scale, originY: rect.minY * scale, width: rect.width * scale, height: rect.height * scale, znear: 0, zfar: 1))
+      guard scale.isFinite, scale > 0,
+            rect.origin.x.isFinite, rect.origin.y.isFinite, rect.width.isFinite, rect.height.isFinite,
+            rect.width > 0, rect.height > 0 else { return nil }
+      let px = CGRect(x: rect.minX * scale, y: rect.minY * scale, width: rect.width * scale, height: rect.height * scale)
+      let visible = px.intersection(drawableBounds)
+      guard !visible.isNull, visible.width >= 1, visible.height >= 1 else { return nil }
+      let u0 = Float((visible.minX - px.minX) / px.width)
+      let v0 = Float((visible.minY - px.minY) / px.height)
+      let u1 = Float((visible.maxX - px.minX) / px.width)
+      let v1 = Float((visible.maxY - px.minY) / px.height)
+      let vp = MTLViewport(
+        originX: visible.minX,
+        originY: visible.minY,
+        width: min(16384.0, visible.width),
+        height: min(16384.0, visible.height),
+        znear: 0,
+        zfar: 1
+      )
+      return (vp, VertexParams(uvRect: SIMD4<Float>(u0, v0, u1, v1), rotation: rotation))
     }
-    viewport(contentRect)
-    encoder.setRenderPipelineState(pipeline)
-    encoder.setFragmentTexture(first, index: 0)
-    encoder.setFragmentTexture(uv, index: 1)
-    let full = format == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
-    var range = SIMD4<Float>(full ? 1 : 255.0 / 219, full ? 0 : 16.0 / 255, full ? 1 : 255.0 / 224, 0)
-    encoder.setFragmentBytes(&range, length: MemoryLayout<SIMD4<Float>>.size, index: 0)
-    encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+    if let (vp, params) = clippedQuad(contentRect, rotation: rotationStep) {
+      var vertexParams = params
+      encoder.setViewport(vp)
+      encoder.setRenderPipelineState(pipeline)
+      encoder.setVertexBytes(&vertexParams, length: MemoryLayout<VertexParams>.stride, index: 0)
+      encoder.setFragmentTexture(first, index: 0)
+      encoder.setFragmentTexture(uv, index: 1)
+      let full = format == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
+      var range = SIMD4<Float>(full ? 1 : 255.0 / 219, full ? 0 : 16.0 / 255, full ? 1 : 255.0 / 224, 0)
+      encoder.setFragmentBytes(&range, length: MemoryLayout<SIMD4<Float>>.size, index: 0)
+      encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+    }
     if view.showsPointer, let cursorTexture = view.cursor, let rgbaPipeline {
       let rect = contentRect
-      viewport(CGRect(x: rect.minX + view.pointer.x * rect.width - view.cursorHotspot.x, y: rect.minY + view.pointer.y * rect.height - view.cursorHotspot.y, width: view.cursorSize.width, height: view.cursorSize.height))
-      encoder.setRenderPipelineState(rgbaPipeline)
-      encoder.setFragmentTexture(cursorTexture, index: 0)
-      encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+      let cursorRect = CGRect(
+        x: rect.minX + view.pointer.x * rect.width - view.cursorHotspot.x,
+        y: rect.minY + view.pointer.y * rect.height - view.cursorHotspot.y,
+        width: view.cursorSize.width,
+        height: view.cursorSize.height
+      )
+      if let (vp, params) = clippedQuad(cursorRect, rotation: 0) {
+        var vertexParams = params
+        encoder.setViewport(vp)
+        encoder.setRenderPipelineState(rgbaPipeline)
+        encoder.setVertexBytes(&vertexParams, length: MemoryLayout<VertexParams>.stride, index: 0)
+        encoder.setFragmentTexture(cursorTexture, index: 0)
+        encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+      }
     }
     encoder.endEncoding()
     guard lifecycle.read() == life else { return }
@@ -321,9 +393,10 @@ private final class ScreenMetalRenderer {
     #if !targetEnvironment(simulator)
     if submittedTimestamp != picture.timestamp, metrics.samples(picture.timestamp) {
       let submitted = CACurrentMediaTime()
+      let expected = expectedPresentation ?? deadline
       drawable.addPresentedHandler { [weak self, metrics] shown in
         guard let self, self.lifecycle.read() == life else { return }
-        metrics.shown(picture.timestamp, submitted: submitted, expected: deadline, actual: shown.presentedTime)
+        metrics.shown(picture.timestamp, submitted: submitted, expected: expected, actual: shown.presentedTime)
       }
     }
     #endif
@@ -356,10 +429,15 @@ private final class ScreenMetalRenderer {
     }
   }
 
-  private func applySize(_ view: ScreenPresentation) {
-    let size = CGSize(width: max(1, view.bounds.width * view.scale), height: max(1, view.bounds.height * view.scale))
+  @discardableResult
+  private func applySize(_ view: ScreenPresentation) -> CGSize {
+    let size = CGSize(
+      width: max(1, (view.bounds.width * view.scale).rounded()),
+      height: max(1, (view.bounds.height * view.scale).rounded())
+    )
     if surface.drawableSize != size { surface.drawableSize = size }
     if surface.contentsScale != view.scale { surface.contentsScale = view.scale }
+    return size
   }
 
   private func fail(_ message: String, generation: UInt64? = nil) {
@@ -378,11 +456,28 @@ private final class ScreenMetalRenderer {
   private static let shader = """
   #include <metal_stdlib>
   using namespace metal;
+  struct VertexParams { float4 uvRect; uint rotation; uint pad0; uint pad1; uint pad2; };
   struct V { float4 position [[position]]; float2 uv; };
-  vertex V screenVertex(uint i [[vertex_id]]) {
+  vertex V screenVertex(uint i [[vertex_id]], constant VertexParams& params [[buffer(0)]]) {
     const float2 p[4] = {float2(-1,1),float2(-1,-1),float2(1,1),float2(1,-1)};
-    const float2 uv[4] = {float2(0,0),float2(0,1),float2(1,0),float2(1,1)};
-    return {float4(p[i],0,1),uv[i]};
+    const float2 base[4] = {
+      float2(params.uvRect.x, params.uvRect.y),
+      float2(params.uvRect.x, params.uvRect.w),
+      float2(params.uvRect.z, params.uvRect.y),
+      float2(params.uvRect.z, params.uvRect.w)
+    };
+    float2 t = base[i];
+    float2 uv;
+    if (params.rotation == 1u) {
+      uv = float2(t.y, 1.0 - t.x);
+    } else if (params.rotation == 2u) {
+      uv = float2(1.0 - t.x, 1.0 - t.y);
+    } else if (params.rotation == 3u) {
+      uv = float2(1.0 - t.y, t.x);
+    } else {
+      uv = t;
+    }
+    return {float4(p[i],0,1),uv};
   }
   fragment float4 screenYUV(V v [[stage_in]], texture2d<float> y [[texture(0)]], texture2d<float> uv [[texture(1)]], constant float4& r [[buffer(0)]]) {
     constexpr sampler s(filter::linear, address::clamp_to_edge);
@@ -406,6 +501,6 @@ private final class ScreenDisplayDriver: NSObject {
 @available(iOS 17.0, *)
 extension ScreenDisplayDriver: CAMetalDisplayLinkDelegate {
   func metalDisplayLink(_ link: CAMetalDisplayLink, needsUpdate update: CAMetalDisplayLink.Update) {
-    renderer?.draw(drawable: update.drawable, deadline: update.targetPresentationTimestamp)
+    renderer?.draw(drawable: update.drawable, deadline: update.targetTimestamp, expectedPresentation: update.targetPresentationTimestamp)
   }
 }

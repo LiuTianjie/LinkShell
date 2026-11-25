@@ -315,26 +315,27 @@ function Workspace({
   selectComputer: (computer: Computer) => void;
   openComputerView: (computer: Computer, view: string) => void;
 }) {
-  const state = useClient((state) => state);
+  // Subscribe only to Workspace-level slices so streaming views[id] deltas never re-render the shell.
+  const status = useClient((state) => state.status);
+  const statusDetail = useClient((state) => state.statusDetail);
+  const session = useClient((state) => state.sessions[view]);
   const { link } = useConnection();
   const [create, setCreate] = useState<string | null | undefined>();
   const [terminal, setTerminal] = useState<string>();
   const [filesStart, setFilesStart] = useState<string>();
-  const session = state.sessions[view];
-  const engineState = useStore(engine.state);
+  const currentComputer = useStore(engine.state, (state) => state.connection?.computer);
   const names = useStore(computerNames.store);
   useWorkspaceCommand((command) => {
-    if (command.command === "new-session" && state.status === "online") setCreate(command.cwd ?? null);
+    if (command.command === "new-session" && status === "online") setCreate(command.cwd ?? null);
   });
-  if (state.status === "locked") {
-    const computer = engineState.connection?.computer;
-    return <AccessUnlock name={computer ? computerName(computer, names) : "这台电脑"} />;
+  if (status === "locked") {
+    return <AccessUnlock name={currentComputer ? computerName(currentComputer, names) : "这台电脑"} />;
   }
   return (
     <>
-      {state.status !== "online" && (
+      {status !== "online" && (
         <div className="connection-banner" role="status">
-          <span>{state.statusDetail ?? "正在连接电脑…"}</span>
+          <span>{statusDetail ?? "正在连接电脑…"}</span>
           <Button
             variant="ghost"
             size="plain"
@@ -524,7 +525,14 @@ function Home({
   navigate: (id: string) => void;
   create: () => void;
 }) {
-  const state = useClient((state) => state);
+  const status = useClient((state) => state.status);
+  const sessionsLoaded = useClient((state) => state.sessionsLoaded);
+  const sessionsError = useClient((state) => state.sessionsError);
+  const nextBefore = useClient((state) =>
+    archived ? state.archivedNextBefore : state.sessionsNextBefore,
+  );
+  const sessionMap = useClient((state) => state.sessions);
+  const machineHostname = useClient((state) => state.machine?.hostname);
   const actions = useActions();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
@@ -538,20 +546,17 @@ function Home({
   const { store } = useConnection();
   const archive = useLoad(async () => {
     if (archived) {
-      if (state.status !== "online")
+      if (status !== "online")
         throw new Error("连接恢复后将重新加载归档");
       await actions.loadArchived();
     }
     return true;
-  }, [store, archived, state.status]);
+  }, [store, archived, status]);
   const loaded = archived
     ? archive.value && !archive.loading
-    : state.sessionsLoaded;
-  const loadError = archived ? archive.error : state.sessionsError;
-  const nextBefore = archived
-    ? state.archivedNextBefore
-    : state.sessionsNextBefore;
-  const allSessions = Object.values(state.sessions).filter(
+    : sessionsLoaded;
+  const loadError = archived ? archive.error : sessionsError;
+  const allSessions = Object.values(sessionMap).filter(
     (session) => session.archived === archived,
   );
   const sessions = allSessions
@@ -576,12 +581,12 @@ function Home({
           : b.updatedAt - a.updatedAt,
     );
   const counts = {
-    all: Object.values(state.sessions).filter((session) => !session.archived)
+    all: Object.values(sessionMap).filter((session) => !session.archived)
       .length,
-    running: Object.values(state.sessions).filter(
+    running: Object.values(sessionMap).filter(
       (session) => !session.archived && sessionGroup(session) === "running",
     ).length,
-    waiting: Object.values(state.sessions).filter(
+    waiting: Object.values(sessionMap).filter(
       (session) => !session.archived && sessionNeedsAttention(session),
     ).length,
   } as Record<string, number | undefined>;
@@ -610,7 +615,7 @@ function Home({
       className="list-refresh"
       aria-label="刷新会话列表"
       title="刷新会话列表"
-      disabled={job.busy || archive.loading || state.status !== "online"}
+      disabled={job.busy || archive.loading || status !== "online"}
       onClick={() => {
         job.clear();
         if (archived) archive.reload();
@@ -651,8 +656,8 @@ function Home({
           </h1>
           <p className="mt-1 flex items-center gap-1.5 text-[13px] text-[var(--secondaryLabel)]">
             <StatusText
-              state={state.status === "online" ? "online" : "pending"}
-              label={state.machine?.hostname ?? "正在连接"}
+              state={status === "online" ? "online" : "pending"}
+              label={machineHostname ?? "正在连接"}
             />
             <span aria-hidden>·</span>
             <span>{pending ? `${pending} 项等你处理` : "暂无待处理事项"}</span>
@@ -660,7 +665,7 @@ function Home({
         </div>
         <Button
           variant="default"
-          disabled={state.status !== "online"}
+          disabled={status !== "online"}
           onClick={create}
         >
           <Icon name="plus" />
@@ -701,7 +706,7 @@ function Home({
           className="self-start"
           variant="outline"
           size="sm"
-          disabled={state.status !== "online" || job.busy}
+          disabled={status !== "online" || job.busy}
           onClick={() =>
             archived ? archive.reload() : void job.run(() => actions.refresh())
           }
@@ -777,7 +782,7 @@ function Home({
               显示全部会话
             </Button>
           ) : !archived ? (
-            <Button disabled={state.status !== "online"} onClick={create}>
+            <Button disabled={status !== "online"} onClick={create}>
               <Plus data-icon="inline-start" />
               新建会话
             </Button>
@@ -785,7 +790,7 @@ function Home({
             // Nothing loaded yet but more on the computer: the way on is part of the empty state.
             <Button
               variant="outline"
-              disabled={job.busy || archive.loading || state.status !== "online"}
+              disabled={job.busy || archive.loading || status !== "online"}
               onClick={() => void job.run(() => actions.loadArchived(nextBefore))}
             >
               {job.busy ? "正在加载…" : "加载更早的会话"}
@@ -799,7 +804,7 @@ function Home({
       )}
       {nextBefore !== undefined && !(loaded && !loadError && !sessions.length && archived && !query && filter === "all") && (
         <LoadMore
-          disabled={job.busy || archive.loading || state.status !== "online"}
+          disabled={job.busy || archive.loading || status !== "online"}
           onClick={() =>
             void job.run(() =>
               archived

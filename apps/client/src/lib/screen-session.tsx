@@ -1,6 +1,6 @@
 import { createContext, use, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { describeActionError } from "@/lib/locale";
-import { AppState, View } from "react-native";
+import { AppState, View, type AppStateStatus } from "react-native";
 import Animated from "react-native-reanimated";
 import { WebView, type WebViewMessageEvent } from "react-native-webview";
 import type { HostLink } from "@linkshell/client-core";
@@ -96,6 +96,13 @@ const SCREEN_TAKEN = "屏幕画面被另一台设备接手了";
 /** The host's words when it ends a relayed picture no one used for minutes (screen-viewer.ts SCREEN_IDLE). */
 export const SCREEN_IDLE = "长时间没有操作，画面已断开";
 
+/** Transient `inactive` states (Control Center, Face ID, Duo fold) pause capture; only `background` tears down. */
+export function screenAppStateAction(state: AppStateStatus): "resume" | "pause" | "reset" {
+  if (state === "active") return "resume";
+  if (state === "background") return "reset";
+  return "pause";
+}
+
 const ScreenSessionContext = createContext<ScreenSessionContextValue | null>(null);
 const initialPlayback = (): ScreenPlaybackMode => nativeScreenAvailable ? "native" : "standard";
 
@@ -169,12 +176,24 @@ export function ScreenSessionProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (next) => {
-      setForeground(next === "active");
-      if (next !== "active") reset();
+      const action = screenAppStateAction(next);
+      setForeground(action === "resume");
+      if (action === "reset") {
+        reset();
+      } else if (action === "pause") {
+        sendSession(false);
+      } else {
+        pauseWatchdog.clear();
+        if (lease.getSnapshot().active) sendSession(true);
+      }
     });
     return () => subscription.remove();
-  }, [reset]);
+  }, [lease, pauseWatchdog, reset, sendSession]);
   useEffect(() => () => { pauseWatchdog.clear(); lease.dispose(); }, [lease, pauseWatchdog]);
+
+  const measureRoot = useCallback(() => root.current?.measureInWindow((x, y) => {
+    setOrigin((previous) => previous.x === x && previous.y === y ? previous : { x, y });
+  }), []);
 
   const failedAt = useRef(0);
   useEffect(() => {
@@ -184,6 +203,7 @@ export function ScreenSessionProvider({ children }: { children: ReactNode }) {
     pauseWatchdog.clear();
     owner.current = nextOwner;
     lease.activate(nextOwner);
+    measureRoot();
     // Opening the screen again asks for it again: what failed on an earlier visit (taken over,
     // idle, offline at the time) must not answer for this one. A session kept from a moment ago
     // still has its picture and its path; a failure that only just happened stays on screen.
@@ -194,7 +214,7 @@ export function ScreenSessionProvider({ children }: { children: ReactNode }) {
       resumeWith.current = null;
     }
     sendSession(AppState.currentState === "active");
-  }, [lease, pauseWatchdog, sendSession]);
+  }, [lease, measureRoot, pauseWatchdog, sendSession]);
   const detach = useCallback((previousOwner: object) => {
     if (owner.current !== previousOwner) return;
     // Pause before the route loses its callback; opacity alone cannot stop input or capture.
@@ -207,9 +227,11 @@ export function ScreenSessionProvider({ children }: { children: ReactNode }) {
   const present = useCallback((routeOwner: object, next: ScreenPresentation) => {
     if (owner.current !== routeOwner) return;
     route.current = next;
+    // Re-measure root alongside anchor so iPad Stage Manager / Duo window translations stay aligned.
+    measureRoot();
     setPresentation(next);
     sendChrome();
-  }, [sendChrome]);
+  }, [measureRoot, sendChrome]);
   const inject = useCallback((routeOwner: object, script: string, generation?: number) => {
     if (owner.current !== routeOwner || !lease.getSnapshot().active || AppState.currentState !== "active" || (generation !== undefined && !lease.isCurrent(generation))) return;
     web.current?.injectJavaScript(script);
@@ -407,9 +429,6 @@ export function ScreenSessionProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const measureRoot = useCallback(() => root.current?.measureInWindow((x, y) => {
-    setOrigin((previous) => previous.x === x && previous.y === y ? previous : { x, y });
-  }), []);
   const viewport = presentation?.viewport;
   const clipTop = Math.min(viewport?.height ?? 0, Math.max(0, presentation?.clipInsets.top ?? 0));
   const clipLeft = Math.min(viewport?.width ?? 0, Math.max(0, presentation?.clipInsets.left ?? 0));

@@ -25,6 +25,7 @@ import {
   ErrorNotice,
   EmptyState,
   baseName,
+  dirName,
   useClient,
   useConnection,
   useJob,
@@ -152,7 +153,7 @@ export function FileEditor({
         agent,
         operation: "open",
         path,
-        cwd: path.slice(0, path.lastIndexOf("/")) || "/",
+        cwd: dirName(path),
       },
       60_000,
     );

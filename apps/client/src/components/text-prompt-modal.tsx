@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
-import { KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, View } from "react-native";
+import { Modal, Pressable, StyleSheet, View } from "react-native";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Text, TextInput } from "@/components/fixed-text";
 import { haptics } from "@/lib/haptics";
 import { colors } from "@/theme/colors";
@@ -35,6 +37,7 @@ export function TextPromptModal({
   onCancel,
   onConfirm,
 }: TextPromptModalProps) {
+  const insets = useSafeAreaInsets();
   const [value, setValue] = useState(initialValue);
   const [error, setError] = useState<string | null>(null);
 
@@ -60,14 +63,25 @@ export function TextPromptModal({
   };
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
+    <Modal
+      visible={visible}
+      transparent
+      statusBarTranslucent
+      navigationBarTranslucent
+      supportedOrientations={["portrait", "portrait-upside-down", "landscape", "landscape-left", "landscape-right"]}
+      animationType="fade"
+      onRequestClose={onCancel}
+    >
       <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        behavior="padding"
         style={{
           flex: 1,
           backgroundColor: "rgba(0,0,0,0.45)",
           justifyContent: "center",
-          paddingHorizontal: 24,
+          paddingLeft: Math.max(24, insets.left + 16),
+          paddingRight: Math.max(24, insets.right + 16),
+          paddingTop: insets.top + 12,
+          paddingBottom: insets.bottom + 12,
         }}
       >
         <Pressable style={StyleSheet.absoluteFill} onPress={busy ? undefined : onCancel} />

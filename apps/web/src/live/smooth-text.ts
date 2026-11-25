@@ -136,8 +136,20 @@ export function markdownBlocks(text: string): string[] {
     }
     current.push(line);
     if (fence || line.trim() !== "" || index === lines.length - 1) continue;
-    const before = [...current].reverse().find((one) => one.trim() !== "");
-    const after = lines.slice(index + 1).find((one) => one.trim() !== "");
+    let before: string | undefined;
+    for (let i = current.length - 1; i >= 0; i--) {
+      if (current[i]!.trim() !== "") {
+        before = current[i];
+        break;
+      }
+    }
+    let after: string | undefined;
+    for (let i = index + 1; i < lines.length; i++) {
+      if (lines[i]!.trim() !== "") {
+        after = lines[i];
+        break;
+      }
+    }
     if (!before || !after || joined(before) || joined(after)) continue;
     blocks.push(current.join("\n") + "\n");
     current = [];

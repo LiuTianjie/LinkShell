@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { waitForPairing } from "../src/commands/pair.js";
+import { qrMaxLineWidth, shouldRenderQr, waitForPairing } from "../src/commands/pair.js";
 
 // A host client that only has the notification `linkshell pair` waits for.
 function fakeClient() {
@@ -54,5 +54,14 @@ describe("waiting for a phone to pair", () => {
     (added[0] as () => void)();
     expect(await wait).toBe("interrupted");
     nothingLeft(client);
+  });
+
+  it("suppresses QR code when --no-qr is passed or terminal is narrower than QR width", () => {
+    const sampleQr = `${"█".repeat(40)}\n${"█".repeat(40)}`;
+    expect(qrMaxLineWidth(sampleQr)).toBe(42);
+    expect(shouldRenderQr(sampleQr, 80, false)).toBe(true);
+    expect(shouldRenderQr(sampleQr, 40, false)).toBe(false);
+    expect(shouldRenderQr(sampleQr, 120, true)).toBe(false);
+    expect(shouldRenderQr(sampleQr, undefined, false)).toBe(true);
   });
 });

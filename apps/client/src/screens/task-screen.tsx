@@ -3,6 +3,7 @@ import { useIsFocused } from "expo-router/react-navigation";
 import { useLocalSearchParams } from "expo-router";
 import { Alert, ScrollView, View } from "react-native";
 import type { MethodResult } from "@linkshell/wire";
+import { usePageInsets } from "@/components/adaptive-page";
 import { Text } from "@/components/fixed-text";
 import { SheetHeader } from "@/components/sheet-header";
 import { Button } from "@/components/button";
@@ -16,6 +17,7 @@ import { mono, type, radius } from "@/theme/type";
 
 export function TaskScreen() {
   const { id, task: taskId } = useLocalSearchParams<{ id: string; task: string }>();
+  const insets = usePageInsets();
   useSessionSubscription(id);
   const focused = useIsFocused();
   const task = useClient((state) => state.tasks[id]?.[taskId]);
@@ -72,7 +74,7 @@ export function TaskScreen() {
       void stopTask(id, taskId).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason))).finally(() => setBusy(false));
     } },
   ]);
-  return <View style={{ flex: 1 }}><SheetHeader title="任务详情" /><View style={{ flex: 1, overflow: "hidden" }}><ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 44, gap: 16 }}>
+  return <View style={{ flex: 1, backgroundColor: colors.sheet, paddingLeft: insets.left, paddingRight: insets.right }}><SheetHeader title="任务详情" /><View style={{ flex: 1, overflow: "hidden" }}><ScrollView contentContainerStyle={{ padding: 16, paddingBottom: Math.max(44, insets.bottom + 24), gap: 16 }}>
     <Text selectable style={[type.title3, { color: colors.label }]}>{task?.title ?? "正在读取…"}</Text>
     {task ? <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>{task.state === "running" ? <StatusDot /> : null}<Text style={[type.subhead, { color: task.state === "failed" ? colors.danger : colors.secondaryLabel }]}>{taskStatus[task.state]} · {duration(Math.max(0, (task.endedAt ?? now) - task.startedAt))}{task.exitCode !== undefined ? ` · 退出码 ${task.exitCode}` : ""}</Text></View> : null}
     {task?.command ? <Text selectable style={[type.footnote, { fontFamily: mono, padding: 14, borderRadius: radius.control, backgroundColor: colors.inset, color: colors.label }]}>{task.command}</Text> : null}

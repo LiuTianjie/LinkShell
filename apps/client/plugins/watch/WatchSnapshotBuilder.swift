@@ -781,6 +781,7 @@ enum WatchSnapshotBuilder {
       let history = histories[id] ?? WatchHistory()
       let permission = session["permission"] as? [String: Any]
       let question = (permission?["questions"] as? [[String: Any]])?.first
+      let asyncQuestion = (session["asyncQuestions"] as? [[String: Any]])?.first
       let tier = agents.first { $0["id"] as? String == agent }?["tier"] as? String
       let actions = driver == "desktop" || !online ? [] : actions(session, key: key)
       let visible = min(history.visibleItems, WatchHistory.maxVisibleItems)
@@ -799,7 +800,24 @@ enum WatchSnapshotBuilder {
         "hasEarlier": visible < WatchHistory.maxVisibleItems && (history.startSeq > 0 || more),
         "items": items, "configOptions": history.configuration,
       ]
-      card["promptTitle"] = question?["text"] ?? permission?["title"]
+      let promptCandidate = (question?["text"] as? String).flatMap { WatchFormat.trim($0).isEmpty ? nil : WatchFormat.trim($0) }
+        ?? (permission?["title"] as? String).flatMap { WatchFormat.trim($0).isEmpty ? nil : WatchFormat.trim($0) }
+        ?? (asyncQuestion?["title"] as? String).flatMap { WatchFormat.trim($0).isEmpty ? nil : WatchFormat.trim($0) }
+      if let promptCandidate {
+        card["promptTitle"] = String(promptCandidate.prefix(180))
+      }
+      if let permTool = permission?["tool"] as? [String: Any],
+         let rawTitle = permTool["title"] as? String, !rawTitle.isEmpty {
+        let cleaned = WatchFormat.toolTitle(rawTitle)
+        let cmd = (permTool["kind"] as? String) == "execute" ? WatchFormat.command(cleaned) : cleaned
+        if !cmd.isEmpty { card["commandPreview"] = String(cmd.prefix(160)) }
+      } else if let activity = session["activity"] as? [String: Any],
+                activity["kind"] as? String == "tool",
+                let rawTitle = activity["title"] as? String, !rawTitle.isEmpty {
+        let cleaned = WatchFormat.toolTitle(rawTitle)
+        let cmd = (activity["toolKind"] as? String) == "execute" ? WatchFormat.command(cleaned) : cleaned
+        if !cmd.isEmpty { card["commandPreview"] = String(cmd.prefix(160)) }
+      }
       card["detailPreview"] = (session["preview"] as? String).map { String(WatchFormat.plain($0).prefix(200)) }
       card["model"] = session["model"]
       card["subagents"] = session["subagents"]
@@ -840,7 +858,7 @@ enum WatchSnapshotBuilder {
 
   static func actions(_ session: [String: Any], key: String) -> [[String: Any]] {
     let id = session["id"] as? String ?? ""
-    func action(_ request: String, _ option: String, _ label: String, _ kind: String, _ role: String = "accept", _ question: String? = nil) -> [String: Any] {
+    func action(_ request: String, _ option: String, _ label: String, _ kind: String, _ role: String = "choice", _ question: String? = nil) -> [String: Any] {
       var value: [String: Any] = ["id": "\(request):\(option)", "computerKey": key, "sessionId": id, "requestId": request, "optionId": option, "label": label, "kind": kind, "role": role]
       value["questionId"] = question
       return value
@@ -851,17 +869,26 @@ enum WatchSnapshotBuilder {
       if questions.count == 1, let q = questions.first, q["kind"] as? String == "choice", q["secret"] as? Bool != true {
         return (q["options"] as? [[String: Any]] ?? []).prefix(20).compactMap { option in
           guard let value = option["value"] as? String else { return nil }
-          return action(request, value, option["label"] as? String ?? value, "answer", "accept", q["id"] as? String)
+          return action(request, value, option["label"] as? String ?? value, "answer", "choice", q["id"] as? String)
         }
       }
       if !questions.isEmpty { return [] }
       return (permission["options"] as? [[String: Any]] ?? []).prefix(20).compactMap { option in
         guard let value = option["optionId"] as? String else { return nil }
-        return action(request, value, option["name"] as? String ?? value, "permission", (option["kind"] as? String ?? "").hasPrefix("reject") ? "reject" : "accept")
+        let optKind = option["kind"] as? String ?? ""
+        let role: String
+        switch optKind {
+        case "allow_once": role = "allow"
+        case "allow_always": role = "always"
+        case "reject_once": role = "reject"
+        case "reject_always": role = "stop"
+        default: role = optKind.hasPrefix("reject") ? "reject" : "allow"
+        }
+        return action(request, value, option["name"] as? String ?? value, "permission", role)
       }
     }
     if let question = (session["asyncQuestions"] as? [[String: Any]])?.first, let request = question["id"] as? String {
-      return (question["options"] as? [String] ?? []).prefix(20).map { action(request, $0, $0, "async-answer") }
+      return (question["options"] as? [String] ?? []).prefix(20).map { action(request, $0, $0, "async-answer", "choice") }
     }
     return []
   }

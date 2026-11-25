@@ -197,3 +197,59 @@ it("lets go of a gateway that a failed pairing opened, and keeps one a computer 
   dropRelayIfUnused("wss://home.example.com");
   expect(relayFor("wss://home.example.com")).toBe(kept);
 });
+
+it("cleans up state.live and stops unused custom gateway relays when removing a paired computer", async () => {
+  const { listComputers, relayKey, useComputers } = await import("../src/lib/computers");
+  const gateway = "wss://selfhost.example.com";
+  const pairedMachine = { ...machine, id: "paired-clean", via: "paired" as const };
+  const key = useComputers.getState().addPaired(gateway, pairedMachine);
+  const relay = fake.relays[fake.relays.length - 1]!;
+  relay.request.mockResolvedValueOnce({ machines: [pairedMachine] });
+  relay.emit("online");
+  await settle();
+
+  expect(useComputers.getState().live[gateway]).toHaveLength(1);
+  expect(listComputers(useComputers.getState()).map((c) => c.key)).toContain(key);
+
+  await expect(useComputers.getState().remove(key)).resolves.toBe(true);
+  expect(useComputers.getState().live[gateway]).toBeUndefined();
+  expect(listComputers(useComputers.getState()).map((c) => c.key)).not.toContain(key);
+  expect(relay.status).toBe("stopped");
+  expect(useComputers.getState().relayStatus[gateway]).toBeUndefined();
+});
+
+it("waits for an account-only saved selection during cold-start discovery instead of jumping to another computer", async () => {
+  const { DEFAULT_GATEWAY, isAwaitingSelectedAccountComputer, relayKey, selectedComputer, useComputers } = await import(
+    "../src/lib/computers"
+  );
+  // Save a fallback paired computer, then select an account-only computer that hasn't hydrated yet.
+  const other = { ...machine, id: "other-mac", via: "paired" as const };
+  useComputers.getState().addPaired("wss://other.example.com", other);
+  const accountKey = relayKey(DEFAULT_GATEWAY, "account-only-mac");
+  useComputers.getState().select(accountKey);
+
+  // While default gateway discovery is still pending/loading, do not jump to other-mac.
+  const pendingState = { ...useComputers.getState(), discovery: { [DEFAULT_GATEWAY]: "loading" as const } };
+  expect(isAwaitingSelectedAccountComputer(pendingState, true)).toBe(true);
+  expect(selectedComputer(pendingState, { signedIn: true })).toBeUndefined();
+
+  // Once discovery completes and returns the selected account computer, select it.
+  const hydratedState = {
+    ...pendingState,
+    discovery: { [DEFAULT_GATEWAY]: "ready" as const },
+    live: {
+      [DEFAULT_GATEWAY]: [{ ...machine, id: "account-only-mac", via: "account" as const }],
+    },
+  };
+  expect(isAwaitingSelectedAccountComputer(hydratedState, true)).toBe(false);
+  expect(selectedComputer(hydratedState, { signedIn: true })?.key).toBe(accountKey);
+
+  // If discovery settles ready without that computer, fall back cleanly to the other computer.
+  const missingState = {
+    ...pendingState,
+    discovery: { [DEFAULT_GATEWAY]: "ready" as const },
+    live: { [DEFAULT_GATEWAY]: [] },
+  };
+  expect(isAwaitingSelectedAccountComputer(missingState, true)).toBe(false);
+  expect(selectedComputer(missingState, { signedIn: true })?.key).toBe(relayKey("wss://other.example.com", "other-mac"));
+});

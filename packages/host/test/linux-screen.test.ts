@@ -6,21 +6,41 @@ import {
   buildWaylandGstArgs,
   buildWaylandWfRecorderArgs,
   buildX11CaptureArgs,
+  buildX11MjpegCaptureArgs,
   detectLinuxDisplayServer,
+  HEADLESS_LINUX_PROBLEM,
   JpegFrameSplitter,
   LinuxInputControl,
   listLinuxDisplays,
   parseWlrRandrJson,
   parseXdpyinfoDimensions,
+  parseXrandrActiveMonitors,
   probeLinuxScreen,
 } from "../src/linux-screen.js";
+import { viewerPage } from "../src/screen-viewer.js";
 
-function mockRunner(availableBins: Set<string>, options: { gstPlugins?: Set<string>; stdout?: Record<string, string> } = {}) {
+function mockRunner(
+  availableBins: Set<string>,
+  options: {
+    gstPlugins?: Set<string>;
+    stdout?: Record<string, string>;
+    ffmpegDevices?: string;
+    ffmpegEncoders?: string;
+  } = {},
+) {
   return async (cmd: string, args: string[]) => {
     if (cmd === "which") {
       const bin = args[0] ?? "";
       if (availableBins.has(bin)) return { stdout: `/usr/bin/${bin}\n`, stderr: "" };
       throw new Error(`not found: ${bin}`);
+    }
+    if (cmd === "ffmpeg") {
+      if (args.includes("-devices")) {
+        return { stdout: options.ffmpegDevices ?? " D  x11grab         X11 screen capture, using XCB\n", stderr: "" };
+      }
+      if (args.includes("-encoders")) {
+        return { stdout: options.ffmpegEncoders ?? " V..... libx264              libx264 H.264 / AVC\n", stderr: "" };
+      }
     }
     if (cmd === "gst-inspect-1.0") {
       const plugin = args[0] ?? "";
@@ -35,14 +55,32 @@ function mockRunner(availableBins: Set<string>, options: { gstPlugins?: Set<stri
 }
 
 describe("linux-screen detection, probing, and capture builders", () => {
-  it("detects X11 vs Wayland from XDG_SESSION_TYPE and WAYLAND_DISPLAY", () => {
-    expect(detectLinuxDisplayServer({})).toBe("x11");
+  it("detects Wayland, X11, and headless sessions from XDG_SESSION_TYPE, WAYLAND_DISPLAY, and DISPLAY", () => {
+    expect(detectLinuxDisplayServer({})).toBe("headless");
+    expect(detectLinuxDisplayServer({ XDG_SESSION_TYPE: "tty" })).toBe("headless");
+    expect(detectLinuxDisplayServer({ DISPLAY: ":0" })).toBe("x11");
     expect(detectLinuxDisplayServer({ XDG_SESSION_TYPE: "x11" })).toBe("x11");
     expect(detectLinuxDisplayServer({ XDG_SESSION_TYPE: "wayland" })).toBe("wayland");
     expect(detectLinuxDisplayServer({ WAYLAND_DISPLAY: "wayland-0" })).toBe("wayland");
   });
 
-  it("reports structured diagnostics for X11 with and without ffmpeg/xdotool", async () => {
+  it("reports headless sessions as unsupported without spawning display probes", async () => {
+    const runCommand = vi.fn();
+    const diag = await probeLinuxScreen({ env: {}, runCommand });
+    expect(diag).toMatchObject({
+      displayServer: "headless",
+      captureBackend: null,
+      captureFormat: null,
+      inputBackend: null,
+      recording: false,
+      control: false,
+      problem: HEADLESS_LINUX_PROBLEM,
+    });
+    expect(runCommand).not.toHaveBeenCalled();
+    expect(await listLinuxDisplays({ env: {}, runCommand })).toEqual([]);
+  });
+
+  it("reports structured diagnostics for X11 including x11grab and libx264/MJPEG fallback", async () => {
     const ok = await probeLinuxScreen({
       env: { XDG_SESSION_TYPE: "x11" },
       runCommand: mockRunner(new Set(["ffmpeg", "xdpyinfo", "xdotool"])),
@@ -56,6 +94,47 @@ describe("linux-screen detection, probing, and capture builders", () => {
       control: true,
     });
     expect(ok.problem).toBeUndefined();
+
+    // Fedora ffmpeg-free: x11grab present, libx264 absent -> falls back to X11 MJPEG.
+    const fedora = await probeLinuxScreen({
+      env: { DISPLAY: ":0" },
+      runCommand: mockRunner(new Set(["ffmpeg", "xdotool"]), {
+        ffmpegDevices: " D  x11grab  X11 screen capture\n",
+        ffmpegEncoders: " V..... mjpeg  MJPEG\n",
+      }),
+    });
+    expect(fedora).toMatchObject({
+      displayServer: "x11",
+      captureBackend: "x11-ffmpeg-mjpeg",
+      captureFormat: "jpeg",
+      recording: true,
+      control: true,
+    });
+    const mjpegPlan = buildLinuxCapturePlan(
+      fedora,
+      0,
+      { width: 1280, fps: 30, bitrate: 2_000_000, ceiling: 3_000_000 },
+      { index: 1, screen: 1, name: "HDMI-1", w: 1920, h: 1080, x: 2560, y: 0 },
+      { DISPLAY: ":0" },
+    );
+    expect(mjpegPlan?.format).toBe("jpeg");
+    expect(mjpegPlan?.args).toContain("mjpeg");
+    expect(mjpegPlan?.args).toContain(":0+2560,0");
+
+    // Minimal ffmpeg without x11grab -> clearly reports missing x11grab.
+    const noX11Grab = await probeLinuxScreen({
+      env: { DISPLAY: ":0" },
+      runCommand: mockRunner(new Set(["ffmpeg", "xdotool"]), {
+        ffmpegDevices: " D  fbdev  Linux framebuffer\n",
+        ffmpegEncoders: " V..... libx264\n",
+      }),
+    });
+    expect(noX11Grab).toMatchObject({
+      captureBackend: null,
+      recording: false,
+      missingCapture: ["ffmpeg (x11grab)"],
+    });
+    expect(noX11Grab.problem).toContain("x11grab");
 
     const missing = await probeLinuxScreen({
       env: { XDG_SESSION_TYPE: "x11" },
@@ -72,6 +151,34 @@ describe("linux-screen detection, probing, and capture builders", () => {
     });
     expect(missing.problem).toContain("ffmpeg");
     expect(missing.problem).toContain("xdotool");
+  });
+
+  it("requires a live ydotoold socket before selecting ydotool as usable control", async () => {
+    const noDaemon = await probeLinuxScreen({
+      env: { WAYLAND_DISPLAY: "wayland-0" },
+      runCommand: mockRunner(new Set(["wf-recorder", "ydotool"])),
+      fileExists: () => false,
+    });
+    expect(noDaemon).toMatchObject({
+      displayServer: "wayland",
+      recording: true,
+      inputBackend: null,
+      control: false,
+      missingInput: ["ydotoold"],
+    });
+    expect(noDaemon.problem).toContain("ydotoold");
+
+    // When ydotoold socket is missing but wtype exists, falls back to wtype instead of broken ydotool.
+    const fallbackWtype = await probeLinuxScreen({
+      env: { WAYLAND_DISPLAY: "wayland-0" },
+      runCommand: mockRunner(new Set(["wf-recorder", "ydotool", "wtype"])),
+      fileExists: () => false,
+    });
+    expect(fallbackWtype).toMatchObject({
+      inputBackend: "wtype",
+      control: true,
+    });
+    expect(fallbackWtype.problem).toContain("ydotoold");
   });
 
   it("selects Wayland capture & input backends by priority with structured fallbacks", async () => {
@@ -151,8 +258,32 @@ describe("linux-screen detection, probing, and capture builders", () => {
     expect(empty.missingCapture).toContain("wf-recorder");
   });
 
-  it("parses display dimensions and constructs capture args cleanly", async () => {
+  it("parses display dimensions (xrandr multi-monitor + xdpyinfo fallback) and constructs capture args cleanly", async () => {
     expect(parseXdpyinfoDimensions("  dimensions:    2560x1440 pixels (677x381 millimeters)\n")).toEqual({ w: 2560, h: 1440 });
+    expect(
+      parseXrandrActiveMonitors(
+        [
+          "Monitors: 2",
+          " 0: +*DP-1 2560/597x1440/336+0+0  DP-1",
+          " 1: +HDMI-1 1920/527x1080/296+2560+360  HDMI-1",
+        ].join("\n"),
+      ),
+    ).toEqual([
+      { index: 0, screen: 0, name: "DP-1", output: "DP-1", w: 2560, h: 1440, x: 0, y: 0 },
+      { index: 1, screen: 1, name: "HDMI-1", output: "HDMI-1", w: 1920, h: 1080, x: 2560, y: 360 },
+    ]);
+
+    const xrandrDisplays = await listLinuxDisplays({
+      env: { XDG_SESSION_TYPE: "x11" },
+      runCommand: mockRunner(new Set(["xrandr"]), {
+        stdout: {
+          xrandr: "Monitors: 2\n 0: +*eDP-1 1920/344x1080/194+0+0  eDP-1\n 1: +DP-2 2560/597x1440/336+1920+0  DP-2\n",
+        },
+      }),
+    });
+    expect(xrandrDisplays).toHaveLength(2);
+    expect(xrandrDisplays[1]).toEqual({ index: 1, screen: 1, name: "DP-2", output: "DP-2", w: 2560, h: 1440, x: 1920, y: 0 });
+
     expect(parseWlrRandrJson(JSON.stringify([
       { name: "DP-1", description: "Dell 4K", enabled: true, modes: [{ width: 3840, height: 2160, current: true }] },
       { name: "HDMI-1", enabled: false, modes: [] },
@@ -166,9 +297,30 @@ describe("linux-screen detection, probing, and capture builders", () => {
 
     const profile = { width: 1280, fps: 30, bitrate: 1_800_000, ceiling: 2_500_000 };
     expect(buildX11CaptureArgs(0, profile, ":99")).toContain(":99");
+    const multiMonitorArgs = buildX11CaptureArgs(0, profile, ":0", { w: 2560, h: 1440, x: 1920, y: 0 });
+    expect(multiMonitorArgs).toContain("-video_size");
+    expect(multiMonitorArgs).toContain("2560x1440");
+    expect(multiMonitorArgs).toContain(":0+1920,0");
+    expect(buildX11MjpegCaptureArgs(0, profile, ":0", { w: 1920, h: 1080, x: 0, y: 0 })).toContain("mjpeg");
     expect(buildWaylandWfRecorderArgs(profile, { mode: "nut", output: "DP-1" })).toContain("nut");
     expect(buildWaylandGstArgs("x264", profile)).toContain("x264enc");
     expect(buildWaylandFfmpegMjpegArgs(profile)).toContain("mjpeg");
+  });
+
+  it("renders Linux Alt and Super modifier labels in the screen viewer HTML instead of macOS glyphs", () => {
+    const linuxHtml = viewerPage("linux");
+    expect(linuxHtml).toContain('data-platform="linux"');
+    expect(linuxHtml).toContain('<div class="tile" data-mod="alt"><b>Alt</b><span>alt</span></div>');
+    expect(linuxHtml).toContain('<div class="tile" data-mod="cmd"><b>Super</b><span>super</span></div>');
+    expect(linuxHtml).toContain('<div class="key" data-mod="alt">Alt</div>');
+    expect(linuxHtml).toContain('<div class="key" data-mod="cmd">Super</div>');
+    expect(linuxHtml).not.toContain("<span>option</span>");
+    expect(linuxHtml).not.toContain("<span>command</span>");
+
+    const macHtml = viewerPage("darwin");
+    expect(macHtml).toContain('data-platform="darwin"');
+    expect(macHtml).toContain("<span>option</span>");
+    expect(macHtml).toContain("<span>command</span>");
   });
 
   it("splits concatenated MJPEG frames across chunk boundaries", () => {
@@ -190,6 +342,9 @@ describe("Linux pointer & keyboard input commands and control readiness", () => 
 
     expect(buildLinuxInputCommands({ t: "move", x: 0.5, y: 0.5 }, "xdotool", size)).toEqual([
       { command: "xdotool", args: ["mousemove", "500", "250"] },
+    ]);
+    expect(buildLinuxInputCommands({ t: "move", x: 0.5, y: 0.5 }, "xdotool", { w: 1001, h: 501, x: 1920, y: 100 })).toEqual([
+      { command: "xdotool", args: ["mousemove", "2420", "350"] },
     ]);
     expect(buildLinuxInputCommands({ t: "down", b: "left", m: ["shift"] }, "xdotool", size)).toEqual([
       { command: "xdotool", args: ["keydown", "Shift_L"] },
@@ -244,6 +399,7 @@ describe("Linux pointer & keyboard input commands and control readiness", () => 
             if (args[0] === "xdotool" || args[0] === "xdpyinfo") return { stdout: `/usr/bin/${args[0]}`, stderr: "" };
             throw new Error("missing");
           }
+          if (cmd === "xrandr") throw new Error("missing");
           if (cmd === "xdpyinfo") return { stdout: "dimensions: 1001x501 pixels", stderr: "" };
           executed.push({ cmd, args });
           if (blockNext) {
@@ -294,7 +450,7 @@ describe("ScreenShare.access integration on Linux", () => {
           control: true,
           missingCapture: [],
           missingInput: [],
-          captureTools: { ffmpeg: false, wfRecorder: true, gstLaunch: false, gstPipewire: false, gstVaapiH264: false, gstX264: false, gstJpeg: false, xdpyinfo: false, wlrRandr: true },
+          captureTools: { ffmpeg: false, ffmpegX11Grab: false, ffmpegLibx264: false, wfRecorder: true, gstLaunch: false, gstPipewire: false, gstVaapiH264: false, gstX264: false, gstJpeg: false, xrandr: false, xdpyinfo: false, wlrRandr: true },
           inputTools: { xdotool: false, ydotool: false, ydotoolSocket: false, dotool: true, wtype: false },
         })),
       };
@@ -307,6 +463,38 @@ describe("ScreenShare.access integration on Linux", () => {
       recording: true,
       control: true,
       app: "dotool",
+    });
+  });
+
+  it("marks headless Linux sessions as supported:false in ScreenShare.access", async () => {
+    Object.defineProperty(process, "platform", { ...originalPlatform, value: "linux" });
+    vi.doMock("../src/linux-screen.js", async (original) => {
+      const mod = await original<typeof import("../src/linux-screen.js")>();
+      return {
+        ...mod,
+        probeLinuxScreen: vi.fn(async () => ({
+          displayServer: "headless" as const,
+          captureBackend: null,
+          captureFormat: null,
+          inputBackend: null,
+          recording: false,
+          control: false,
+          missingCapture: [],
+          missingInput: [],
+          problem: HEADLESS_LINUX_PROBLEM,
+          captureTools: { ffmpeg: false, ffmpegX11Grab: false, ffmpegLibx264: false, wfRecorder: false, gstLaunch: false, gstPipewire: false, gstVaapiH264: false, gstX264: false, gstJpeg: false, xrandr: false, xdpyinfo: false, wlrRandr: false },
+          inputTools: { xdotool: false, ydotool: false, ydotoolSocket: false, dotool: false, wtype: false },
+        })),
+      };
+    });
+    const { ScreenShare } = await import("../src/screen.js");
+    const access = await new ScreenShare(() => {}).access(false);
+    expect(access).toEqual({
+      supported: false,
+      ffmpeg: false,
+      recording: false,
+      control: false,
+      problem: HEADLESS_LINUX_PROBLEM,
     });
   });
 });

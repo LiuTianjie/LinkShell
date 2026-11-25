@@ -2,6 +2,7 @@ import * as http from "node:http";
 import { createHash, randomBytes } from "node:crypto";
 import { execFile } from "node:child_process";
 import { saveAuth, SUPABASE_ANON_KEY, SUPABASE_URL, type AuthTokens } from "../auth.js";
+import { isHeadlessSession } from "../utils/format.js";
 import { cacheMembership, lookupMembership, type DesktopMembership } from "../pro-membership.js";
 import { oauthErrorCode, tokenErrorCode } from "../../../client-core/src/account-errors.js";
 import { LoginError } from "./login-error.js";
@@ -175,6 +176,7 @@ export function authorizeURL(provider: OAuthProvider, redirectTo: string, challe
 }
 
 export function openInBrowser(url: string): void {
+  if (isHeadlessSession()) return;
   const [command, args] = process.platform === "win32"
     ? ["rundll32.exe", ["url.dll,FileProtocolHandler", url]]
     : [process.platform === "darwin" ? "open" : "xdg-open", [url]];

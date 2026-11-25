@@ -332,6 +332,7 @@ export function ApprovalCard({
                 computerKey={connection.computer.key}
                 sessionId={sessionId}
                 sessionKey={sessionKey}
+                cwd={cwd}
               />
             );
           }

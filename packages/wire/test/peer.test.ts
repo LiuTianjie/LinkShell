@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { ABANDON, RpcError, RpcPeer } from "../src/peer.js";
-import { decodeDirectFrame, DIRECT_MAX_FRAME_BYTES, encodeDirectFrame, parseSessionId, sessionIdFor, sessionUpdateSchema } from "../src/index.js";
+import {
+  acpFeaturesSchema,
+  decodeDirectFrame,
+  DIRECT_MAX_FRAME_BYTES,
+  encodeDirectFrame,
+  parseSessionId,
+  sessionIdFor,
+  sessionUpdateSchema,
+  stopReasonSchema,
+  toolKindSchema,
+} from "../src/index.js";
 
 function pair(handlers: {
   onRequest?: ConstructorParameters<typeof RpcPeer>[0]["onRequest"];
@@ -126,6 +136,58 @@ describe("RpcPeer", () => {
     peer.close();
     expect(signals.get("req-2")?.aborted).toBe(true);
   });
+
+  it("supports custom cancelMethod (ACP $/cancel_request with requestId) for outbound timeout and inbound abort or notify", async () => {
+    const wireFrames: Array<Record<string, unknown>> = [];
+    let aborted = false;
+    let right!: RpcPeer;
+    const left = new RpcPeer({
+      send: (text) => {
+        wireFrames.push(JSON.parse(text) as Record<string, unknown>);
+        queueMicrotask(() => right.receive(text));
+      },
+      requestTimeoutMs: 20,
+      cancelMethod: { method: "$/cancel_request", idField: "requestId" },
+    });
+    right = new RpcPeer({
+      send: (text) => queueMicrotask(() => left.receive(text)),
+      cancelMethod: { method: "$/cancel_request", idField: "requestId" },
+      onRequest: (_method, _params, _id, signal) =>
+        new Promise(() => {
+          signal.addEventListener("abort", () => {
+            aborted = true;
+          });
+        }),
+    });
+
+    const err = await left.request("session/prompt", {}, 20).catch((e: unknown) => e);
+    expect((err as RpcError).appCode).toBe("timeout");
+    await new Promise((r) => setTimeout(r, 10));
+    expect(wireFrames).toContainEqual({
+      jsonrpc: "2.0",
+      method: "$/cancel_request",
+      params: { requestId: 1 },
+    });
+    expect(aborted).toBe(true);
+
+    // inbound: "notify" forwards $/cancel_request to onNotification without suppressing a pending reply
+    const notices: Array<{ method: string; params: unknown }> = [];
+    const replies: Array<Record<string, unknown>> = [];
+    let finish!: (value: unknown) => void;
+    const acpPeer = new RpcPeer({
+      send: (text) => replies.push(JSON.parse(text) as Record<string, unknown>),
+      cancelMethod: { method: "$/cancel_request", idField: "requestId", inbound: "notify" },
+      onNotification: (method, params) => notices.push({ method, params }),
+      onRequest: () => new Promise((resolve) => { finish = resolve; }),
+    });
+    acpPeer.receive(JSON.stringify({ jsonrpc: "2.0", id: 7, method: "session/request_permission", params: {} }));
+    acpPeer.receive(JSON.stringify({ jsonrpc: "2.0", method: "$/cancel_request", params: { requestId: 7 } }));
+    await new Promise((r) => setTimeout(r, 5));
+    expect(notices).toEqual([{ method: "$/cancel_request", params: { requestId: 7 } }]);
+    finish({ outcome: { outcome: "cancelled" } });
+    await new Promise((r) => setTimeout(r, 5));
+    expect(replies).toContainEqual({ jsonrpc: "2.0", id: 7, result: { outcome: { outcome: "cancelled" } } });
+  });
 });
 
 describe("wire model", () => {
@@ -162,5 +224,80 @@ describe("wire model", () => {
     const ok = encodeDirectFrame({ type: "data", stream: 7, data: new Uint8Array([1, 2, 3]) });
     expect(decodeDirectFrame(ok)).toEqual({ type: "data", stream: 7, data: new Uint8Array([1, 2, 3]) });
     expect(decodeDirectFrame(new Uint8Array(DIRECT_MAX_FRAME_BYTES + 1))).toBeUndefined();
+  });
+
+  it("forward-compatibly parses unknown stopReason/toolKind and validates v3 wire fields", () => {
+    expect(stopReasonSchema.parse("future_stop_reason")).toBe("unknown");
+    expect(toolKindSchema.parse("future_tool_kind")).toBe("other");
+
+    const parsedPlan = sessionUpdateSchema.parse({
+      sessionUpdate: "plan",
+      parentToolCallId: "sub-1",
+      explanation: "Breaking work into two steps",
+      entries: [{ content: "Step 1", priority: "high", status: "in_progress" }],
+    });
+    expect(parsedPlan).toMatchObject({ parentToolCallId: "sub-1", explanation: "Breaking work into two steps" });
+
+    const parsedError = sessionUpdateSchema.parse({
+      sessionUpdate: "ls_error",
+      parentToolCallId: "sub-1",
+      code: "turn_failed",
+      message: "failed",
+      retryable: true,
+    });
+    expect(parsedError).toMatchObject({ parentToolCallId: "sub-1", retryable: true });
+
+    const parsedNotice = sessionUpdateSchema.parse({
+      sessionUpdate: "ls_notice",
+      parentToolCallId: "sub-1",
+      level: "warning",
+      title: "subagent warning",
+      detail: "extra detail",
+    });
+    expect(parsedNotice).toMatchObject({ parentToolCallId: "sub-1", title: "subagent warning" });
+
+    const parsedAppend = sessionUpdateSchema.parse({
+      sessionUpdate: "tool_call_update",
+      toolCallId: "t1",
+      content: [{ type: "content", content: { type: "text", text: "chunk" } }],
+      appendContent: true,
+    });
+    expect(parsedAppend).toMatchObject({ appendContent: true });
+
+    const parsedQuestion = sessionUpdateSchema.parse({
+      sessionUpdate: "ls_permission",
+      requestId: "q1",
+      title: "Choose layout",
+      options: [{ optionId: "cancel", name: "Cancel", kind: "reject_once" }],
+      questions: [
+        {
+          id: "layout",
+          text: "Layout",
+          kind: "choice",
+          options: [{ value: "a", label: "A", preview: "<div>A</div>" }],
+        },
+      ],
+    });
+    expect(parsedQuestion).toMatchObject({
+      questions: [{ options: [{ value: "a", preview: "<div>A</div>" }] }],
+    });
+
+    expect(
+      acpFeaturesSchema.parse({
+        protocolVersion: 2,
+        authMethods: [],
+        logout: false,
+        providers: false,
+        nes: false,
+        additionalDirectories: false,
+        mcpHttp: true,
+        mcpSse: false,
+        mcpStdio: true,
+        mcpAcp: true,
+      }),
+    ).toMatchObject({
+      mcpStdio: true,
+      mcpAcp: true,
+    });
   });
 });

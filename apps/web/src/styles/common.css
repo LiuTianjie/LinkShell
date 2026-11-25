@@ -422,6 +422,8 @@ a > .external-link-icon {
   .connect-pairing-form { display: flex; flex: 1; flex-direction: column; gap: 12px; }
   .connect-pairing-fields { display: flex; flex-direction: column; gap: 12px; }
   .connect-label-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; min-width: 0; }
+  .connect-forgot-link { color: var(--link); font-size: 12px; line-height: 16px; text-decoration: none; white-space: nowrap; }
+  .connect-forgot-link:hover { text-decoration: underline; text-underline-offset: 2px; }
   .connect-field-note { overflow: hidden; color: var(--tertiaryLabel); font-size: 12px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
   .connect-field-note[data-ok] { color: var(--ok); }
   .connect-field-note code,

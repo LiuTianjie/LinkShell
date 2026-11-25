@@ -15,7 +15,9 @@ import {
   DNS_TYPE_SRV,
   DNS_TYPE_TXT,
   encodeDnsName,
+  isVirtualInterface,
   LINKSHELL_SERVICE_TYPE,
+  localIpv4Addresses,
   MDNS_DEFAULT_TTL,
   MDNS_MULTICAST_ADDR,
   MDNS_PORT,
@@ -195,31 +197,136 @@ describe("PureMdnsResponder and MdnsAdvertiser fallback", () => {
     expect(goodbye.answers.some((rr) => rr.type === DNS_TYPE_SRV && rr.ttl === 0)).toBe(true);
   });
 
-  it("uses PureMdnsResponder natively on Windows and Linux without spawning dns-sd/avahi", async () => {
-    for (const platform of ["win32", "linux"] as const) {
-      const socket = new FakeMdnsSocket();
-      let spawned = false;
-      const adv = new MdnsAdvertiser({
-        port: 7878,
-        machineId: "m1",
-        fingerprint: "1122334455667788",
-        protocolVersion: 4,
-        platform,
-        ipv4Addresses: ["127.0.0.1"],
-        socketFactory: () => socket,
-        spawnProcess: () => {
-          spawned = true;
-          throw new Error("should not spawn");
-        },
-        log: () => {},
-      });
-      expect(adv.start()).toBe(true);
-      await new Promise((r) => setTimeout(r, 15));
-      expect(spawned).toBe(false);
-      expect(adv.active).toBe(true);
-      await adv.stop();
-      expect(adv.active).toBe(false);
-    }
+  it("filters out Linux/container/VPN virtual interfaces from localIpv4Addresses", () => {
+    const v4 = (address: string, internal = false) => ({
+      address,
+      netmask: "255.255.255.0",
+      family: "IPv4" as const,
+      mac: "00:00:00:00:00:00",
+      internal,
+      cidr: `${address}/24`,
+    });
+    expect(isVirtualInterface("docker0")).toBe(true);
+    expect(isVirtualInterface("br-a1b2c3")).toBe(true);
+    expect(isVirtualInterface("veth9f3a1")).toBe(true);
+    expect(isVirtualInterface("virbr0")).toBe(true);
+    expect(isVirtualInterface("podman0")).toBe(true);
+    expect(isVirtualInterface("cni0")).toBe(true);
+    expect(isVirtualInterface("flannel.1")).toBe(true);
+    expect(isVirtualInterface("wg0")).toBe(true);
+    expect(isVirtualInterface("zt0abc")).toBe(true);
+    expect(isVirtualInterface("lxcbr0")).toBe(true);
+    expect(isVirtualInterface("lxdbr0")).toBe(true);
+    expect(isVirtualInterface("incusbr0")).toBe(true);
+    expect(isVirtualInterface("tailscale0")).toBe(true);
+    expect(isVirtualInterface("eth0")).toBe(false);
+    expect(isVirtualInterface("enp3s0")).toBe(false);
+    expect(isVirtualInterface("wlan0")).toBe(false);
+
+    const ips = localIpv4Addresses({
+      lo: [v4("127.0.0.1", true)],
+      docker0: [v4("172.17.0.1")],
+      "br-deadbeef": [v4("172.18.0.1")],
+      veth1234: [v4("169.254.1.2")],
+      virbr0: [v4("192.168.122.1")],
+      podman0: [v4("10.88.0.1")],
+      cni0: [v4("10.244.0.1")],
+      "flannel.1": [v4("10.244.1.0")],
+      wg0: [v4("10.66.66.1")],
+      zt1234: [v4("10.147.17.5")],
+      lxcbr0: [v4("10.0.3.1")],
+      lxdbr0: [v4("10.10.10.1")],
+      incusbr0: [v4("10.20.20.1")],
+      tailscale0: [v4("100.64.0.2")],
+      enp3s0: [v4("192.168.1.42")],
+      wlan0: [v4("192.168.1.88")],
+    });
+    expect(ips).toEqual(["192.168.1.42", "192.168.1.88"]);
+  });
+
+  it("uses PureMdnsResponder natively on Windows without spawning dns-sd/avahi", async () => {
+    const socket = new FakeMdnsSocket();
+    let spawned = false;
+    const adv = new MdnsAdvertiser({
+      port: 7878,
+      machineId: "m1",
+      fingerprint: "1122334455667788",
+      protocolVersion: 4,
+      platform: "win32",
+      ipv4Addresses: ["127.0.0.1"],
+      socketFactory: () => socket,
+      spawnProcess: () => {
+        spawned = true;
+        throw new Error("should not spawn");
+      },
+      log: () => {},
+    });
+    expect(adv.start()).toBe(true);
+    await new Promise((r) => setTimeout(r, 15));
+    expect(spawned).toBe(false);
+    expect(adv.active).toBe(true);
+    await adv.stop();
+    expect(adv.active).toBe(false);
+  });
+
+  it("prefers avahi-publish-service on Linux when available and falls back to PureMdnsResponder when missing or exiting", async () => {
+    // 1. avahi-publish-service not installed -> falls back directly to PureMdnsResponder without spawning.
+    const fallbackSocket = new FakeMdnsSocket();
+    let spawnedMissing = false;
+    const missingAvahi = new MdnsAdvertiser({
+      port: 7878,
+      machineId: "lin-1",
+      fingerprint: "1122334455667788",
+      protocolVersion: 4,
+      platform: "linux",
+      ipv4Addresses: ["192.168.1.33"],
+      hasCommand: () => false,
+      socketFactory: () => fallbackSocket,
+      spawnProcess: () => {
+        spawnedMissing = true;
+        throw new Error("should not spawn when missing");
+      },
+      log: () => {},
+    });
+    expect(missingAvahi.start()).toBe(true);
+    await new Promise((r) => setTimeout(r, 15));
+    expect(spawnedMissing).toBe(false);
+    expect(missingAvahi.active).toBe(true);
+    await missingAvahi.stop();
+
+    // 2. avahi-publish-service installed -> spawns it, then falls back cleanly if avahi-daemon exits.
+    const socket = new FakeMdnsSocket();
+    let spawnedCmd = "";
+    const child = Object.assign(new EventEmitter(), {
+      exitCode: null as number | null,
+      killed: false,
+      unref: () => {},
+      kill: () => true,
+    }) as unknown as ChildProcess;
+    const withAvahi = new MdnsAdvertiser({
+      port: 8787,
+      machineId: "lin-2",
+      fingerprint: "aabbccdd11223344",
+      protocolVersion: 4,
+      platform: "linux",
+      ipv4Addresses: ["192.168.1.44"],
+      hasCommand: (cmd) => cmd === "avahi-publish-service",
+      socketFactory: () => socket,
+      spawnProcess: (cmd) => {
+        spawnedCmd = cmd;
+        return child;
+      },
+      log: () => {},
+    });
+    expect(withAvahi.start()).toBe(true);
+    expect(spawnedCmd).toBe("avahi-publish-service");
+    (child as unknown as { exitCode: number }).exitCode = 1;
+    (child as unknown as EventEmitter).emit("exit", 1);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(withAvahi.active).toBe(true);
+    expect(socket.sent.length).toBeGreaterThanOrEqual(1);
+    await withAvahi.stop();
+    expect(withAvahi.active).toBe(false);
   });
 
   it("falls back automatically to PureMdnsResponder on macOS when dns-sd errors or exits", async () => {

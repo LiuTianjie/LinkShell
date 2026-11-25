@@ -12,6 +12,7 @@ import { DESKTOP_COMMAND_EVENT } from "../../bridge/desktop-bridge";
 import {
   DESKTOP_SHORTCUTS,
   formatShortcut,
+  isImeComposing,
   useDesktopCommand,
 } from "../../bridge/shortcuts";
 import { appTabId } from "../../core/mcp-bridge";
@@ -56,6 +57,7 @@ import { agentHasSide, sideCommandName } from "./side-chat-store";
 import { SubagentTabPanel } from "./SubagentTabPanel";
 import { countRunningTasksAndSubagents, TasksPanel } from "./TasksPanel";
 import { TerminalPanel } from "./TerminalPanel";
+import { isDispatchingOpenFileInInspector } from "../session/session-helpers";
 import { getTerminalStageController } from "./terminal-runtime";
 import { useInspectorConnection } from "./use-inspector-connection";
 
@@ -393,12 +395,16 @@ export function InspectorWorkbench({
       }
     };
     const onOpenFileEvent = (event: Event) => {
+      // `openFileInInspector` already opens the tab with its full `#Lstart-Lend` range before
+      // broadcasting the event; skipping avoids a duplicate `fs.read` and dropping `endLine`.
+      if (isDispatchingOpenFileInInspector()) return;
       const detail = (
         event as CustomEvent<{
           computerKey?: string;
           sessionId?: string;
           path?: string;
           line?: number;
+          endLine?: number;
         }>
       ).detail;
       if (!detail?.path) return;
@@ -411,7 +417,9 @@ export function InspectorWorkbench({
       }
       const spec =
         typeof detail.line === "number" && detail.line > 0
-          ? `${detail.path}#L${detail.line}`
+          ? typeof detail.endLine === "number" && detail.endLine > detail.line
+            ? `${detail.path}#L${detail.line}-L${detail.endLine}`
+            : `${detail.path}#L${detail.line}`
           : detail.path;
       handleOpenFileInTab(spec);
     };
@@ -511,6 +519,7 @@ export function InspectorWorkbench({
   // Ctrl+Tab while focus is in the inspector; the app-wide binding calls the same function.
   const handleWorkbenchKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
     if (event.key !== "Tab" || !event.ctrlKey || event.metaKey || event.altKey) return;
+    if (event.defaultPrevented || isImeComposing(event)) return;
     if (cycleInspectorTab(event.shiftKey ? -1 : 1)) {
       event.preventDefault();
       event.stopPropagation();
@@ -876,12 +885,16 @@ function InspectorTabButton({
           <span className="inspector-tab-title">{title}</span>
           {diffStats && (diffStats.added > 0 || diffStats.removed > 0) ? (
             <span className="inspector-diff-stat-pill" data-tabular="">
-              <span className="inspector-diff-stat-add">
-                +{formatCompactStat(diffStats.added)}
-              </span>
-              <span className="inspector-diff-stat-del">
-                -{formatCompactStat(diffStats.removed)}
-              </span>
+              {diffStats.added > 0 ? (
+                <span className="inspector-diff-stat-add">
+                  +{formatCompactStat(diffStats.added)}
+                </span>
+              ) : null}
+              {diffStats.removed > 0 ? (
+                <span className="inspector-diff-stat-del">
+                  -{formatCompactStat(diffStats.removed)}
+                </span>
+              ) : null}
             </span>
           ) : null}
           {count > 0 ? (

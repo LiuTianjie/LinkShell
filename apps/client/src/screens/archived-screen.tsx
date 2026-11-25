@@ -2,6 +2,7 @@ import { LegendList } from "@legendapp/list/react-native";
 import type { SessionSummary } from "@linkshell/wire";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View } from "react-native";
+import { usePageInsets } from "@/components/adaptive-page";
 import { SessionRow, positionOf } from "@/components/session-row";
 import { EmptyState, LoadingState, unreachable, WaitingForComputer } from "@/components/state-views";
 import { useActions, useClient } from "@/lib/client";
@@ -11,6 +12,7 @@ import { colors } from "@/theme/colors";
 
 /** Archived sessions: out of the way, one long-press from coming back. */
 export function ArchivedScreen() {
+  const insets = usePageInsets();
   const sessionsById = useClient((state) => state.sessions);
   const { loadArchived } = useActions();
   const [loaded, setLoaded] = useState(false);
@@ -59,7 +61,7 @@ export function ArchivedScreen() {
       renderItem={({ item, index }) => <SessionRow session={item} position={positionOf(index, archived.length)} now={now} />}
       estimatedItemSize={64}
       contentInsetAdjustmentBehavior="automatic"
-      contentContainerStyle={{ padding: 16 }}
+      contentContainerStyle={{ padding: 16, paddingBottom: Math.max(16, insets.bottom + 16) }}
       style={{ flex: 1, backgroundColor: colors.background }}
       ListEmptyComponent={
         error ? (

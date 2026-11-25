@@ -163,7 +163,15 @@ function FloatingMenu({
         </Pressable>
       )}
       {anchor && anchor.geometry === geometry && level ? (
-        <Modal visible transparent statusBarTranslucent navigationBarTranslucent animationType="none" onRequestClose={close}>
+        <Modal
+          visible
+          transparent
+          statusBarTranslucent
+          navigationBarTranslucent
+          supportedOrientations={["portrait", "portrait-upside-down", "landscape", "landscape-left", "landscape-right"]}
+          animationType="none"
+          onRequestClose={close}
+        >
           <Pressable onPress={close} style={{ flex: 1 }} accessibilityLabel="关闭菜单">
             {/* The page dims and the row it belongs to stays lit above it, the way a context menu lifts its source. */}
             <Animated.View

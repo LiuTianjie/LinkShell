@@ -6,11 +6,11 @@ import { z } from "zod";
 import type { AppDisplay, StreamProfile } from "./input.js";
 
 const JPEG_PROFILES = [
-  { width: 1920, fps: 30, quality: 70 },
-  { width: 1440, fps: 24, quality: 66 },
-  { width: 1280, fps: 20, quality: 60 },
-  { width: 1024, fps: 15, quality: 52 },
-  { width: 854, fps: 10, quality: 45 },
+  { width: 1920, fps: 30, quality: 80 },
+  { width: 1600, fps: 24, quality: 75 },
+  { width: 1440, fps: 20, quality: 70 },
+  { width: 1024, fps: 15, quality: 65 },
+  { width: 960, fps: 12, quality: 58 },
 ] as const;
 
 export function windowsProfile(level: number, maxWidth = 1920, maxFps = 30) {
@@ -87,7 +87,7 @@ export class WindowsFrameSplitter {
 export function captureWindows(screen: number, profile: Pick<StreamProfile, "width" | "fps"> & { quality?: number }): ChildProcess {
   const helper = windowsHelper();
   if (!helper) throw new Error("Windows 屏幕组件缺失，请重新安装桌面版");
-  const child = spawn(helper, ["--capture", String(screen), String(profile.width), String(Math.min(30, profile.fps)), String(profile.quality ?? 70)], {
+  const child = spawn(helper, ["--capture", String(screen), String(profile.width), String(Math.min(30, profile.fps)), String(profile.quality ?? 80)], {
     windowsHide: true, stdio: ["pipe", "pipe", "pipe"],
   });
   child.stdin!.on("error", () => {}); // A capture can exit while a profile change is in flight.

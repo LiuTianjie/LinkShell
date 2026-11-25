@@ -5,7 +5,21 @@ import { dirname, join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { createInterface } from "node:readline";
 import { encodeScreenAudioPacket, SCREEN_AUDIO_CODEC_PCM16 } from "@linkshell/wire";
-import { RTCPeerConnection, RTCRtpCodecParameters, RtpHeader, RtpPacket, useH264, useSdesMid, useAbsSendTime, type RTCDataChannel } from "werift";
+import {
+  RTCPeerConnection,
+  RTCRtpCodecParameters,
+  RtpHeader,
+  RtpPacket,
+  useAbsSendTime,
+  useH264,
+  useNACK,
+  usePLI,
+  useREMB,
+  useSdesMid,
+  useTWCC,
+  useTransportWideCC,
+  type RTCDataChannel,
+} from "werift";
 import { inputEvent, type VideoOffer, type VideoSignal, type VideoConfiguration, type VideoConfigured } from "./input.js";
 import { H264_MIME, H264AccessUnits, ScreenInputOrder, h264Nals, h264Payloads } from "./screen-h264.js";
 import { configureWindowsCapture, noteWindowsVideo, windowsHelper, windowsVideoEnv } from "./windows-screen.js";
@@ -67,9 +81,16 @@ export function windowsSlowerLevel(level: number, made: number | undefined): num
 }
 
 export function windowsVideoProfile(level: number, request: Pick<VideoOffer, "maxWidth" | "maxFps" | "fps">) {
-  const profile = profiles[Math.max(0, Math.min(profiles.length - 1, level))]!;
-  const width = Math.min(profile.width, request.maxWidth ?? 1920), fps = Math.min(profile.fps, request.maxFps ?? 60, request.fps ?? 60);
-  return { width, fps, bitrate: Math.max(400_000, Math.round(profile.bitrate * (width / profile.width) ** 2 * fps / profile.fps)) };
+  const index = Math.max(0, Math.min(profiles.length - 1, level));
+  const profile = profiles[index]!;
+  // Allow up to 2560x1440 at level 0 when explicitly requested; keep 1920 default when unspecified.
+  const ceiling = index === 0 && request.maxWidth && request.maxWidth > profile.width
+    ? Math.min(2560, request.maxWidth)
+    : profile.width;
+  const width = Math.min(ceiling, request.maxWidth ?? 1920);
+  const fps = Math.min(profile.fps, request.maxFps ?? 60, request.fps ?? 60);
+  const bitrate = Math.min(16_000_000, Math.max(400_000, Math.round(profile.bitrate * (width / profile.width) ** 2 * fps / profile.fps)));
+  return { width, fps, bitrate };
 }
 
 /** werift relays over UDP only and takes one address a server: TLS and TCP relays are for the other senders. */
@@ -125,15 +146,24 @@ export interface WindowsVideoDeps {
   helper?: () => string | undefined;
   media?: () => string | undefined;
   spawn?: typeof spawn;
+  displaySize?: (screen: number) => { w?: number; h?: number } | undefined;
 }
 
 /** Same SDP and input protocol as the Mac helper; media leaves through DTLS-SRTP, never the gateway. */
 export class WindowsVideoSession implements ScreenVideoSession {
   readonly id = `windows-video-${randomBytes(6).toString("hex")}`;
+  readonly reconfigure = true;
   private readonly pc: RTCPeerConnection;
   private readonly sender;
   private readonly channels = new Map<string, RTCDataChannel>();
   private readonly order = new ScreenInputOrder();
+  private targetScreen: number;
+  private targetMaxWidth?: number;
+  private targetMaxFps?: number;
+  private inputGeneration?: number;
+  private h264Profile: "main" | "baseline";
+  private lastWidth = 0;
+  private lastHeight = 0;
   private child?: ChildProcess;
   private shapeChild?: ChildProcess;
   private audioChild?: ChildProcess;
@@ -150,13 +180,15 @@ export class WindowsVideoSession implements ScreenVideoSession {
   private needsKey = true;
   private connected = false;
   private level = windowsMachineLevel();
-  /** Seconds in a row in which the capture and encoder made well under the profile's frame rate. */
+  /** Seconds in a row in which an active capture/encoder delivered well under the profile's frame rate. */
   private behindIntervals = 0;
   private made = 0;
   /** When the running capture delivered its first frame: its first seconds say nothing about its rate. */
   private steadySince = Infinity;
   private changed = performance.now();
   private goodSince = performance.now();
+  private calmUpgradeMs = 25_000;
+  private lastUpgradeAt?: number;
   private seq = randomBytes(2).readUInt16BE();
   private cursorSeq = 0;
   private timestamp = randomBytes(4).readUInt32BE();
@@ -169,6 +201,7 @@ export class WindowsVideoSession implements ScreenVideoSession {
   private plis = 0;
   private lastStats = performance.now();
   private lastFeedback = 0;
+  private feedbackSource: "none" | "remb" | "twcc" = "none";
   private estimate = 0;
   private strainedIntervals = 0;
   private encoder = "";
@@ -189,21 +222,44 @@ export class WindowsVideoSession implements ScreenVideoSession {
     private readonly events: { tell(message: object): void; input(message: unknown): void; lost(): void; log(message: string): void; path?(relayed: boolean): void },
     private readonly deps: WindowsVideoDeps = {},
   ) {
+    this.targetScreen = request.screen;
+    this.targetMaxWidth = request.maxWidth;
+    this.targetMaxFps = request.maxFps;
+    this.h264Profile = process.env.LINKSHELL_WINDOWS_PROFILE?.toLowerCase() === "baseline" ? "baseline" : "main";
     this.audioEnabled = request.audio === true;
+    const rtcpFeedback = [useNACK(), usePLI(), useREMB(), useTWCC()];
     this.pc = new RTCPeerConnection({
       iceServers: weriftIceServers(request.iceServers),
       bundlePolicy: "max-bundle",
       codecs: { video: [
-        useH264({ mimeType: H264_MIME, payloadType: 96, parameters: "profile-level-id=42e02a;packetization-mode=1;level-asymmetry-allowed=1" }),
+        // Main for Chrome/Safari/Edge/Firefox, Constrained High for iOS native VideoToolbox, Baseline fallback.
+        useH264({ mimeType: H264_MIME, payloadType: 96, rtcpFeedback, parameters: "profile-level-id=4d002a;packetization-mode=1;level-asymmetry-allowed=1" }),
         new RTCRtpCodecParameters({ mimeType: "video/rtx", clockRate: 90000, payloadType: 97, parameters: "apt=96" }),
+        useH264({ mimeType: H264_MIME, payloadType: 98, rtcpFeedback, parameters: "profile-level-id=640c2a;packetization-mode=1;level-asymmetry-allowed=1" }),
+        new RTCRtpCodecParameters({ mimeType: "video/rtx", clockRate: 90000, payloadType: 99, parameters: "apt=98" }),
+        useH264({ mimeType: H264_MIME, payloadType: 100, rtcpFeedback, parameters: "profile-level-id=42e02a;packetization-mode=1;level-asymmetry-allowed=1" }),
+        new RTCRtpCodecParameters({ mimeType: "video/rtx", clockRate: 90000, payloadType: 101, parameters: "apt=100" }),
       ] },
-      headerExtensions: { video: [useSdesMid(), useAbsSendTime()] },
+      headerExtensions: { video: [useSdesMid(), useAbsSendTime(), useTransportWideCC()] },
     });
     this.sender = this.pc.addTransceiver("video", { direction: "sendonly" }).sender;
-    this.sender.onPictureLossIndication.subscribe(() => { this.plis++; this.needsKey = true; });
+    // Never gate P-frames on a PLI: FFmpeg cannot emit an on-demand IDR here, so setting needsKey
+    // would discard seconds of valid P-frames instead of letting RTX/NACK repair packet loss.
+    this.sender.onPictureLossIndication.subscribe(() => { this.plis++; });
     this.sender.onRtcp.subscribe(() => {
-      const estimate = Number(this.sender.receiverEstimatedMaxBitrate);
-      if (estimate > 0) { this.estimate = estimate; this.lastFeedback = performance.now(); }
+      const remb = Number(this.sender.receiverEstimatedMaxBitrate);
+      if (Number.isFinite(remb) && remb > 0) {
+        this.estimate = remb;
+        this.feedbackSource = "remb";
+        this.lastFeedback = performance.now();
+        return;
+      }
+      const bwe = Number((this.sender as { senderBWE?: { availableBitrate?: number } }).senderBWE?.availableBitrate);
+      if (Number.isFinite(bwe) && bwe > 0) {
+        this.estimate = bwe;
+        this.feedbackSource = "twcc";
+        this.lastFeedback = performance.now();
+      }
     });
     this.pc.onIceCandidate.subscribe(candidate => {
       if (candidate && !this.closed) this.events.tell({ t: "ice", ...candidate.toJSON() });
@@ -215,6 +271,8 @@ export class WindowsVideoSession implements ScreenVideoSession {
       clearTimeout(this.unsteady);
       if (this.connected) {
         this.needsKey = true;
+        this.goodSince = performance.now();
+        this.strainedIntervals = this.behindIntervals = 0;
         this.events.log("[screen] Windows H.264 video connected directly to the viewer");
       } else if (state === "disconnected") {
         // Missed consent checks on Wi-Fi recover on their own; ending at once sent the viewer to
@@ -237,6 +295,7 @@ export class WindowsVideoSession implements ScreenVideoSession {
         if (this.closed || this.hidden || typeof data !== "string" || data.length > 32_000) return;
         try {
           const message: unknown = JSON.parse(data);
+          if (this.inputGeneration !== undefined && (message as { screenGeneration?: unknown } | null)?.screenGeneration !== this.inputGeneration) return;
           if (inputEvent.safeParse(message).success && this.order.accept(message, lossy)) { this.inputUsed = true; this.events.input(message); }
         } catch { /* Invalid input cannot terminate a screen session. */ }
       });
@@ -272,7 +331,16 @@ export class WindowsVideoSession implements ScreenVideoSession {
       if (this.closed) return;
       if (message.t === "rtc.answer") {
         await this.pc.setRemoteDescription({ type: "answer", sdp: message.sdp });
-        if (!this.sender.codec || this.sender.codec.mimeType.toLowerCase() !== "video/h264") this.fail("viewer did not accept H.264");
+        if (!this.sender.codec || this.sender.codec.mimeType.toLowerCase() !== "video/h264") {
+          this.fail("viewer did not accept H.264");
+          return;
+        }
+        const params = (this.sender.codec.parameters ?? "").toLowerCase();
+        if (/(?:^|;)\s*profile-level-id=42/.test(params) && this.h264Profile !== "baseline") {
+          this.h264Profile = "baseline";
+          this.events.log("[screen] viewer accepted Baseline H.264 only; restarting Windows capture in baseline profile");
+          if (this.started && !this.hidden) this.restartCapture();
+        }
       } else await this.pc.addIceCandidate(message);
     }).catch(error => this.fail(String(error)));
   }
@@ -305,10 +373,110 @@ export class WindowsVideoSession implements ScreenVideoSession {
     this.captureSerial = this.captureSerial.then(async () => { await this.stopCapture(); if (!this.hidden && !this.closed) this.startCapture(); }).catch(error => this.fail(String(error)));
   }
 
-  /** The profile for this level, held to the relay's share while the path goes through one. */
-  private profile() {
-    const profile = windowsVideoProfile(this.level, this.request);
+  async configure(configuration: VideoConfiguration): Promise<VideoConfigured> {
+    if (this.closed) throw new Error("屏幕连接已断开");
+    const screenChanged = configuration.screen !== this.targetScreen;
+    const sizeChanged = configuration.maxWidth !== this.targetMaxWidth || configuration.maxFps !== this.targetMaxFps;
+    const before = this.profile();
+    const wasHidden = this.hidden;
+    this.targetScreen = configuration.screen;
+    this.targetMaxWidth = configuration.maxWidth;
+    this.targetMaxFps = configuration.maxFps;
+    if (configuration.inputGeneration !== undefined) this.inputGeneration = configuration.inputGeneration;
+    if (screenChanged || sizeChanged) {
+      this.level = windowsMachineLevel();
+      this.strainedIntervals = this.behindIntervals = 0;
+      this.changed = performance.now();
+      this.goodSince = this.changed;
+      this.calmUpgradeMs = 25_000;
+      this.lastUpgradeAt = undefined;
+    }
+    const after = this.profile();
+    const dims = this.resolvedDimensions(after.width, screenChanged);
+    if (configuration.paused) {
+      this.hidden = true;
+      this.needsKey = true;
+      this.release();
+      if (screenChanged) {
+        this.stopShapeCapture();
+        this.shapesSent.clear();
+        this.lastShapeId = undefined;
+      } else if (this.shapeChild) {
+        configureWindowsCapture(this.shapeChild, { t: "pause", value: 1 });
+      }
+      this.stopAudioCapture();
+      const stopping = this.captureSerial.then(async () => { await this.stopCapture(); });
+      this.captureSerial = stopping.catch(error => this.fail(String(error)));
+      await stopping;
+      if (this.closed) throw new Error("屏幕连接已断开");
+      return {
+        screen: this.targetScreen, width: dims.width, height: dims.height, maxFps: after.fps, paused: true,
+        ...(configuration.inputGeneration === undefined ? {} : { generation: configuration.inputGeneration }),
+      };
+    }
+    this.hidden = false;
+    if (screenChanged) {
+      this.stopShapeCapture();
+      this.shapesSent.clear();
+      this.lastShapeId = undefined;
+      if (this.started) this.startShapeCapture();
+    } else if (wasHidden) {
+      if (this.shapeChild) configureWindowsCapture(this.shapeChild, { t: "pause", value: 0 });
+      else if (this.started) this.startShapeCapture();
+    }
+    if (wasHidden && this.started && this.audioEnabled) this.startAudioCapture();
+    const needsRestart = this.started && (
+      wasHidden || screenChanged || !this.child ||
+      after.width !== before.width || after.fps !== before.fps || after.bitrate !== before.bitrate
+    );
+    if (needsRestart) {
+      this.needsKey = true;
+      const restarting = this.captureSerial.then(async () => {
+        if (this.closed) return;
+        await this.stopCapture();
+        if (!this.hidden && !this.closed) this.startCapture();
+      });
+      this.captureSerial = restarting.catch(error => this.fail(String(error)));
+      await restarting;
+    }
+    if (this.closed) throw new Error("屏幕连接已断开");
+    return {
+      screen: this.targetScreen, width: dims.width, height: dims.height, maxFps: after.fps, paused: false,
+      ...(configuration.inputGeneration === undefined ? {} : { generation: configuration.inputGeneration }),
+    };
+  }
+
+  private resolvedDimensions(requestedWidth: number, screenChanged: boolean): { width: number; height: number } {
+    const maxW = requestedWidth > 1920 ? Math.min(2560, requestedWidth) : Math.max(320, Math.min(1920, requestedWidth));
+    const maxH = requestedWidth > 1920 ? 1440 : 1080;
+    const display = this.deps.displaySize?.(this.targetScreen);
+    if (display && display.w && display.h) {
+      const scale = Math.min(1, Math.min(maxW / display.w, maxH / display.h));
+      return { width: Math.max(2, Math.floor(display.w * scale / 2) * 2), height: Math.max(2, Math.floor(display.h * scale / 2) * 2) };
+    }
+    if (!screenChanged && this.lastWidth > 0 && this.lastHeight > 0) {
+      const scale = Math.min(maxW / this.lastWidth, maxH / this.lastHeight);
+      return { width: Math.max(2, Math.floor(this.lastWidth * scale / 2) * 2), height: Math.max(2, Math.floor(this.lastHeight * scale / 2) * 2) };
+    }
+    return { width: maxW, height: Math.max(2, Math.floor(maxW * 9 / 16 / 2) * 2) };
+  }
+
+  /** The profile for a given level, held to the relay's share while the path goes through one. */
+  private profileFor(level: number) {
+    const profile = windowsVideoProfile(level, { maxWidth: this.targetMaxWidth, maxFps: this.targetMaxFps, fps: this.request.fps });
     return this.relayed ? { ...profile, bitrate: Math.min(profile.bitrate, (this.request.relayKbps ?? 3000) * 1000) } : profile;
+  }
+
+  private profile() {
+    return this.profileFor(this.level);
+  }
+
+  private restartCapture(): void {
+    this.needsKey = true;
+    this.captureSerial = this.captureSerial.then(async () => {
+      await this.stopCapture();
+      if (!this.hidden && !this.closed) this.startCapture();
+    }).catch(error => this.fail(String(error)));
   }
 
   private startCapture(): void {
@@ -316,8 +484,11 @@ export class WindowsVideoSession implements ScreenVideoSession {
     const helper = this.resolveHelper(), media = this.resolveMedia();
     if (!helper || !media) return;
     const profile = this.profile();
-    const child = this.spawnProcess()(helper, ["--video", String(this.request.screen), String(profile.width), String(profile.fps), String(profile.bitrate), media], {
-      windowsHide: true, stdio: ["pipe", "pipe", "pipe"], env: windowsVideoEnv(),
+    const env: NodeJS.ProcessEnv = this.h264Profile === "baseline"
+      ? { ...windowsVideoEnv(), LINKSHELL_WINDOWS_PROFILE: "baseline" }
+      : windowsVideoEnv();
+    const child = this.spawnProcess()(helper, ["--video", String(this.targetScreen), String(profile.width), String(profile.fps), String(profile.bitrate), media], {
+      windowsHide: true, stdio: ["pipe", "pipe", "pipe"], env,
     });
     this.child = child;
     this.needsKey = true;
@@ -339,8 +510,16 @@ export class WindowsVideoSession implements ScreenVideoSession {
     child.stderr!.on("data", (chunk: Buffer) => {
       const text = chunk.toString(); errors = (errors + text).slice(-2000);
       noteWindowsVideo(text);
-      const encoder = /\[video\] encoder=(\S+)/.exec(text)?.[1];
-      if (encoder) { this.encoder = encoder; this.events.log(`[screen] Windows hardware encoder: ${encoder}`); }
+      const dims = /\[video\] encoder=(\S+)\s+width=(\d+)\s+height=(\d+)/.exec(text);
+      if (dims) {
+        this.encoder = dims[1]!;
+        this.lastWidth = Number(dims[2]);
+        this.lastHeight = Number(dims[3]);
+        this.events.log(`[screen] Windows hardware encoder: ${this.encoder}`);
+      } else {
+        const encoder = /\[video\] encoder=(\S+)/.exec(text)?.[1];
+        if (encoder) { this.encoder = encoder; this.events.log(`[screen] Windows hardware encoder: ${encoder}`); }
+      }
     });
     child.on("error", error => this.fail(error.message));
     child.on("exit", code => {
@@ -356,8 +535,29 @@ export class WindowsVideoSession implements ScreenVideoSession {
     this.captured++;
     if (this.closed || this.hidden || !this.connected) return;
     const at = performance.now();
-    if (this.pending.length >= 2 || (this.pending[0] && at - this.pending[0].at > 80)) {
-      this.dropped += this.pending.length; this.queueDrops += this.pending.length; this.pending = []; this.needsKey = true;
+    if (this.pending.length >= 4 || (this.pending[0] && at - this.pending[0].at > 160)) {
+      if (key) {
+        this.dropped += this.pending.length;
+        this.queueDrops += this.pending.length;
+        this.pending = [];
+        this.needsKey = false;
+      } else {
+        let newestKey = -1;
+        for (let i = this.pending.length - 1; i >= 1; i--) {
+          if (this.pending[i]!.key) { newestKey = i; break; }
+        }
+        if (newestKey > 0) {
+          this.dropped += newestKey;
+          this.queueDrops += newestKey;
+          this.pending = this.pending.slice(newestKey);
+          this.needsKey = false;
+        } else {
+          this.dropped += this.pending.length;
+          this.queueDrops += this.pending.length;
+          this.pending = [];
+          this.needsKey = true;
+        }
+      }
     }
     this.pending.push({ unit, key, at });
     if (this.sending) return;
@@ -381,13 +581,20 @@ export class WindowsVideoSession implements ScreenVideoSession {
       const nals = h264Nals(unit);
       const missing = key ? [...this.parameterSets].filter(([type]) => !nals.some(nal => (nal[0]! & 31) === type)).map(([, nal]) => Buffer.concat([Buffer.from([0, 0, 0, 1]), nal])) : [];
       const payloads = h264Payloads(missing.length ? Buffer.concat([...missing, unit]) : unit);
-      for (let i = 0; i < payloads.length; i += 32) {
+      const payloadType = this.sender.codec?.payloadType ?? 96;
+      const batchSize = 8;
+      const shouldPace = payloads.length > 16;
+      for (let i = 0; i < payloads.length; i += batchSize) {
         if (this.closed || this.hidden) break;
-        if (performance.now() - now > 120) { this.needsKey = true; this.dropped++; break; }
-        // Small batches avoid one event-loop round trip per UDP packet in a large IDR.
-        await Promise.all(payloads.slice(i, i + 32).map((payload, offset) => this.sender.sendRtp(new RtpPacket(new RtpHeader({
-          payloadType: 96, sequenceNumber: this.seq++ & 0xffff, timestamp: this.timestamp, ssrc: this.sender.ssrc, marker: i + offset === payloads.length - 1,
+        if (performance.now() - now > 200) { this.needsKey = true; this.dropped++; this.queueDrops++; break; }
+        // Micro-paced 8-packet batches smooth large IDR UDP bursts so Wi-Fi/TURN queues and werift's NACK ring do not overflow.
+        await Promise.all(payloads.slice(i, i + batchSize).map((payload, offset) => this.sender.sendRtp(new RtpPacket(new RtpHeader({
+          payloadType, sequenceNumber: this.seq++ & 0xffff, timestamp: this.timestamp, ssrc: this.sender.ssrc, marker: i + offset === payloads.length - 1,
         }), payload))));
+        // Cap pacing wait to 60 ms so Windows' default 15.6 ms timer tick never trips the 200 ms stall guard.
+        if (shouldPace && i + batchSize < payloads.length && performance.now() - now < 60) {
+          await new Promise<void>(resolve => setTimeout(resolve, 1));
+        }
       }
       this.sentFrames++; this.sentBytes += unit.length;
     } catch (error) { this.fail(String(error)); }
@@ -395,17 +602,28 @@ export class WindowsVideoSession implements ScreenVideoSession {
 
   private report(): void {
     if (this.closed) return;
-    const now = performance.now(), elapsed = (now - this.lastStats) / 1000;
+    const now = performance.now(), elapsed = Math.max((now - this.lastStats) / 1000, 0.001);
     const profile = this.profile();
-    const sendBitrate = Math.round(this.sentBytes * 8 / elapsed);
-    if (process.env.LINKSHELL_SCREEN_DIAGNOSTICS === "1") this.events.log(`[screen] Windows video ${JSON.stringify({ captured: this.captured, sent: this.sentFrames, dropped: this.dropped, queueDrops: this.queueDrops, pli: this.plis, bitrate: sendBitrate, estimate: this.estimate })}`);
+    const captured = this.captured;
+    const queueDrops = this.queueDrops;
+    const plis = this.plis;
+    const dropped = this.dropped;
+    const sentFrames = this.sentFrames;
+    const sentBytes = this.sentBytes;
+    this.captured = this.queueDrops = this.plis = this.dropped = this.sentFrames = this.sentBytes = 0;
+    this.lastStats = now;
+    const sendBitrate = Math.round(sentBytes * 8 / elapsed);
+    if (process.env.LINKSHELL_SCREEN_DIAGNOSTICS === "1") {
+      this.events.log(`[screen] Windows video ${JSON.stringify({ captured, sent: sentFrames, dropped, queueDrops, pli: plis, bitrate: sendBitrate, estimate: this.estimate, source: this.feedbackSource })}`);
+    }
     // What the capture and encoder delivered, whatever was then sent: the computer's own limit.
-    this.made = this.captured / Math.max(elapsed, 0.001);
-    this.captured = this.queueDrops = this.plis = 0;
-    this.events.tell({ t: "stats", encoder: this.encoder, codec: "H264", fps: Math.round(this.sentFrames / elapsed), bitrate: Math.round(this.sentBytes * 8 / elapsed), targetFps: profile.fps, targetBitrate: profile.bitrate, dropped: this.dropped });
-    this.sentFrames = this.sentBytes = 0; this.lastStats = now;
+    this.made = captured / elapsed;
+    this.events.tell({ t: "stats", encoder: this.encoder, codec: "H264", fps: Math.round(sentFrames / elapsed), bitrate: sendBitrate, targetFps: profile.fps, targetBitrate: profile.bitrate, dropped });
     if (!this.connected || this.hidden) return;
     const feedback = this.lastFeedback > 0 && now - this.lastFeedback < 3000;
+    const rembFeedback = feedback && this.feedbackSource === "remb";
+    const twccFeedback = feedback && this.feedbackSource === "twcc";
+    const bweCongested = (this.sender as { senderBWE?: { congestion?: boolean } }).senderBWE?.congestion === true;
     const pair = this.pc.iceTransports[0]?.connection.nominated;
     const relayed = !!pair && (pair.localCandidate.type === "relay" || pair.remoteCandidate.type === "relay");
     if (relayed !== this.relayed) {
@@ -419,28 +637,54 @@ export class WindowsVideoSession implements ScreenVideoSession {
     // A same-computer receiver can bootstrap a low REMB from an almost still desktop.
     // That estimate says nothing about link capacity and must not trigger repeated encoder restarts.
     const loopback = pair && pair.localCandidate.host === pair.remoteCandidate.host;
-    // The screen is duplicated at a constant rate, so fewer frames than asked for is the computer, not the picture.
-    const behind = now > this.steadySince && this.made < profile.fps * 0.7;
+    // A static desktop may emit < 5 fps; only treat an active stream falling well below target fps as CPU/GPU-bound.
+    const behind = now > this.steadySince && this.made >= 5 && this.made < profile.fps * 0.7;
     this.behindIntervals = behind ? this.behindIntervals + 1 : 0;
-    const strained = behind || this.dropped > profile.fps / 2 || (!loopback && feedback && this.estimate < profile.bitrate * 0.75 && sendBitrate > this.estimate * 0.9);
+    // REMB estimates link capacity; werift's TWCC senderBWE reports min(send, recv) throughput which tracks
+    // sendBitrate on a quiet screen, so TWCC only flags congestion when recv lags send or congestion triggers.
+    const lowBandwidth = !loopback && (
+      (rembFeedback && this.estimate < profile.bitrate * 0.65 && sendBitrate > this.estimate * 0.9) ||
+      (twccFeedback && this.estimate < profile.bitrate * 0.65 && (
+        sendBitrate > this.estimate * 1.15 ||
+        (bweCongested && sendBitrate > this.estimate * 0.9)
+      ))
+    );
+    const strained = behind || queueDrops > profile.fps * 0.4 || plis >= 4 || lowBandwidth;
     this.strainedIntervals = strained ? this.strainedIntervals + 1 : 0;
-    this.dropped = 0;
     if (strained) {
       this.goodSince = now;
-      if (this.strainedIntervals >= 3 && now - this.changed > 10_000 && this.level < profiles.length - 1) {
-        const machineLimit = this.behindIntervals >= 3;
+      if (this.strainedIntervals >= 5 && now - this.changed > 15_000 && this.level < profiles.length - 1) {
+        if (this.lastUpgradeAt !== undefined && now - this.lastUpgradeAt < 45_000) {
+          this.calmUpgradeMs = Math.min(120_000, this.calmUpgradeMs * 2);
+        }
+        const machineLimit = this.behindIntervals >= 6;
         const next = windowsSlowerLevel(this.level, machineLimit ? this.made : undefined);
         if (machineLimit) noteWindowsMachineLevel(next);
         this.adapt(next);
       }
-    } else if (feedback && this.level > windowsMachineLevel() && this.estimate > profiles[this.level - 1]!.bitrate * 1.2 && now - this.goodSince > 20_000 && now - this.changed > 20_000) this.adapt(this.level - 1);
+    } else if (queueDrops === 0 && plis === 0 && !bweCongested) {
+      if (this.lastUpgradeAt !== undefined && now - this.lastUpgradeAt >= 45_000) {
+        this.calmUpgradeMs = 25_000;
+        this.lastUpgradeAt = undefined;
+      }
+      if (this.level > windowsMachineLevel() && now - this.goodSince >= this.calmUpgradeMs && now - this.changed >= this.calmUpgradeMs) {
+        const nextProfile = this.profileFor(this.level - 1);
+        const canUpgrade = !rembFeedback || this.estimate > nextProfile.bitrate * 1.15;
+        if (canUpgrade) {
+          this.lastUpgradeAt = now;
+          this.adapt(this.level - 1);
+        }
+      }
+    } else {
+      this.goodSince = now;
+    }
   }
 
   private adapt(level: number): void {
-    this.level = level; this.changed = performance.now(); this.needsKey = true;
+    this.level = level; this.changed = performance.now(); this.goodSince = this.changed; this.needsKey = true;
     this.strainedIntervals = this.behindIntervals = 0;
     this.events.log(`[screen] Windows video profile: ${JSON.stringify(this.profile())}`);
-    this.captureSerial = this.captureSerial.then(async () => { await this.stopCapture(); this.startCapture(); }).catch(error => this.fail(String(error)));
+    this.restartCapture();
   }
 
   private stopChild(child: ChildProcess | undefined): Promise<void> {
@@ -463,7 +707,7 @@ export class WindowsVideoSession implements ScreenVideoSession {
     if (this.closed || this.shapeChild) return;
     const helper = this.resolveHelper();
     if (!helper) return;
-    const child = this.spawnProcess()(helper, ["--shape", String(this.request.screen)], {
+    const child = this.spawnProcess()(helper, ["--shape", String(this.targetScreen)], {
       windowsHide: true, stdio: ["pipe", "pipe", "ignore"],
     });
     this.shapeChild = child;

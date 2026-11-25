@@ -127,6 +127,35 @@ let sessions: [String: [String: Any]] = [
   "a": ["id": "a", "agent": "codex", "state": "unknown", "cwd": "/tmp/a", "updatedAt": 3.0],
   "b": ["id": "b", "agent": "codex", "state": "idle", "cwd": "/tmp/b", "updatedAt": 2.0],
   "c": ["id": "c", "agent": "codex", "state": "waiting", "cwd": "/tmp/c", "updatedAt": 1.0],
+  "d": [
+    "id": "d",
+    "agent": "claude",
+    "state": "waiting",
+    "cwd": "/tmp/d",
+    "updatedAt": 4.0,
+    "permission": [
+      "requestId": "req-9",
+      "title": "运行单元测试",
+      "tool": ["kind": "execute", "title": "bash -lc 'pnpm test'"],
+      "options": [
+        ["optionId": "allow_once", "name": "允许一次", "kind": "allow_once"],
+        ["optionId": "allow_always", "name": "始终允许", "kind": "allow_always"],
+        ["optionId": "reject_once", "name": "拒绝", "kind": "reject_once"],
+      ],
+    ],
+  ],
+  "e": [
+    "id": "e",
+    "agent": "codex",
+    "state": "waiting",
+    "cwd": "/tmp/e",
+    "updatedAt": 5.0,
+    "asyncQuestions": [[
+      "id": "q-1",
+      "title": "是否直接部署到测试环境？",
+      "options": ["立即部署", "暂不部署"],
+    ]],
+  ],
 ]
 let agents: [[String: Any]] = [["id": "codex", "installed": true, "tier": "native"], ["id": "aider", "installed": true, "tier": "terminal"], ["id": "gemini", "installed": false, "tier": "acp"]]
 let json = try WatchSnapshotBuilder.snapshot(gateway: URL(string: "https://example.com")!, machine: machine, machines: [machine], online: true, sessions: sessions, terminals: [:], histories: ["b": claude], outputs: [:], info: ["agents": agents], projects: [])
@@ -135,6 +164,10 @@ let card = { (id: String) in snapshot.sessions.first { $0.id == id }! }
 check(card("a").phase == "starting", "unknown is starting")
 check(card("b").phase == "completed" && card("b").subtitle == "本轮任务已结束", "idle subtitle is Chinese: \(card("b").subtitle)")
 check(card("c").phase == "waiting_for_approval" && card("c").hasMoreActions == true && card("c").subtitle == "需要你的确认", "waiting without a request points elsewhere")
+check(card("d").commandPreview == "pnpm test", "permission commandPreview is populated: \(card("d").commandPreview ?? "nil")")
+check(card("d").actions?.map(\.role) == ["allow", "always", "reject"], "permission action roles match WatchViews: \(card("d").actions?.map(\.role) ?? [])")
+check(card("e").promptTitle == "是否直接部署到测试环境？", "asyncQuestion promptTitle is populated: \(card("e").promptTitle ?? "nil")")
+check(card("e").actions?.map(\.role) == ["choice", "choice"], "asyncQuestion actions use choice role")
 check(card("b").items?.map(\.kind) == ["thought", "assistant"], "card items decode")
 check(snapshot.availableAgents == ["codex"], "agents: \(snapshot.availableAgents ?? [])")
 check(WatchSnapshot.empty.availableAgents?.isEmpty == true, "no invented agents")

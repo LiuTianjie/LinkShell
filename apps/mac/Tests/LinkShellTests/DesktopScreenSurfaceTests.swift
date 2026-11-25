@@ -340,6 +340,97 @@ final class DesktopScreenSurfaceTests: XCTestCase {
     XCTAssertEqual(dragTop.dy, 0)
   }
 
+  func testRotatedDisplayResolvesEffectivePortraitPixelSizeAndScale() {
+    // 4K 3840x2160 monitor rotated 90° at 2x HiDPI: CGDisplayBounds is portrait (1080x1920)
+    // while CGDisplayCopyDisplayMode still reports native panel pixels (3840x2160).
+    let portraitBounds = CGRect(x: 0, y: 0, width: 1080, height: 1920)
+    let rotated = Display.effectivePixelSize(
+      bounds: portraitBounds,
+      modePixelWidth: 3840,
+      modePixelHeight: 2160,
+      rotation: 90
+    )
+    XCTAssertEqual(rotated.width, 2160)
+    XCTAssertEqual(rotated.height, 3840)
+
+    let display = Display(id: 1, bounds: portraitBounds, pixelWidth: rotated.width, pixelHeight: rotated.height)
+    XCTAssertEqual(display.scale, 2.0, accuracy: 0.001)
+    let picture = display.pictureSize(maxWidth: 1080)
+    XCTAssertEqual(picture.width, 1080)
+    XCTAssertEqual(picture.height, 1920)
+
+    // Already-rotated mode dimensions must not be double-swapped.
+    let alreadyPortrait = Display.effectivePixelSize(
+      bounds: portraitBounds,
+      modePixelWidth: 2160,
+      modePixelHeight: 3840,
+      rotation: 270
+    )
+    XCTAssertEqual(alreadyPortrait.width, 2160)
+    XCTAssertEqual(alreadyPortrait.height, 3840)
+
+    // Normal landscape monitor remains untouched.
+    let landscape = Display.effectivePixelSize(
+      bounds: CGRect(x: 0, y: 0, width: 1920, height: 1080),
+      modePixelWidth: 3840,
+      modePixelHeight: 2160,
+      rotation: 0
+    )
+    XCTAssertEqual(landscape.width, 3840)
+    XCTAssertEqual(landscape.height, 2160)
+  }
+
+  func testReleaseHeldInputsClearsPendingWindowDragState() throws {
+    let surface = DesktopScreenSurface(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+    defer { surface.stop() }
+    var inputs: [[String: Any]] = []
+    surface.onInput = { command, _ in inputs.append(command) }
+    surface.controlEnabled = true
+    surface.shouldDragWindow = { _ in true }
+
+    let down = try XCTUnwrap(NSEvent.mouseEvent(
+      with: .leftMouseDown,
+      location: CGPoint(x: 100, y: 20),
+      modifierFlags: [],
+      timestamp: 0,
+      windowNumber: 0,
+      context: nil,
+      eventNumber: 1,
+      clickCount: 1,
+      pressure: 1
+    ))
+    let up = try XCTUnwrap(NSEvent.mouseEvent(
+      with: .leftMouseUp,
+      location: CGPoint(x: 100, y: 20),
+      modifierFlags: [],
+      timestamp: 0.1,
+      windowNumber: 0,
+      context: nil,
+      eventNumber: 2,
+      clickCount: 1,
+      pressure: 0
+    ))
+
+    surface.mouseDown(with: down)
+    surface.releaseHeldInputs()
+    surface.mouseUp(with: up)
+    XCTAssertTrue(inputs.isEmpty, "Releasing input while a window drag is pending must clear downEvent so mouseUp never synthesizes a stale click")
+  }
+
+  @MainActor
+  func testFullScreenOverlayDeinitCleansUpWithoutExplicitDetach() {
+    let container = DesktopScreenClipView(frame: CGRect(x: 0, y: 0, width: 1280, height: 800))
+    weak var weakOverlay: DesktopFullScreenOverlay?
+    autoreleasepool {
+      let overlay = DesktopFullScreenOverlay {}
+      weakOverlay = overlay
+      overlay.attach(to: container)
+      overlay.bar.removeFromSuperview()
+      overlay.handle.removeFromSuperview()
+    }
+    XCTAssertNil(weakOverlay, "Overlay must deallocate cleanly and remove its local NSEvent monitor in deinit")
+  }
+
   private func commandDescription(_ command: [String: Any]) -> String {
     guard let kind = command["t"] as? String else { return "missing-kind" }
     return kind + ":" + ((command[kind == "text" ? "s" : "k"] as? String) ?? "missing-value")

@@ -8,10 +8,12 @@ try {
   const require = createRequire(import.meta.url);
   const ptyPath = dirname(require.resolve("node-pty/package.json"));
   const candidates = [
+    join(ptyPath, "prebuilds", `${process.platform}-${process.arch}`, "spawn-helper"),
     join(ptyPath, "prebuilds", "darwin-arm64", "spawn-helper"),
     join(ptyPath, "prebuilds", "darwin-x64", "spawn-helper"),
     join(ptyPath, "prebuilds", "linux-x64", "spawn-helper"),
     join(ptyPath, "prebuilds", "linux-arm64", "spawn-helper"),
+    join(ptyPath, "build", "Release", "spawn-helper"),
   ];
   for (const p of candidates) {
     if (existsSync(p)) {

@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -331,10 +332,22 @@ export class FusionElectronHub {
       case "wclose": return this.windowClosed(num(m.id));
       case "wstyle": return this.windowStyle(m);
       case "layout": return this.layout(Array.isArray(m.windows) ? m.windows as FusionMessage[] : []);
-      case "fullscreen": return void this.windows.get(num(m.id))?.win?.setFullScreen(m.on !== false);
-      case "minimize": return void this.windows.get(num(m.id))?.win?.minimize();
+      case "fullscreen": {
+        const w = this.windows.get(num(m.id))?.win;
+        if (w && !w.isDestroyed()) w.setFullScreen(m.on !== false);
+        return;
+      }
+      case "minimize": {
+        const w = this.windows.get(num(m.id))?.win;
+        if (w && !w.isDestroyed()) w.minimize();
+        return;
+      }
       case "app.hidden":
-        for (const record of this.windows.values()) if (record.app === m.app) { if (m.on) record.win?.hide(); else record.win?.showInactive(); }
+        for (const record of this.windows.values()) {
+          if (record.app === m.app && record.win && !record.win.isDestroyed()) {
+            if (m.on) record.win.hide(); else record.win.showInactive();
+          }
+        }
         return;
       case "app.exited": return this.appExited(String(m.app ?? ""));
       case "icon": return this.icon(m);
@@ -446,10 +459,13 @@ export class FusionElectronHub {
       return [{ app: id, name: String(entry.name ?? ""), category: String(entry.category ?? ""), system: entry.system === true }];
     });
     if (parsed.length || !this.apps.length) this.apps = parsed;
-    writeFileSync(join(this.iconsDir, "catalog.json"), JSON.stringify({
+    const payload = JSON.stringify({
       computerKey: this.options.computerKey, hostLabel: this.options.name, hostSlug: this.options.slug, updatedAt: Date.now(),
       apps: this.apps.map((a) => ({ name: a.name, bundle: a.app, category: a.category, isSystem: a.system })),
-    }));
+    });
+    void writeFile(join(this.iconsDir, "catalog.json"), payload).catch((err) => {
+      this.options.log(`[fusion] catalog write failed: ${err instanceof Error ? err.message : String(err)}`);
+    });
     for (const entry of this.apps) this.requestIcon(entry.app);
     // What was still queued when the last connection dropped goes on from here.
     this.requestNextIcon();
@@ -500,12 +516,21 @@ export class FusionElectronHub {
     if (!app || typeof m.png !== "string") return;
     const png = Buffer.from(m.png, "base64");
     const file = fusionIconFile(app);
-    writeFileSync(join(this.iconsDir, `${file}.png`), png);
     // Taskbar icons are ICO files; 256 px PNG inside one keeps them sharp at every scale.
     const small = nativeImage.createFromBuffer(png).resize({ width: 256, height: 256, quality: "best" }).toPNG();
-    writeFileSync(join(this.iconsDir, `${file}.ico`), pngToIco(small));
-    this.iconBundles.add(app);
-    for (const record of this.windows.values()) if (record.app === app && record.win) this.brand(record.win, app);
+    const ico = pngToIco(small);
+    void Promise.all([
+      writeFile(join(this.iconsDir, `${file}.png`), png),
+      writeFile(join(this.iconsDir, `${file}.ico`), ico),
+    ]).then(() => {
+      if (this.stopping) return;
+      this.iconBundles.add(app);
+      for (const record of this.windows.values()) {
+        if (record.app === app && record.win && !record.win.isDestroyed()) this.brand(record.win, app);
+      }
+    }).catch((err) => {
+      this.options.log(`[fusion] icon write failed (${app}): ${err instanceof Error ? err.message : String(err)}`);
+    });
   }
 
   private iconPath(app: string): string | undefined {
@@ -559,7 +584,7 @@ export class FusionElectronHub {
   }
 
   private brand(win: BrowserWindow, app: string): void {
-    if (process.platform !== "win32") return;
+    if (process.platform !== "win32" || win.isDestroyed()) return;
     const entry = this.apps.find((a) => a.app === app);
     const icon = this.iconPath(app);
     win.setAppDetails({
@@ -641,6 +666,7 @@ export class FusionElectronHub {
       const record = this.popups.get(Number(popup[1]));
       if (!record) return void win.destroy();
       record.win = win;
+      win.on("closed", () => { if (record.win === win) record.win = undefined; });
       win.setAlwaysOnTop(true, "pop-up-menu");
       win.showInactive();
       return;
@@ -649,6 +675,7 @@ export class FusionElectronHub {
     const record = match ? this.windows.get(Number(match[1])) : undefined;
     if (!record) return void win.destroy();
     record.win = win;
+    win.on("closed", () => { if (record.win === win) record.win = undefined; });
     this.brand(win, record.app);
     win.on("move", () => this.userMoved(record, false));
     win.on("resize", () => this.userMoved(record, true));
@@ -657,12 +684,12 @@ export class FusionElectronHub {
       // After `focus`: the remote takes a clipboard only once the user has been in a window.
       void this.clipboard.focused();
       this.clipboardTimer ??= setInterval(() => {
-        if ([...this.windows.values()].some((w) => w.win?.isFocused())) void this.clipboard.tick();
+        if ([...this.windows.values()].some((w) => w.win && !w.win.isDestroyed() && w.win.isFocused())) void this.clipboard.tick();
       }, 700);
       this.clipboardTimer.unref?.();
     });
     win.on("blur", () => setTimeout(() => {
-      if (![...this.windows.values()].some((w) => w.win?.isFocused())) this.send({ t: "app.active", on: false });
+      if (![...this.windows.values()].some((w) => w.win && !w.win.isDestroyed() && w.win.isFocused())) this.send({ t: "app.active", on: false });
     }, 80).unref?.());
     // Closing here asks the remote app; the window goes when the remote says it closed.
     win.on("close", (event) => {
@@ -735,7 +762,7 @@ export class FusionElectronHub {
     if (!record) return;
     if (typeof m.title === "string" && m.title) {
       record.title = m.title;
-      record.win?.setTitle(m.title);
+      if (record.win && !record.win.isDestroyed()) record.win.setTitle(m.title);
     }
     if (m.chrome) record.chrome = m.chrome as Record<string, unknown>;
     this.toPage({ t: "chrome", id: record.id, key: record.stream, chrome: record.chrome });
@@ -751,7 +778,7 @@ export class FusionElectronHub {
         if (!record) continue;
         if (typeof entry.title === "string" && entry.title && entry.title !== record.title) {
           record.title = entry.title;
-          record.win?.setTitle(entry.title);
+          if (record.win && !record.win.isDestroyed()) record.win.setTitle(entry.title);
         }
         const ack = num(entry.ack);
         record.ack = Math.max(record.ack, ack);
@@ -759,7 +786,7 @@ export class FusionElectronHub {
         // once it answered the latest `place`, nothing newer is pending here (a drag going on), and
         // what it accepted is not what was asked.
         const asked = record.asked;
-        if (record.ack >= record.seq && !record.placeTimer && asked && record.win
+        if (record.ack >= record.seq && !record.placeTimer && asked && record.win && !record.win.isDestroyed()
             && (Math.abs(frame.w - asked.w) >= 3 || Math.abs(frame.h - asked.h) >= 3)) {
           record.frame = { ...record.frame, w: frame.w, h: frame.h };
           record.asked = { w: frame.w, h: frame.h };
@@ -883,7 +910,7 @@ export class FusionElectronHub {
 
   /** Messages from the hub page (its preload sends them on `linkshell:fusion-hub`). */
   fromPage(sender: WebContents, message: FusionMessage): void {
-    if (!this.page || sender !== this.page.webContents || !this.options.isTrusted(sender.getURL())) return;
+    if (!this.page || this.page.isDestroyed() || sender !== this.page.webContents || !this.options.isTrusted(sender.getURL())) return;
     switch (message.t) {
       case "ready":
         this.pageReady = true;
@@ -892,7 +919,7 @@ export class FusionElectronHub {
       case "rtc": return this.send({ t: "rtc", m: message.m });
       case "action": {
         const record = this.windows.get(num(message.id));
-        if (!record?.win) return;
+        if (!record?.win || record.win.isDestroyed()) return;
         if (message.what === "close") this.send({ t: "wclose.req", id: record.id });
         else if (message.what === "minimize") record.win.minimize();
         else if (message.what === "zoom") { if (record.win.isMaximized()) record.win.unmaximize(); else record.win.maximize(); }

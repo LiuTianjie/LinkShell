@@ -12,6 +12,11 @@ export {
   type StandaloneToolWorkspaceProps,
 } from "./StandaloneToolWorkspace";
 export {
+  disposeAllTerminalStages,
+  disposeTerminalStageController,
+  disposeTerminalStagesForComputer,
+} from "./terminal-runtime";
+export {
   FileViewerTabPanel,
   type FileViewerTabPanelProps,
 } from "./FileViewerTabPanel";

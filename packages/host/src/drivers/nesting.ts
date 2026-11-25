@@ -18,7 +18,7 @@ export function nestUnder(update: SessionUpdate, parent: string): SessionUpdate 
     case "ls_error":
     case "ls_notice":
     case "plan":
-      return { ...update, parentToolCallId: parent } as SessionUpdate;
+      return { ...update, parentToolCallId: parent };
     default:
       return undefined;
   }

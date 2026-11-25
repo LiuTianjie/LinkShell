@@ -67,6 +67,12 @@ namespace LinkShell.Windows {
         [DllImport("user32.dll")] static extern IntPtr GetThreadDesktop(uint thread);
         [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
         [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool GetUserObjectInformation(IntPtr handle, int index, StringBuilder value, int length, out int needed);
+        delegate bool MonitorEnumProc(IntPtr monitor, IntPtr hdc, IntPtr rect, IntPtr data);
+        [DllImport("user32.dll")] static extern bool EnumDisplayMonitors(IntPtr hdc, IntPtr clip, MonitorEnumProc callback, IntPtr data);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern bool GetMonitorInfo(IntPtr monitor, ref MONITORINFO info);
+        [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
+        [StructLayout(LayoutKind.Sequential)] struct MONITORINFO { public int cbSize; public RECT rcMonitor; public RECT rcWork; public uint dwFlags; }
+        internal struct DisplayInfo { public Rectangle Bounds; public bool Primary; }
         [StructLayout(LayoutKind.Sequential)] struct POINT { public int X, Y; }
         [StructLayout(LayoutKind.Sequential)] struct CURSORINFO { public int cbSize, flags; public IntPtr hCursor; public POINT ptScreenPos; }
         [StructLayout(LayoutKind.Sequential)] struct ICONINFO { [MarshalAs(UnmanagedType.Bool)] public bool fIcon; public int xHotspot, yHotspot; public IntPtr hbmMask, hbmColor; }
@@ -95,7 +101,7 @@ namespace LinkShell.Windows {
                 }
                 if (args.Length == 1 && args[0] == "--displays") {
                     EnsureDesktop();
-                    Write(Screen.AllScreens.Select((s, i) => new { screen = i, name = s.Primary ? "主屏幕" : "屏幕 " + (i + 1), w = s.Bounds.Width, h = s.Bounds.Height, main = s.Primary }).ToArray());
+                    Write(EnumerateDisplays().Select((s, i) => new { screen = i, name = s.Primary ? "主屏幕" : "屏幕 " + (i + 1), w = s.Bounds.Width, h = s.Bounds.Height, main = s.Primary }).ToArray());
                     return 0;
                 }
                 if ((args.Length == 4 || args.Length == 5) && args[0] == "--capture") {
@@ -149,9 +155,46 @@ namespace LinkShell.Windows {
             try { if (current == IntPtr.Zero || DesktopName(current) != "Default") throw new InvalidOperationException("Windows 已锁定或正在显示安全桌面，请在电脑上解锁后重新连接"); }
             finally { if (current != IntPtr.Zero) CloseDesktop(current); }
         }
+        // Query Win32 directly on each call: System.Windows.Forms.Screen.AllScreens caches monitor
+        // bounds for the process lifetime when no WinForms message loop processes WM_DISPLAYCHANGE.
+        internal static DisplayInfo[] EnumerateDisplays() {
+            var list = new List<DisplayInfo>();
+            EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, delegate(IntPtr monitor, IntPtr hdc, IntPtr rect, IntPtr data) {
+                var info = new MONITORINFO();
+                info.cbSize = Marshal.SizeOf(typeof(MONITORINFO));
+                if (GetMonitorInfo(monitor, ref info)) {
+                    var rc = info.rcMonitor;
+                    list.Add(new DisplayInfo {
+                        Bounds = Rectangle.FromLTRB(rc.Left, rc.Top, rc.Right, rc.Bottom),
+                        Primary = (info.dwFlags & 1u) != 0,
+                    });
+                }
+                return true;
+            }, IntPtr.Zero);
+            if (list.Count == 0) {
+                return Screen.AllScreens.Select(s => new DisplayInfo { Bounds = s.Bounds, Primary = s.Primary }).ToArray();
+            }
+            return list.OrderByDescending(d => d.Primary).ToArray();
+        }
+
+        internal static Rectangle DisplayBoundsAt(Point point) {
+            var all = EnumerateDisplays();
+            for (int i = 0; i < all.Length; i++) {
+                if (all[i].Bounds.Contains(point)) return all[i].Bounds;
+            }
+            return all.Length > 0 ? all[0].Bounds : Screen.PrimaryScreen.Bounds;
+        }
+
+        static Rectangle VirtualScreenBounds() {
+            int w = GetSystemMetrics(78);
+            int h = GetSystemMetrics(79);
+            if (w > 0 && h > 0) return new Rectangle(GetSystemMetrics(76), GetSystemMetrics(77), w, h);
+            return SystemInformation.VirtualScreen;
+        }
+
         static Rectangle Display(int index) {
             EnsureDesktop();
-            var all = Screen.AllScreens;
+            var all = EnumerateDisplays();
             if (index < 0 || index >= all.Length) throw new ArgumentOutOfRangeException("display", "屏幕已断开，请重新打开屏幕共享");
             return all[index].Bounds;
         }
@@ -219,7 +262,8 @@ namespace LinkShell.Windows {
                                 if (duplication == null) {
                                     var dc = target.GetHdc();
                                     try {
-                                        SetStretchBltMode(dc, 3); SetBrushOrgEx(dc, 0, 0, IntPtr.Zero);
+                                        // HALFTONE (4) preserves crisp text edges when GDI downscales high-DPI displays.
+                                        SetStretchBltMode(dc, 4); SetBrushOrgEx(dc, 0, 0, IntPtr.Zero);
                                         if (!StretchBlt(dc, 0, 0, w, h, screenDC, bounds.Left, bounds.Top, bounds.Width, bounds.Height, 0x40cc0020)) throw new InvalidOperationException("Windows 屏幕采集失败：" + Marshal.GetLastWin32Error());
                                         copied = true;
                                     } finally { target.ReleaseHdc(dc); }
@@ -234,7 +278,7 @@ namespace LinkShell.Windows {
                                 } finally { scaled.UnlockBits(locked); }
                                 bool changed = frame.Length == 0 || memcmp(pixels, previous, (UIntPtr)pixels.Length) != 0;
                                 if (changed) { Buffer.BlockCopy(pixels, 0, previous, 0, pixels.Length); lastChanged = began; refined = false; }
-                                bool refine = !refined && began - lastChanged >= 250;
+                                bool refine = !refined && began - lastChanged >= 200;
                                 bool forced = Interlocked.Exchange(ref forceFrame, 0) != 0;
                                 long comparedAt = clock.ElapsedMilliseconds, encodedAt = comparedAt;
                                 if (changed || refine || forced || began - lastSent >= 2000) {
@@ -491,9 +535,18 @@ namespace LinkShell.Windows {
                 if (line == null) return;
                 next = Task.Run(() => Console.ReadLine());
                 if (line.Length > 32000) continue;
-                var e = Json.Deserialize<Dictionary<string, object>>(line);
+                Dictionary<string, object> e;
+                try { e = Json.Deserialize<Dictionary<string, object>>(line); }
+                catch { continue; }
+                if (e == null) continue;
                 if (dryRun) { e["t"] = "posted"; Write(e); continue; }
-                Handle(e);
+                try {
+                    Handle(e);
+                } catch (Exception error) {
+                    // UIPI / elevated focus / transient UAC can reject SendInput without invalidating the session.
+                    Release();
+                    Console.Error.WriteLine("[control] " + error.Message);
+                }
             }
         }
         static string Str(Dictionary<string, object> e, string key) { object value; return e.TryGetValue(key, out value) ? Convert.ToString(value, CultureInfo.InvariantCulture) : ""; }
@@ -516,7 +569,7 @@ namespace LinkShell.Windows {
         static void Handle(Dictionary<string, object> e) {
             string type = Str(e, "t");
             if (type == "move") {
-                var all = SystemInformation.VirtualScreen;
+                var all = VirtualScreenBounds();
                 var x = bounds.Left + (int)(Math.Max(0, Math.Min(1, Number(e, "x"))) * (bounds.Width - 1));
                 var y = bounds.Top + (int)(Math.Max(0, Math.Min(1, Number(e, "y"))) * (bounds.Height - 1));
                 Mouse(0x8000 | 0x4000 | 0x0001, (int)((long)(x - all.Left) * 65535 / Math.Max(1, all.Width - 1)), (int)((long)(y - all.Top) * 65535 / Math.Max(1, all.Height - 1)));
@@ -554,7 +607,12 @@ namespace LinkShell.Windows {
                     }
                     if (key != 0) { Key(key, false); Key(key, true); }
                 }
-            } finally { for (int i = modifiers.Count - 1; i >= 0; i--) Key(modifiers[i], true); }
+            } finally {
+                for (int i = modifiers.Count - 1; i >= 0; i--) {
+                    try { Key(modifiers[i], true); }
+                    catch { HeldKeys.Remove(modifiers[i]); }
+                }
+            }
         }
         static ushort NamedKey(string name) {
             switch (name.ToLowerInvariant()) {

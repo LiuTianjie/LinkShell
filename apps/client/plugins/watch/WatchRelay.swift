@@ -75,6 +75,8 @@ final class WatchRelay {
   private var waking = false
   /// Frames taken from the outbox are in an exchange that hasn't been answered yet.
   private var carrying = false
+  /// Best-effort shutdown drain: avoid parking for new server frames once `finish()` is called.
+  private var finishing = false
   private var stopped = false
   private var pending: [Int: CheckedContinuation<[String: Any], Error>] = [:]
   private var timeouts: [Int: Task<Void, Never>] = [:]
@@ -90,7 +92,7 @@ final class WatchRelay {
     self.url = url; self.identity = identity; accountToken = token
     let config = URLSessionConfiguration.ephemeral
     config.timeoutIntervalForRequest = 30
-    config.timeoutIntervalForResource = 35
+    config.timeoutIntervalForResource = 40
     config.urlCache = nil
     ownsSession = http == nil
     self.http = http ?? URLSession(configuration: config, delegate: WatchHTTPDelegate(), delegateQueue: nil)
@@ -135,44 +137,67 @@ final class WatchRelay {
         guard let id = opened["id"] as? String, let token = opened["token"] as? String,
               !id.isEmpty, !token.isEmpty else { throw WatchLinkError("网关未返回连接凭证") }
         let endpoint = url.appendingPathComponent("v2/poll/\(id)")
-        var ack = 0, requestNumber = 0
-        // An empty poll cut short for new frames: the gateway may or may not have seen it.
-        var cutShort: Int?
+        var ack = 0, requestNumber = 0, idlePolls = 0
+        // Earliest consecutive empty poll cut short for new frames: the gateway may not have seen
+        // one or more of them, so step back down to `cutShortFrom` on `request_out_of_order`.
+        var cutShortFrom: Int?
         while !Task.isCancelled && generation == epoch {
           // A reply resumes the RPCs waiting on it; let them queue their next request (a chained
           // call) so it goes out with this poll instead of behind one parked for up to `waitMs`.
           await Task.yield()
           guard generation == epoch, !Task.isCancelled else { throw CancellationError() }
           requestNumber += 1
+          let highestRequested = requestNumber
           let sending = outbox
           outbox.removeAll()
           carrying = !sending.isEmpty
           defer { carrying = false }
           var reply: [String: Any]?
           var retry = WatchRetry()
-          var busyRetries = 0, reused = false
+          var busySince: Date?
+          var busyRetries = 0
           exchange: while true {
-            let body: [String: Any] = ["request": requestNumber, "ack": ack, "frames": sending, "waitMs": 1_000]
+            // Drain immediately when finishing or new frames arrived mid-retry; keep active bursts
+            // short so non-aborting proxies cannot trap outgoing frames, and ramp to 20s when idle
+            // so steady-state watch radio wakeups drop 20x.
+            let waitMs: Int
+            if finishing || !outbox.isEmpty {
+              waitMs = 0
+            } else if !sending.isEmpty || idlePolls == 0 {
+              waitMs = 1_000
+            } else if idlePolls == 1 {
+              waitMs = 4_000
+            } else {
+              waitMs = 20_000
+            }
+            let body: [String: Any] = ["request": requestNumber, "ack": ack, "frames": sending, "waitMs": waitMs]
             do {
               reply = try await exchange(endpoint, body: body, token: token)
-              cutShort = nil
+              cutShortFrom = nil
               break exchange
             } catch is WatchPollWoken {
               // Nothing was in it, so nothing is lost or repeated: the next poll carries the new frames.
-              cutShort = requestNumber
+              if cutShortFrom == nil { cutShortFrom = requestNumber }
+              idlePolls = 0
               break exchange
-            } catch let refused as WatchPollRefused where refused.code == "request_out_of_order" && cutShort == requestNumber - 1 {
-              // The poll cut short never reached the gateway: these frames take its number.
+            } catch let refused as WatchPollRefused where refused.code == "request_out_of_order" && (cutShortFrom.map { requestNumber > $0 } ?? false) {
+              // One or more cut-short polls never reached the gateway: step back to claim their number.
               requestNumber -= 1
-              cutShort = nil; reused = true
-            } catch let refused as WatchPollRefused where refused.code == "request_conflict" && reused {
-              // It did arrive after all, just later, and holds that number: take the next one back.
+            } catch let refused as WatchPollRefused where refused.code == "request_conflict" && requestNumber < highestRequested {
+              // It did arrive after all, just later, and holds that number: advance past it.
               requestNumber += 1
-              reused = false
-            } catch let refused as WatchPollRefused where refused.code == "poll_in_progress" && busyRetries < 40 {
-              // The gateway hasn't yet seen the poll cut short close; it frees within its wait.
+              if let earliest = cutShortFrom, requestNumber > earliest { cutShortFrom = requestNumber }
+            } catch let refused as WatchPollRefused where refused.code == "poll_in_progress" {
+              // If a long-poll's TCP close was delayed across a proxy or NAT/LTE, wait up to 22s with
+              // progressive backoff instead of tearing down and thrashing reconnects.
+              let now = Date()
+              let start = busySince ?? now
+              busySince = start
+              guard now.timeIntervalSince(start) < 22 else { throw refused }
               busyRetries += 1
-              try await Task.sleep(nanoseconds: 50_000_000)
+              let capNs = busyRetries <= 8 ? 250_000_000 : 500_000_000
+              let waitNs = UInt64(min(capNs, 50_000_000 * busyRetries))
+              try await Task.sleep(nanoseconds: waitNs)
             } catch {
               if Task.isCancelled || generation != epoch { throw CancellationError() }
               // Retry the exact numbered exchange; the gateway deduplicates it.
@@ -183,7 +208,13 @@ final class WatchRelay {
           }
           guard generation == epoch, !Task.isCancelled else { throw CancellationError() }
           guard let reply else { continue }
-          for entry in reply["frames"] as? [[String: Any]] ?? [] {
+          let incoming = reply["frames"] as? [[String: Any]] ?? []
+          if !sending.isEmpty || !incoming.isEmpty {
+            idlePolls = 0
+          } else {
+            idlePolls = min(idlePolls + 1, 2)
+          }
+          for entry in incoming {
             guard let seq = entry["seq"] as? Int, let frame = entry["frame"] as? String else { throw WatchLinkError("网关数据格式无效") }
             if seq <= ack { continue }
             guard seq == ack + 1 else { throw WatchLinkError("连接数据缺失，请重连") }
@@ -201,6 +232,7 @@ final class WatchRelay {
   /// Ends this relay for good; a new connection is a new relay.
   func stop() {
     generation += 1
+    finishing = false
     loop?.cancel(); loop = nil
     exchanging?.cancel(); exchanging = nil
     ready = false; outbox.removeAll()
@@ -212,7 +244,12 @@ final class WatchRelay {
   /// Delivers what is already queued (a tunnel's close) before stopping, best effort: the host
   /// would otherwise keep a dead tunnel and stream to it until the gateway expires this transport.
   func finish(within seconds: TimeInterval = 1.5) async {
+    finishing = true
     onReady = nil; onEvent = nil; onFrame = nil; onClosed = nil
+    if exchangingEmpty, !waking, let exchanging {
+      waking = true
+      exchanging.cancel()
+    }
     let deadline = Date().addingTimeInterval(seconds)
     while ready, loop != nil, !outbox.isEmpty || carrying, Date() < deadline {
       try? await Task.sleep(nanoseconds: 50_000_000)
@@ -253,7 +290,9 @@ final class WatchRelay {
   private func exchange(_ endpoint: URL, body: [String: Any], token: String) async throws -> [String: Any] {
     let task = Task { try await self.post(endpoint, body: body, token: token) }
     exchanging = task
-    exchangingEmpty = (body["frames"] as? [String])?.isEmpty ?? false
+    let emptyFrames = (body["frames"] as? [String])?.isEmpty ?? false
+    let parked = ((body["waitMs"] as? Int) ?? 0) > 0
+    exchangingEmpty = emptyFrames && parked
     waking = false
     defer { exchanging = nil; exchangingEmpty = false }
     do { return try await task.value }

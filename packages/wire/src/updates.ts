@@ -71,7 +71,7 @@ export const planEntrySchema = z.object({
 });
 export type PlanEntry = z.infer<typeof planEntrySchema>;
 
-export const stopReasonSchema = z.enum(["end_turn", "cancelled", "error", "max_tokens", "max_turn_requests", "refusal", "unknown"]);
+export const stopReasonSchema = z.enum(["end_turn", "cancelled", "error", "max_tokens", "max_turn_requests", "refusal", "unknown"]).catch("unknown");
 export type StopReason = z.infer<typeof stopReasonSchema>;
 
 export const sessionConfigOptionSchema = z.object({
@@ -147,15 +147,19 @@ export const sessionUpdateSchema = z.discriminatedUnion("sessionUpdate", [
     /** Streamed output appended to the tool call's running output. */
     appendOutput: z.string().optional(),
     replaceOutput: z.string().optional(),
+    /** Appends `content` entries onto the tool call instead of replacing prior content (ACP v2 `tool_call_content_chunk`). */
+    appendContent: z.boolean().optional(),
     /** ACP v2 null/empty content clears every previous diff and attachment. */
     replaceContent: z.boolean().optional(),
     rawOutput: z.unknown().optional(),
   }),
   z.object({
     sessionUpdate: z.literal("plan"),
+    parentToolCallId: z.string().optional(),
     entries: z.array(planEntrySchema),
     planId: z.string().optional(),
     title: z.string().optional(),
+    explanation: z.string().optional(),
     markdown: z.string().nullable().optional(),
     path: z.string().nullable().optional(),
     removed: z.boolean().optional(),
@@ -213,6 +217,7 @@ export const sessionUpdateSchema = z.discriminatedUnion("sessionUpdate", [
   }),
   z.object({
     sessionUpdate: z.literal("ls_notice"),
+    parentToolCallId: z.string().optional(),
     level: z.enum(["info", "warning"]),
     title: z.string(),
     detail: z.string().optional(),
@@ -267,9 +272,11 @@ export const sessionUpdateSchema = z.discriminatedUnion("sessionUpdate", [
   }),
   z.object({
     sessionUpdate: z.literal("ls_error"),
+    parentToolCallId: z.string().optional(),
     code: z.string(),
     message: z.string(),
     hint: z.string().optional(),
+    retryable: z.boolean().optional(),
   }),
 ]);
 export type SessionUpdate = z.infer<typeof sessionUpdateSchema>;

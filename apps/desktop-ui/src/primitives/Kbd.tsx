@@ -9,9 +9,10 @@ import { cn } from "./utils";
 export interface KbdProps extends HTMLAttributes<HTMLElement> {
   /**
    * Optional platform-agnostic shortcut string (e.g. "Mod+K", "Mod+Shift+M", "Ctrl+`").
-   * Automatically formats compact symbols on macOS (`⌘K`) and explicit keycaps on Windows (`Ctrl+K`).
+   * Automatically formats compact symbols on macOS (`⌘K`) and explicit keycaps on Windows/Linux (`Ctrl+K`).
    */
   shortcut?: string;
+  platform?: "macos" | "windows" | "linux";
   children?: ReactNode;
 }
 
@@ -23,9 +24,7 @@ export function formatPlatformShortcut(
     .split("+")
     .map((part) => part.trim())
     .filter(Boolean);
-  if (parts.length <= 1 && !shortcut.includes("Mod")) {
-    return shortcut;
-  }
+  if (parts.length === 0) return shortcut;
 
   if (platform === "macos") {
     return parts
@@ -58,14 +57,15 @@ export function formatPlatformShortcut(
     .join("+");
 }
 
-export function Kbd({ shortcut, children, className, ...props }: KbdProps) {
+export function Kbd({ shortcut, platform, children, className, ...props }: KbdProps) {
   const activePlatform = useSyncExternalStore(
     subscribeDesktopPlatform,
     getActiveDesktopPlatform,
     () => desktopPlatform,
   );
+  const resolvedPlatform = platform ?? activePlatform;
   const rendered = shortcut
-    ? formatPlatformShortcut(shortcut, activePlatform)
+    ? formatPlatformShortcut(shortcut, resolvedPlatform)
     : children;
   return (
     <kbd className={cn("ls-kbd", className)} {...props}>

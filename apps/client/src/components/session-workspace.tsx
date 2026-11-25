@@ -1,7 +1,7 @@
 import { ComputerPreviewVisible } from "@/lib/use-computer-preview";
 import { createContext, use, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { ActivityIndicator, Platform, Pressable, View } from "react-native";
-import { useHeaderHeight } from "expo-router/react-navigation";
+import { ActivityIndicator, BackHandler, Platform, Pressable, View } from "react-native";
+import { useHeaderHeight, useIsFocused } from "expo-router/react-navigation";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { Text, TextInput } from "@/components/fixed-text";
@@ -49,6 +49,7 @@ export function SessionWorkspace({ sessionId, initialPanel, children }: { sessio
   const insets = usePageInsets();
   const systemInsets = useSafeAreaInsets();
   const headerHeight = useHeaderHeight();
+  const focused = useIsFocused();
   const laptop = folded && axis === "column";
   const [motionAction, setMotionAction] = useState(0);
   const showPanel = useCallback((next: Panel, nextPort?: number) => {
@@ -57,35 +58,55 @@ export function SessionWorkspace({ sessionId, initialPanel, children }: { sessio
     setPanel(next);
     setToolsOpen(true);
   }, []);
-  const closeTools = () => { setMotionAction((value) => value + 1); setToolsOpen(false); };
-  const safeTop = Math.max(8, insets.top, Platform.OS === "ios" ? homeNavigationLayout(insets, systemInsets, headerHeight).contentTop : 0);
+  const closeTools = useCallback(() => {
+    setMotionAction((value) => value + 1);
+    setToolsOpen(false);
+  }, []);
+  useEffect(() => {
+    if (Platform.OS !== "android" || !focused || !toolsOpen) return;
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      closeTools();
+      return true;
+    });
+    return () => subscription.remove();
+  }, [focused, toolsOpen, closeTools]);
+  // On Android, the pushed session route has an opaque native Toolbar that already consumes the top safe area.
+  const safeTop = Platform.OS === "ios"
+    ? Math.max(8, insets.top, homeNavigationLayout(insets, systemInsets, headerHeight).contentTop)
+    : 0;
   // The iOS list adjusts its own inset and must scroll behind the transparent bar.
   // Folded panes keep their explicit bounds so content cannot cross the hinge.
   const chatTop = Platform.OS === "ios" && !folded ? 0 : safeTop;
-  const headerConsumed = chatTop > 0;
+  const headerConsumed = Platform.OS === "android" || chatTop > 0;
   const context = useMemo(() => ({ split, headerConsumed, show: showPanel }), [split, headerConsumed, showPanel]);
   const bottom = laptop ? insets.bottom : 0;
   const foldLayout = useMemo(() => laptop ? { bottomReserved: bottom } : null, [laptop, bottom]);
   const motionGeometry = [geometry.revision, width, height, folded, axis, before, after, gap, safeTop, bottom].join(":");
   const chatVisible = split || !toolsOpen;
+  // In tabletop/laptop mode, keep chat strictly below the horizontal hinge so messages/composer never straddle the crease.
+  const laptopChatTop = Math.max(chatTop, before + gap);
   const chat: PaneFrame = laptop
-    ? { left: 0, top: chatTop, width, height: Math.max(0, height - chatTop - bottom) }
+    ? { left: 0, top: laptopChatTop, width, height: Math.max(0, height - laptopChatTop - bottom) }
     : folded && !toolsOpen
       ? { left: before + gap, top: chatTop, width: after, height: Math.max(0, height - chatTop) }
       : { left: 0, top: chatTop, width: chatVisible ? toolsOpen && split ? before : width : 0, height: Math.max(0, height - chatTop) };
   const tools: PaneFrame = split && axis === "column"
     ? { left: 0, top: safeTop, width, height: toolsOpen ? Math.max(0, before - safeTop) : 0 }
     : { left: toolsOpen ? split ? before + gap : 0 : width, top: safeTop, width: toolsOpen ? Math.max(0, split ? after - 12 : width) : 0, height: Math.max(0, height - safeTop - 12) };
+  const consumedChatTop = Platform.OS === "android" ? insets.top : chat.top;
+  const consumedToolsTop = Platform.OS === "android" ? insets.top : tools.top;
   return (
     <Workspace value={context}>
       <View style={{ flex: 1, backgroundColor: colors.plain }}>
         <View onLayout={geometry.onLayout} style={{ flex: 1, overflow: "hidden" }}>
           <LayoutProbe onMetrics={geometry.onMetrics} revision={geometry.revision} />
           <MountedMotionPane frame={chat} visible={chatVisible} action={motionAction} geometry={motionGeometry}>
-            <ConsumedTopInset height={chat.top}><SessionFoldLayoutContext value={foldLayout}><ComputerPreviewVisible value={chatVisible}>{children}</ComputerPreviewVisible></SessionFoldLayoutContext></ConsumedTopInset>
+            <ConsumedTopInset height={consumedChatTop}><SessionFoldLayoutContext value={foldLayout}><ComputerPreviewVisible value={chatVisible}>{children}</ComputerPreviewVisible></SessionFoldLayoutContext></ConsumedTopInset>
           </MountedMotionPane>
           <MountedMotionPane fixedWidth={Math.max(0, split && axis === "row" ? after - 12 : width)} frame={tools} visible={toolsOpen} action={motionAction} geometry={motionGeometry} style={{ borderRadius: radius.panel, borderCurve: "continuous", backgroundColor: colors.background }}>
-            <SessionTools sessionId={sessionId} panel={panel} requestedPort={requestedPort} onPanel={showPanel} onClose={closeTools} active={toolsOpen} motionAction={motionAction} motionGeometry={motionGeometry} />
+            <ConsumedTopInset height={consumedToolsTop}>
+              <SessionTools sessionId={sessionId} panel={panel} requestedPort={requestedPort} onPanel={showPanel} onClose={closeTools} active={toolsOpen} motionAction={motionAction} motionGeometry={motionGeometry} />
+            </ConsumedTopInset>
           </MountedMotionPane>
         </View>
       </View>

@@ -110,10 +110,12 @@ namespace LinkShell.Windows {
         static int CatalogUsed = -1;
         static object[] CatalogResult;
         static DateTime CatalogAt;
-        sealed class WindowApp { public uint Pid; public string App; public int At; }
+        sealed class WindowApp { public uint Pid; public string App; public long At; }
         /// <summary>A window's app, for a moment: asking the shell for every window 30 times a second is the loop's cost.</summary>
         static readonly Dictionary<IntPtr, WindowApp> AppByWindow = new Dictionary<IntPtr, WindowApp>();
-        static int PidsClearedAt = Environment.TickCount;
+        static readonly Stopwatch MonotonicClock = Stopwatch.StartNew();
+        static long MonotonicMs() { return MonotonicClock.ElapsedMilliseconds; }
+        static long PidsClearedAt = MonotonicMs();
         const int LaunchWaitSeconds = 180;
         const int PostFirstWindowFollowUpSeconds = 30;
         /// <summary>Title bar measurements by window and size: probing is cheap, but not 30 times a second.</summary>
@@ -311,8 +313,8 @@ namespace LinkShell.Windows {
                         shapeAt.Restart();
                         POINT cursorPt;
                         var screenBounds = GetCursorPos(out cursorPt)
-                            ? System.Windows.Forms.Screen.FromPoint(new Point(cursorPt.X, cursorPt.Y)).Bounds
-                            : System.Windows.Forms.Screen.PrimaryScreen.Bounds;
+                            ? DisplayBoundsAt(new Point(cursorPt.X, cursorPt.Y))
+                            : DisplayBoundsAt(new Point(0, 0));
                         double scale = Math.Max(1.0, Math.Min(4.0, MonitorScale(new Point(screenBounds.Left + screenBounds.Width / 2, screenBounds.Top + screenBounds.Height / 2))));
                         var shape = CaptureCursorShape(scale);
                         if (shape != null && shape.Id != lastShapeId) {
@@ -335,7 +337,7 @@ namespace LinkShell.Windows {
 
         static string lastMonitors;
         static void WriteMonitors() {
-            var screens = System.Windows.Forms.Screen.AllScreens;
+            var screens = EnumerateDisplays();
             var list = screens.Select((s, i) => new { index = i, x = s.Bounds.X, y = s.Bounds.Y, w = s.Bounds.Width, h = s.Bounds.Height, scale = MonitorScale(new Point(s.Bounds.X + s.Bounds.Width / 2, s.Bounds.Y + s.Bounds.Height / 2)) }).ToArray();
             var text = Json.Serialize(list);
             if (text == lastMonitors) return;
@@ -413,7 +415,7 @@ namespace LinkShell.Windows {
                         if (!WindowFrame(hwnd, out frame)) return;
                         bounds = new Rectangle(frame.Left, frame.Top, frame.Right - frame.Left, frame.Bottom - frame.Top);
                     } else {
-                        var screens = System.Windows.Forms.Screen.AllScreens;
+                        var screens = EnumerateDisplays();
                         int index = (int)Number(c, "monitor");
                         if (index < 0 || index >= screens.Length) return;
                         bounds = screens[index].Bounds;
@@ -480,11 +482,12 @@ namespace LinkShell.Windows {
             HashSet<string> fused;
             lock (Fused) fused = new HashSet<string>(Fused, StringComparer.OrdinalIgnoreCase);
             var found = new List<FusionWindow>();
-            var screens = System.Windows.Forms.Screen.AllScreens;
+            var screens = EnumerateDisplays();
             int version = CatalogVersion;
+            long nowMs = MonotonicMs();
             // A process id is used again by another program before long.
-            if (version != CatalogUsed || unchecked(Environment.TickCount - PidsClearedAt) > 60000) {
-                CatalogUsed = version; PidsClearedAt = Environment.TickCount;
+            if (version != CatalogUsed || nowMs - PidsClearedAt > 60000) {
+                CatalogUsed = version; PidsClearedAt = nowMs;
                 AppByPid.Clear(); AppByWindow.Clear(); ParentPids.Clear();
                 foreach (uint dead in FusedPids.Keys.Where(p => !ProcessAlive(p)).ToList()) FusedPids.Remove(dead);
             }
@@ -619,7 +622,7 @@ namespace LinkShell.Windows {
             bool known = ChromeCache.TryGetValue(w.Handle, out cached);
             if (known && cached.Key == key) return (Dictionary<string, object>)cached.Value;
             // While a window is being resized its size changes every frame: probe at most twice a second.
-            long now = Environment.TickCount;
+            long now = MonotonicMs();
             long probed;
             if (known && ChromeProbed.TryGetValue(w.Handle, out probed) && now - probed < 500) return (Dictionary<string, object>)cached.Value;
             ChromeProbed[w.Handle] = now;
@@ -661,8 +664,8 @@ namespace LinkShell.Windows {
         /// </summary>
         static string AppOf(IntPtr hwnd, uint pid, HashSet<string> fused) {
             WindowApp known;
-            int now = Environment.TickCount;
-            if (AppByWindow.TryGetValue(hwnd, out known) && known.Pid == pid && unchecked(now - known.At) < 1500) return known.App;
+            long now = MonotonicMs();
+            if (AppByWindow.TryGetValue(hwnd, out known) && known.Pid == pid && now - known.At < 1500) return known.App;
             string app = AppOfNow(hwnd, pid, fused);
             if (AppByWindow.Count > 1024) AppByWindow.Clear();
             AppByWindow[hwnd] = new WindowApp { Pid = pid, App = app, At = now };
@@ -792,16 +795,19 @@ namespace LinkShell.Windows {
             } catch { return null; }
         }
 
+        static void ReleaseCom(object com) {
+            if (com != null && Marshal.IsComObject(com)) {
+                try { Marshal.FinalReleaseComObject(com); } catch { }
+            }
+        }
+
         /// <summary>
         /// Start menu apps (shell:AppsFolder): packaged apps by AppUserModelID, classic ones by
         /// `{KNOWNFOLDERID}\relative\app.exe`, which also maps their executables back to them.
         /// </summary>
         static object[] Catalog() {
             var type = Type.GetTypeFromProgID("Shell.Application");
-            object shell = Activator.CreateInstance(type);
-            object folder = type.InvokeMember("NameSpace", BindingFlags.InvokeMethod, null, shell, new object[] { "shell:::{4234d49b-0245-4df3-b780-3893943456e1}" });
-            object items = folder.GetType().InvokeMember("Items", BindingFlags.InvokeMethod, null, folder, null);
-            int count = (int)items.GetType().InvokeMember("Count", BindingFlags.GetProperty, null, items, null);
+            object shell = null, folder = null, items = null;
             var apps = new List<Dictionary<string, object>>();
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             // Built apart and put in place whole: the window loop reads these all the while, and a
@@ -809,38 +815,53 @@ namespace LinkShell.Windows {
             var byExe = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             var primaryExes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            for (int i = 0; i < count && i < 2000; i++) {
-                object item = items.GetType().InvokeMember("Item", BindingFlags.InvokeMethod, null, items, new object[] { i });
-                string name = Convert.ToString(item.GetType().InvokeMember("Name", BindingFlags.GetProperty, null, item, null));
-                string id = Convert.ToString(item.GetType().InvokeMember("Path", BindingFlags.GetProperty, null, item, null));
-                if (String.IsNullOrEmpty(id) || String.IsNullOrEmpty(name) || !seen.Add(id)) continue;
-                // Uninstallers, help files, links to web pages, and LinkShell itself (or its own Fusion shortcuts) are excluded.
-                if (id.StartsWith("http", StringComparison.OrdinalIgnoreCase) || name.IndexOf("uninstall", StringComparison.OrdinalIgnoreCase) >= 0 || name.Contains("卸载")) continue;
-                string exe = ResolveKnownFolder(id);
-                if (IsOwnLinkShellEntry(id, exe)) continue;
-                if (exe != null && exe.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) { byExe[exe] = id; primaryExes.Add(exe); }
-                else if (exe != null && !id.Contains("!")) continue;
-                // A shortcut with an id of its own (most installers write one): the executable it
-                // starts is the only thing its windows have in common with it. A plain shortcut
-                // (Google Chrome) wins over argument-bearing PWA shortcuts (`--app-id=...`).
-                if (exe == null && !id.Contains("!")) {
-                    string target = null, args = null;
-                    try { target = Convert.ToString(item.GetType().InvokeMember("ExtendedProperty", BindingFlags.InvokeMethod, null, item, new object[] { "System.Link.TargetParsingPath" })); } catch { }
-                    try { args = Convert.ToString(item.GetType().InvokeMember("ExtendedProperty", BindingFlags.InvokeMethod, null, item, new object[] { "System.Link.Arguments" })); } catch { }
-                    if (String.IsNullOrEmpty(target) && id.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) && Path.IsPathRooted(id)) target = id;
-                    if (String.IsNullOrEmpty(target)) target = ResolveAppPathRegistry(id);
-                    if (IsOwnLinkShellEntry(id, target)) continue;
-                    if (!String.IsNullOrEmpty(target) && target.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) {
-                        bool primary = String.IsNullOrEmpty(args) && id.IndexOf("_crx_", StringComparison.OrdinalIgnoreCase) < 0;
-                        if (primary && !primaryExes.Contains(target)) { byExe[target] = id; primaryExes.Add(target); }
-                        else if (!byExe.ContainsKey(target)) byExe[target] = id;
+            try {
+                shell = Activator.CreateInstance(type);
+                folder = type.InvokeMember("NameSpace", BindingFlags.InvokeMethod, null, shell, new object[] { "shell:::{4234d49b-0245-4df3-b780-3893943456e1}" });
+                items = folder.GetType().InvokeMember("Items", BindingFlags.InvokeMethod, null, folder, null);
+                int count = (int)items.GetType().InvokeMember("Count", BindingFlags.GetProperty, null, items, null);
+                for (int i = 0; i < count && i < 2000; i++) {
+                    object item = null;
+                    try {
+                        item = items.GetType().InvokeMember("Item", BindingFlags.InvokeMethod, null, items, new object[] { i });
+                        if (item == null) continue;
+                        string name = Convert.ToString(item.GetType().InvokeMember("Name", BindingFlags.GetProperty, null, item, null));
+                        string id = Convert.ToString(item.GetType().InvokeMember("Path", BindingFlags.GetProperty, null, item, null));
+                        if (String.IsNullOrEmpty(id) || String.IsNullOrEmpty(name) || !seen.Add(id)) continue;
+                        // Uninstallers, help files, links to web pages, and LinkShell itself (or its own Fusion shortcuts) are excluded.
+                        if (id.StartsWith("http", StringComparison.OrdinalIgnoreCase) || name.IndexOf("uninstall", StringComparison.OrdinalIgnoreCase) >= 0 || name.Contains("卸载")) continue;
+                        string exe = ResolveKnownFolder(id);
+                        if (IsOwnLinkShellEntry(id, exe)) continue;
+                        if (exe != null && exe.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) { byExe[exe] = id; primaryExes.Add(exe); }
+                        else if (exe != null && !id.Contains("!")) continue;
+                        // A shortcut with an id of its own (most installers write one): the executable it
+                        // starts is the only thing its windows have in common with it. A plain shortcut
+                        // (Google Chrome) wins over argument-bearing PWA shortcuts (`--app-id=...`).
+                        if (exe == null && !id.Contains("!")) {
+                            string target = null, args = null;
+                            try { target = Convert.ToString(item.GetType().InvokeMember("ExtendedProperty", BindingFlags.InvokeMethod, null, item, new object[] { "System.Link.TargetParsingPath" })); } catch { }
+                            try { args = Convert.ToString(item.GetType().InvokeMember("ExtendedProperty", BindingFlags.InvokeMethod, null, item, new object[] { "System.Link.Arguments" })); } catch { }
+                            if (String.IsNullOrEmpty(target) && id.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) && Path.IsPathRooted(id)) target = id;
+                            if (String.IsNullOrEmpty(target)) target = ResolveAppPathRegistry(id);
+                            if (IsOwnLinkShellEntry(id, target)) continue;
+                            if (!String.IsNullOrEmpty(target) && target.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) {
+                                bool primary = String.IsNullOrEmpty(args) && id.IndexOf("_crx_", StringComparison.OrdinalIgnoreCase) < 0;
+                                if (primary && !primaryExes.Contains(target)) { byExe[target] = id; primaryExes.Add(target); }
+                                else if (!byExe.ContainsKey(target)) byExe[target] = id;
+                            }
+                        }
+                        ids.Add(id);
+                        bool system = id.StartsWith("Microsoft.Windows", StringComparison.OrdinalIgnoreCase) || id.StartsWith("windows.", StringComparison.OrdinalIgnoreCase) || id.IndexOf("\\WINDOWS\\", StringComparison.OrdinalIgnoreCase) >= 0;
+                        apps.Add(new Dictionary<string, object> { { "app", id }, { "name", name }, { "category", "" }, { "system", system } });
+                    } finally {
+                        ReleaseCom(item);
                     }
                 }
-                ids.Add(id);
-                bool system = id.StartsWith("Microsoft.Windows", StringComparison.OrdinalIgnoreCase) || id.StartsWith("windows.", StringComparison.OrdinalIgnoreCase) || id.IndexOf("\\WINDOWS\\", StringComparison.OrdinalIgnoreCase) >= 0;
-                apps.Add(new Dictionary<string, object> { { "app", id }, { "name", name }, { "category", "" }, { "system", system } });
+            } finally {
+                ReleaseCom(items);
+                ReleaseCom(folder);
+                ReleaseCom(shell);
             }
-            Marshal.ReleaseComObject(shell);
             lock (CatalogLock) {
                 AppByExe.Clear(); foreach (var pair in byExe) AppByExe[pair.Key] = pair.Value;
                 CatalogIds.Clear(); foreach (string listed in ids) CatalogIds.Add(listed);

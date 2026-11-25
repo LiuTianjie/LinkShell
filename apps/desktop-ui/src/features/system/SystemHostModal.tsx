@@ -4,6 +4,7 @@ import {
   accountAction,
   cancelLogin,
   healthy as isHealthy,
+  managementStore,
   newVersion as hasNewVersion,
   pollManagement,
   refreshManagement,
@@ -72,16 +73,19 @@ export function SystemHostModal(): ReactElement {
     null,
   );
   const [confirmBusy, setConfirmBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) {
       setConfirmAction(null);
+      setActionError(null);
       return undefined;
     }
     return pollManagement();
   }, [open]);
 
   const navigatePage = (nextPage: ManagePage) => {
+    setActionError(null);
     routerStore.getState().openSystemModal(nextPage);
   };
 
@@ -159,27 +163,41 @@ export function SystemHostModal(): ReactElement {
   const executeConfirmedAction = async () => {
     if (!confirmAction || confirmBusy) return;
     setConfirmBusy(true);
+    setActionError(null);
+    const prevProblem = managementStore.getState().problem;
     try {
+      let ok: boolean | void = true;
       switch (confirmAction.kind) {
         case "stop":
-          await serviceAction("stop");
+          ok = await serviceAction("stop");
           break;
         case "restart":
-          await serviceAction("restart");
+          ok = await serviceAction("restart");
           break;
         case "logout":
-          await accountAction("logout");
+          ok = await accountAction("logout");
           break;
         case "remove-password":
-          await setAccessPassword(null);
+          ok = await setAccessPassword(null);
           break;
         case "upgrade":
-          await upgradeInstall();
+          ok = await upgradeInstall();
           break;
         case "revoke-device":
-          await revokePairedDevice(confirmAction.deviceId);
+          ok = await revokePairedDevice(confirmAction.deviceId);
           break;
       }
+      const next = managementStore.getState();
+      const failure =
+        next.problem && next.problem !== prevProblem
+          ? next.problem
+          : ok === false
+            ? (next.problem ?? (next.passwordIsError ? next.passwordMessage : undefined))
+            : undefined;
+      if (failure) setActionError(tm(failure));
+      setConfirmAction(null);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : String(error));
       setConfirmAction(null);
     } finally {
       setConfirmBusy(false);
@@ -336,6 +354,25 @@ export function SystemHostModal(): ReactElement {
                     <DesktopIcon name="spinner" size="sm" />
                     <span>{tm(state.busyNotice)}</span>
                   </div>
+                </div>
+              ) : null}
+              {actionError ? (
+                <div
+                  className="ls-system-banner ls-system-banner--spaced"
+                  data-tone="warning"
+                  role="alert"
+                >
+                  <div className="ls-system-banner__copy">
+                    <DesktopIcon name="alert-triangle" size="sm" />
+                    <span>{actionError}</span>
+                  </div>
+                  <IconButton
+                    icon="close"
+                    size="icon-sm"
+                    variant="ghost"
+                    label={ts("modal.close")}
+                    onClick={() => setActionError(null)}
+                  />
                 </div>
               ) : null}
               {state.problem ? (

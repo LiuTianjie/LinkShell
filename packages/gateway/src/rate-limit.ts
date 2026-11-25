@@ -1,5 +1,7 @@
 import type { IncomingMessage } from "node:http";
 
+const DEFAULT_MAX_KEYS = 100_000;
+
 /** Counts hits per key in fixed windows; over `maxHits` in one window is refused. */
 export class RateLimiter {
   private readonly hits = new Map<string, { count: number; resetAt: number }>();
@@ -8,16 +10,30 @@ export class RateLimiter {
   constructor(
     private readonly maxHits: number,
     private readonly windowMs: number,
+    private readonly maxKeys = DEFAULT_MAX_KEYS,
   ) {
     // Finished windows are dropped, so the map holds only keys seen lately.
     this.pruneTimer = setInterval(() => this.prune(), Math.max(windowMs, 60_000));
     this.pruneTimer.unref();
   }
 
+  get size(): number {
+    return this.hits.size;
+  }
+
   allow(key: string): boolean {
     const now = Date.now();
     const entry = this.hits.get(key);
     if (!entry || now >= entry.resetAt) {
+      if (entry) this.hits.delete(key);
+      if (this.hits.size >= this.maxKeys) {
+        this.prune(now);
+        while (this.hits.size >= this.maxKeys) {
+          const oldest = this.hits.keys().next().value;
+          if (oldest === undefined) break;
+          this.hits.delete(oldest);
+        }
+      }
       this.hits.set(key, { count: 1, resetAt: now + this.windowMs });
       return true;
     }
@@ -25,8 +41,7 @@ export class RateLimiter {
     return entry.count <= this.maxHits;
   }
 
-  private prune(): void {
-    const now = Date.now();
+  private prune(now = Date.now()): void {
     for (const [key, entry] of this.hits) {
       if (now >= entry.resetAt) this.hits.delete(key);
     }
@@ -34,6 +49,7 @@ export class RateLimiter {
 
   destroy(): void {
     clearInterval(this.pruneTimer);
+    this.hits.clear();
   }
 }
 

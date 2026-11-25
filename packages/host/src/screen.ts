@@ -504,7 +504,7 @@ export class ScreenShare {
     if (process.platform === "linux") {
       const diag = await probeLinuxScreen();
       return {
-        supported: true,
+        supported: diag.displayServer !== "headless",
         ffmpeg: diag.recording,
         recording: diag.recording,
         control: diag.control,
@@ -597,7 +597,7 @@ export class ScreenShare {
     } else {
       const diag = await probeLinuxScreen();
       if (!wanted()) return undefined;
-      const displays = diag.displayServer === "wayland" ? await listLinuxDisplays() : [];
+      const displays = diag.displayServer !== "headless" ? await listLinuxDisplays() : [];
       if (!wanted()) return undefined;
       const targetDisplay = displays.find((d) => d.screen === screen || d.index === screen) ?? displays[0];
       const plan = buildLinuxCapturePlan(diag, level, profile, targetDisplay);
@@ -714,9 +714,11 @@ export class ScreenShare {
       if (viewer.closed()) return "refused";
       const iceServers = this.servers(relay);
       viewer.tell({ rtc: { t: "config", iceServers } });
-      const session = new WindowsVideoSession({ screen, iceServers, maxWidth, maxFps, ...(viewer.audio ? { audio: true } : {}), ...(relay?.maxKbps ? { relayKbps: relay.maxKbps } : {}) }, {
-        tell: message => viewer.tell({ rtc: message }), input: viewer.input, lost: viewer.lost, log: this.log, path: viewer.path,
-      });
+      const session = new WindowsVideoSession(
+        { screen, iceServers, maxWidth, maxFps, ...(viewer.audio ? { audio: true } : {}), ...(relay?.maxKbps ? { relayKbps: relay.maxKbps } : {}) },
+        { tell: message => viewer.tell({ rtc: message }), input: viewer.input, lost: viewer.lost, log: this.log, path: viewer.path },
+        { displaySize: s => this.displays.find(d => d.screen === s) },
+      );
       const mine = { id: session.id, taken: () => {
         if (this.video === mine) this.video = undefined;
         session.end(); viewer.refuse(SCREEN_TAKEN);
@@ -775,6 +777,10 @@ export class ScreenShare {
     let reached: unknown;
     let lastStats = 0;
     const relay = await lending;
+    if (viewer.closed() || this.video !== mine) {
+      if (this.video === mine) this.video = undefined;
+      return "refused";
+    }
     const iceServers = this.servers(relay);
     viewer.tell({ rtc: { t: "config", iceServers } });
     // LINKSHELL_SCREEN_FPS: another frame rate than the app's own choice, to try one out.
@@ -813,6 +819,7 @@ export class ScreenShare {
   private stream(ws: WebSocket, display: number, relayed: boolean, wantsVideo: boolean, width: number | undefined, maxFps?: number, diagnostics = false, codec?: "hevc", turn = false, match?: ScreenMatch, audio = false): void {
     let shown = this.displays.find((entry) => entry.index === display) ?? this.displays[0];
     let desired: ScreenConfiguration = { display: shown?.index ?? 0, width: width ?? 1920, maxFps: maxFps === 30 || maxFps === 60 || maxFps === 120 ? maxFps : undefined, paused: false };
+    let desiredAudio = audio;
     let closed = false;
     const live = () => !closed && ws.readyState === ws.OPEN;
     const tell = (message: object) => { if (live()) ws.send(JSON.stringify(message)); };
@@ -838,7 +845,7 @@ export class ScreenShare {
     let signals: Promise<void> = Promise.resolve();
     const windows = process.platform === "win32";
     const best = relayed ? windows ? 1 : RELAY_LEVEL : 0;
-    const pacer = new Pacer(Date.now(), windows ? { maxInFlight: 2, behindMs: 120, caughtUpMs: 50, probeMs: 1500 } : {});
+    const pacer = new Pacer(Date.now(), windows ? { maxInFlight: 3, behindMs: 280, caughtUpMs: 120, probeMs: 1500 } : {});
     const profileFor = (next: number, configuration: ScreenConfiguration): StreamProfile => ({
       ...fallbackProfile(next, configuration),
       ...(windows ? windowsProfile(next, configuration.width, configuration.maxFps) : {}),
@@ -963,7 +970,7 @@ export class ScreenShare {
       const captureAt = ++captureGeneration;
       const wanted = () => live() && revision === at && captureGeneration === captureAt && !desired.paused && !video;
       const scoped: CaptureEvents = {
-        frame: (unit, key) => { if (wanted()) events.frame(unit, key); },
+        frame: (unit, key, format) => { if (wanted()) events.frame(unit, key, format); },
         resized: () => { if (wanted()) events.resized?.(); },
         exit: (message) => { if (wanted()) events.exit(message); },
       };
@@ -1185,6 +1192,7 @@ export class ScreenShare {
       }
       else if (kind === "audio") {
         const enabled = (message as { enabled?: unknown }).enabled === true;
+        desiredAudio = enabled;
         if (!desired.paused) video?.setAudio?.(enabled);
       } else if (kind === "control" && !desired.paused) {
         // Requesting control only records intent. Input still needs the applied generation,
@@ -1223,6 +1231,7 @@ export class ScreenShare {
         if (!offered) { startFallback(); return; }
         video = offered;
         if (lostWhileOpening) { startFallback(); return; }
+        if (!desired.paused && desiredAudio !== audio) video.setAudio?.(desiredAudio);
         initialized = true;
         canConfigure = offered.reconfigure === true;
         capabilities();

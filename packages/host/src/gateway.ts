@@ -85,6 +85,10 @@ export function relayUrl(base: string): string {
   return url.toString();
 }
 
+export function ensureIdentity(home: string): Identity {
+  return loadIdentity(home);
+}
+
 function loadIdentity(home: string): Identity {
   const path = join(home, "identity.json");
   try {
@@ -384,12 +388,21 @@ export class GatewayLink {
         }
         const tunnel: Tunnel = { channel: answer.channel, deviceId: from.id, via, ch: frame.ch, closed: false };
         this.tunnels.set(key, tunnel);
-        this.relay.send(from.id, answer.welcome);
+        if (!this.relay.send(from.id, answer.welcome)) {
+          this.closeTunnel(tunnel, "gateway send failed");
+          return;
+        }
         this.options.serve({
           local: false,
           deviceId: from.id,
+          bufferedAmount: () => this.relay.bufferedAmount,
           send: (text) => {
-            if (!tunnel.closed) this.relay.send(from.id, { k: "data", ch: frame.ch, box: tunnel.channel.seal(text) });
+            if (tunnel.closed) return;
+            // Dropping a sealed frame desynchronizes the ordered SecureChannel counter, so close
+            // immediately if the gateway link cannot accept the write.
+            if (!this.relay.send(from.id, { k: "data", ch: frame.ch, box: tunnel.channel.seal(text) })) {
+              this.closeTunnel(tunnel, "gateway send failed");
+            }
           },
           close: () => this.closeTunnel(tunnel, "closed by host", true),
           onMessage: (listener) => (tunnel.message = listener),

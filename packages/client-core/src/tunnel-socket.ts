@@ -22,6 +22,10 @@ export class TunnelSocket implements SocketLike {
   private cleanup: (() => void)[] = [];
   private timer?: ReturnType<typeof setTimeout>;
 
+  get bufferedAmount(): number {
+    return this.relay.bufferedAmount ?? 0;
+  }
+
   constructor(
     private readonly relay: RelayClient,
     device: Identity,
@@ -116,19 +120,29 @@ export class TunnelSocket implements SocketLike {
         return;
       }
       helloSent = true;
-      relay.send(machine.id, opening.hello);
+      if (relay.send(machine.id, opening.hello) === false) {
+        this.fail("与网关的连接断开了");
+        return;
+      }
       this.timer = setTimeout(() => this.fail("电脑没有响应"), HANDSHAKE_TIMEOUT_MS);
     });
   }
 
   send(data: string): void {
     if (this.readyState !== OPEN || !this.channel) return;
-    this.relay.send(this.machine.id, { k: "data", ch: this.ch, box: this.channel.seal(data) });
+    // Never silently drop a sealed frame: SecureChannel's counter already advanced and would desync the tunnel.
+    if (this.relay.send(this.machine.id, { k: "data", ch: this.ch, box: this.channel.seal(data) }) === false) {
+      this.fail("与网关的连接断开了");
+    }
   }
 
   close(): void {
     if (this.readyState === CLOSED) return;
     if (this.readyState === OPEN) this.relay.send(this.machine.id, { k: "close", ch: this.ch });
+    this.finish(1000, "closed");
+  }
+
+  terminate(): void {
     this.finish(1000, "closed");
   }
 

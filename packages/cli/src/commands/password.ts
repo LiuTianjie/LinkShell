@@ -1,42 +1,11 @@
 import { RpcError } from "@linkshell/wire";
 import { linkshellDir } from "../utils/daemon.js";
+import { readHidden as readHiddenInput } from "../utils/format.js";
 import { assertHostRuntime, silenceSqliteWarning, withRunningHost } from "./host.js";
 
 /** Reads a line without echoing it; from a pipe, just the first line. */
-function readHidden(prompt: string): Promise<string> {
-  const stdin = process.stdin;
-  if (!stdin.isTTY) {
-    return new Promise((resolve) => {
-      let text = "";
-      stdin.setEncoding("utf8");
-      stdin.on("data", (chunk) => (text += chunk));
-      stdin.on("end", () => resolve(text.split(/\r?\n/)[0] ?? ""));
-    });
-  }
-  process.stdout.write(prompt);
-  return new Promise((resolve, reject) => {
-    let value = "";
-    stdin.setRawMode(true);
-    stdin.resume();
-    stdin.setEncoding("utf8");
-    const done = (result?: string) => {
-      stdin.setRawMode(false);
-      stdin.pause();
-      stdin.removeListener("data", onData);
-      process.stdout.write("\n");
-      if (result === undefined) reject(new Error("cancelled"));
-      else resolve(result);
-    };
-    const onData = (chunk: string) => {
-      for (const char of chunk) {
-        if (char === "\u0003") return done();
-        if (char === "\r" || char === "\n") return done(value);
-        if (char === "\u007f" || char === "\b") value = value.slice(0, -1);
-        else if (char >= " ") value += char;
-      }
-    };
-    stdin.on("data", onData);
-  });
+export function readHidden(prompt: string): Promise<string> {
+  return readHiddenInput(prompt, { output: process.stdout });
 }
 
 function unknownMethod(error: unknown): boolean {

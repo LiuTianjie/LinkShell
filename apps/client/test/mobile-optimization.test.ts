@@ -400,6 +400,154 @@ describe("LAN Direct Discovery, E2EE Handshake & Seamless Gateway Fallback", () 
     }
   });
 
+  it("uses RFC 8305 staggered Happy Eyeballs: races gateway at 250ms, picks first OPEN, and aborts the loser immediately", () => {
+    vi.useFakeTimers();
+    try {
+      const makeRaceSocket = () => {
+        let state = 0;
+        const sent: string[] = [];
+        let closeCalls = 0;
+        const sock: SocketLike & {
+          sent: string[];
+          get closeCalls(): number;
+          setOpen: () => void;
+          fail: () => void;
+        } = {
+          get readyState() {
+            return state;
+          },
+          get closeCalls() {
+            return closeCalls;
+          },
+          onopen: null,
+          onclose: null,
+          onerror: null,
+          onmessage: null,
+          sent,
+          setOpen: () => {
+            state = 1;
+            sock.onopen?.({});
+          },
+          fail: () => {
+            state = 3;
+            sock.onerror?.({});
+            sock.onclose?.({ code: 1006 });
+          },
+          send: (data: string) => sent.push(data),
+          close: () => {
+            closeCalls += 1;
+            state = 3;
+          },
+        };
+        return sock;
+      };
+
+      // Scenario A: LAN blackholed, Gateway opens at 320ms (70ms after 250ms stagger) -> Gateway wins at 320ms, NOT 1800ms!
+      const lanA = makeRaceSocket();
+      const gwA = makeRaceSocket();
+      let gwAOpenedAt = -1;
+      let routeA: string | undefined;
+      const t0 = Date.now();
+      const hybridA = new HybridLanGatewaySocket({
+        openLan: () => lanA,
+        openGateway: () => {
+          gwAOpenedAt = Date.now() - t0;
+          return gwA;
+        },
+        onRouteSelected: (mode) => {
+          routeA = mode;
+        },
+      });
+
+      vi.advanceTimersByTime(249);
+      expect(gwAOpenedAt).toBe(-1);
+      vi.advanceTimersByTime(1);
+      expect(gwAOpenedAt).toBe(250);
+      vi.advanceTimersByTime(70);
+      gwA.setOpen();
+      expect(hybridA.readyState).toBe(1);
+      expect(routeA).toBe("gateway");
+      expect(lanA.readyState).toBe(3);
+      expect(lanA.closeCalls).toBe(1);
+      hybridA.close();
+
+      // Scenario B: LAN slow (300ms), Gateway dialed at 250ms, LAN opens first at 300ms -> LAN wins and immediately aborts Gateway!
+      const lanB = makeRaceSocket();
+      const gwB = makeRaceSocket();
+      let routeB: string | undefined;
+      const hybridB = new HybridLanGatewaySocket({
+        openLan: () => lanB,
+        openGateway: () => gwB,
+        onRouteSelected: (mode) => {
+          routeB = mode;
+        },
+      });
+      vi.advanceTimersByTime(250);
+      expect(gwB.readyState).toBe(0);
+      vi.advanceTimersByTime(50);
+      lanB.setOpen();
+      expect(hybridB.readyState).toBe(1);
+      expect(routeB).toBe("lan");
+      expect(gwB.readyState).toBe(3);
+      expect(gwB.closeCalls).toBe(1);
+      // Late gateway open after abort must be ignored.
+      gwB.setOpen();
+      expect(routeB).toBe("lan");
+      hybridB.close();
+
+      // Scenario C: LAN fails immediately at 40ms -> Gateway dials immediately without waiting 250ms.
+      const lanC = makeRaceSocket();
+      const gwC = makeRaceSocket();
+      let gwCOpenedAt = -1;
+      const tC = Date.now();
+      const hybridC = new HybridLanGatewaySocket({
+        openLan: () => lanC,
+        openGateway: () => {
+          gwCOpenedAt = Date.now() - tC;
+          return gwC;
+        },
+      });
+      vi.advanceTimersByTime(40);
+      lanC.fail();
+      expect(gwCOpenedAt).toBe(40);
+      gwC.setOpen();
+      expect(hybridC.readyState).toBe(1);
+      hybridC.close();
+
+      // Scenario D: Gateway fails early during race while LAN is still connecting -> LAN can still win; close() mid-race closes both.
+      const lanD = makeRaceSocket();
+      const gwD = makeRaceSocket();
+      let closedD = false;
+      const hybridD = new HybridLanGatewaySocket({
+        openLan: () => lanD,
+        openGateway: () => gwD,
+      });
+      hybridD.onclose = () => {
+        closedD = true;
+      };
+      vi.advanceTimersByTime(250);
+      gwD.fail();
+      expect(closedD).toBe(false);
+      lanD.setOpen();
+      expect(hybridD.readyState).toBe(1);
+      hybridD.close();
+
+      // Scenario E: close() mid-race aborts both sockets cleanly.
+      const lanE = makeRaceSocket();
+      const gwE = makeRaceSocket();
+      const hybridE = new HybridLanGatewaySocket({
+        openLan: () => lanE,
+        openGateway: () => gwE,
+      });
+      vi.advanceTimersByTime(250);
+      hybridE.close();
+      expect(lanE.readyState).toBe(3);
+      expect(gwE.readyState).toBe(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("authenticates and encrypts RPC payloads end-to-end over LanE2eeSocket", () => {
     const device = createIdentity();
     const machine = createIdentity();

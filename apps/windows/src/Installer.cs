@@ -71,7 +71,8 @@ namespace LinkShell.Windows {
             heading = Label("准备安装 LinkShell", 27, true); body.Children.Add(heading);
             description = Label("从手机连接这台电脑，跟进 Agent 任务、终端和远程屏幕。", 13, false, "Secondary"); description.Margin = new Thickness(0, 10, 0, 22); body.Children.Add(description);
             var path = new StackPanel(); path.Children.Add(Label("安装位置", 12, false, "Secondary"));
-            var location = new TextBox { Text = engine.Destination, IsReadOnly = true, BorderThickness = new Thickness(0), Background = Brushes.Transparent, Padding = new Thickness(0), Margin = new Thickness(0, 8, 0, 0), TextWrapping = TextWrapping.Wrap }; AutomationProperties.SetName(location, "安装位置"); path.Children.Add(location);
+            var focusStyle = CreateFocusVisualStyle();
+            var location = new TextBox { Text = engine.Destination, IsReadOnly = true, BorderThickness = new Thickness(0), Background = Brushes.Transparent, Padding = new Thickness(0), Margin = new Thickness(0, 8, 0, 0), TextWrapping = TextWrapping.Wrap, FocusVisualStyle = focusStyle }; AutomationProperties.SetName(location, "安装位置"); path.Children.Add(location);
             body.Children.Add(new Border { Child = path, Background = Brush("Sidebar"), BorderBrush = Brush("Line"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(10), Padding = new Thickness(18), Margin = new Thickness(0, 0, 0, 18) });
             var status = new StackPanel(); var row = new DockPanel();
             percent = Label("0%", 13, true, "Accent"); DockPanel.SetDock(percent, Dock.Right); row.Children.Add(percent);
@@ -82,12 +83,12 @@ namespace LinkShell.Windows {
             detail = Label("", 11, false, "Secondary"); detail.TextWrapping = TextWrapping.NoWrap; detail.TextTrimming = TextTrimming.CharacterEllipsis; status.Children.Add(detail);
             progressCard = new Border { Child = status, Visibility = Visibility.Collapsed, Margin = new Thickness(0, 0, 0, 16) }; body.Children.Add(progressCard);
             result = Label("仅为当前用户安装，无需管理员权限。\n更新前请从托盘退出 LinkShell；更新会暂时停止其托管的服务，可能中断任务。账号、配对和会话历史会保留。", 12, false, "Secondary"); result.LineHeight = 21; body.Children.Add(result);
-            launch = new CheckBox { Content = "安装完成后启动 LinkShell", IsChecked = true, Margin = new Thickness(0, 20, 0, 0), Visibility = Visibility.Collapsed }; body.Children.Add(launch);
+            launch = new CheckBox { Content = "安装完成后启动 LinkShell", IsChecked = true, Margin = new Thickness(0, 20, 0, 0), Visibility = Visibility.Collapsed, FocusVisualStyle = focusStyle }; body.Children.Add(launch);
             var footer = new StackPanel(); Grid.SetRow(footer, 2); root.Children.Add(footer);
             footer.Children.Add(new Border { Height = 1, Background = Brush("Line"), Margin = new Thickness(0, 18, 0, 18) });
             var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
-            secondary = new Button { Content = "取消", MinWidth = 90, Margin = new Thickness(0, 0, 12, 0) }; secondary.Click += (s, e) => CancelOrClose(); buttons.Children.Add(secondary);
-            primary = new Button { Content = "安装", MinWidth = 124, Background = Brush("AccentFill"), Foreground = Brush("OnAccent"), FontWeight = FontWeights.SemiBold, BorderThickness = new Thickness(0), IsDefault = true }; primary.Click += async (s, e) => { if (installed) Finish(); else await BeginInstall(); }; buttons.Children.Add(primary); footer.Children.Add(buttons);
+            secondary = new Button { Content = "取消", MinWidth = 90, Margin = new Thickness(0, 0, 12, 0), FocusVisualStyle = focusStyle }; secondary.Click += (s, e) => CancelOrClose(); buttons.Children.Add(secondary);
+            primary = new Button { Content = "安装", MinWidth = 124, Background = Brush("AccentFill"), Foreground = Brush("OnAccent"), FontWeight = FontWeights.SemiBold, BorderBrush = Brush("AccentFill"), BorderThickness = new Thickness(2), IsDefault = true, FocusVisualStyle = focusStyle }; primary.Click += async (s, e) => { if (installed) Finish(); else await BeginInstall(); }; buttons.Children.Add(primary); footer.Children.Add(buttons);
             Content = root;
             SourceInitialized += (s, e) => { int value = 1; try { DwmSetWindowAttribute(new WindowInteropHelper(this).Handle, 20, ref value, 4); } catch (DllNotFoundException) {} };
             Closing += (s, e) => { if (working) { e.Cancel = true; CancelOrClose(); } };
@@ -99,6 +100,18 @@ namespace LinkShell.Windows {
 
         static Stream Resource(string name) { return Assembly.GetExecutingAssembly().GetManifestResourceStream(name); }
         Brush Brush(string key) { return (Brush)FindResource(key); }
+        Style CreateFocusVisualStyle() {
+            var style = new Style(typeof(Control));
+            var border = new FrameworkElementFactory(typeof(Border));
+            border.SetValue(Border.BorderBrushProperty, Brush("Accent"));
+            border.SetValue(Border.BorderThicknessProperty, new Thickness(2));
+            border.SetValue(Border.CornerRadiusProperty, new CornerRadius(7));
+            border.SetValue(FrameworkElement.MarginProperty, new Thickness(-3));
+            border.SetValue(UIElement.SnapsToDevicePixelsProperty, true);
+            var template = new ControlTemplate(typeof(Control)) { VisualTree = border };
+            style.Setters.Add(new Setter(Control.TemplateProperty, template));
+            return style;
+        }
         TextBlock Label(string value, double size, bool bold = false, string tone = "Primary") { return new TextBlock { Text = value, FontSize = size, FontWeight = bold ? FontWeights.SemiBold : FontWeights.Normal, Foreground = Brush(tone), VerticalAlignment = VerticalAlignment.Center }; }
 
         internal async Task BeginInstall() {

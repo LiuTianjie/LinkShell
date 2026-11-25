@@ -219,4 +219,183 @@ describe("Host-owned Live Activity updates", () => {
     finish(new Response(null, { status: 200 })); await pending;
     await s.relay.flush(); expect(s.body().notice.id).toBe(noticeId);
   });
+
+  it("triggers push-to-start ONLY for urgent waiting/error transitions and always includes computerName", async () => {
+    const s = setup();
+    const ptsGrant = "b".repeat(64);
+    s.relay.registerPushToStart({
+      deviceId: "ios-phone-1",
+      pushToStartToken: "fe".repeat(32),
+      platform: "ios",
+      serviceUrl: "https://push.itool.tech",
+      grant: ptsGrant,
+      expiresAt: Date.now() + 3_600_000,
+      computerKey: "computer-1",
+    });
+
+    // Routine running, starting, and completed transitions NEVER trigger push-to-start.
+    s.setSessions([{ ...first, id: "task-run", state: "unknown", updatedAt: 10 }]);
+    await s.relay.flush();
+    s.setSessions([{ ...first, id: "task-run", state: "running", updatedAt: 11 }]);
+    await s.relay.flush();
+    s.setSessions([{ ...first, id: "task-run", state: "idle", updatedAt: 12 }]);
+    await s.relay.flush();
+    expect(s.request).not.toHaveBeenCalled();
+
+    // Actionable waiting transition triggers push-to-start with computerName.
+    s.setSessions([{
+      ...first,
+      id: "task-run",
+      state: "waiting",
+      pendingPermissions: 1,
+      permission: { requestId: "req-1", title: "Run build?", options: [{ optionId: "accept", name: "Allow", kind: "allow_once" }] },
+      updatedAt: 13,
+    }]);
+    await s.relay.flush();
+    expect(s.request).toHaveBeenCalledTimes(1);
+    expect(s.request.mock.calls[0]![0]).toBe("https://push.itool.tech/v1/activities/start");
+    expect(s.body()).toMatchObject({
+      deviceId: "ios-phone-1",
+      computerKey: "computer-1",
+      computerName: "Mac",
+      phase: "waiting_for_approval",
+    });
+  });
+
+  it("enforces per-(deviceId, computerKey) push-to-start cooldown across restarts and resets after foreground lifecycle ends", async () => {
+    const s = setup();
+    const ptsGrant = "c".repeat(64);
+    s.relay.registerPushToStart({
+      deviceId: "ios-phone-1",
+      pushToStartToken: "fe".repeat(32),
+      platform: "ios",
+      serviceUrl: "https://push.itool.tech",
+      grant: ptsGrant,
+      expiresAt: Date.now() + 24 * 3_600_000,
+      computerKey: "computer-1",
+    });
+
+    // First urgent transition triggers push-to-start and starts 15m cooldown.
+    s.setSessions([{ ...first, state: "waiting", updatedAt: 20 }]);
+    await s.relay.flush();
+    expect(s.request).toHaveBeenCalledTimes(1);
+
+    // Subsequent urgent error transition within cooldown does NOT fire another push-to-start.
+    s.advance(60_000);
+    s.setSessions([{ ...first, state: "error", updatedAt: 21 }]);
+    await s.relay.flush();
+    expect(s.request).toHaveBeenCalledTimes(1);
+
+    // Cooldown survives Host restart.
+    s.relay.stop();
+    const restarted = s.create();
+    s.advance(60_000);
+    s.setSessions([{ ...first, state: "waiting", updatedAt: 22 }]);
+    await restarted.flush();
+    expect(s.request).toHaveBeenCalledTimes(1);
+
+    // Foreground subscribe + unsubscribe resets cooldown cleanly.
+    restarted.subscribe({ ...s.subscription, activityId: "act-fg-1", deviceId: "ios-phone-1", expiresAt: Date.now() + 3_600_000 });
+    await restarted.unsubscribe("act-fg-1");
+    s.request.mockClear();
+
+    s.setSessions([{ ...first, state: "error", updatedAt: 23 }]);
+    await restarted.flush();
+    expect(s.request).toHaveBeenCalledTimes(1);
+    expect(s.request.mock.calls[0]![0]).toBe("https://push.itool.tech/v1/activities/start");
+    expect(s.body()).toMatchObject({ phase: "failed", computerName: "Mac" });
+
+    // Without foreground registration, cooldown expires naturally after 15 minutes.
+    s.advance(15 * 60_000 + 1);
+    s.setSessions([{ ...first, state: "waiting", updatedAt: 24 }]);
+    await restarted.flush();
+    expect(s.request).toHaveBeenCalledTimes(2);
+  });
+
+  it("deduplicates subscribed activityIds per (deviceId, computerKey), retires superseded ones with end, and preserves multi-device cards", async () => {
+    const s = setup();
+    const grant1 = "1".repeat(64);
+    const grant2 = "2".repeat(64);
+    const grantIpad = "3".repeat(64);
+
+    // iPhone subscribes act-old for computer-1.
+    s.relay.subscribe({
+      activityId: "act-old",
+      computerKey: "computer-1",
+      deviceId: "ios-iphone",
+      serviceUrl: "https://push.itool.tech",
+      grant: grant1,
+      expiresAt: Date.now() + 60_000,
+    });
+    // iPad subscribes act-ipad for computer-1 (different deviceId -> must NOT be retired!).
+    s.relay.subscribe({
+      activityId: "act-ipad",
+      computerKey: "computer-1",
+      deviceId: "ios-ipad",
+      serviceUrl: "https://push.itool.tech",
+      grant: grantIpad,
+      expiresAt: Date.now() + 60_000,
+    });
+    await s.relay.flush();
+    s.request.mockClear();
+
+    // iPhone registers replacement act-new for computer-1 -> act-old must be retired with event:end!
+    s.relay.subscribe({
+      activityId: "act-new",
+      computerKey: "computer-1",
+      deviceId: "ios-iphone",
+      serviceUrl: "https://push.itool.tech",
+      grant: grant2,
+      expiresAt: Date.now() + 60_000,
+    });
+    await Promise.resolve();
+    await s.relay.flush();
+
+    const calls = s.request.mock.calls.map(([url, init]) => ({
+      url: String(url),
+      method: init?.method,
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    }));
+    expect(calls).toContainEqual(expect.objectContaining({
+      url: "https://push.itool.tech/v1/activities/act-old/events",
+      method: "POST",
+      body: expect.objectContaining({ event: "end" }),
+    }));
+    // Only act-new and act-ipad remain active on disk and receive updates (act-old is gone).
+    const persisted = JSON.parse(readFileSync(s.path, "utf8")) as Array<{ activityId: string }>;
+    expect(persisted.map((item) => item.activityId).sort()).toEqual(["act-ipad", "act-new"]);
+    const updateUrls = calls.filter((c) => c.body?.event === "update").map((c) => c.url).sort();
+    expect(updateUrls).toEqual([
+      "https://push.itool.tech/v1/activities/act-ipad/events",
+      "https://push.itool.tech/v1/activities/act-new/events",
+    ]);
+  });
+
+  it("falls back to DELETE when retiring a superseded legacy subscription gets HTTP 429", async () => {
+    const s = setup();
+    s.relay.subscribe({
+      activityId: "legacy-1",
+      computerKey: "computer-1",
+      serviceUrl: "https://push.itool.tech",
+      grant: "4".repeat(64),
+      expiresAt: Date.now() + 60_000,
+    });
+    s.request.mockClear();
+    s.request.mockResolvedValueOnce(new Response(JSON.stringify({ error: "coalesce_updates" }), { status: 429 }));
+
+    s.relay.subscribe({
+      activityId: "legacy-2",
+      computerKey: "computer-1",
+      serviceUrl: "https://push.itool.tech",
+      grant: "5".repeat(64),
+      expiresAt: Date.now() + 60_000,
+    });
+    await vi.waitFor(() => {
+      expect(s.request.mock.calls.some(([url, init]) =>
+        String(url).endsWith("/v1/activities/legacy-1") && init?.method === "DELETE",
+      )).toBe(true);
+    });
+    const persisted = JSON.parse(readFileSync(s.path, "utf8")) as Array<{ activityId: string }>;
+    expect(persisted.map((item) => item.activityId)).toEqual(["legacy-2"]);
+  });
 });

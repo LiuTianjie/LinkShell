@@ -15,6 +15,35 @@ export function sanitizeTerminalPasteText(text: string): string {
 }
 
 /**
+ * Splits raw already-encoded terminal data (e.g. Ghostty bracketed paste output) into
+ * 64 KiB chunks without stripping escape sequences or splitting UTF-16 surrogate pairs.
+ */
+export function chunkRawTerminalData(
+  data: string,
+  maxChunkLength = TERMINAL_PASTE_MAX_CHUNK_LENGTH,
+): string[] {
+  if (!data) return [];
+  const limit = Math.max(16, maxChunkLength);
+  if (data.length <= limit) return [data];
+  const chunks: string[] = [];
+  let offset = 0;
+  while (offset < data.length) {
+    let end = Math.min(data.length, offset + limit);
+    if (end < data.length && /[\uD800-\uDBFF]/.test(data[end - 1]!)) {
+      end -= 1;
+    }
+    // Keep a trailing bracketed-paste end sequence (`\x1b[201~`) intact in a single chunk.
+    const bracketEnd = data.lastIndexOf("\x1b[201~");
+    if (bracketEnd > offset && bracketEnd < end && end < bracketEnd + 6) {
+      end = bracketEnd;
+    }
+    chunks.push(data.slice(offset, end));
+    offset = end;
+  }
+  return chunks;
+}
+
+/**
  * Splits sanitized paste text into 64 KiB chunks without splitting UTF-16 surrogate pairs.
  */
 export function chunkTerminalPasteText(
@@ -23,18 +52,7 @@ export function chunkTerminalPasteText(
 ): string[] {
   const sanitized = sanitizeTerminalPasteText(text);
   if (!sanitized) return [];
-  const limit = Math.max(16, maxChunkLength);
-  const chunks: string[] = [];
-  let offset = 0;
-  while (offset < sanitized.length) {
-    let end = Math.min(sanitized.length, offset + limit);
-    if (end < sanitized.length && /[\uD800-\uDBFF]/.test(sanitized[end - 1]!)) {
-      end -= 1;
-    }
-    chunks.push(sanitized.slice(offset, end));
-    offset = end;
-  }
-  return chunks;
+  return chunkRawTerminalData(sanitized, maxChunkLength);
 }
 
 /**
@@ -77,6 +95,30 @@ export function cleanTerminalOutputForAgent(raw: string, maxLines = 80): string 
   return logicalLines.slice(-maxLines).join("\n");
 }
 
+const VT_INPUT_TO_KEY_NAME: Record<string, string> = {
+  "\x7f": "backspace",
+  "\b": "backspace",
+  "\x1b[A": "up",
+  "\x1bOA": "up",
+  "\x1b[B": "down",
+  "\x1bOB": "down",
+  "\x1b[C": "right",
+  "\x1bOC": "right",
+  "\x1b[D": "left",
+  "\x1bOD": "left",
+  "\x1b[H": "home",
+  "\x1bOH": "home",
+  "\x1b[F": "end",
+  "\x1bOF": "end",
+  "\x1b[5~": "pageUp",
+  "\x1b[6~": "pageDown",
+};
+
+/** Maps a raw VT sequence from `onInput` (e.g. keyboard backspace/arrows) to a logical Ghostty key name. */
+export function terminalKeyNameFromInput(data: string): string | undefined {
+  return VT_INPUT_TO_KEY_NAME[data];
+}
+
 /**
  * Encodes terminal keys and modifiers into VT sequences when either using
  * one-shot JS modifiers (ctrl / alt / cmd) or running on a fallback view.
@@ -85,8 +127,10 @@ export function encodeTerminalKeySequence(
   name: string,
   modifiers: TerminalKeyModifiers & { cmd?: boolean } = {},
 ): string | undefined {
+  const normalized = VT_INPUT_TO_KEY_NAME[name] ?? name;
+
   if (modifiers.cmd) {
-    const lower = name.toLowerCase();
+    const lower = normalized.toLowerCase();
     if (lower === "k") return "\x0c"; // Cmd+K -> Clear screen (Ctrl+L)
     if (lower === "c") return "\x03"; // Cmd+C -> SIGINT
     if (lower === "d") return "\x04"; // Cmd+D -> EOF
@@ -99,28 +143,45 @@ export function encodeTerminalKeySequence(
     if (lower === "backspace") return "\x15";
   }
 
+  const csiModifier =
+    1 + (modifiers.shift ? 1 : 0) + (modifiers.alt ? 2 : 0) + (modifiers.ctrl ? 4 : 0);
+
+  const csiCursorFinal: Record<string, string> = {
+    up: "A",
+    down: "B",
+    right: "C",
+    left: "D",
+    home: "H",
+    end: "F",
+  };
+  if (csiCursorFinal[normalized]) {
+    const final = csiCursorFinal[normalized]!;
+    return csiModifier > 1 ? `\x1b[1;${csiModifier}${final}` : `\x1b[${final}`;
+  }
+
+  const csiTildeCode: Record<string, number> = {
+    pageUp: 5,
+    pageDown: 6,
+  };
+  if (csiTildeCode[normalized] !== undefined) {
+    const code = csiTildeCode[normalized]!;
+    return csiModifier > 1 ? `\x1b[${code};${csiModifier}~` : `\x1b[${code}~`;
+  }
+
   const special: Record<string, string> = {
     enter: modifiers.shift ? "\x1b[13;2u" : "\r",
     escape: "\x1b",
     tab: modifiers.shift ? "\x1b[Z" : "\t",
-    up: "\x1b[A",
-    down: "\x1b[B",
-    right: "\x1b[C",
-    left: "\x1b[D",
     backspace: "\x7f",
-    home: "\x1b[H",
-    end: "\x1b[F",
-    pageUp: "\x1b[5~",
-    pageDown: "\x1b[6~",
   };
 
-  if (special[name]) {
-    const seq = special[name]!;
+  if (special[normalized]) {
+    const seq = special[normalized]!;
     return modifiers.alt && !seq.startsWith("\x1b") ? `\x1b${seq}` : seq;
   }
 
-  if (name.length === 1) {
-    let ch = modifiers.shift ? name.toUpperCase() : name;
+  if (normalized.length === 1) {
+    let ch = modifiers.shift ? normalized.toUpperCase() : normalized;
     if (modifiers.ctrl) {
       const code = ch.toUpperCase().charCodeAt(0);
       if (code >= 64 && code <= 95) {

@@ -1,15 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import net from "node:net";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { EventEmitter } from "node:events";
+import type { ChildProcess } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import WebSocket from "ws";
 import { RTCPeerConnection } from "werift";
 import { DirectPeer } from "../src/direct.js";
-import { ProxyStreams } from "../src/ports.js";
-import { acquireHostLock, ensureSecureRunDir, startHost } from "../src/host.js";
-import { HostRpcServer, buildDesktopOpenCommand, openDesktopPath } from "../src/rpc/server.js";
+import { parseProcNetTcp, procNetListeners, ProxyStreams } from "../src/ports.js";
+import { acquireHostLock, ensureSecureRunDir, hostPaths, isLinkShellHostCmdline, startHost } from "../src/host.js";
+import { HostRpcServer, buildDesktopOpenCommand, openDesktopPath, resolveLinuxTerminalCommand } from "../src/rpc/server.js";
 import { connectHost } from "../src/rpc/client.js";
 import { HostStore } from "../src/store.js";
 import { TerminalManager } from "../src/terminals.js";
@@ -183,6 +185,169 @@ describe("Host lockfile, secure runDir, live socket probe, WS heartbeat, session
 
     release();
     expect(existsSync(lockPath)).toBe(false);
+  });
+
+  it("reclaims Linux host.lock on EPERM or recycled non-LinkShell PID, and keeps live LinkShell PID locks", () => {
+    const dir = tempDir("lsh-lock-linux-");
+    const lockPath = join(dir, "host.lock");
+    expect(isLinkShellHostCmdline("/usr/bin/node\0/usr/local/bin/linkshell\0host\0--daemon\0")).toBe(true);
+    expect(isLinkShellHostCmdline("/usr/bin/python3\0app.py\0")).toBe(false);
+
+    // 1. EPERM from kill(pid, 0) means another user owns the recycled PID -> reclaim lock.
+    writeFileSync(lockPath, `${JSON.stringify({ pid: 4242, startedAt: 1000 })}\n`);
+    const releaseEperm = acquireHostLock(lockPath, {
+      platform: "linux",
+      killZero: () => {
+        const err = new Error("Operation not permitted") as NodeJS.ErrnoException;
+        err.code = "EPERM";
+        throw err;
+      },
+    });
+    releaseEperm();
+
+    // 2. Recycled PID owned by same user running a non-LinkShell binary -> reclaim lock.
+    writeFileSync(lockPath, `${JSON.stringify({ pid: 5252, startedAt: 1000 })}\n`);
+    const releaseRecycled = acquireHostLock(lockPath, {
+      platform: "linux",
+      socketReachable: false,
+      killZero: () => {},
+      readProcCmdline: () => "/usr/bin/python3\0server.py\0",
+    });
+    releaseRecycled();
+
+    // 3. Live PID whose /proc/<pid>/cmdline IS a LinkShell host -> reject acquisition.
+    writeFileSync(lockPath, `${JSON.stringify({ pid: 6262, startedAt: 1000 })}\n`);
+    expect(() =>
+      acquireHostLock(lockPath, {
+        platform: "linux",
+        socketReachable: false,
+        killZero: () => {},
+        readProcCmdline: () => "/usr/bin/node\0/usr/lib/node_modules/linkshell-cli/dist/index.js\0host\0",
+      }),
+    ).toThrow(/already running/);
+  });
+
+  it.skipIf(process.platform === "win32")("prefers writable $XDG_RUNTIME_DIR on Linux for long homes and enforces 0700/0600 permissions", async () => {
+    const xdg = tempDir("lsh-xdg-");
+    const longHome = join(xdg, "a".repeat(95));
+    const linuxPaths = hostPaths(longHome, { platform: "linux", env: { XDG_RUNTIME_DIR: xdg }, uid: 1000 });
+    expect(linuxPaths.runDir.startsWith(join(xdg, "linkshell-"))).toBe(true);
+    expect(Buffer.byteLength(linuxPaths.codexSocket)).toBeLessThanOrEqual(100);
+
+    // Falls back to /tmp when XDG_RUNTIME_DIR is missing or not writable.
+    const fallbackPaths = hostPaths(longHome, { platform: "linux", env: { XDG_RUNTIME_DIR: join(xdg, "missing") }, uid: 1000 });
+    expect(fallbackPaths.runDir.startsWith("/tmp/linkshell-1000-")).toBe(true);
+
+    // Verify startHost enforces 0700 on home/runDir and 0600 on state.db (+ sidecars) and host.sock.
+    const home = tempDir("lsh-perms-");
+    const host = await startHost({ home, version: "test", drivers: () => [], discoveryIntervalMs: 0, log: () => {} });
+    cleanups.push(() => host.stop());
+    expect(statSync(host.paths.home).mode & 0o777).toBe(0o700);
+    expect(statSync(host.paths.runDir).mode & 0o777).toBe(0o700);
+    expect(statSync(host.paths.database).mode & 0o777).toBe(0o600);
+    expect(statSync(host.paths.hostSocket).mode & 0o777).toBe(0o600);
+    for (const sidecar of [`${host.paths.database}-wal`, `${host.paths.database}-shm`]) {
+      if (existsSync(sidecar)) expect(statSync(sidecar).mode & 0o777).toBe(0o600);
+    }
+  });
+
+  it("advertises mDNS in LAN mode when lanPort is configured and ensures identity.json first", async () => {
+    const home = tempDir("lsh-lan-mdns-");
+    let spawnedArgs: string[] = [];
+    const fakeChild = Object.assign(new EventEmitter(), {
+      exitCode: null as number | null,
+      killed: false,
+      unref: () => {},
+      kill() {
+        this.killed = true;
+        this.exitCode = 0;
+        this.emit("exit", 0);
+        return true;
+      },
+    }) as unknown as ChildProcess;
+
+    const host = await startHost({
+      home,
+      version: "test",
+      lanPort: 8787,
+      mdns: true,
+      spawnMdnsProcess: (_cmd, args) => {
+        spawnedArgs = args;
+        return fakeChild;
+      },
+      drivers: () => [],
+      discoveryIntervalMs: 0,
+      log: () => {},
+    });
+    cleanups.push(() => host.stop());
+
+    expect(existsSync(join(home, "identity.json"))).toBe(true);
+    if (process.platform === "darwin" || process.platform === "linux") {
+      expect(spawnedArgs).toContain("8787");
+      expect(spawnedArgs).toContain("hostport=8787");
+    }
+  });
+
+  it("probes $TERMINAL and major Linux terminal emulators for desktop.openPath terminal", () => {
+    expect(
+      resolveLinuxTerminalCommand("/srv/app", {
+        env: { TERMINAL: "/usr/bin/kitty" },
+        hasCommand: (cmd) => cmd === "/usr/bin/kitty",
+      }),
+    ).toEqual({ command: "/usr/bin/kitty", args: ["--directory", "/srv/app"] });
+
+    expect(
+      buildDesktopOpenCommand("/srv/app/file.ts", false, "terminal", "linux", {
+        env: {},
+        hasCommand: (cmd) => cmd === "konsole",
+      }),
+    ).toEqual({ command: "konsole", args: ["--workdir", "/srv/app"] });
+
+    expect(
+      buildDesktopOpenCommand("/srv/app", true, "terminal", "linux", {
+        env: {},
+        hasCommand: (cmd) => cmd === "wezterm",
+      }),
+    ).toEqual({ command: "wezterm", args: ["start", "--cwd", "/srv/app"] });
+
+    expect(
+      buildDesktopOpenCommand("/srv/app", true, "terminal", "linux", {
+        env: {},
+        hasCommand: (cmd) => cmd === "alacritty" || cmd === "x-terminal-emulator",
+      }),
+    ).toEqual({ command: "alacritty", args: ["--working-directory", "/srv/app"] });
+  });
+
+  it.skipIf(process.platform === "win32")("parses Linux /proc/net/tcp{,6} and resolves socket owners when ss is unavailable", async () => {
+    const tcp4 = [
+      "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode",
+      "   0: 0100007F:1435 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 55501 1 0000 100 0 0 10 0",
+      "   1: 0100007F:1436 0100007F:C350 01 00000000:00000000 00:00000000 00000000  1000        0 55502 1 0000 100 0 0 10 0",
+    ].join("\n");
+    const tcp6 = [
+      "  sl  local_address                         remote_address                        st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode",
+      "   0: 00000000000000000000000001000000:1F90 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 66602 1 0000 100 0 0 10 0",
+    ].join("\n");
+
+    expect(parseProcNetTcp(tcp4)).toEqual([{ port: 5173, inode: "55501" }]);
+    expect(parseProcNetTcp(tcp6)).toEqual([{ port: 8080, inode: "66602" }]);
+
+    const fakeProc = tempDir("lsh-proc-");
+    mkdirSync(join(fakeProc, "net"), { recursive: true });
+    writeFileSync(join(fakeProc, "net", "tcp"), tcp4);
+    writeFileSync(join(fakeProc, "net", "tcp6"), tcp6);
+    mkdirSync(join(fakeProc, "4321", "fd"), { recursive: true });
+    writeFileSync(join(fakeProc, "4321", "comm"), "node\n");
+    symlinkSync("socket:[55501]", join(fakeProc, "4321", "fd", "20"));
+    mkdirSync(join(fakeProc, "9876", "fd"), { recursive: true });
+    writeFileSync(join(fakeProc, "9876", "comm"), "python3\n");
+    symlinkSync("socket:[66602]", join(fakeProc, "9876", "fd", "7"));
+
+    const found = await procNetListeners(fakeProc);
+    expect(found).toEqual([
+      { port: 5173, pid: 4321, process: "node" },
+      { port: 8080, pid: 9876, process: "python3" },
+    ]);
   });
 
   it.skipIf(process.platform === "win32")("probes socketPath before unlinking so a live listener's socket is never deleted", async () => {

@@ -173,6 +173,32 @@ final class DesktopScreenReceiverTests: XCTestCase {
     XCTAssertTrue(state.allowsInput)
   }
 
+  func testCandidatePathClassifiesRelayLanAndDirectConnections() {
+    XCTAssertEqual(
+      DesktopScreenReceiver.candidatePath(localType: "relay", remoteType: "srflx", localAddress: "1.2.3.4", remoteAddress: "5.6.7.8"),
+      "relay"
+    )
+    XCTAssertEqual(
+      DesktopScreenReceiver.candidatePath(localType: "host", remoteType: "relay", localAddress: "192.168.1.2", remoteAddress: "203.0.113.5"),
+      "relay"
+    )
+    XCTAssertEqual(
+      DesktopScreenReceiver.candidatePath(localType: "host", remoteType: "host", localAddress: "192.168.1.2", remoteAddress: "192.168.1.9"),
+      "lan"
+    )
+    XCTAssertEqual(
+      DesktopScreenReceiver.candidatePath(localType: "host", remoteType: "prflx", localAddress: "10.0.0.5", remoteAddress: "172.16.4.8"),
+      "lan"
+    )
+    XCTAssertEqual(
+      DesktopScreenReceiver.candidatePath(localType: "srflx", remoteType: "srflx", localAddress: "198.51.100.1", remoteAddress: "203.0.113.9"),
+      "direct"
+    )
+    XCTAssertNil(
+      DesktopScreenReceiver.candidatePath(localType: nil, remoteType: nil, localAddress: nil, remoteAddress: nil)
+    )
+  }
+
   private var capabilities: [String: Any] { ["t": "capabilities", "version": 1, "configure": true, "pause": true] }
 
   private func configuredState() -> DesktopScreenInputState {

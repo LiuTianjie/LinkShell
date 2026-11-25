@@ -196,6 +196,10 @@ export function describeClaudeTool(name: string, input: Json): { title: string; 
       const skill = str(input.skill) ?? str(input.command) ?? "skill";
       return { title: `Skill: ${skill}`, kind: "other", detail: { type: "skill", name: skill.replace(/^\//, "") } };
     }
+    case "ExitPlanMode":
+      return { title: "Approve Plan", kind: "switch_mode" };
+    case "EnterPlanMode":
+      return { title: "Enter Plan Mode", kind: "switch_mode" };
     default: {
       // MCP tools are named mcp__<server>__<tool>.
       const mcp = /^mcp__(.+?)__(.+)$/.exec(name);
@@ -225,6 +229,129 @@ function toolContent(name: string, input: Json): ToolCallContent[] | undefined {
 
 /** The last task list per transcript reader (its `hidden` set), for the updates that only move it on. */
 const lastPlans = new WeakMap<Set<string>, { id: string; entries: PlanEntry[] }>();
+
+interface TrackedTask {
+  subject: string;
+  status: PlanEntry["status"];
+  activeForm?: string;
+}
+
+interface TaskTracker {
+  tasks: Map<string, TrackedTask>;
+  pending: Map<string, { name: "TaskCreate" | "TaskUpdate" | "TaskList" | "ExitPlanMode"; input: Json }>;
+}
+
+const taskTrackers = new WeakMap<Set<string>, TaskTracker>();
+
+function taskTrackerOf(reader: Set<string> | undefined): TaskTracker | undefined {
+  if (!reader) return undefined;
+  let tracker = taskTrackers.get(reader);
+  if (!tracker) {
+    tracker = { tasks: new Map(), pending: new Map() };
+    taskTrackers.set(reader, tracker);
+  }
+  return tracker;
+}
+
+function taskPlanEntries(tasks: Map<string, TrackedTask>): PlanEntry[] {
+  return [...tasks.values()].map((task) => ({
+    content: task.status === "in_progress" && task.activeForm ? task.activeForm : task.subject,
+    status: task.status,
+    priority: "medium" as const,
+  }));
+}
+
+function parseJsonObject(text: string | undefined): Json | undefined {
+  if (!text) return undefined;
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("{")) return undefined;
+  try {
+    return obj(JSON.parse(trimmed));
+  } catch {
+    return undefined;
+  }
+}
+
+function parseTaskCreateResult(content: unknown, structured: Json | undefined): { id: string; subject?: string } | undefined {
+  const fromStructured = obj(structured?.task);
+  if (str(fromStructured?.id)) return { id: str(fromStructured?.id)!, subject: str(fromStructured?.subject) };
+  const text = resultText(content);
+  const fromJson = obj(parseJsonObject(text)?.task);
+  if (str(fromJson?.id)) return { id: str(fromJson?.id)!, subject: str(fromJson?.subject) };
+  const match = text ? /^Task #(\S+) created successfully:\s*(.+)$/m.exec(text.trim()) : null;
+  return match ? { id: match[1]!, subject: match[2]! } : undefined;
+}
+
+function parseTaskListResult(content: unknown, structured: Json | undefined): { id: string; subject: string; status: PlanEntry["status"] }[] | undefined {
+  const toEntries = (raw: unknown) => {
+    if (!Array.isArray(raw)) return undefined;
+    const out: { id: string; subject: string; status: PlanEntry["status"] }[] = [];
+    for (const item of raw) {
+      const task = obj(item);
+      const id = str(task?.id);
+      const subject = str(task?.subject);
+      if (!id || !subject) return undefined;
+      const status = task?.status === "completed" || task?.status === "in_progress" ? task.status : "pending";
+      out.push({ id, subject, status });
+    }
+    return out;
+  };
+  const fromStructured = toEntries(structured?.tasks);
+  if (fromStructured) return fromStructured;
+  const text = resultText(content);
+  const fromJson = toEntries(parseJsonObject(text)?.tasks);
+  if (fromJson) return fromJson;
+  if (!text) return undefined;
+  const trimmed = text.trim();
+  if (trimmed === "No tasks found") return [];
+  const parsed: { id: string; subject: string; status: PlanEntry["status"] }[] = [];
+  for (const row of trimmed.split("\n")) {
+    const match = /^#(\S+) \[(pending|in_progress|completed)\] (.+)$/.exec(row.trim());
+    if (!match) return undefined;
+    const subject = match[3]!.replace(/ \[blocked by [^\]]+\]$/, "").replace(/ \([^()]+\)$/, "");
+    parsed.push({ id: match[1]!, subject, status: match[2] as PlanEntry["status"] });
+  }
+  return parsed.length > 0 ? parsed : undefined;
+}
+
+function isTaskUpdateFailure(content: unknown, structured: Json | undefined): boolean {
+  if (structured?.success === false) return true;
+  const text = resultText(content);
+  if (parseJsonObject(text)?.success === false) return true;
+  if (!text) return false;
+  const trimmed = text.trim();
+  return /^Task #\S+ not found$/.test(trimmed) || trimmed === "Failed to delete task";
+}
+
+function claudeContextWindow(model: string | undefined): number {
+  return model && /(?:\[1m\]|(?:-|_)1m\b)/i.test(model) ? 1_000_000 : 200_000;
+}
+
+function webSearchResultContent(content: unknown): { failed: boolean; items: ToolCallContent[] } {
+  const errorObj = obj(content);
+  if (errorObj?.type === "web_search_tool_result_error") {
+    const code = str(errorObj.error_code) ?? "search_error";
+    return { failed: true, items: [{ type: "content", content: { type: "text", text: `Web search failed: ${code}` } }] };
+  }
+  if (!Array.isArray(content)) return { failed: false, items: [] };
+  const items: ToolCallContent[] = [];
+  let failed = false;
+  for (const raw of content) {
+    const entry = obj(raw);
+    if (!entry) continue;
+    if (entry.type === "web_search_tool_result_error") {
+      failed = true;
+      const code = str(entry.error_code) ?? "search_error";
+      items.push({ type: "content", content: { type: "text", text: `Web search failed: ${code}` } });
+    } else if (entry.type === "web_search_result" && str(entry.url)) {
+      items.push({
+        type: "content",
+        content: { type: "resource_link", uri: str(entry.url)!, name: str(entry.title) ?? str(entry.url)! },
+      });
+    }
+  }
+  return { failed, items };
+}
 
 /**
  * The Claude desktop app's task list (its `update_plan` tool, under any MCP server prefix): the
@@ -534,25 +661,96 @@ export function transcriptLine(
         updates.push({ sessionUpdate: "user_message_chunk", messageId: uuid, content });
         userText = true;
       } else if (block.type === "tool_result" && str(block.tool_use_id)) {
-        if (options.hidden?.delete(str(block.tool_use_id)!)) continue;
+        const toolUseId = str(block.tool_use_id)!;
         const launched = obj(line.toolUseResult ?? line.tool_use_result);
+        const tracker = taskTrackerOf(options.hidden);
+        const tracked = tracker?.pending.get(toolUseId);
+        if (tracked) {
+          tracker!.pending.delete(toolUseId);
+          if (tracked.name !== "ExitPlanMode") {
+            options.hidden?.delete(toolUseId);
+            if (block.is_error !== true) {
+              if (tracked.name === "TaskCreate") {
+                const created = parseTaskCreateResult(block.content, launched);
+                const subject = str(tracked.input.subject) ?? created?.subject;
+                if (created?.id && subject) {
+                  tracker!.tasks.set(created.id, { subject, status: "pending", activeForm: str(tracked.input.activeForm) });
+                  updates.push({ sessionUpdate: "plan", entries: taskPlanEntries(tracker!.tasks) });
+                }
+              } else if (tracked.name === "TaskUpdate" && !isTaskUpdateFailure(block.content, launched)) {
+                const taskId = str(tracked.input.taskId);
+                if (taskId) {
+                  if (tracked.input.status === "deleted") {
+                    tracker!.tasks.delete(taskId);
+                    updates.push({ sessionUpdate: "plan", entries: taskPlanEntries(tracker!.tasks) });
+                  } else {
+                    const existing = tracker!.tasks.get(taskId);
+                    const subject = str(tracked.input.subject) ?? existing?.subject;
+                    if (subject) {
+                      const rawStatus = tracked.input.status;
+                      const status = rawStatus === "completed" || rawStatus === "in_progress" || rawStatus === "pending"
+                        ? rawStatus
+                        : (existing?.status ?? "pending");
+                      tracker!.tasks.set(taskId, {
+                        subject,
+                        status,
+                        activeForm: str(tracked.input.activeForm) ?? existing?.activeForm,
+                      });
+                      updates.push({ sessionUpdate: "plan", entries: taskPlanEntries(tracker!.tasks) });
+                    }
+                  }
+                }
+              } else if (tracked.name === "TaskList") {
+                const listed = parseTaskListResult(block.content, launched);
+                if (listed) {
+                  const prev = new Map(tracker!.tasks);
+                  tracker!.tasks.clear();
+                  for (const task of listed) {
+                    tracker!.tasks.set(task.id, {
+                      subject: task.subject,
+                      status: task.status,
+                      activeForm: prev.get(task.id)?.activeForm,
+                    });
+                  }
+                  updates.push({ sessionUpdate: "plan", entries: taskPlanEntries(tracker!.tasks) });
+                }
+              }
+            }
+            continue;
+          }
+        }
+        if (options.hidden?.delete(toolUseId)) continue;
         const workflow = launched?.status === "async_launched" || launched?.status === "remote_launched";
         const teammate = launched?.status === "teammate_spawned" && (str(launched.agentId) ?? str(launched.agent_id));
         if (!block.is_error && !launched?.error && (teammate || (launched?.isAsync === true && str(launched.agentId)) || (workflow && str(launched?.taskId))) && !options.sidechain) {
           // An agent started in the background: the call returns at once (with
           // nothing to show) while the agent works on. Its end is a task notification.
-          options.agents?.add(str(block.tool_use_id)!);
-          updates.push({ sessionUpdate: "ls_turn", state: "started", parentToolCallId: str(block.tool_use_id)! });
+          options.agents?.add(toolUseId);
+          updates.push({ sessionUpdate: "ls_turn", state: "started", parentToolCallId: toolUseId });
           continue;
         }
         const text = resultText(block.content);
         const content: ToolCallContent[] = [...(text ? [{ type: "content" as const, content: { type: "text" as const, text } }] : []), ...resultImages(block.content)];
         updates.push({
           sessionUpdate: "tool_call_update",
-          toolCallId: str(block.tool_use_id)!,
+          toolCallId: toolUseId,
           status: block.is_error === true ? "failed" : "completed",
           content: content.length > 0 ? content : undefined,
         });
+        if (tracked?.name === "ExitPlanMode" && block.is_error !== true) {
+          const planMarkdown = str(tracked.input.plan) ?? str(launched?.plan);
+          const planPath = str(tracked.input.planFilePath) ?? str(launched?.filePath);
+          if (planMarkdown || planPath) {
+            updates.push({
+              sessionUpdate: "plan",
+              planId: `exit-plan:${toolUseId}`,
+              title: "Plan",
+              entries: [],
+              markdown: planMarkdown ?? null,
+              path: planPath ?? null,
+            });
+          }
+        }
       }
     }
     // A real prompt starts a turn; tool results continue one.
@@ -574,33 +772,54 @@ export function transcriptLine(
     if (!block) continue;
     if (block.type === "thinking" && typeof block.thinking === "string" && block.thinking) {
       updates.push({ sessionUpdate: "agent_thought_chunk", messageId, content: { type: "text", text: block.thinking } });
+    } else if (block.type === "redacted_thinking") {
+      updates.push({ sessionUpdate: "agent_thought_chunk", messageId, content: { type: "text", text: "（思考内容已加密隐藏）" } });
     } else if (block.type === "text" && typeof block.text === "string" && block.text) {
       updates.push({ sessionUpdate: "agent_message_chunk", messageId, content: { type: "text", text: block.text } });
-    } else if (block.type === "tool_use" && str(block.id) && str(block.name)) {
+    } else if ((block.type === "tool_use" || block.type === "server_tool_use") && str(block.id) && str(block.name)) {
+      const toolId = str(block.id)!;
+      const rawName = str(block.name)!;
+      const toolName = block.type === "server_tool_use" && rawName === "web_search" ? "WebSearch" : rawName;
       const input = obj(block.input) ?? {};
-      if (block.name === "TodoWrite" || /(^|__)update_plan$/.test(str(block.name)!)) {
-        const desktop = block.name === "TodoWrite" ? undefined : desktopPlan(input, options.hidden, str(block.id)!);
-        const entries = block.name === "TodoWrite" ? todoPlan(input) : desktop?.entries;
+      if (toolName === "TodoWrite" || /(^|__)update_plan$/.test(toolName)) {
+        const desktop = toolName === "TodoWrite" ? undefined : desktopPlan(input, options.hidden, toolId);
+        const entries = toolName === "TodoWrite" ? todoPlan(input) : desktop?.entries;
         if (entries) updates.push({ sessionUpdate: "plan", entries, ...(desktop ? { planId: desktop.id } : {}) });
         // The plan card is the view; its result line is skipped by id. Without a
         // reader's set (a single line) the call still shows, and closes cleanly.
         if (entries && options.hidden) {
-          options.hidden.add(str(block.id)!);
+          options.hidden.add(toolId);
           continue;
         }
       }
-      const { title, kind, detail } = describeClaudeTool(str(block.name)!, input);
+      if ((toolName === "TaskCreate" || toolName === "TaskUpdate" || toolName === "TaskList") && options.hidden) {
+        taskTrackerOf(options.hidden)!.pending.set(toolId, { name: toolName, input });
+        options.hidden.add(toolId);
+        continue;
+      }
+      if (toolName === "ExitPlanMode" && options.hidden) {
+        taskTrackerOf(options.hidden)!.pending.set(toolId, { name: "ExitPlanMode", input });
+      }
+      const { title, kind, detail } = describeClaudeTool(toolName, input);
       updates.push({
         sessionUpdate: "tool_call",
-        toolCallId: str(block.id)!,
+        toolCallId: toolId,
         title,
         // Claude's own name for the tool: Grep and Glob, Write and Edit share a kind.
-        name: str(block.name),
+        name: toolName,
         kind,
         detail,
         status: "in_progress",
         rawInput: input,
-        content: toolContent(str(block.name)!, input),
+        content: toolContent(toolName, input),
+      });
+    } else if (block.type === "web_search_tool_result" && str(block.tool_use_id)) {
+      const { failed, items } = webSearchResultContent(block.content);
+      updates.push({
+        sessionUpdate: "tool_call_update",
+        toolCallId: str(block.tool_use_id)!,
+        status: failed ? "failed" : "completed",
+        content: items.length > 0 ? items : undefined,
       });
     }
   }
@@ -615,15 +834,17 @@ export function transcriptLine(
       const contextTokens = inputTokens + (cachedReadTokens ?? 0) + (cachedWriteTokens ?? 0);
       const totalTokens = contextTokens + outputTokens;
       if (totalTokens > 0) {
+        const model = str(message.model);
         updates.push({
           sessionUpdate: "usage_update",
           usedTokens: contextTokens > 0 ? contextTokens : totalTokens,
+          contextWindow: claudeContextWindow(model),
           ...(messageId
             ? {
                 accounting: {
                   id: `claude:${messageId}`,
                   scope: "turn",
-                  ...(str(message.model) ? { model: str(message.model) } : {}),
+                  ...(model ? { model } : {}),
                   ...(ts !== undefined ? { timestamp: ts } : {}),
                 },
               }
@@ -643,6 +864,7 @@ export function transcriptLine(
   const stop = message.stop_reason;
   if (stop === "end_turn" || stop === "stop_sequence") updates.push({ sessionUpdate: "ls_turn", state: "ended", stopReason: "end_turn" });
   else if (stop === "max_tokens" || stop === "refusal") updates.push({ sessionUpdate: "ls_turn", state: "ended", stopReason: stop });
+  else if (stop === "model_context_window_exceeded") updates.push({ sessionUpdate: "ls_turn", state: "ended", stopReason: "max_tokens" });
   return { updates, ts };
 }
 
@@ -719,17 +941,34 @@ export interface ObservedSettings {
   fast?: boolean;
 }
 
-/** The settings one transcript line shows, if any (matched on the raw line: quotes inside message text are escaped there). */
+/** The settings one transcript line shows, read from parsed JSON fields rather than raw regexes. */
 export function settingsOf(raw: string): ObservedSettings | undefined {
-  if (raw.includes('"isSidechain":true')) return undefined;
-  if (raw.includes('"type":"assistant"')) {
-    const model = /"model":"([^"]+)"/.exec(raw)?.[1];
-    if (!model || model === "<synthetic>") return undefined;
-    const speed = /"speed":"([a-z]+)"/.exec(raw)?.[1];
-    return { model, effort: /"effort":"([a-z]+)"/.exec(raw)?.[1], fast: speed ? speed === "fast" : undefined };
+  // Fast pre-filter skips parsing unrelated progress/system lines.
+  if (
+    !raw.includes('"type":"assistant"') &&
+    !raw.includes('"type":"user"') &&
+    !raw.includes('"type": "assistant"') &&
+    !raw.includes('"type": "user"')
+  ) {
+    return undefined;
   }
-  if (raw.includes('"type":"user"')) {
-    const mode = /"permissionMode":"([A-Za-z]+)"/.exec(raw)?.[1];
+  let parsed: Json;
+  try {
+    parsed = JSON.parse(raw) as Json;
+  } catch {
+    return undefined;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || parsed.isSidechain === true) return undefined;
+  if (parsed.type === "assistant") {
+    const message = obj(parsed.message);
+    const model = str(message?.model) ?? str(parsed.model);
+    if (!model || model === "<synthetic>") return undefined;
+    const effort = str(message?.effort) ?? str(parsed.effort);
+    const speed = str(obj(message?.usage)?.speed) ?? str(parsed.speed);
+    return { model, effort, fast: speed ? speed === "fast" : undefined };
+  }
+  if (parsed.type === "user") {
+    const mode = str(parsed.permissionMode);
     return mode ? { mode } : undefined;
   }
   return undefined;
@@ -923,7 +1162,7 @@ export class ClaudeLateCwds {
  */
 export class TranscriptTail {
   private offset: number;
-  private carry = "";
+  private hasIncomplete = false;
   private timer?: ReturnType<typeof setInterval>;
   private paused = false;
   private path?: string;
@@ -973,11 +1212,12 @@ export class TranscriptTail {
       return false;
     }
     if (size <= this.looked) return false;
-    const chunk = readRange(path, this.looked, size);
-    const end = chunk.lastIndexOf("\n");
+    const bytes = readBytes(path, this.looked, size);
+    const end = bytes.lastIndexOf(0x0a);
     if (end < 0) return false;
-    this.looked += Buffer.byteLength(chunk.slice(0, end + 1));
-    return chunk.slice(0, end).split("\n").some(match);
+    // Advance only to the last complete newline byte so multi-byte UTF-8 sequences are never split.
+    this.looked += end + 1;
+    return bytes.subarray(0, end).toString("utf8").split("\n").some(match);
   }
 
   /**
@@ -990,13 +1230,13 @@ export class TranscriptTail {
     this.skip = skip;
     this.poll();
     // A line still being written when we looked gets the same check once it's whole.
-    this.skip = this.carry ? skip : undefined;
+    this.skip = this.hasIncomplete ? skip : undefined;
   }
 
   resumeAtEnd(): void {
     const path = this.resolve();
     this.offset = path ? statSync(path).size : this.offset;
-    this.carry = "";
+    this.hasIncomplete = false;
     this.paused = false;
   }
 
@@ -1014,20 +1254,22 @@ export class TranscriptTail {
     if (size < this.offset) {
       // Rewritten (rare): start over.
       this.offset = 0;
-      this.carry = "";
+      this.hasIncomplete = false;
     }
     if (size === this.offset) return;
-    const chunk = this.carry + readRange(path, this.offset, size);
-    this.offset = size;
-    const end = chunk.lastIndexOf("\n");
+    const bytes = readBytes(path, this.offset, size);
+    const end = bytes.lastIndexOf(0x0a);
     if (end < 0) {
-      this.carry = chunk;
+      this.hasIncomplete = bytes.length > 0;
       return;
     }
-    this.carry = chunk.slice(end + 1);
+    // Keep offset aligned to complete newline boundaries so a chunk boundary inside a CJK/emoji
+    // UTF-8 sequence is re-read whole once the line finishes instead of decoding into U+FFFD.
+    this.offset += end + 1;
+    this.hasIncomplete = end + 1 < bytes.length;
     const skip = this.skip;
     this.skip = undefined;
-    for (const line of chunk.slice(0, end).split("\n")) {
+    for (const line of bytes.subarray(0, end).toString("utf8").split("\n")) {
       if (line.trim() && !skip?.(line)) this.options.onLine(line);
     }
   }

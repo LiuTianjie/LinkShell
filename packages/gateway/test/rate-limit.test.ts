@@ -1,6 +1,6 @@
 import type { IncomingMessage } from "node:http";
 import { describe, expect, it } from "vitest";
-import { clientIp, trustedProxySet } from "../src/rate-limit.js";
+import { clientIp, RateLimiter, trustedProxySet } from "../src/rate-limit.js";
 
 const request = (peer: string, forwarded?: string) =>
   ({ socket: { remoteAddress: peer }, headers: forwarded === undefined ? {} : { "x-forwarded-for": forwarded } }) as unknown as IncomingMessage;
@@ -53,5 +53,22 @@ describe("who is connecting", () => {
   it("is the proxy when the proxy reports nobody", () => {
     expect(clientIp(request("10.0.0.2"), proxies)).toBe("10.0.0.2");
     expect(clientIp(request("10.0.0.2", "10.0.0.9"), proxies)).toBe("10.0.0.9");
+  });
+});
+
+describe("RateLimiter memory bounding", () => {
+  it("caps active keys under unique-IP floods and prunes expired buckets", () => {
+    const limiter = new RateLimiter(2, 60_000, 5);
+    try {
+      for (let i = 0; i < 20; i++) {
+        expect(limiter.allow(`198.51.100.${i}`)).toBe(true);
+      }
+      expect(limiter.size).toBe(5);
+      // Most recent key is still tracked and enforced.
+      expect(limiter.allow("198.51.100.19")).toBe(true);
+      expect(limiter.allow("198.51.100.19")).toBe(false);
+    } finally {
+      limiter.destroy();
+    }
   });
 });

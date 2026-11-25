@@ -17,17 +17,50 @@ import { sha256 } from "@noble/hashes/sha2.js";
 // stolen static key doesn't decrypt past channels. Each direction has its own
 // XChaCha20-Poly1305 key and a counter nonce that must strictly increase.
 
-// UTF-8 by hand: not every JS engine LinkShell runs on has TextDecoder.
+// Fast native UTF-8 / base64url paths (Node Buffer, browser/RN TextEncoder/TextDecoder)
+// with pure-JS fallbacks for runtimes lacking those globals.
+interface NodeBufferInstance extends Uint8Array {
+  toString(encoding?: "utf8" | "base64url"): string;
+}
+interface NodeBufferCtor {
+  from(text: string, encoding: "utf8" | "base64url"): NodeBufferInstance;
+  from(buffer: ArrayBufferLike, byteOffset: number, byteLength: number): NodeBufferInstance;
+}
+function nodeBuffer(): NodeBufferCtor | undefined {
+  const buf = (globalThis as { Buffer?: unknown }).Buffer;
+  return typeof buf === "function" ? (buf as unknown as NodeBufferCtor) : undefined;
+}
+let cachedTextEncoder: TextEncoder | undefined;
+let cachedTextDecoder: TextDecoder | undefined;
+const B64_VALID = /^[A-Za-z0-9+/_-]*$/;
+
 export function utf8(text: string): Uint8Array {
+  const BufferCtor = nodeBuffer();
+  if (BufferCtor) {
+    const buf = BufferCtor.from(text, "utf8");
+    return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+  }
+  if (typeof TextEncoder === "function") {
+    if (!cachedTextEncoder) cachedTextEncoder = new TextEncoder();
+    return cachedTextEncoder.encode(text);
+  }
   const out: number[] = [];
   for (let i = 0; i < text.length; i++) {
     let code = text.charCodeAt(i);
-    if (code >= 0xd800 && code <= 0xdbff && i + 1 < text.length) {
-      const next = text.charCodeAt(i + 1);
-      if (next >= 0xdc00 && next <= 0xdfff) {
-        code = 0x10000 + ((code - 0xd800) << 10) + (next - 0xdc00);
-        i++;
+    if (code >= 0xd800 && code <= 0xdbff) {
+      if (i + 1 < text.length) {
+        const next = text.charCodeAt(i + 1);
+        if (next >= 0xdc00 && next <= 0xdfff) {
+          code = 0x10000 + ((code - 0xd800) << 10) + (next - 0xdc00);
+          i++;
+        } else {
+          code = 0xfffd;
+        }
+      } else {
+        code = 0xfffd;
       }
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      code = 0xfffd;
     }
     if (code < 0x80) out.push(code);
     else if (code < 0x800) out.push(0xc0 | (code >> 6), 0x80 | (code & 63));
@@ -38,9 +71,18 @@ export function utf8(text: string): Uint8Array {
 }
 
 export function fromUtf8(bytes: Uint8Array): string {
+  const BufferCtor = nodeBuffer();
+  if (BufferCtor) {
+    return BufferCtor.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("utf8");
+  }
+  if (typeof TextDecoder === "function") {
+    if (!cachedTextDecoder) cachedTextDecoder = new TextDecoder("utf-8");
+    return cachedTextDecoder.decode(bytes);
+  }
   let out = "";
   let chunk: number[] = [];
   const flush = () => {
+    if (chunk.length === 0) return;
     out += String.fromCharCode(...chunk);
     chunk = [];
   };
@@ -50,15 +92,65 @@ export function fromUtf8(bytes: Uint8Array): string {
     if (byte < 0x80) {
       code = byte;
       i += 1;
-    } else if (byte >= 0xf0) {
-      code = ((byte & 7) << 18) | ((bytes[i + 1]! & 63) << 12) | ((bytes[i + 2]! & 63) << 6) | (bytes[i + 3]! & 63);
-      i += 4;
-    } else if (byte >= 0xe0) {
-      code = ((byte & 15) << 12) | ((bytes[i + 1]! & 63) << 6) | (bytes[i + 2]! & 63);
-      i += 3;
+    } else if (byte >= 0xc2 && byte <= 0xdf) {
+      if (i + 1 < bytes.length) {
+        const b1 = bytes[i + 1]!;
+        if ((b1 & 0xc0) === 0x80) {
+          code = ((byte & 31) << 6) | (b1 & 63);
+          i += 2;
+        } else {
+          code = 0xfffd;
+          i += 1;
+        }
+      } else {
+        code = 0xfffd;
+        i += 1;
+      }
+    } else if (byte >= 0xe0 && byte <= 0xef) {
+      if (i + 2 < bytes.length) {
+        const b1 = bytes[i + 1]!;
+        const b2 = bytes[i + 2]!;
+        const valid =
+          (b1 & 0xc0) === 0x80 &&
+          (b2 & 0xc0) === 0x80 &&
+          !(byte === 0xe0 && b1 < 0xa0) &&
+          !(byte === 0xed && b1 >= 0xa0);
+        if (valid) {
+          code = ((byte & 15) << 12) | ((b1 & 63) << 6) | (b2 & 63);
+          i += 3;
+        } else {
+          code = 0xfffd;
+          i += 1;
+        }
+      } else {
+        code = 0xfffd;
+        i += 1;
+      }
+    } else if (byte >= 0xf0 && byte <= 0xf4) {
+      if (i + 3 < bytes.length) {
+        const b1 = bytes[i + 1]!;
+        const b2 = bytes[i + 2]!;
+        const b3 = bytes[i + 3]!;
+        const valid =
+          (b1 & 0xc0) === 0x80 &&
+          (b2 & 0xc0) === 0x80 &&
+          (b3 & 0xc0) === 0x80 &&
+          !(byte === 0xf0 && b1 < 0x90) &&
+          !(byte === 0xf4 && b1 >= 0x90);
+        if (valid) {
+          code = ((byte & 7) << 18) | ((b1 & 63) << 12) | ((b2 & 63) << 6) | (b3 & 63);
+          i += 4;
+        } else {
+          code = 0xfffd;
+          i += 1;
+        }
+      } else {
+        code = 0xfffd;
+        i += 1;
+      }
     } else {
-      code = ((byte & 31) << 6) | (bytes[i + 1]! & 63);
-      i += 2;
+      code = 0xfffd;
+      i += 1;
     }
     if (code > 0xffff) {
       code -= 0x10000;
@@ -79,6 +171,10 @@ const B64_INDEX = new Map([...B64].map((ch, i) => [ch, i]));
 
 /** Unpadded base64url. */
 export function toBase64(bytes: Uint8Array): string {
+  const BufferCtor = nodeBuffer();
+  if (BufferCtor) {
+    return BufferCtor.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("base64url");
+  }
   let out = "";
   for (let i = 0; i < bytes.length; i += 3) {
     const n = (bytes[i]! << 16) | ((bytes[i + 1] ?? 0) << 8) | (bytes[i + 2] ?? 0);
@@ -90,7 +186,16 @@ export function toBase64(bytes: Uint8Array): string {
 }
 
 export function fromBase64(text: string): Uint8Array {
-  const clean = text.replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_");
+  const stripped = text.replace(/=+$/, "");
+  const BufferCtor = nodeBuffer();
+  if (BufferCtor) {
+    // Buffer.from(..., "base64url") silently skips invalid characters; reject them up front.
+    if (!B64_VALID.test(stripped)) throw new Error("invalid base64");
+    const normalized = stripped.replace(/\+/g, "-").replace(/\//g, "_");
+    const buf = BufferCtor.from(normalized, "base64url");
+    return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+  }
+  const clean = stripped.replace(/\+/g, "-").replace(/\//g, "_");
   const out = new Uint8Array(Math.floor((clean.length * 3) / 4));
   let bits = 0;
   let value = 0;

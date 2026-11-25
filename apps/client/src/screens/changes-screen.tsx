@@ -1,9 +1,11 @@
 import { router, useLocalSearchParams } from "expo-router";
 import { errorCode } from "@/lib/action-error";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, View } from "react-native";
+import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import type { Locale } from "@linkshell/client-core";
 import type { GitDiffFileStatus } from "@linkshell/wire";
+import { usePageInsets } from "@/components/adaptive-page";
 import { Button } from "@/components/button";
 import { ConnectionBanner } from "@/components/connection-banner";
 import { Text, TextInput } from "@/components/fixed-text";
@@ -239,6 +241,7 @@ export function ChangesScreen() {
 
 export function ChangesContent({ sessionId, embedded = false }: { sessionId: string; embedded?: boolean }) {
   const { locale, t, pick } = useLocale();
+  const insets = usePageInsets();
   const { link } = useConnection();
   const status = useConnectionStatus();
   const online = status === "online";
@@ -430,7 +433,11 @@ export function ChangesContent({ sessionId, embedded = false }: { sessionId: str
       <ScrollView
         contentInsetAdjustmentBehavior={embedded ? "never" : "automatic"}
         style={{ flex: 1 }}
-        contentContainerStyle={{ padding: 16, paddingBottom: commentList.length > 0 ? 96 : 24, gap: 12 }}
+        contentContainerStyle={{
+          padding: 16,
+          paddingBottom: (commentList.length > 0 ? 96 : 24) + (embedded ? 0 : insets.bottom),
+          gap: 12,
+        }}
       >
         <ConnectionBanner />
         {/* Mode Switcher: Real Git Diff vs Session Edits */}
@@ -566,7 +573,7 @@ export function ChangesContent({ sessionId, embedded = false }: { sessionId: str
       </ScrollView>
 
       {commentList.length > 0 ? (
-        <View style={{ position: "absolute", left: 16, right: 16, bottom: 20 }}>
+        <View style={{ position: "absolute", left: 16, right: 16, bottom: embedded ? 16 : Math.max(20, insets.bottom + 12) }}>
           <Glass style={{ borderRadius: radius.panel, paddingHorizontal: 14, paddingVertical: 10, flexDirection: "row", alignItems: "center", gap: 10 }}>
             <Icon sf="text.bubble.fill" md="comment" size={16} color={colors.accent} />
             <Text style={[type.subhead, { flex: 1, color: colors.label, fontWeight: "600" }]}>
@@ -592,9 +599,17 @@ export function ChangesContent({ sessionId, embedded = false }: { sessionId: str
         </View>
       ) : null}
 
-      <Modal visible={!!editingTarget} transparent animationType="fade" onRequestClose={() => setEditingTarget(null)}>
-        <Pressable
-          onPress={() => setEditingTarget(null)}
+      <Modal
+        visible={!!editingTarget}
+        transparent
+        statusBarTranslucent
+        navigationBarTranslucent
+        supportedOrientations={["portrait", "portrait-upside-down", "landscape", "landscape-left", "landscape-right"]}
+        animationType="fade"
+        onRequestClose={() => setEditingTarget(null)}
+      >
+        <KeyboardAvoidingView
+          behavior="padding"
           style={{
             flex: 1,
             backgroundColor: "rgba(0,0,0,0.45)",
@@ -603,6 +618,7 @@ export function ChangesContent({ sessionId, embedded = false }: { sessionId: str
             padding: 20,
           }}
         >
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setEditingTarget(null)} />
           <Pressable
             onPress={() => {}}
             style={{
@@ -655,7 +671,7 @@ export function ChangesContent({ sessionId, embedded = false }: { sessionId: str
               <Button title={t("changes.saveComment")} variant="primary" size="small" onPress={saveLineComment} />
             </View>
           </Pressable>
-        </Pressable>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );

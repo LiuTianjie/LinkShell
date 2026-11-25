@@ -103,6 +103,10 @@ export interface AcpSessionState {
   messageAliases: Map<string, string>;
   deferredUserUpdates: unknown[];
   idleReason?: StopReason;
+  /** Prompt generation tracking prevents a delayed idle from an earlier turn ending a steered prompt. */
+  promptGen: number;
+  runningGen: number;
+  idleGen?: number;
   reportedState?: SessionState;
   commands?: Extract<SessionUpdate, { sessionUpdate: "available_commands_update" }>;
   config: SourcedConfigOption[];
@@ -112,6 +116,8 @@ export interface AcpSessionState {
   turnActive: boolean;
   /** True after an explicit cancel / interrupt-and-send until the active prompt settles. */
   cancelling?: boolean;
+  /** Bounds how long a wedged `session/prompt` can ignore `session/cancel` before recovery finishes the turn. */
+  cancelTimer?: ReturnType<typeof setTimeout>;
   usageTurnId?: string;
   /** session/prompt requests in flight; with steering, a turn spans several. */
   inflight: number;
@@ -244,6 +250,7 @@ export class AcpDriver implements AgentDriver {
       },
     });
     this.edits = new AcpEditor({ capabilities: () => this.connection?.capabilities ?? {}, settings: () => this.settings(),
+      protocolVersion: () => this.connection?.protocolVersion ?? 1,
       request: (method, params) => this.connection?.request(method, params, method === "nes/close" ? 5000 : 30_000) ?? Promise.reject(RpcError.app("offline", "ACP 连接已关闭")),
       notify: (method, params) => this.connection?.notify(method, params),
     });
@@ -278,7 +285,11 @@ export class AcpDriver implements AgentDriver {
   async stop(): Promise<void> {
     this.stopped = true;
     if (this.restartTimer) clearTimeout(this.restartTimer);
-    for (const state of this.sessions.values()) this.cancelPermissions(state);
+    for (const state of this.sessions.values()) {
+      clearTimeout(state.cancelTimer);
+      state.cancelTimer = undefined;
+      this.cancelPermissions(state);
+    }
     for (const id of [...this.interactions.keys()]) this.resolveInteraction(id, "cancel");
     await this.edits.close();
     await this.connection?.stop();
@@ -296,9 +307,13 @@ export class AcpDriver implements AgentDriver {
     return { features: {
       protocolVersion: this.connection.protocolVersion,
       authMethods: (this.connection.initializeResult.authMethods ?? []).filter((method) => !method.type || ["terminal", "agent"].includes(method.type)).map((method) => ({ id: method.id, name: method.name ?? method.id, description: method.description ?? undefined, type: method.type === "terminal" ? "terminal" : "agent" })),
-      logout: this.connection.protocolVersion === 2 ? caps.auth !== undefined : Boolean(caps.auth?.logout), providers: Boolean(caps.providers) && this.settings().experimental,
+      logout: this.connection.protocolVersion === 2 ? (this.connection.initializeResult.authMethods?.length ?? 0) > 0 : Boolean(caps.auth?.logout), providers: Boolean(caps.providers) && this.settings().experimental,
       nes: Boolean(caps.nes) && this.settings().experimental,
-      additionalDirectories: Boolean(caps.sessionCapabilities?.additionalDirectories), mcpHttp: caps.mcpCapabilities?.http === true, mcpSse: caps.mcpCapabilities?.sse === true,
+      additionalDirectories: Boolean(caps.sessionCapabilities?.additionalDirectories),
+      mcpHttp: caps.mcpCapabilities?.http === true,
+      mcpSse: caps.mcpCapabilities?.sse === true,
+      mcpStdio: this.connection.protocolVersion === 2 ? caps.mcpCapabilities?.stdio === true : caps.mcpCapabilities?.stdio !== false,
+      mcpAcp: caps.mcpCapabilities?.acp === true,
     }, settings: nativeId ? this.sessions.get(nativeId)?.settings ?? this.settings() : this.settings(), interactions: this.pendingInteractions() };
   }
 
@@ -394,7 +409,7 @@ export class AcpDriver implements AgentDriver {
 
   private async validateDirectories(settings: AcpAgentSettings): Promise<void> {
     for (const path of settings.additionalDirectories) {
-      if (!isAbsolute(path) || !await stat(await realpath(path)).then((info) => info.isDirectory()).catch(() => false)) throw RpcError.app("invalid_params", `附加目录不存在或不是绝对路径：${path}`);
+      if (!isAbsolute(path) || !(await realpath(path).then((resolved) => stat(resolved)).then((info) => info.isDirectory()).catch(() => false))) throw RpcError.app("invalid_params", `附加目录不存在或不是绝对路径：${path}`);
     }
     if (new Set(settings.mcpServers.map((server) => server.name)).size !== settings.mcpServers.length) throw RpcError.app("invalid_params", "MCP 服务名称不能重复");
   }
@@ -514,11 +529,30 @@ export class AcpDriver implements AgentDriver {
     return this.knownModels() ?? { models: [] };
   }
 
+  protected noteCapabilities(config: SessionConfigOption[]): void {
+    const hasModels = config.some((option) => option.category === "model" && option.values.length > 0);
+    const hasModes = config.some((option) => option.category === "mode" && option.values.length > 0);
+    if ((hasModels && !this.capabilityState.models) || (hasModes && !this.capabilityState.modes)) {
+      this.capabilityState = {
+        ...this.capabilityState,
+        models: this.capabilityState.models || hasModels,
+        modes: this.capabilityState.modes || hasModes,
+      };
+    }
+  }
+
   protected knownModels(): MethodResult<"agents.models"> | undefined {
     if (this.reportedModels) return this.reportedModels;
     try {
       const saved = this.host?.agentState?.(this.id).get("models");
-      if (saved) this.reportedModels = methods["agents.models"].result.parse(JSON.parse(saved));
+      if (saved) {
+        this.reportedModels = methods["agents.models"].result.parse(JSON.parse(saved));
+        const hasModels = this.reportedModels.models.length > 0;
+        const hasModes = this.reportedModels.config?.some((option) => option.category === "mode" && option.values.length > 0) === true;
+        if ((hasModels && !this.capabilityState.models) || (hasModes && !this.capabilityState.modes)) {
+          this.capabilityState = { ...this.capabilityState, models: this.capabilityState.models || hasModels, modes: this.capabilityState.modes || hasModes };
+        }
+      }
     } catch {
       // Unreadable: as good as none, and the next session writes it again.
     }
@@ -527,6 +561,7 @@ export class AcpDriver implements AgentDriver {
 
   /** Keeps the model list a session was just given. `fresh`: a new session, so its model is the agent's default. */
   protected rememberModels(config: SessionConfigOption[], fresh: boolean): void {
+    this.noteCapabilities(config);
     const option = modelOption(config);
     const known = this.knownModels();
     const models = option?.values.map(({ value, name, description, group }) => ({ value, name, ...(description ? { description } : {}), ...(group ? { group } : {}) })) ?? known?.models ?? [];
@@ -634,21 +669,64 @@ export class AcpDriver implements AgentDriver {
   async detach(nativeId: string): Promise<void> {
     const state = this.sessions.get(nativeId);
     if (!state) return;
+    clearTimeout(state.cancelTimer);
+    state.cancelTimer = undefined;
     const wasLoaded = state.loaded;
     state.loaded = false;
+    state.turnActive = false;
+    state.cancelling = false;
+    state.inflight = 0;
     state.tracker = new AcpItemTracker();
     state.updates = new AcpUpdates();
     state.messageAliases.clear();
     state.deferredUserUpdates = [];
     state.toolCalls.clear();
+    state.config = [];
+    state.commands = undefined;
+    this.evictSessionChildren(nativeId);
+    for (const key of this.terminalCalls.keys()) if (key.startsWith(`${nativeId}\n`)) this.terminalCalls.delete(key);
     if (!wasLoaded) return;
     this.cancelPermissions(state);
     await this.services.close(nativeId);
     await this.mcp.close(nativeId);
-    for (const key of this.terminalCalls.keys()) if (key.startsWith(`${nativeId}\n`)) this.terminalCalls.delete(key);
     if (this.acpBehavior.detach === "protocol-close") {
       await this.rpc("session/close", { sessionId: nativeId }).catch(() => {});
     }
+  }
+
+  private evictSessionChildren(parentId: string): void {
+    for (const [childId, parents] of [...this.children.entries()]) {
+      if (!parents.delete(parentId)) continue;
+      if (parents.size === 0) {
+        this.children.delete(childId);
+        const child = this.sessions.get(childId);
+        if (child) {
+          clearTimeout(child.cancelTimer);
+          this.cancelPermissions(child);
+          this.sessions.delete(childId);
+        }
+      }
+    }
+  }
+
+  private armCancelRecovery(nativeId: string, state: AcpSessionState): void {
+    clearTimeout(state.cancelTimer);
+    const timeoutMs = Number(process.env.LINKSHELL_ACP_CANCEL_RECOVERY_MS) || 10_000;
+    state.cancelTimer = setTimeout(() => {
+      state.cancelTimer = undefined;
+      if (!state.turnActive || !state.cancelling) return;
+      this.host?.log(`[${this.id}] session/prompt did not settle after cancel for ${nativeId}; forcing turn recovery`);
+      state.inflight = 0;
+      this.finishTurn(nativeId, state, "cancelled");
+    }, timeoutMs);
+    state.cancelTimer.unref?.();
+  }
+
+  protected supportsSteeringMethod(): boolean {
+    const init = this.connection?.initializeResult;
+    if (this.connection?.protocolVersion !== 1 || !init) return false;
+    const meta = { ...init.agentCapabilities?._meta, ...init._meta };
+    return (meta.steering as { supported?: boolean } | undefined)?.supported === true;
   }
 
   async prompt(nativeId: string, content: ContentBlock[], clientMessageId: string, context?: string): Promise<"started" | "steered" | "queued"> {
@@ -661,9 +739,33 @@ export class AcpDriver implements AgentDriver {
     const prompt = toAcpPrompt(content);
     if (prompt.length === 0) throw RpcError.app("invalid_params", "没有可发送的内容");
     if (state.turnActive) {
+      if (this.supportsSteeringMethod()) {
+        try {
+          const result = await this.rpc<{ outcome?: string }>(
+            "_session/steering",
+            { sessionId: nativeId, prompt: withContext(prompt, context), _meta: { steering: { idleBehavior: "promptRequired" } } },
+            30_000,
+          );
+          if (result?.outcome === "promptRequired") {
+            if (state.turnActive) {
+              state.queue.push({ content, clientMessageId, context });
+              this.reportQueue(nativeId, state);
+              return "queued";
+            }
+            this.startTurn(nativeId, state, content, clientMessageId, context);
+            return "started";
+          }
+          this.echoUserMessage(nativeId, content, clientMessageId);
+          return "steered";
+        } catch (error) {
+          // Only fall back to concurrent session/prompt if the agent does not implement _session/steering.
+          if (!(error instanceof RpcError && error.code === -32601)) throw error;
+        }
+      }
       if (this.acpBehavior.busyInput === "concurrent-prompt") {
+        const gen = ++state.promptGen;
         this.echoUserMessage(nativeId, content, clientMessageId);
-        void this.sendPrompt(nativeId, state, withContext(prompt, context), clientMessageId);
+        void this.sendPrompt(nativeId, state, withContext(prompt, context), clientMessageId, gen);
         return "steered";
       }
       state.queue.push({ content, clientMessageId, context });
@@ -677,9 +779,13 @@ export class AcpDriver implements AgentDriver {
   async cancel(nativeId: string): Promise<void> {
     const state = this.sessions.get(nativeId);
     if (!state) return;
-    if (state.turnActive) state.cancelling = true;
+    if (state.turnActive) {
+      state.cancelling = true;
+      this.armCancelRecovery(nativeId, state);
+    }
     // Stopping stops what's waiting too; the apps put queued text back in the composer.
-    state.queue = [];
+    const dropped = state.queue.splice(0);
+    for (const entry of dropped) this.host?.releaseClientMessage?.(this.id, nativeId, entry.clientMessageId);
     this.reportQueue(nativeId, state);
     this.cancelPermissions(state);
     this.connection?.notify("session/cancel", { sessionId: nativeId });
@@ -691,11 +797,20 @@ export class AcpDriver implements AgentDriver {
     this.connection?.notify("session/cancel", { sessionId: childId });
   }
 
-  /** Stops the running turn only: the first queued message starts as soon as it has ended. */
-  async sendQueuedNow(nativeId: string): Promise<void> {
+  /** Stops the running turn only: the chosen (or first) queued message starts as soon as it has ended. */
+  async sendQueuedNow(nativeId: string, clientMessageId?: string): Promise<void> {
     const state = this.sessions.get(nativeId);
     if (!state?.turnActive || state.queue.length === 0) return;
+    if (clientMessageId) {
+      const index = state.queue.findIndex((entry) => entry.clientMessageId === clientMessageId);
+      if (index > 0) {
+        const [picked] = state.queue.splice(index, 1);
+        state.queue.unshift(picked!);
+        this.reportQueue(nativeId, state);
+      }
+    }
     state.cancelling = true;
+    this.armCancelRecovery(nativeId, state);
     this.cancelPermissions(state);
     this.connection?.notify("session/cancel", { sessionId: nativeId });
   }
@@ -735,7 +850,7 @@ export class AcpDriver implements AgentDriver {
       await this.rpc("session/set_model", { sessionId: nativeId, modelId: value });
     } else {
       const response = await this.rpc<Record<string, unknown>>("session/set_config_option", {
-        sessionId: nativeId, configId: optionId, ...(option.type === "boolean" ? { type: "boolean", value: value === "on" } : { ...(this.connection?.protocolVersion === 2 ? { type: "select" } : {}), value }),
+        sessionId: nativeId, configId: optionId, ...(option.type === "boolean" ? { type: "boolean", value: value === "on" } : { ...(this.connection?.protocolVersion === 2 ? { type: "id" } : {}), value }),
       });
       if (Array.isArray(response.configOptions)) {
         state.config = this.mergeConfig(state, toConfigOptions(response));
@@ -889,18 +1004,22 @@ export class AcpDriver implements AgentDriver {
     for (const id of [...this.interactions.keys()]) this.resolveInteraction(id, "cancel");
     for (const [nativeId, state] of this.sessions) {
       if (!state.loaded) continue;
+      clearTimeout(state.cancelTimer);
+      state.cancelTimer = undefined;
       state.loaded = false;
+      state.inflight = 0;
       this.cancelPermissions(state);
       if (state.turnActive) {
         state.turnActive = false;
+        state.cancelling = false;
         this.emit(nativeId, { sessionUpdate: "ls_turn", state: "ended", stopReason: "error" });
       }
       // Sending these after the restart would run them out of order, after whatever turn comes next.
-      const dropped = state.queue.length;
-      if (dropped) {
-        state.queue = [];
+      const dropped = state.queue.splice(0);
+      if (dropped.length) {
+        for (const entry of dropped) this.host?.releaseClientMessage?.(this.id, nativeId, entry.clientMessageId);
         this.reportQueue(nativeId, state);
-        this.emit(nativeId, { sessionUpdate: "ls_notice", level: "warning", title: `${this.label} 已退出，${dropped} 条排队消息未发送`, detail: "Agent 重启后请重新发送。" });
+        this.emit(nativeId, { sessionUpdate: "ls_notice", level: "warning", title: `${this.label} 已退出，${dropped.length} 条排队消息未发送`, detail: "Agent 重启后请重新发送。" });
       }
       this.host?.update(this.id, nativeId, { sessionUpdate: "ls_status", state: "offline" });
       this.host?.detached(this.id, nativeId);
@@ -926,14 +1045,36 @@ export class AcpDriver implements AgentDriver {
     let state = this.sessions.get(nativeId);
     if (!state) {
       const saved = this.host?.state(this.id, nativeId).get("acp-settings");
+      let settings: AcpAgentSettings | undefined;
+      if (saved) {
+        try {
+          settings = acpAgentSettingsSchema.parse(JSON.parse(saved));
+        } catch {
+          // Corrupt persisted settings fall back to agent defaults.
+        }
+      }
+      let aliases: [string, string][] = [];
+      try {
+        const rawAliases = this.host?.state(this.id, nativeId).get("acp-message-aliases");
+        if (rawAliases) {
+          const parsed = JSON.parse(rawAliases);
+          if (Array.isArray(parsed)) {
+            aliases = parsed.filter((entry): entry is [string, string] => Array.isArray(entry) && typeof entry[0] === "string" && typeof entry[1] === "string");
+          }
+        }
+      } catch {
+        // Corrupt persisted aliases are ignored.
+      }
       state = {
         cwd,
-        settings: saved ? acpAgentSettingsSchema.parse(JSON.parse(saved)) : { ...this.settings(), ...(this.discoveredDirectories.has(nativeId) ? { additionalDirectories: this.discoveredDirectories.get(nativeId)! } : {}) },
+        settings: settings ?? { ...this.settings(), ...(this.discoveredDirectories.has(nativeId) ? { additionalDirectories: this.discoveredDirectories.get(nativeId)! } : {}) },
         loaded: false,
         tracker: new AcpItemTracker(),
         updates: new AcpUpdates(),
-        messageAliases: new Map(JSON.parse(this.host?.state(this.id, nativeId).get("acp-message-aliases") ?? "[]") as [string, string][]),
+        messageAliases: new Map(aliases),
         deferredUserUpdates: [],
+        promptGen: 0,
+        runningGen: 0,
         config: [],
         modeRevision: 0,
         turnActive: false,
@@ -992,7 +1133,7 @@ export class AcpDriver implements AgentDriver {
         : { ...update };
       if ("messageId" in mapped && mapped.messageId) mapped.messageId = prefix + mapped.messageId;
       if ("toolCallId" in mapped && mapped.toolCallId) mapped.toolCallId = prefix + mapped.toolCallId;
-      if (["agent_message_chunk", "agent_thought_chunk", "ls_message", "ls_message_done", "tool_call", "tool_call_update", "ls_turn"].includes(mapped.sessionUpdate)) {
+      if (["agent_message_chunk", "agent_thought_chunk", "ls_message", "ls_message_done", "tool_call", "tool_call_update", "ls_turn", "ls_error", "ls_notice"].includes(mapped.sessionUpdate)) {
         (mapped as { parentToolCallId?: string }).parentToolCallId = "parentToolCallId" in update && update.parentToolCallId ? prefix + update.parentToolCallId : this.childCallId(nativeId);
       }
       if (mapped.sessionUpdate === "ls_permission") { mapped.title = `${association.title ?? "子代理"} · ${mapped.title}`; mapped.childSessionId ??= nativeId; }
@@ -1016,13 +1157,15 @@ export class AcpDriver implements AgentDriver {
     if (update.state !== undefined) association.state = update.state;
     parents.set(parent, association); this.children.set(childId, parents);
     const child = this.stateFor(childId, parentState.cwd); child.loaded = true; child.settings = parentState.settings;
-    const status = association.state as { state?: string; stopReason?: string } | null | undefined;
+    const status = association.state as { state?: string; stopReason?: string; error?: { code?: number; message?: string; data?: unknown } | null } | null | undefined;
     const state: WorkflowAgentState = status?.state === "running" ? "running" : status?.state === "requires_action" ? "paused" : status?.state === "idle"
       ? status.stopReason === "cancelled" ? "stopped" : status.stopReason === "error" ? "failed" : status.stopReason ? "completed" : "unknown" : "unknown";
+    const errorMessage = typeof status?.error?.message === "string" && status.error.message ? status.error.message : undefined;
     const call = {
       toolCallId: this.childCallId(childId), title: association.title ?? "子代理", kind: "other" as const,
       status: state === "failed" || state === "stopped" ? "failed" as const : state === "completed" ? "completed" as const : "in_progress" as const,
       detail: { type: "subagent" as const, action: "spawn" as const, name: association.title, task: association.description, nativeSessionId: childId, canCancel: association.canCancel, state },
+      ...(errorMessage ? { rawOutput: { error: errorMessage } } : {}),
     };
     this.onMappedUpdate(parent, { sessionUpdate: created ? "tool_call" : "tool_call_update", ...call });
   }
@@ -1048,10 +1191,16 @@ export class AcpDriver implements AgentDriver {
       return;
     }
     const state = this.sessions.get(sessionId);
-    if (record?.sessionUpdate === "subagent_update" && this.settings().experimental) { this.subagentUpdate(sessionId, raw); return; }
     const version = this.connection?.protocolVersion ?? 1;
+    if (record?.sessionUpdate === "subagent_update" && (version === 2 || this.settings().experimental)) { this.subagentUpdate(sessionId, raw); return; }
     if (this.acpBehavior.turnCompletion === "state-update" && state && record?.sessionUpdate === "state_update") {
-      const status = raw as { state: string; stopReason?: string; usage?: unknown; message?: string };
+      const status = raw as {
+        state: string;
+        stopReason?: string;
+        usage?: unknown;
+        message?: string;
+        error?: { code?: number; message?: string; data?: unknown } | null;
+      };
       const completing = status.state === "idle" && state.turnActive && !state.replaying;
       const usage = completing && status.usage ? this.accountedUsage(status.usage, state, state.usageTurnId ?? randomUUID()) : undefined;
       if (usage) this.onMappedUpdate(sessionId, usage);
@@ -1062,11 +1211,37 @@ export class AcpDriver implements AgentDriver {
           state.usageTurnId = randomUUID();
           this.emit(sessionId, { sessionUpdate: "ls_turn", state: "started" });
         }
-        state.turnActive = true; state.idleReason = undefined;
+        state.turnActive = true;
+        state.runningGen = state.promptGen;
+        state.idleReason = undefined;
+        state.idleGen = undefined;
       } else if (status.state === "idle") {
         if (state.replaying) state.turnActive = false;
         else if (state.turnActive) {
-          state.idleReason = toStopReason(status.stopReason);
+          const reason = toStopReason(status.stopReason);
+          if (status.stopReason === "error") {
+            this.closeMessage(sessionId);
+            if (status.error?.code === -32000) {
+              const mapped = this.signInError(new RpcError(-32000, status.error.message || "Authentication required", status.error.data));
+              this.emit(sessionId, {
+                sessionUpdate: "ls_error",
+                code: "not_logged_in",
+                message: mapped instanceof Error ? mapped.message : `${this.label} 未登录`,
+                ...(this.signedOut?.hint ? { hint: this.signedOut.hint } : {}),
+              });
+            } else {
+              const rawMessage = status.error?.message || status.message || `${this.label} 运行失败`;
+              const described = describeAgentError(this.label, rawMessage);
+              this.emit(sessionId, {
+                sessionUpdate: "ls_error",
+                code: "turn_failed",
+                message: described.message,
+                ...(described.hint ? { hint: described.hint } : {}),
+              });
+            }
+          }
+          state.idleReason = reason;
+          state.idleGen = state.runningGen;
           if (!state.inflight) this.finishTurn(sessionId, state, state.idleReason);
         }
       }
@@ -1090,6 +1265,7 @@ export class AcpDriver implements AgentDriver {
     }
     if (update.sessionUpdate === "ls_config" && state) {
       state.config = this.mergeConfig(state, update.options.map((option) => ({ ...option, source: "configOptions" as const })));
+      this.noteCapabilities(state.config);
       update = { ...update, options: state.config.map(({ source: _source, ...option }) => option) };
     }
     if (update.sessionUpdate === "available_commands_update" && state) state.commands = update;
@@ -1246,10 +1422,14 @@ export class AcpDriver implements AgentDriver {
     state.turnActive = true;
     state.cancelling = false;
     state.usageTurnId = clientMessageId;
-    state.reportedState = undefined; state.idleReason = undefined;
+    state.reportedState = undefined;
+    state.idleReason = undefined;
+    state.idleGen = undefined;
+    const gen = ++state.promptGen;
+    state.runningGen = gen;
     this.echoUserMessage(nativeId, content, clientMessageId);
     this.emit(nativeId, { sessionUpdate: "ls_turn", state: "started" });
-    void this.sendPrompt(nativeId, state, withContext(toAcpPrompt(content), context), clientMessageId);
+    void this.sendPrompt(nativeId, state, withContext(toAcpPrompt(content), context), clientMessageId, gen);
   }
 
   private accountedUsage(value: unknown, state: AcpSessionState, id: string): SessionUpdate | undefined {
@@ -1260,7 +1440,7 @@ export class AcpDriver implements AgentDriver {
       model: state.config.find(option => option.category === "model")?.current } };
   }
 
-  private async sendPrompt(nativeId: string, state: AcpSessionState, prompt: Record<string, unknown>[], clientMessageId: string): Promise<void> {
+  private async sendPrompt(nativeId: string, state: AcpSessionState, prompt: Record<string, unknown>[], clientMessageId: string, gen: number): Promise<void> {
     state.inflight += 1;
     const completion = this.acpBehavior.turnCompletion;
     let stopReason: StopReason | undefined;
@@ -1270,10 +1450,24 @@ export class AcpDriver implements AgentDriver {
         if (typeof result.messageId !== "string") throw new Error("ACP 2 未返回已接收的消息 ID");
         state.messageAliases.set(result.messageId, `local-${clientMessageId}`);
         this.host?.state(this.id, nativeId).set("acp-message-aliases", JSON.stringify([...state.messageAliases]));
+        // If a delayed idle arrived from an earlier prompt before this steered prompt was accepted,
+        // discard it so it cannot prematurely terminate the newly accepted prompt.
+        if (state.idleGen !== undefined && state.idleGen !== gen) {
+          state.idleReason = undefined;
+          state.idleGen = undefined;
+        } else if (state.idleReason === undefined) {
+          state.runningGen = Math.max(state.runningGen, gen);
+        }
       } else stopReason = toStopReason(result.stopReason);
       const usage = completion !== "state-update" && result.usage ? this.accountedUsage(result.usage, state, clientMessageId) : undefined;
       if (usage) this.emit(nativeId, usage);
     } catch (error) {
+      // Do not emit a stray ls_error on the rejection microtask after onExit/detach/stop/cancel-recovery
+      // has already torn down the turn.
+      if (this.stopped || !state.loaded || !state.turnActive) {
+        state.inflight = Math.max(0, state.inflight - 1);
+        return;
+      }
       const rawMessage = error instanceof Error ? error.message : String(error);
       const isExpectedCancel =
         state.cancelling &&
@@ -1287,7 +1481,8 @@ export class AcpDriver implements AgentDriver {
         this.emit(nativeId, { sessionUpdate: "ls_error", code: "turn_failed", message: described.message, hint: described.hint });
       }
     }
-    state.inflight -= 1;
+    state.inflight = Math.max(0, state.inflight - 1);
+    if (!state.turnActive) return;
     // A steered prompt settles the earlier one; the turn ends with the last.
     if (state.inflight > 0) return;
     for (const raw of state.deferredUserUpdates.splice(0)) this.onUpdate(nativeId, raw);
@@ -1296,12 +1491,15 @@ export class AcpDriver implements AgentDriver {
   }
 
   private finishTurn(nativeId: string, state: AcpSessionState, stopReason: StopReason): void {
+    clearTimeout(state.cancelTimer);
+    state.cancelTimer = undefined;
     if (!state.turnActive) return;
     this.closeMessage(nativeId);
     state.turnActive = false;
     state.cancelling = false;
     state.reportedState = stopReason === "error" ? "error" : "idle";
     state.idleReason = undefined;
+    state.idleGen = undefined;
     state.toolCalls.clear();
     this.cancelPermissions(state);
     this.emit(nativeId, { sessionUpdate: "ls_turn", state: "ended", stopReason });
@@ -1318,6 +1516,14 @@ export class AcpDriver implements AgentDriver {
   async delete(nativeId: string): Promise<void> {
     if (!this.connection?.alive) await this.ensureStarted();
     if (this.connection?.capabilities.sessionCapabilities?.delete) await this.rpc("session/delete", { sessionId: nativeId });
+    const state = this.sessions.get(nativeId);
+    if (state) {
+      clearTimeout(state.cancelTimer);
+      state.cancelTimer = undefined;
+      this.cancelPermissions(state);
+    }
+    this.evictSessionChildren(nativeId);
+    for (const key of this.terminalCalls.keys()) if (key.startsWith(`${nativeId}\n`)) this.terminalCalls.delete(key);
     this.sessions.delete(nativeId);
   }
 
@@ -1396,7 +1602,8 @@ export class AcpDriver implements AgentDriver {
       // own credentials; never choose an interactive sign-in method here.
       try {
         if (this.authenticating?.connection !== connection) {
-          const attempt = { connection, promise: connection.request<void>("authenticate", { methodId }) };
+          const authMethod = connection.protocolVersion === 2 ? "auth/login" : "authenticate";
+          const attempt = { connection, promise: connection.request<void>(authMethod, { methodId }) };
           this.authenticating = attempt;
           void attempt.promise.finally(() => {
             if (this.authenticating === attempt) this.authenticating = undefined;

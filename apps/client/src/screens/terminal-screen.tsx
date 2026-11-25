@@ -27,9 +27,12 @@ import { sessionTitle } from "@/lib/describe";
 import { shortPath } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
 import {
+  chunkRawTerminalData,
   chunkTerminalPasteText,
   cleanTerminalOutputForAgent,
   encodeTerminalKeySequence,
+  sanitizeTerminalPasteText,
+  terminalKeyNameFromInput,
 } from "@/lib/terminal-paste";
 import { toggleTerminalSnippetsOpen, useTerminalSnippetsOpen } from "@/lib/terminal-snippets";
 import { useVoiceInput } from "@/lib/voice-input";
@@ -72,6 +75,16 @@ export function TerminalScreen() {
   const [ctrl, setCtrl] = useState(false);
   const [alt, setAlt] = useState(false);
   const [cmd, setCmd] = useState(false);
+  const altRef = useRef(false);
+  const cmdRef = useRef(false);
+  const setAltArmed = useCallback((next: boolean) => {
+    altRef.current = next;
+    setAlt(next);
+  }, []);
+  const setCmdArmed = useCallback((next: boolean) => {
+    cmdRef.current = next;
+    setCmd(next);
+  }, []);
   const [voiceDraft, setVoiceDraft] = useState("");
   const [restoring, setRestoring] = useState(true);
   const [restoreError, setRestoreError] = useState<string | null>(null);
@@ -233,28 +246,54 @@ export function TerminalScreen() {
     };
   }, [appendRecentOutput, id, link, retry]);
 
+  const writeRawToPty = useCallback(
+    async (data: string) => {
+      const chunks = chunkRawTerminalData(data);
+      for (const chunk of chunks) {
+        await link.call("terminals.input", { terminalId: id, data: chunk });
+      }
+    },
+    [id, link],
+  );
+
   const send = useCallback(
     (data: string) => {
       if (attaching.current) return;
-      if ((alt || cmd) && data.length === 1) {
-        const encoded = encodeTerminalKeySequence(data, { ctrl, alt, cmd });
-        setAlt(false);
-        setCmd(false);
-        if (encoded) {
-          void link.call("terminals.input", { terminalId: id, data: encoded }).catch(() => {});
-          return;
+      const armedAlt = altRef.current;
+      const armedCmd = cmdRef.current;
+      if (armedAlt || armedCmd) {
+        const mappedKey = terminalKeyNameFromInput(data);
+        if (mappedKey || data.length === 1) {
+          setAltArmed(false);
+          setCmdArmed(false);
+          // Delegate Alt-modified keys to Ghostty so Kitty/DECCKM/modifyOtherKeys modes stay truthful.
+          if (armedAlt && !armedCmd && mappedKey && view.current) {
+            void view.current.key(mappedKey, { ctrl, alt: true }).catch(() => {});
+            return;
+          }
+          const encoded = encodeTerminalKeySequence(mappedKey ?? data, { ctrl, alt: armedAlt, cmd: armedCmd });
+          if (encoded) {
+            void writeRawToPty(encoded).catch(() => {});
+            return;
+          }
         }
       }
-      void link.call("terminals.input", { terminalId: id, data }).catch(() => {});
+      void writeRawToPty(data).catch(() => {});
     },
-    [alt, cmd, ctrl, id, link],
+    [ctrl, setAltArmed, setCmdArmed, writeRawToPty],
   );
 
   const pasteSafeChunked = useCallback(
     async (rawText: string) => {
       if (attaching.current) return;
-      const chunks = chunkTerminalPasteText(rawText);
-      if (chunks.length === 0) return;
+      const sanitized = sanitizeTerminalPasteText(rawText);
+      if (!sanitized) return;
+      // Route text pastes through native Ghostty so bracketed paste (`\x1b[200~...\x1b[201~`) is honored.
+      if (view.current) {
+        await view.current.paste(sanitized);
+        return;
+      }
+      const chunks = chunkTerminalPasteText(sanitized);
       for (const chunk of chunks) {
         await link.call("terminals.input", { terminalId: id, data: chunk });
       }
@@ -264,17 +303,20 @@ export function TerminalScreen() {
 
   const handlePasteClipboard = useCallback(async () => {
     if (attaching.current) return;
-    let clip = "";
-    try {
-      clip = await Clipboard.getStringAsync();
-    } catch {
-      // The clipboard couldn't be read from here: the native view pastes it itself, below.
+    // Prefer native Ghostty clipboard paste so bracketed paste mode, multiline safety dialogs,
+    // and image clipboard imports all work natively without bypassing Ghostty.
+    if (view.current) {
+      try {
+        await view.current.pasteClipboard();
+        haptics.selection();
+        return;
+      } catch {
+        // Fall through to JS clipboard fallback only if native paste fails.
+      }
     }
-    if (!clip) {
-      await view.current?.pasteClipboard().catch(() => {});
-      return;
-    }
     try {
+      const clip = await Clipboard.getStringAsync();
+      if (!clip) return;
       await pasteSafeChunked(clip);
       haptics.selection();
     } catch (reason) {
@@ -287,23 +329,31 @@ export function TerminalScreen() {
   const handleKey = useCallback(
     (name: string, modifiers?: TerminalKeyModifiers) => {
       if (attaching.current) return;
-      if (alt || cmd) {
+      const armedAlt = altRef.current;
+      const armedCmd = cmdRef.current;
+      if (armedCmd) {
+        setAltArmed(false);
+        setCmdArmed(false);
         const seq = encodeTerminalKeySequence(name, {
           ...modifiers,
           ctrl: modifiers?.ctrl || ctrl,
-          alt: modifiers?.alt || alt,
-          cmd,
+          alt: modifiers?.alt || armedAlt,
+          cmd: true,
         });
-        setAlt(false);
-        setCmd(false);
         if (seq) {
-          send(seq);
+          void writeRawToPty(seq).catch(() => {});
           return;
         }
       }
+      if (armedAlt) {
+        setAltArmed(false);
+        // Delegate Alt-armed keys to native Ghostty so arrows, backspace, and symbols respect active terminal modes.
+        void view.current?.key(name, { ...modifiers, ctrl: modifiers?.ctrl || ctrl, alt: true }).catch(() => {});
+        return;
+      }
       void view.current?.key(name, modifiers).catch(() => {});
     },
-    [alt, cmd, ctrl, send],
+    [ctrl, setAltArmed, setCmdArmed, writeRawToPty],
   );
 
   const captureOutputToAgent = useCallback(async () => {
@@ -465,7 +515,7 @@ export function TerminalScreen() {
   const showCmd = !hostPlatform || hostPlatform === "darwin";
 
   return (
-    <View style={{ flex: 1, backgroundColor: theme.background, paddingTop: insets.top }}>
+    <View style={{ flex: 1, backgroundColor: theme.background, paddingTop: Platform.OS === "android" ? 0 : insets.top }}>
       <Stack.Screen
         options={{
           title: state?.title ?? "终端",
@@ -720,8 +770,8 @@ export function TerminalScreen() {
                   onToggleCtrl={() => {
                     if (!attaching.current) void view.current?.toggleCtrl().catch(() => {});
                   }}
-                  onToggleAlt={() => setAlt((v) => !v)}
-                  onToggleCmd={() => setCmd((v) => !v)}
+                  onToggleAlt={() => setAltArmed(!altRef.current)}
+                  onToggleCmd={() => setCmdArmed(!cmdRef.current)}
                   onKey={handleKey}
                   onImage={() => {
                     if (!attaching.current) void sendFile(pickPhoto);

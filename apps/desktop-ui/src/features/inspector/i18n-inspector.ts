@@ -113,6 +113,7 @@ const inspectorZh = {
   foldTree: "折叠目录栏",
   expandTree: "展开目录栏",
   filterFilesPlaceholder: "搜索文件名",
+  clearSearch: "清除搜索",
   newFolder: "新建文件夹",
   newFolderPrompt: "新建文件夹名称",
   rename: "重命名",
@@ -236,6 +237,7 @@ const inspectorZh = {
   noSearchHitsTitle: "没有匹配的文件",
   dirTruncatedNote: "此文件夹内容太多，只显示前 1000 项。",
   fileChangedWhileReading: "文件在读取过程中被修改，请重新载入",
+  unchangedLines: "已折叠 {count} 行未改动代码",
 } as const;
 
 export type InspectorCopyKey = keyof typeof inspectorZh;
@@ -339,6 +341,7 @@ const inspectorEn: Record<InspectorCopyKey, string> = {
   foldTree: "Collapse File Tree",
   expandTree: "Expand File Tree",
   filterFilesPlaceholder: "Filter files",
+  clearSearch: "Clear search",
   newFolder: "New Folder",
   newFolderPrompt: "New folder name",
   rename: "Rename",
@@ -457,6 +460,7 @@ const inspectorEn: Record<InspectorCopyKey, string> = {
   noSearchHitsTitle: "No matching files",
   dirTruncatedNote: "This folder has too many entries; showing the first 1000.",
   fileChangedWhileReading: "The file changed while it was being read. Reload it.",
+  unchangedLines: "{count} unchanged lines",
 };
 
 const inspectorJa: Record<InspectorCopyKey, string> = {
@@ -558,6 +562,7 @@ const inspectorJa: Record<InspectorCopyKey, string> = {
   foldTree: "ツリーを折りたたむ",
   expandTree: "ツリーを展開",
   filterFilesPlaceholder: "ファイルを検索",
+  clearSearch: "検索をクリア",
   newFolder: "新規フォルダ",
   newFolderPrompt: "新しいフォルダ名",
   rename: "名前を変更",
@@ -676,6 +681,7 @@ const inspectorJa: Record<InspectorCopyKey, string> = {
   noSearchHitsTitle: "一致するファイルはありません",
   dirTruncatedNote: "項目が多すぎるため先頭 1000 件のみ表示しています。",
   fileChangedWhileReading: "読み込み中にファイルが変更されました。再読み込みしてください。",
+  unchangedLines: "変更のない {count} 行を折りたたみ",
 };
 
 const INSPECTOR_DICTS: Record<Locale, Record<InspectorCopyKey, string>> = {

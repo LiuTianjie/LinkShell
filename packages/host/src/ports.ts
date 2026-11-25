@@ -1,7 +1,8 @@
 import { execFile } from "node:child_process";
-import { readlink } from "node:fs/promises";
+import { readdir, readFile, readlink } from "node:fs/promises";
 import { connect, type Socket } from "node:net";
 import { randomUUID } from "node:crypto";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import { DIRECT_CHUNK, RpcError, type PortInfo } from "@linkshell/wire";
 import type { DirectPeer } from "./direct.js";
@@ -48,6 +49,64 @@ function parseSs(output: string): Listener[] {
   return found;
 }
 
+/** Parses Linux `/proc/net/tcp` or `/proc/net/tcp6` content for TCP_LISTEN (`0A`) sockets. */
+export function parseProcNetTcp(content: string): Array<{ port: number; inode: string }> {
+  const found: Array<{ port: number; inode: string }> = [];
+  for (const line of content.split(/\r?\n/)) {
+    const columns = line.trim().split(/\s+/);
+    if (columns.length < 10 || !columns[0]?.endsWith(":")) continue;
+    // State 0A is TCP_LISTEN in Linux's /proc/net/tcp{,6}.
+    if (columns[3]?.toUpperCase() !== "0A") continue;
+    const localAddr = columns[1] ?? "";
+    const sep = localAddr.lastIndexOf(":");
+    if (sep < 0) continue;
+    const port = Number.parseInt(localAddr.slice(sep + 1), 16);
+    const inode = columns[9] ?? "";
+    if (!Number.isInteger(port) || port <= 0 || port > 65535 || !inode || inode === "0") continue;
+    found.push({ port, inode });
+  }
+  return found;
+}
+
+/** Resolves listening TCP sockets from `/proc/net/tcp{,6}` and `/proc/<pid>/fd` when `ss` is unavailable (e.g. Alpine). */
+export async function procNetListeners(procRoot = "/proc"): Promise<Listener[]> {
+  const [tcp4, tcp6] = await Promise.all([
+    readFile(join(procRoot, "net", "tcp"), "utf8").catch(() => ""),
+    readFile(join(procRoot, "net", "tcp6"), "utf8").catch(() => ""),
+  ]);
+  const entries = [...parseProcNetTcp(tcp4), ...parseProcNetTcp(tcp6)];
+  if (entries.length === 0) return [];
+
+  const targetInodes = new Set(entries.map((entry) => entry.inode));
+  const owners = new Map<string, { pid: number; process: string }>();
+  const procEntries = await readdir(procRoot).catch(() => []);
+  for (const name of procEntries) {
+    if (owners.size >= targetInodes.size) break;
+    if (!/^\d+$/.test(name)) continue;
+    const pid = Number(name);
+    const fdDir = join(procRoot, name, "fd");
+    const fds = await readdir(fdDir).catch(() => []);
+    if (fds.length === 0) continue;
+    let comm: string | undefined;
+    for (const fd of fds) {
+      const link = await readlink(join(fdDir, fd)).catch(() => "");
+      const match = /^socket:\[(\d+)\]$/.exec(link);
+      const inode = match?.[1];
+      if (!inode || !targetInodes.has(inode) || owners.has(inode)) continue;
+      if (comm === undefined) {
+        comm = (await readFile(join(procRoot, name, "comm"), "utf8").catch(() => "")).trim();
+      }
+      owners.set(inode, { pid, process: comm });
+      if (owners.size >= targetInodes.size) break;
+    }
+  }
+
+  return entries.map(({ port, inode }) => {
+    const owner = owners.get(inode);
+    return { port, pid: owner?.pid, process: owner?.process ?? "" };
+  });
+}
+
 async function listeners(): Promise<Listener[]> {
   if (process.platform === "win32") {
     const { stdout } = await run("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new(); ConvertTo-Json -InputObject @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | ForEach-Object { $owner = Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue; if ($owner) { @{ port=$_.LocalPort; pid=$_.OwningProcess; process=$owner.ProcessName } } }) -Compress"], { windowsHide: true, timeout: 10_000 }).catch(() => ({ stdout: "[]" }));
@@ -60,8 +119,13 @@ async function listeners(): Promise<Listener[]> {
     return parseLsof(stdout);
   }
   if (process.platform === "linux") {
-    const { stdout } = await run("ss", ["-ltnpH"], { timeout: 5000 }).catch(() => ({ stdout: "" }));
-    return parseSs(stdout);
+    try {
+      const { stdout } = await run("ss", ["-ltnpH"], { timeout: 5000 });
+      return parseSs(stdout);
+    } catch {
+      // Alpine and minimal containers omit iproute2 (`ss`); read /proc/net/tcp{,6} directly.
+      return procNetListeners();
+    }
   }
   return [];
 }
@@ -284,9 +348,12 @@ export class ProxyStreams {
       });
       return { streamId };
     }
+    let unwatchDrain: (() => void) | undefined;
     const channel = direct.attach({
       data: (bytes) => socket.write(bytes),
       close: (lost) => {
+        unwatchDrain?.();
+        unwatchDrain = undefined;
         this.streams.delete(streamId);
         if (lost) socket.destroy();
         else {
@@ -297,16 +364,25 @@ export class ProxyStreams {
     });
     socket.on("data", (chunk: Buffer) => {
       for (let offset = 0; offset < chunk.length; offset += DIRECT_CHUNK) {
-        direct.send({ type: "data", stream: channel, data: chunk.subarray(offset, offset + DIRECT_CHUNK) });
+        if (!direct.send({ type: "data", stream: channel, data: chunk.subarray(offset, offset + DIRECT_CHUNK) })) {
+          socket.destroy();
+          return;
+        }
       }
       // The device isn't keeping up: stop reading the server until it has. (For the
       // screen that reaches the viewer server, which then skips frames instead of queueing them.)
       if (direct.backedUp && !socket.isPaused()) {
         socket.pause();
-        direct.whenDrained(() => socket.resume());
+        unwatchDrain?.();
+        unwatchDrain = direct.whenDrained(() => {
+          unwatchDrain = undefined;
+          if (!socket.destroyed && socket.isPaused()) socket.resume();
+        });
       }
     });
     socket.on("close", () => {
+      unwatchDrain?.();
+      unwatchDrain = undefined;
       if (!this.streams.delete(streamId)) return;
       direct.detach(channel);
       direct.send({ type: "close", stream: channel, error: failure });

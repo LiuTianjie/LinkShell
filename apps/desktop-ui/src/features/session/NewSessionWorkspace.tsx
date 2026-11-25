@@ -4,6 +4,7 @@ import type { AgentInfo, GitInfo, ProjectSummary } from "@linkshell/wire";
 import { DESKTOP_LOCAL } from "@/bridge";
 import {
   composerDrafts,
+  composerPastedDrafts,
   configToCreate,
   creationOptions,
   draftKeyFor,
@@ -16,7 +17,6 @@ import {
   useComposerDraft,
   useManagement,
   useT,
-  type PastedTextBlock,
 } from "@/core";
 import { AgentMark, DesktopIcon } from "@/icons";
 import {
@@ -225,9 +225,9 @@ export function NewSessionWorkspace({
 
   // Composer draft & attachments
   const draftKey = draftKeyFor(computerKey, "new");
-  const { text, setText, clearSubmitted } = useComposerDraft(draftKey);
+  const { text, setText, clearSubmitted, pastedBlocks, setPastedBlocks } =
+    useComposerDraft(draftKey);
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
-  const [pastedBlocks, setPastedBlocks] = useState<PastedTextBlock[]>([]);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | undefined>();
 
@@ -289,10 +289,10 @@ export function NewSessionWorkspace({
       connection.link.call("fs.upload", { dir, name, data }, UPLOAD_TIMEOUT_MS);
     const clearComposer = () => {
       clearSubmitted(submittedText);
+      setPastedBlocks([]);
       revokeAttachmentPreviews(currentAttachments);
       if (aliveRef.current) {
         setAttachments([]);
-        setPastedBlocks([]);
       }
     };
 
@@ -327,7 +327,11 @@ export function NewSessionWorkspace({
           }
           clearComposer();
         } catch (error) {
-          composerDrafts.getState().update(draftKeyFor(computerKey, created.id), submittedText);
+          const targetDraftKey = draftKeyFor(computerKey, created.id);
+          composerDrafts.getState().update(targetDraftKey, submittedText);
+          if (currentPasted.length > 0) {
+            composerPastedDrafts.getState().update(targetDraftKey, currentPasted);
+          }
           clearComposer();
           reportDesktopError(
             new Error(copy.firstMessageNotSent(describeActionError(error, copy.actionFailed))),

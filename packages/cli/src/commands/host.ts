@@ -1,6 +1,6 @@
-import { spawn } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { networkInterfaces } from "node:os";
+import { spawn, type ChildProcess } from "node:child_process";
+import { chmodSync, readFileSync, writeFileSync } from "node:fs";
+import { constants as osConstants, networkInterfaces } from "node:os";
 import { join } from "node:path";
 import {
   RELAY_PATH,
@@ -11,6 +11,7 @@ import {
 } from "@linkshell/wire";
 import { getCachedToken, isLoggedIn, loadAuth } from "../auth.js";
 import * as daemon from "../utils/daemon.js";
+import { stderrStyle, stdoutStyle, type TtyReadable } from "../utils/format.js";
 
 // node:sqlite prints an ExperimentalWarning on load; it is expected here and
 // only confuses users. Must run before the host (and node:sqlite) is imported.
@@ -50,22 +51,27 @@ export function parseLanOption(raw: boolean | string): "off" | number {
   throw new Error(`Invalid --lan value "${raw}". Pass a port (e.g. 8787), omit for 8787, or pass "off".`);
 }
 
+// Exclude loopback, VPN/mesh tunnels, and container/VM virtual bridges so LAN detection picks the real NIC.
+const VIRTUAL_INTERFACE_RE = /^(lo|utun|tun|tap|docker|br-|veth|virbr|podman|cni|flannel|wg|zt|lxc|lxd|incus|vmnet|tailscale|cali|weave|kube)/i;
+
 export function findLanIpv4(interfaces = networkInterfaces()): string | undefined {
   const isPrivateRfc1918 = (ip: string) =>
     ip.startsWith("192.168.") ||
     ip.startsWith("10.") ||
     /^172\.(1[6-9]|2\d|3[01])\./.test(ip);
-  const virtualName = /^(lo|utun|tun|tap|docker|br-|veth|vmnet|tailscale)/i;
   let fallback: string | undefined;
+  let virtualFallback: string | undefined;
   for (const [name, addrs] of Object.entries(interfaces)) {
     if (!addrs) continue;
+    const isVirtual = VIRTUAL_INTERFACE_RE.test(name);
     for (const addr of addrs) {
       if (addr.family !== "IPv4" || addr.internal) continue;
-      if (!virtualName.test(name) && isPrivateRfc1918(addr.address)) return addr.address;
-      fallback ??= addr.address;
+      if (!isVirtual && isPrivateRfc1918(addr.address)) return addr.address;
+      if (!isVirtual) fallback ??= addr.address;
+      else virtualFallback ??= addr.address;
     }
   }
-  return fallback;
+  return fallback ?? virtualFallback;
 }
 
 export function configureLanGateway(
@@ -171,8 +177,12 @@ export function readHostConfig(home: string): HostConfig {
 }
 
 export function writeHostConfig(home: string, config: HostConfig): void {
-  mkdirSync(home, { recursive: true });
-  writeFileSync(configPath(home), `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
+  daemon.ensurePrivateDir(home);
+  const target = configPath(home);
+  writeFileSync(target, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
+  if (process.platform !== "win32") {
+    try { chmodSync(target, 0o600); } catch {}
+  }
 }
 
 /** The host keeps its state in node:sqlite, unflagged from Node 22.13. */
@@ -196,7 +206,7 @@ async function loadHost() {
   return import("@linkshell/host");
 }
 
-/** Runs the host in this process until SIGINT/SIGTERM. */
+/** Runs the host in this process until SIGINT/SIGTERM/SIGHUP. */
 export async function runHostForeground(version: string): Promise<void> {
   const host = await loadHost();
   const log = (message: string) => process.stderr.write(`${new Date().toISOString()} ${message}\n`);
@@ -205,14 +215,14 @@ export async function runHostForeground(version: string): Promise<void> {
     log(`[host] unhandled rejection: ${reason instanceof Error ? (reason.stack ?? reason.message) : String(reason)}`),
   );
   // Started from a terminal (by `linkshell`): use that environment as is.
-  // Otherwise (launchd, a bare process) recover the login shell's.
+  // Otherwise (launchd, systemd, a bare process) recover the login shell's.
   const env = process.env.LINKSHELL_ENV_FROM_TERMINAL === "1" ? process.env : await host.resolveLoginShellEnv(undefined, log);
   const adapter = process.env.LINKSHELL_CLAUDE_ADAPTER;
   const devPort = process.env.LINKSHELL_DEV_PORT ? Number(process.env.LINKSHELL_DEV_PORT) : undefined;
-  // Where devices reach this machine from outside the LAN. The account from
-  // `linkshell login`, if any, lets that account's devices in without pairing.
-  // Asked again on `gateway.refresh`, so login, logout and `--gateway` apply to a running host.
   const home = host.defaultHome();
+  daemon.ensurePrivateDir(home);
+  const stopLogRotation = daemon.startPeriodicLogRotation(daemon.getLogFile("host"));
+
   let shutdownRequested = false;
   let earlyShutdown = false;
   let requestShutdown: (() => void) | undefined;
@@ -246,6 +256,7 @@ export async function runHostForeground(version: string): Promise<void> {
   const shutdown = async () => {
     if (shutdownRequested) return;
     shutdownRequested = true;
+    stopLogRotation();
     log("[host] shutting down");
     const hardDeadline = setTimeout(() => {
       log("[host] shutdown timed out after 10s; forcing exit");
@@ -265,6 +276,7 @@ export async function runHostForeground(version: string): Promise<void> {
   if (earlyShutdown) requestShutdown();
   process.on("SIGINT", () => void shutdown());
   process.on("SIGTERM", () => void shutdown());
+  process.on("SIGHUP", () => void shutdown());
   await new Promise(() => {});
 }
 
@@ -280,6 +292,55 @@ export async function ensureHostRunning(env?: NodeJS.ProcessEnv): Promise<string
     await new Promise((resolve) => setTimeout(resolve, 150));
   }
   throw new Error(`LinkShell host did not start; see ${daemon.getLogFile("host")}`);
+}
+
+/** Stops the host cleanly via its OS service manager (systemd/launchd) if supervised, else via daemon PID. */
+export async function stopHost(): Promise<{ stopped: boolean; managed: boolean }> {
+  try {
+    const { stopManagedHostService } = await import("./service.js");
+    const outcome = await stopManagedHostService({ linkshellHome: daemon.linkshellDir() });
+    if (outcome === "stopped") {
+      // Wait briefly for the process to exit and clean up any leftover PID file.
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        if (!daemon.readPid("host")) break;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      if (!daemon.readPid("host")) daemon.removePid("host");
+      return { stopped: true, managed: true };
+    }
+  } catch {
+    // Fall back to direct PID signaling if the service manager query failed.
+  }
+  const stopped = await daemon.stopDaemonAndWait("host");
+  return { stopped, managed: false };
+}
+
+/** Restarts the host cleanly (service-aware on systemd/launchd; preserves host-launch.json env for daemon mode). */
+export async function restartHost(): Promise<{ managed: boolean; socket: string }> {
+  const host = await loadHost();
+  const { hostSocket } = host.hostPaths();
+  try {
+    const { restartManagedHostService } = await import("./service.js");
+    const outcome = await restartManagedHostService({ linkshellHome: daemon.linkshellDir() });
+    if (outcome === "restarted") {
+      return { managed: true, socket: hostSocket };
+    }
+  } catch (error) {
+    // If the managed service existed and explicitly failed to restart, surface that failure.
+    if (error instanceof Error && /restarted|systemctl|launchctl|schtasks/i.test(error.message)) {
+      throw error;
+    }
+  }
+
+  const pid = daemon.readPid("host");
+  const savedEnv = pid ? daemon.readHostLaunch(pid) : {};
+  const env = { ...process.env, ...savedEnv };
+  if (pid) {
+    await daemon.stopDaemonAndWait("host", 30_000, pid);
+  }
+  const socket = await ensureHostRunning(env);
+  return { managed: false, socket };
 }
 
 type HostClient = Awaited<ReturnType<Awaited<ReturnType<typeof loadHost>>["connectHost"]>>;
@@ -310,7 +371,7 @@ export async function refreshGateway(waitMs: number): Promise<GatewayStatus | un
     } catch {
       // A host from before 0.6.3 (still running after an upgrade) only reads its gateway at start.
       process.stderr.write("  The running host is older than this CLI. Restart it to apply this (stops running agent turns):\n");
-      process.stderr.write("    linkshell host stop && linkshell host --daemon\n");
+      process.stderr.write("    linkshell host restart\n");
       return client.call("gateway.status", {});
     }
     const deadline = Date.now() + waitMs;
@@ -332,7 +393,6 @@ export function describeGateway(gateway: GatewayStatus): string {
   return `${gateway.status} ${gateway.url}${account}${problem}`;
 }
 
-/** After `linkshell login`: this computer joins the gateway its account is for. */
 /**
  * A signed-in member's computer belongs on the official gateway: nobody should have to find
  * a button for it before their phone can see this computer. A gateway of one's own (a URL) is kept;
@@ -356,6 +416,7 @@ export async function followAccountGateway(plan: "pro" | "free" | "unknown"): Pr
 }
 
 export async function joinGatewayAfterLogin(plan: "pro" | "free"): Promise<void> {
+  const style = stderrStyle();
   const out = (line: string) => process.stderr.write(`  ${line}\n`);
   if (!hostRuntimeOk()) {
     out(`The LinkShell host needs Node.js 22.13 or newer (this is ${process.version}); upgrade Node, then: linkshell host --daemon\n`);
@@ -378,31 +439,153 @@ export async function joinGatewayAfterLogin(plan: "pro" | "free"): Promise<void>
   const gateway = await refreshGateway(15_000);
   const where = chosen ? (gateway?.url ?? chosen) : "the official gateway";
   if (gateway?.status === "online") {
-    out(`\x1b[32m✓\x1b[0m This computer is online on ${where}.`);
+    out(`${style.green("✓")} This computer is online on ${where}.`);
     out(
       gateway.account
         ? "  Open LinkShell on your phone and sign in with the same account: it shows up there, no pairing needed.\n"
         : "  Pair your phone with: linkshell pair\n",
     );
   } else {
-    out(`\x1b[31m✗\x1b[0m Not connected to ${where}${gateway?.error ? `: ${gateway.error.message}` : " yet"}`);
+    out(`${style.red("✗")} Not connected to ${where}${gateway?.error ? `: ${gateway.error.message}` : " yet"}`);
     out("  Check again with: linkshell host status\n");
   }
 }
 
-export async function printHostStatus(): Promise<void> {
+export function formatDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return "0s";
+  const s = Math.floor(seconds);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${s % 60}s`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ${m % 60}m`;
+  const d = Math.floor(h / 24);
+  return `${d}d ${h % 24}h`;
+}
+
+export async function printHostStatus(options: {
+  json?: boolean;
+  cliVersion?: string;
+  includeGatewayServer?: boolean;
+} = {}): Promise<void> {
   const host = await loadHost();
   const { hostSocket } = host.hostPaths();
+  const logFile = daemon.getLogFile("host");
+  const lanIp = findLanIpv4();
+  const serviceStatus = await import("./service.js")
+    .then(({ getServiceStatus }) => getServiceStatus({ linkshellHome: daemon.linkshellDir() }))
+    .catch(() => undefined);
+
+  const gatewayPid = options.includeGatewayServer ? daemon.readPid("gateway") : null;
+  const gatewayServer = options.includeGatewayServer
+    ? { running: Boolean(gatewayPid), pid: gatewayPid ?? undefined, logFile: daemon.getLogFile("gateway") }
+    : undefined;
+
   if (!(await host.isHostRunning(hostSocket))) {
-    process.stderr.write("  LinkShell host is not running. Start it with: linkshell host --daemon\n");
+    if (options.json) {
+      process.stdout.write(
+        `${JSON.stringify(
+          {
+            running: false,
+            cliVersion: options.cliVersion,
+            hostSocket,
+            logFile,
+            lanIp,
+            service: serviceStatus,
+            ...(gatewayServer ? { gatewayServer } : {}),
+          },
+          null,
+          2,
+        )}\n`,
+      );
+    } else {
+      process.stderr.write("  LinkShell host is not running. Start it with: linkshell host --daemon\n");
+    }
     process.exitCode = 1;
     return;
   }
+
   const client = await host.connectHost(hostSocket);
   try {
+    const style = stdoutStyle();
     const info = await client.call("machine.info", {});
     const { sessions } = await client.call("sessions.list", { limit: 200 });
-    process.stdout.write(`  Host ${info.hostVersion} on ${info.hostname} (${hostSocket})\n`);
+    const terminalsRes = await client.call("terminals.list", {}, 3000).catch(() => undefined);
+    const terminalsCount = terminalsRes?.terminals?.length;
+    const gateway = await client.call("gateway.status", {});
+    const metrics = await client.call("machine.metrics", {}, 5000).catch(() => undefined);
+    const powerLine = describePowerAndKeepAwake(metrics);
+    const { describeScreen } = await import("./screen.js");
+    const rawScreen = await client
+      .call("screen.access", {}, 20_000)
+      .catch((error: Error) => (/method not found|unknown method/i.test(error.message) ? ("old" as const) : undefined));
+    const screenLine = describeScreen(rawScreen);
+    const pid = daemon.readPid("host") ?? serviceStatus?.pid ?? undefined;
+    const uptimeSeconds = daemon.readDaemonUptimeSeconds("host", pid);
+    const versionMismatch = Boolean(options.cliVersion && info.hostVersion !== options.cliVersion);
+    const active = sessions.filter((s) => s.state === "running" || s.state === "waiting");
+
+    if (options.json) {
+      process.stdout.write(
+        `${JSON.stringify(
+          {
+            running: true,
+            cliVersion: options.cliVersion,
+            hostVersion: info.hostVersion,
+            versionMismatch,
+            hostname: info.hostname,
+            hostSocket,
+            pid,
+            uptimeSeconds,
+            lanIp,
+            logFile,
+            service: serviceStatus,
+            agents: info.agents,
+            sessions: { total: sessions.length, active: active.length },
+            ...(terminalsCount !== undefined ? { terminals: terminalsCount } : {}),
+            gateway,
+            power: metrics?.power,
+            keepAwake: metrics?.keepAwake,
+            screen: screenLine,
+            ...(gatewayServer ? { gatewayServer } : {}),
+          },
+          null,
+          2,
+        )}\n`,
+      );
+      return;
+    }
+
+    const metaParts = [
+      pid !== undefined ? `PID ${pid}` : undefined,
+      uptimeSeconds !== undefined ? `up ${formatDuration(uptimeSeconds)}` : undefined,
+    ].filter(Boolean);
+    process.stdout.write(
+      `  Host ${info.hostVersion} on ${info.hostname}${metaParts.length ? ` (${metaParts.join(", ")})` : ""}\n`,
+    );
+    process.stdout.write(`  Socket:   ${hostSocket}\n`);
+    if (versionMismatch) {
+      process.stdout.write(
+        `  ${style.yellow("⚠")} Version mismatch: host is ${info.hostVersion}, CLI is ${options.cliVersion} — run: linkshell host restart\n`,
+      );
+    }
+    if (serviceStatus) {
+      const manager =
+        serviceStatus.platform === "linux"
+          ? "systemd --user"
+          : serviceStatus.platform === "darwin"
+            ? "launchd"
+            : "Task Scheduler";
+      if (serviceStatus.installed) {
+        const lingerBadge =
+          serviceStatus.platform === "linux" && serviceStatus.linger !== undefined
+            ? `, linger ${serviceStatus.linger ? style.green("on") : style.yellow("off")}`
+            : "";
+        process.stdout.write(`  Service:  ${manager} (${serviceStatus.state}${lingerBadge})\n`);
+      } else {
+        process.stdout.write(`  Service:  background daemon (${style.dim("not installed as OS service")})\n`);
+      }
+    }
     for (const agent of info.agents) {
       const state = agent.installed ? `v${agent.version ?? "?"}${agent.problem ? `  ⚠ ${agent.problem}` : ""}` : "not installed";
       const auth =
@@ -413,21 +596,20 @@ export async function printHostStatus(): Promise<void> {
             : "";
       process.stdout.write(`  ${agent.label.padEnd(10)} ${agent.tier.padEnd(13)} ${state}${auth}\n`);
     }
-    const active = sessions.filter((s) => s.state === "running" || s.state === "waiting");
-    process.stdout.write(`  Sessions: ${sessions.length} known, ${active.length} active\n`);
-    const gateway = await client.call("gateway.status", {});
+    process.stdout.write(
+      `  Sessions: ${sessions.length} known, ${active.length} active${terminalsCount !== undefined ? ` · Terminals: ${terminalsCount}` : ""}\n`,
+    );
     process.stdout.write(`  Gateway:  ${describeGateway(gateway)}\n`);
     for (const device of gateway.devices) {
-      process.stdout.write(`    ${device.online ? "●" : "○"} ${device.name}  paired ${new Date(device.pairedAt).toLocaleDateString()}\n`);
+      process.stdout.write(`    ${device.online ? style.green("●") : style.dim("○")} ${device.name}  paired ${new Date(device.pairedAt).toLocaleDateString()}\n`);
     }
-    const metrics = await client.call("machine.metrics", {}, 5000).catch(() => undefined);
-    const powerLine = describePowerAndKeepAwake(metrics);
+    if (lanIp) process.stdout.write(`  LAN IP:   ${lanIp}\n`);
     if (powerLine) process.stdout.write(`  Power:    ${powerLine}\n`);
-    const { describeScreen } = await import("./screen.js");
-    const screen = describeScreen(
-      await client.call("screen.access", {}, 20_000).catch((error: Error) => (/method not found|unknown method/i.test(error.message) ? ("old" as const) : undefined)),
-    );
-    if (screen) process.stdout.write(`  Screen:   ${screen}\n`);
+    if (screenLine) process.stdout.write(`  Screen:   ${screenLine}\n`);
+    process.stdout.write(`  Log:      ${logFile}\n`);
+    if (gatewayServer?.running) {
+      process.stdout.write(`  Gateway server: running (PID ${gatewayServer.pid}), log ${gatewayServer.logFile}\n`);
+    }
   } finally {
     client.close();
   }
@@ -439,10 +621,17 @@ interface LaunchSpec {
   env?: Record<string, string>;
 }
 
+/** Computes the exact POSIX shell exit code (128 + signal number) for a signal-terminated child. */
+export function signalExitCode(signal: NodeJS.Signals | null): number {
+  if (!signal) return 1;
+  const num = (osConstants.signals as Record<string, number | undefined>)[signal];
+  return 128 + (typeof num === "number" ? num : 15);
+}
+
 function runChild(
   launch: LaunchSpec,
   baseEnv: NodeJS.ProcessEnv,
-  onSpawn?: (child: import("node:child_process").ChildProcess) => void,
+  onSpawn?: (child: ChildProcess) => void,
 ): Promise<number> {
   const child = spawn(launch.command, launch.args, {
     stdio: "inherit",
@@ -451,15 +640,25 @@ function runChild(
   onSpawn?.(child);
   // The terminal delivers Ctrl-C to the whole foreground group; the agent handles it.
   const ignore = () => {};
+  const forwardTerm = () => {
+    try { child.kill("SIGTERM"); } catch {}
+  };
+  const forwardHup = () => {
+    try { child.kill("SIGHUP"); } catch {}
+  };
   process.on("SIGINT", ignore);
   process.on("SIGQUIT", ignore);
+  process.on("SIGTERM", forwardTerm);
+  process.on("SIGHUP", forwardHup);
   return new Promise<number>((resolve) => {
     const done = (code: number) => {
       process.off("SIGINT", ignore);
       process.off("SIGQUIT", ignore);
+      process.off("SIGTERM", forwardTerm);
+      process.off("SIGHUP", forwardHup);
       resolve(code);
     };
-    child.once("exit", (exitCode, signal) => done(exitCode ?? (signal ? 128 + 15 : 1)));
+    child.once("exit", (exitCode, signal) => done(exitCode ?? signalExitCode(signal)));
     child.once("error", (error) => {
       process.stderr.write(`linkshell: could not start ${launch.command}: ${error.message}\n`);
       done(127);
@@ -467,24 +666,59 @@ function runChild(
   });
 }
 
-/** Undo what a killed full-screen TUI may have left on: alt screen, hidden cursor, mouse/paste modes. */
-function restoreTerminal(): void {
-  if (!process.stdout.isTTY) return;
-  process.stdout.write("\x1b[?1049l\x1b[?25h\x1b[?2004l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[0m\r\n");
+/** Undo what a killed full-screen TUI may have left on: alt screen, cursor, paste, mouse, focus reporting, Kitty keyboard protocol. */
+export function restoreTerminal(stdout: { isTTY?: boolean; write: (chunk: string) => unknown } = process.stdout): void {
+  if (!stdout.isTTY) return;
+  stdout.write("\x1b[?1049l\x1b[?25h\x1b[?2004l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1004l\x1b[<u\x1b[0m\r\n");
 }
 
-/** Resolves with the first key pressed; "\u0003" for Ctrl-C. */
-function waitForKey(): Promise<string> {
+/** True when a stdin chunk contains only terminal focus-in (`\x1b[I`) / focus-out (`\x1b[O`) reports. */
+export function isTerminalFocusSequence(text: string): boolean {
+  return text.length > 0 && /^(?:\x1b\[[IO])+$/.test(text);
+}
+
+/**
+ * Resolves with the first real key pressed; ignores terminal focus-in/out sequences so switching
+ * tmux panes never accidentally reclaims a phone session, and resolves cleanly on EOF / SIGTERM / SIGHUP.
+ */
+export function waitForKey(stdin: TtyReadable = process.stdin as TtyReadable): Promise<string> {
   return new Promise((resolve) => {
-    const stdin = process.stdin;
-    const raw = stdin.isTTY;
-    if (raw) stdin.setRawMode(true);
+    const raw = stdin.isTTY === true;
+    let settled = false;
+    if (raw) {
+      try { stdin.setRawMode?.(true); } catch {}
+    }
     stdin.resume();
-    stdin.once("data", (data) => {
-      if (raw) stdin.setRawMode(false);
+
+    const finish = (value: string) => {
+      if (settled) return;
+      settled = true;
+      stdin.off("data", onData);
+      stdin.off("end", onEof);
+      stdin.off("close", onEof);
+      process.off("SIGTERM", onTerm);
+      process.off("SIGHUP", onHup);
+      if (raw) {
+        try { stdin.setRawMode?.(false); } catch {}
+      }
       stdin.pause();
-      resolve(data.toString("utf8"));
-    });
+      resolve(value);
+    };
+
+    const onData = (data: Buffer | string) => {
+      const text = Buffer.isBuffer(data) ? data.toString("utf8") : String(data);
+      if (isTerminalFocusSequence(text)) return;
+      finish(text);
+    };
+    const onEof = () => finish("\u0003");
+    const onTerm = () => finish("\u0003");
+    const onHup = () => finish("\u0003");
+
+    stdin.on("data", onData);
+    stdin.once("end", onEof);
+    stdin.once("close", onEof);
+    process.once("SIGTERM", onTerm);
+    process.once("SIGHUP", onHup);
   });
 }
 
@@ -517,7 +751,7 @@ export async function runAgentShim(agent: string, args: string[]): Promise<void>
   }
 
   const sessionId = launch.sessionId;
-  let child: import("node:child_process").ChildProcess | undefined;
+  let child: ChildProcess | undefined;
   let yielded: boolean;
   let showingRemote = false;
   client.on("desktop.yield", ({ sessionId: target }) => {

@@ -7,10 +7,11 @@ import { fallbackProfile } from "./screen-session.js";
 
 const runExecFile = promisify(execFile);
 
-export type LinuxDisplayServer = "wayland" | "x11";
+export type LinuxDisplayServer = "wayland" | "x11" | "headless";
 
 export type LinuxCaptureBackend =
   | "x11-ffmpeg"
+  | "x11-ffmpeg-mjpeg"
   | "wayland-wf-recorder"
   | "wayland-gst-vaapi"
   | "wayland-gst-x264"
@@ -21,12 +22,15 @@ export type LinuxInputBackend = "xdotool" | "ydotool" | "dotool" | "wtype";
 
 export interface LinuxCaptureTools {
   ffmpeg: boolean;
+  ffmpegX11Grab: boolean;
+  ffmpegLibx264: boolean;
   wfRecorder: boolean;
   gstLaunch: boolean;
   gstPipewire: boolean;
   gstVaapiH264: boolean;
   gstX264: boolean;
   gstJpeg: boolean;
+  xrandr: boolean;
   xdpyinfo: boolean;
   wlrRandr: boolean;
 }
@@ -60,6 +64,8 @@ export interface LinuxDisplayInfo {
   output?: string;
   w?: number;
   h?: number;
+  x?: number;
+  y?: number;
 }
 
 export type LinuxExtendedInputEvent =
@@ -78,11 +84,15 @@ export interface LinuxProbeDeps {
   fileExists?: (path: string) => boolean;
 }
 
-/** Detects whether the current Linux session runs on Wayland or X11. */
+export const HEADLESS_LINUX_PROBLEM =
+  "Headless Linux session (no DISPLAY or WAYLAND_DISPLAY); screen sharing requires a desktop X11/Wayland session";
+
+/** Detects whether the current Linux session runs on Wayland, X11, or headless (SSH/container/TTY). */
 export function detectLinuxDisplayServer(env: NodeJS.ProcessEnv = process.env): LinuxDisplayServer {
-  if (env.XDG_SESSION_TYPE?.trim().toLowerCase() === "wayland") return "wayland";
-  if (env.WAYLAND_DISPLAY?.trim()) return "wayland";
-  return "x11";
+  const sessionType = env.XDG_SESSION_TYPE?.trim().toLowerCase();
+  if (sessionType === "wayland" || env.WAYLAND_DISPLAY?.trim()) return "wayland";
+  if (sessionType === "x11" || env.DISPLAY?.trim()) return "x11";
+  return "headless";
 }
 
 async function hasBinary(name: string, deps: LinuxProbeDeps): Promise<boolean> {
@@ -109,8 +119,28 @@ async function hasBinary(name: string, deps: LinuxProbeDeps): Promise<boolean> {
 }
 
 async function hasGstPlugin(plugin: string, deps: LinuxProbeDeps): Promise<boolean> {
-  const exec = deps.runCommand ?? ((cmd, args, opts) => runExecFile(cmd, args, opts));
+  const exec = resolveExec(deps);
   return exec("gst-inspect-1.0", [plugin], { timeout: 1500 }).then(() => true, () => false);
+}
+
+async function probeFfmpegCapabilities(
+  displayServer: LinuxDisplayServer,
+  deps: LinuxProbeDeps,
+): Promise<{ x11grab: boolean; libx264: boolean }> {
+  const exec = resolveExec(deps);
+  const [devices, encoders] = await Promise.all([
+    displayServer === "x11"
+      ? exec("ffmpeg", ["-hide_banner", "-devices"], { timeout: 2000 }).then(
+          ({ stdout, stderr }) => /\bx11grab\b/i.test(`${stdout}\n${stderr}`),
+          () => false,
+        )
+      : Promise.resolve(false),
+    exec("ffmpeg", ["-hide_banner", "-encoders"], { timeout: 2000 }).then(
+      ({ stdout, stderr }) => /\blibx264\b/i.test(`${stdout}\n${stderr}`),
+      () => false,
+    ),
+  ]);
+  return { x11grab: devices, libx264: encoders };
 }
 
 function resolveCaptureSelection(displayServer: LinuxDisplayServer, tools: LinuxCaptureTools): {
@@ -118,9 +148,15 @@ function resolveCaptureSelection(displayServer: LinuxDisplayServer, tools: Linux
   format: "h264" | "jpeg" | null;
   missing: string[];
 } {
+  if (displayServer === "headless") {
+    return { backend: null, format: null, missing: [] };
+  }
   if (displayServer === "x11") {
-    if (tools.ffmpeg) return { backend: "x11-ffmpeg", format: "h264", missing: [] };
-    return { backend: null, format: null, missing: ["ffmpeg"] };
+    if (!tools.ffmpeg) return { backend: null, format: null, missing: ["ffmpeg"] };
+    if (!tools.ffmpegX11Grab) return { backend: null, format: null, missing: ["ffmpeg (x11grab)"] };
+    if (tools.ffmpegLibx264) return { backend: "x11-ffmpeg", format: "h264", missing: [] };
+    // Fedora's `ffmpeg-free` omits libx264 while shipping x11grab + mjpeg.
+    return { backend: "x11-ffmpeg-mjpeg", format: "jpeg", missing: [] };
   }
   if (tools.wfRecorder) return { backend: "wayland-wf-recorder", format: "h264", missing: [] };
   if (tools.gstLaunch && tools.gstPipewire) {
@@ -138,15 +174,17 @@ function resolveInputSelection(displayServer: LinuxDisplayServer, tools: LinuxIn
   backend: LinuxInputBackend | null;
   missing: string[];
 } {
+  if (displayServer === "headless") return { backend: null, missing: [] };
   if (displayServer === "x11") {
     if (tools.xdotool) return { backend: "xdotool", missing: [] };
     if (tools.dotool) return { backend: "dotool", missing: [] };
     return { backend: null, missing: ["xdotool"] };
   }
   if (tools.dotool) return { backend: "dotool", missing: [] };
-  if (tools.ydotool) return { backend: "ydotool", missing: [] };
+  // ydotool requires a running ydotoold socket to inject uinput events.
+  if (tools.ydotool && tools.ydotoolSocket) return { backend: "ydotool", missing: [] };
   if (tools.wtype) return { backend: "wtype", missing: [] };
-  return { backend: null, missing: ["dotool / ydotool (或 wtype)"] };
+  return { backend: null, missing: tools.ydotool ? ["ydotoold"] : ["dotool / ydotool (或 wtype)"] };
 }
 
 function buildDiagnosticsProblem(
@@ -155,26 +193,38 @@ function buildDiagnosticsProblem(
   inputBackend: LinuxInputBackend | null,
   missingCapture: string[],
   missingInput: string[],
+  captureTools: LinuxCaptureTools,
   inputTools: LinuxInputTools,
 ): string | undefined {
+  if (displayServer === "headless") return HEADLESS_LINUX_PROBLEM;
   const parts: string[] = [];
   if (!captureBackend) {
-    parts.push(
-      displayServer === "wayland"
-        ? `Wayland 屏幕捕获需要安装 ${missingCapture.join(" 或 ")}`
-        : `查看屏幕需要安装 ${missingCapture.join("、")}`,
-    );
+    if (displayServer === "x11" && captureTools.ffmpeg && !captureTools.ffmpegX11Grab) {
+      parts.push("检测到 ffmpeg，但当前构建不支持 x11grab 输入设备，请安装包含 x11grab 的完整版 ffmpeg");
+    } else {
+      parts.push(
+        displayServer === "wayland"
+          ? `Wayland 屏幕捕获需要安装 ${missingCapture.join(" 或 ")}`
+          : `查看屏幕需要安装 ${missingCapture.join("、")}`,
+      );
+    }
   }
   if (!inputBackend) {
-    parts.push(
-      displayServer === "wayland"
-        ? `Wayland 远程控制需要安装 ${missingInput.join(" 或 ")}`
-        : `远程控制需要安装 ${missingInput.join(" 或 ")}`,
-    );
+    if (inputTools.ydotool && !inputTools.ydotoolSocket) {
+      parts.push("检测到 ydotool，但未发现 ydotoold 套接字，请确认 ydotoold 服务正在运行");
+    } else {
+      parts.push(
+        displayServer === "wayland"
+          ? `Wayland 远程控制需要安装 ${missingInput.join(" 或 ")}`
+          : `远程控制需要安装 ${missingInput.join(" 或 ")}`,
+      );
+    }
   } else if (inputBackend === "wtype") {
-    parts.push("当前仅检测到 wtype（仅支持键盘输入）；安装 dotool 或 ydotool 可同时控制鼠标");
-  } else if (inputBackend === "ydotool" && !inputTools.ydotoolSocket) {
-    parts.push("检测到 ydotool，但未发现 ydotoold 套接字，请确认 ydotoold 服务正在运行");
+    parts.push(
+      inputTools.ydotool && !inputTools.ydotoolSocket
+        ? "当前仅检测到 wtype（仅支持键盘输入）；检测到 ydotool 但未发现 ydotoold 套接字，启动 ydotoold 或安装 dotool 可同时控制鼠标"
+        : "当前仅检测到 wtype（仅支持键盘输入）；安装 dotool 或 ydotool 可同时控制鼠标",
+    );
   }
   return parts.length > 0 ? parts.join("；") : undefined;
 }
@@ -185,10 +235,46 @@ export async function probeLinuxScreen(deps: LinuxProbeDeps = {}): Promise<Linux
   const checkFile = deps.fileExists ?? existsSync;
   const displayServer = detectLinuxDisplayServer(env);
 
-  const [ffmpeg, wfRecorder, gstLaunch, xdpyinfo, wlrRandr, xdotool, ydotool, dotool, wtype] = await Promise.all([
+  if (displayServer === "headless") {
+    return {
+      displayServer: "headless",
+      captureBackend: null,
+      captureFormat: null,
+      inputBackend: null,
+      recording: false,
+      control: false,
+      missingCapture: [],
+      missingInput: [],
+      problem: HEADLESS_LINUX_PROBLEM,
+      captureTools: {
+        ffmpeg: false,
+        ffmpegX11Grab: false,
+        ffmpegLibx264: false,
+        wfRecorder: false,
+        gstLaunch: false,
+        gstPipewire: false,
+        gstVaapiH264: false,
+        gstX264: false,
+        gstJpeg: false,
+        xrandr: false,
+        xdpyinfo: false,
+        wlrRandr: false,
+      },
+      inputTools: {
+        xdotool: false,
+        ydotool: false,
+        ydotoolSocket: false,
+        dotool: false,
+        wtype: false,
+      },
+    };
+  }
+
+  const [ffmpeg, wfRecorder, gstLaunch, xrandr, xdpyinfo, wlrRandr, xdotool, ydotool, dotool, wtype] = await Promise.all([
     hasBinary("ffmpeg", deps),
     hasBinary("wf-recorder", deps),
     hasBinary("gst-launch-1.0", deps),
+    displayServer === "x11" ? hasBinary("xrandr", deps) : Promise.resolve(false),
     displayServer === "x11" ? hasBinary("xdpyinfo", deps) : Promise.resolve(false),
     displayServer === "wayland" ? hasBinary("wlr-randr", deps) : Promise.resolve(false),
     hasBinary("xdotool", deps),
@@ -196,6 +282,14 @@ export async function probeLinuxScreen(deps: LinuxProbeDeps = {}): Promise<Linux
     hasBinary("dotool", deps),
     hasBinary("wtype", deps),
   ]);
+
+  let ffmpegX11Grab = false;
+  let ffmpegLibx264 = false;
+  if (ffmpeg && (displayServer === "x11" || wfRecorder)) {
+    const caps = await probeFfmpegCapabilities(displayServer, deps);
+    ffmpegX11Grab = caps.x11grab;
+    ffmpegLibx264 = caps.libx264;
+  }
 
   let gstPipewire = false;
   let gstVaapiH264 = false;
@@ -212,27 +306,43 @@ export async function probeLinuxScreen(deps: LinuxProbeDeps = {}): Promise<Linux
 
   const captureTools: LinuxCaptureTools = {
     ffmpeg,
+    ffmpegX11Grab,
+    ffmpegLibx264,
     wfRecorder,
     gstLaunch,
     gstPipewire,
     gstVaapiH264,
     gstX264,
     gstJpeg,
+    xrandr,
     xdpyinfo,
     wlrRandr,
   };
-  const ydotoolSocketPath = env.YDOTOOL_SOCKET || "/tmp/.ydotool_socket";
+  const ydotoolSocketCandidates = [
+    env.YDOTOOL_SOCKET?.trim(),
+    env.XDG_RUNTIME_DIR?.trim() ? join(env.XDG_RUNTIME_DIR.trim(), ".ydotool_socket") : undefined,
+    "/tmp/.ydotool_socket",
+    "/run/ydotoold/socket",
+  ].filter((candidate): candidate is string => Boolean(candidate));
   const inputTools: LinuxInputTools = {
     xdotool,
     ydotool,
-    ydotoolSocket: ydotool && (checkFile(ydotoolSocketPath) || checkFile("/run/ydotoold/socket")),
+    ydotoolSocket: ydotool && ydotoolSocketCandidates.some((candidate) => checkFile(candidate)),
     dotool,
     wtype,
   };
 
   const capture = resolveCaptureSelection(displayServer, captureTools);
   const input = resolveInputSelection(displayServer, inputTools);
-  const problem = buildDiagnosticsProblem(displayServer, capture.backend, input.backend, capture.missing, input.missing, inputTools);
+  const problem = buildDiagnosticsProblem(
+    displayServer,
+    capture.backend,
+    input.backend,
+    capture.missing,
+    input.missing,
+    captureTools,
+    inputTools,
+  );
 
   return {
     displayServer,
@@ -247,6 +357,25 @@ export async function probeLinuxScreen(deps: LinuxProbeDeps = {}): Promise<Linux
     captureTools,
     inputTools,
   };
+}
+
+/** Parses `xrandr --listactivemonitors` output into physical X11 monitors with offsets (`+X+Y`). */
+export function parseXrandrActiveMonitors(stdout: string): LinuxDisplayInfo[] {
+  const displays: LinuxDisplayInfo[] = [];
+  for (const line of stdout.split(/\r?\n/)) {
+    // Format: ` 0: +*DP-1 2560/597x1440/336+0+0  DP-1` or ` 1: +HDMI-1 1920x1080+2560+0  HDMI-1`
+    const match = /^\s*(\d+):\s+\S+\s+(\d+)(?:\/\d+)?x(\d+)(?:\/\d+)?\+(\d+)\+(\d+)\s+(\S+)/.exec(line);
+    if (!match) continue;
+    const w = Number(match[2]);
+    const h = Number(match[3]);
+    const x = Number(match[4]);
+    const y = Number(match[5]);
+    const output = match[6]!;
+    if (!Number.isFinite(w) || w <= 0 || !Number.isFinite(h) || h <= 0) continue;
+    const index = displays.length;
+    displays.push({ index, screen: index, name: output, output, w, h, x, y });
+  }
+  return displays;
 }
 
 /** Parses `xdpyinfo` stdout into root display dimensions. */
@@ -292,28 +421,52 @@ function resolveExec(deps: LinuxProbeDeps): (command: string, args: string[], op
   });
 }
 
-/** Lists available Linux displays for X11 or Wayland. */
+/** Lists available Linux displays for X11 or Wayland (empty when headless). */
 export async function listLinuxDisplays(deps: LinuxProbeDeps = {}): Promise<LinuxDisplayInfo[]> {
   const exec = resolveExec(deps);
   const env = deps.env ?? process.env;
   const displayServer = detectLinuxDisplayServer(env);
+  if (displayServer === "headless") return [];
   if (displayServer === "wayland") {
     const wlr = await exec("wlr-randr", ["--json"], { timeout: 3000 }).then(({ stdout }) => parseWlrRandrJson(stdout), () => []);
     if (wlr.length > 0) return wlr;
     return [{ index: 0, screen: 0, name: "屏幕" }];
   }
+  const monitors = await exec("xrandr", ["--listactivemonitors"], { timeout: 3000 }).then(
+    ({ stdout }) => parseXrandrActiveMonitors(stdout),
+    () => [],
+  );
+  if (monitors.length > 0) return monitors;
   const dimensions = await exec("xdpyinfo", [], { timeout: 5000 }).then(({ stdout }) => parseXdpyinfoDimensions(stdout), () => null);
   return [{ index: 0, name: "屏幕", screen: 0, ...(dimensions ? { w: dimensions.w, h: dimensions.h } : {}) }];
 }
 
-/** Builds ffmpeg x11grab H.264 capture arguments for an X11 display. */
-export function buildX11CaptureArgs(level = 0, profile = fallbackProfile(level), display = process.env.DISPLAY ?? ":0"): string[] {
+function buildX11InputArgs(
+  display: string,
+  fps: number,
+  target?: Pick<LinuxDisplayInfo, "w" | "h" | "x" | "y">,
+): string[] {
+  const sizeArgs = target?.w && target?.h ? ["-video_size", `${target.w}x${target.h}`] : [];
+  const inputTarget =
+    target && (target.x !== undefined || target.y !== undefined)
+      ? `${display}+${target.x ?? 0},${target.y ?? 0}`
+      : display;
+  return ["-f", "x11grab", "-framerate", String(fps), ...sizeArgs, "-i", inputTarget];
+}
+
+/** Builds ffmpeg x11grab H.264 capture arguments for an X11 display (with optional monitor geometry/offset). */
+export function buildX11CaptureArgs(
+  level = 0,
+  profile = fallbackProfile(level),
+  display = process.env.DISPLAY ?? ":0",
+  target?: Pick<LinuxDisplayInfo, "w" | "h" | "x" | "y">,
+): string[] {
   const rate = (bits: number) => `${Math.round(bits / 1000)}k`;
   return [
     "-hide_banner",
     "-loglevel",
     "error",
-    "-f", "x11grab", "-framerate", String(profile.fps), "-i", display,
+    ...buildX11InputArgs(display, profile.fps, target),
     "-vf",
     `fps=${profile.fps},scale='min(${profile.width},iw)':-2,format=yuv420p`,
     "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-profile:v", "baseline", "-x264-params", "sliced-threads=0",
@@ -328,6 +481,27 @@ export function buildX11CaptureArgs(level = 0, profile = fallbackProfile(level),
     "h264_metadata=aud=insert",
     "-f",
     "h264",
+    "-",
+  ];
+}
+
+/** Builds ffmpeg x11grab MJPEG fallback capture arguments when libx264 is absent (e.g. Fedora `ffmpeg-free`). */
+export function buildX11MjpegCaptureArgs(
+  level = 0,
+  profile = fallbackProfile(level),
+  display = process.env.DISPLAY ?? ":0",
+  target?: Pick<LinuxDisplayInfo, "w" | "h" | "x" | "y">,
+): string[] {
+  const quality = String(Math.max(3, Math.min(12, 5 + level * 2)));
+  return [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    ...buildX11InputArgs(display, profile.fps, target),
+    "-vf",
+    `fps=${profile.fps},scale='min(${profile.width},iw)':-2`,
+    "-c:v", "mjpeg", "-q:v", quality,
+    "-f", "mjpeg",
     "-",
   ];
 }
@@ -471,9 +645,11 @@ export function buildLinuxCapturePlan(
 ): LinuxCapturePlan | null {
   switch (diag.captureBackend) {
     case "x11-ffmpeg":
-      return { backend: "x11-ffmpeg", format: "h264", command: "ffmpeg", args: buildX11CaptureArgs(level, profile, env.DISPLAY ?? ":0") };
+      return { backend: "x11-ffmpeg", format: "h264", command: "ffmpeg", args: buildX11CaptureArgs(level, profile, env.DISPLAY ?? ":0", display) };
+    case "x11-ffmpeg-mjpeg":
+      return { backend: "x11-ffmpeg-mjpeg", format: "jpeg", command: "ffmpeg", args: buildX11MjpegCaptureArgs(level, profile, env.DISPLAY ?? ":0", display) };
     case "wayland-wf-recorder":
-      if (diag.captureTools.ffmpeg) {
+      if (diag.captureTools.ffmpeg && diag.captureTools.ffmpegLibx264) {
         return {
           backend: "wayland-wf-recorder",
           format: "h264",
@@ -626,12 +802,16 @@ function clampUnit(value: number): number {
   return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
 }
 
-function toPixelCoords(x: number, y: number, size: { w: number; h: number }): { px: number; py: number } {
+function toPixelCoords(
+  x: number,
+  y: number,
+  size: { w: number; h: number; x?: number; y?: number },
+): { px: number; py: number } {
   const maxW = Math.max(1, size.w - 1);
   const maxH = Math.max(1, size.h - 1);
   return {
-    px: Math.round(clampUnit(x) * maxW),
-    py: Math.round(clampUnit(y) * maxH),
+    px: (size.x ?? 0) + Math.round(clampUnit(x) * maxW),
+    py: (size.y ?? 0) + Math.round(clampUnit(y) * maxH),
   };
 }
 
@@ -651,7 +831,7 @@ function mapModifiers(names: ("cmd" | "shift" | "alt" | "ctrl")[] | undefined, t
   return (names ?? []).map((m) => table[m]).filter((v): v is string => Boolean(v));
 }
 
-function buildXdotoolCommands(event: LinuxExtendedInputEvent, size: { w: number; h: number }): LinuxInputCommand[] {
+function buildXdotoolCommands(event: LinuxExtendedInputEvent, size: { w: number; h: number; x?: number; y?: number }): LinuxInputCommand[] {
   if (event.t === "prompt") return [];
   if (event.t === "move") {
     const { px, py } = toPixelCoords(event.x, event.y, size);
@@ -695,7 +875,7 @@ function buildXdotoolCommands(event: LinuxExtendedInputEvent, size: { w: number;
   return [{ command: "xdotool", args: ["type", "--clearmodifiers", "--delay", "0", "--", event.s] }];
 }
 
-function buildYdotoolCommands(event: LinuxExtendedInputEvent, size: { w: number; h: number }): LinuxInputCommand[] {
+function buildYdotoolCommands(event: LinuxExtendedInputEvent, size: { w: number; h: number; x?: number; y?: number }): LinuxInputCommand[] {
   if (event.t === "prompt") return [];
   if (event.t === "move") {
     const { px, py } = toPixelCoords(event.x, event.y, size);
@@ -781,7 +961,7 @@ function buildWtypeCommands(event: LinuxExtendedInputEvent): LinuxInputCommand[]
 export function buildLinuxInputCommands(
   event: LinuxExtendedInputEvent,
   backend: LinuxInputBackend,
-  size: { w: number; h: number } = { w: 1920, h: 1080 },
+  size: { w: number; h: number; x?: number; y?: number } = { w: 1920, h: 1080 },
 ): LinuxInputCommand[] {
   switch (backend) {
     case "xdotool":
@@ -800,7 +980,7 @@ export function buildLinuxInputCommands(
 /** Dispatches viewer pointer and keyboard events on Linux using the available X11/Wayland backend. */
 export class LinuxInputControl {
   private backend: LinuxInputBackend | null = null;
-  private displaySize = { w: 1920, h: 1080 };
+  private displaySize: { w: number; h: number; x?: number; y?: number } = { w: 1920, h: 1080 };
   private stopped = false;
   private running = false;
   private pendingMove: InputEvent | undefined;
@@ -818,7 +998,14 @@ export class LinuxInputControl {
     const [diag, displays] = await Promise.all([probeLinuxScreen(this.deps), listLinuxDisplays(this.deps)]);
     if (this.stopped) return;
     const target = displays.find((d) => d.screen === screen || d.index === screen) ?? displays[0];
-    if (target?.w && target?.h) this.displaySize = { w: target.w, h: target.h };
+    if (target?.w && target?.h) {
+      this.displaySize = {
+        w: target.w,
+        h: target.h,
+        ...(target.x !== undefined ? { x: target.x } : {}),
+        ...(target.y !== undefined ? { y: target.y } : {}),
+      };
+    }
     this.backend = diag.inputBackend;
     if (!diag.inputBackend) {
       this.listener.state({

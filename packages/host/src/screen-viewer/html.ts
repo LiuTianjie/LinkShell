@@ -8,12 +8,17 @@ export function renderViewerHtml(
   locale: "zh" | "en" | "ja",
   script: string,
 ): string {
+  const dataPlatform = platform === "win32" ? "win32" : platform === "linux" ? "linux" : "darwin";
+  const altGlyph = platform === "darwin" ? "⌥" : "Alt";
+  const altLabel = platform === "darwin" ? "option" : "alt";
+  const cmdGlyph = platform === "win32" ? "Win" : platform === "linux" ? "Super" : "⌘";
+  const cmdLabel = platform === "win32" ? "windows" : platform === "linux" ? "super" : "command";
   return `<!doctype html>
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>屏幕</title>
 <style>${VIEWER_STYLE}${SCREEN_LOADING_STYLE}</style></head>
-<body data-platform="${platform === "win32" ? "win32" : "darwin"}"${locale !== "zh" ? ` data-lang="${locale}"` : ""}>
+<body data-platform="${dataPlatform}"${locale !== "zh" ? ` data-lang="${locale}"` : ""}>
 <div id="stage"><div id="picture"><canvas id="screen"></canvas><canvas id="gpu" class="gone"></canvas><video id="video" class="gone" autoplay playsinline muted></video><div id="pointer"></div></div></div>
 ${SCREEN_LOADING_HTML}
 <div id="toast" class="glass"></div>
@@ -87,9 +92,9 @@ ${SCREEN_LOADING_HTML}
     <div class="group"><span>添加快捷键</span><span id="makersign"></span></div>
     <div class="tiles" id="makermods">
       <div class="tile" data-mod="ctrl"><b>⌃</b><span>control</span></div>
-      <div class="tile" data-mod="alt"><b>${platform === "win32" ? "Alt" : "⌥"}</b><span>${platform === "win32" ? "alt" : "option"}</span></div>
+      <div class="tile" data-mod="alt"><b>${altGlyph}</b><span>${altLabel}</span></div>
       <div class="tile" data-mod="shift"><b>⇧</b><span>shift</span></div>
-      <div class="tile" data-mod="cmd"><b>${platform === "win32" ? "Win" : "⌘"}</b><span>${platform === "win32" ? "windows" : "command"}</span></div>
+      <div class="tile" data-mod="cmd"><b>${cmdGlyph}</b><span>${cmdLabel}</span></div>
     </div>
     <label class="field"><span>按键</span><select id="makerkey" aria-label="按键"></select></label>
     <label class="field"><span>名称</span><input id="makername" type="text" maxlength="16" placeholder="可不填" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="done" aria-label="名称"></label>
@@ -112,8 +117,8 @@ ${SCREEN_LOADING_HTML}
   <div class="key word" data-key="escape">esc</div>
   <div class="key word" data-key="tab">tab</div>
   <div class="key" data-mod="ctrl">⌃</div>
-  <div class="key" data-mod="alt">${platform === "win32" ? "Alt" : "⌥"}</div>
-  <div class="key" data-mod="cmd">${platform === "win32" ? "Win" : "⌘"}</div>
+  <div class="key" data-mod="alt">${altGlyph}</div>
+  <div class="key" data-mod="cmd">${cmdGlyph}</div>
   <div class="key" data-mod="shift">⇧</div>
   <div class="key" data-key="left">←</div>
   <div class="key" data-key="down">↓</div>

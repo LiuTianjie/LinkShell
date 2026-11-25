@@ -583,9 +583,11 @@ const WATCH_RECONNECT_WAIT_MS = 5_000;
 
 export async function executeWatchCommand(
   command: WatchCommand,
-  ctx: WatchActionContext,
+  ctxOrGetter: WatchActionContext | (() => WatchActionContext),
 ): Promise<{ ok: boolean; message: string }> {
+  const readCtx = typeof ctxOrGetter === "function" ? ctxOrGetter : () => ctxOrGetter;
   try {
+    let ctx = readCtx();
     if (command.kind === "select-computer") {
       const target = ctx.computers.find((item) => item.key === command.computerKey);
       if (!target) return { ok: false, message: "未找到这台电脑" };
@@ -595,8 +597,13 @@ export async function executeWatchCommand(
 
     // A watch command is often what wakes the phone, and the link's own retry timer
     // doesn't run while the app is suspended: reconnect now instead of waiting for it.
-    let online = ctx.online;
-    if (!online && ctx.ensureOnline) online = await ctx.ensureOnline(WATCH_RECONNECT_WAIT_MS);
+    const wasOnline = ctx.online;
+    let online = wasOnline;
+    if (!online && ctx.ensureOnline) {
+      online = await ctx.ensureOnline(WATCH_RECONNECT_WAIT_MS);
+      // Re-read live context after reconnecting so we never inspect stale pre-reconnect sessions/actions.
+      ctx = readCtx();
+    }
 
     if (command.kind === "refresh") {
       if (!online) return { ok: false, message: "暂时连不上电脑，请确认电脑在线后重试" };
@@ -606,6 +613,12 @@ export async function executeWatchCommand(
 
     if (!online) {
       return { ok: false, message: "电脑当前不在线，请稍后重试" };
+    }
+
+    if (!wasOnline) {
+      // Refresh host summaries after waking from offline so decisions validate against current state.
+      await ctx.actions.refresh().catch(() => {});
+      ctx = readCtx();
     }
 
     if (command.kind === "open-session") {
@@ -854,6 +867,9 @@ export function createWatchSnapshotScheduler(
   let lastFlushAt = 0;
   let lastKey: string | undefined;
   let lastSentAt = 0;
+  let inFlight: Promise<boolean> | null = null;
+  let inFlightToken: symbol | null = null;
+  let flushAgain = false;
   const waiters = new Set<() => void>();
 
   const cancelPending = () => {
@@ -862,7 +878,7 @@ export function createWatchSnapshotScheduler(
     firstPendingAt = undefined;
   };
 
-  const flush = async (): Promise<boolean> => {
+  const runFlushOnce = async (): Promise<boolean> => {
     cancelPending();
     if (!build) return false;
     lastFlushAt = Date.now();
@@ -879,6 +895,35 @@ export function createWatchSnapshotScheduler(
       if (lastKey === key) lastKey = undefined;
       return false;
     }
+  };
+
+  // Single-flight guard: overlapping flushes coalesce into one trailing pass instead of racing send().
+  const flush = (): Promise<boolean> => {
+    cancelPending();
+    if (!build) return Promise.resolve(false);
+    if (inFlight) {
+      flushAgain = true;
+      return inFlight;
+    }
+    const token = Symbol("watch-flush");
+    inFlightToken = token;
+    const run = (async () => {
+      let sent = false;
+      try {
+        do {
+          flushAgain = false;
+          if (await runFlushOnce()) sent = true;
+        } while (flushAgain && build);
+        return sent;
+      } finally {
+        if (inFlightToken === token) {
+          inFlightToken = null;
+          inFlight = null;
+        }
+      }
+    })();
+    inFlight = run;
+    return run;
   };
 
   return {
@@ -921,6 +966,7 @@ export function createWatchSnapshotScheduler(
     cancelPending,
     dispose() {
       cancelPending();
+      flushAgain = false;
       for (const wake of [...waiters]) wake();
       build = undefined;
     },
@@ -1002,8 +1048,13 @@ export function useIOSWatchSync(
   const pinned = usePinnedSessionIds();
   const { status: watchStatus } = useWatchStatus();
   const watchInstalled = watchInstalledOverride ?? (watchStatus.paired && watchStatus.installed);
-  const active = Platform.OS === "ios" && enabled && watchInstalled;
+  // Stop streaming 5 sessions + 6 terminals + ANSI-stripping on the iPhone while Watch runs independently.
+  const companionActive = watchInstalled && !watchStatus.independent;
+  const active = Platform.OS === "ios" && enabled && companionActive;
   const terminalGenerationRef = useRef(0);
+  const prevComputerKeyRef = useRef(computerKey);
+  const heldSessionsKeyRef = useRef(computerKey);
+  const heldTerminalsLinkRef = useRef<HostLink | undefined>(link);
   const [terminalOutputs, setTerminalOutputs] = useState<Record<string, string>>({});
   const [itemLimits, setItemLimits] = useState<Record<string, number>>({});
   const [focusedSessionId, setFocusedSessionId] = useState<string | undefined>(undefined);
@@ -1135,10 +1186,30 @@ export function useIOSWatchSync(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, link]);
 
+  // Reset per-computer focus & buffers in place when switching computers without unmounting the command loop.
+  useEffect(() => {
+    if (prevComputerKeyRef.current === computerKey) return;
+    prevComputerKeyRef.current = computerKey;
+    terminalGenerationRef.current += 1;
+    focusedSessionRef.current = undefined;
+    focusedTerminalRef.current = undefined;
+    itemLimitsRef.current = {};
+    rawTerminalBuffersRef.current = {};
+    setFocusedSessionId(undefined);
+    setItemLimits({});
+    setTerminalOutputs({});
+  }, [computerKey]);
+
   // Exactly the terminals the snapshot carries, held so the terminal screen's detach on
   // leaving doesn't end their stream (and released, detaching them, when they drop out).
   useEffect(() => {
     const held = heldTerminalsRef.current;
+    if (heldTerminalsLinkRef.current !== link) {
+      for (const release of held.values()) release();
+      held.clear();
+      rawTerminalBuffersRef.current = {};
+      heldTerminalsLinkRef.current = link;
+    }
     const wanted = new Set<string>();
     if (active && link) {
       for (const terminal of sortWatchTerminals(terminals).slice(0, WATCH_TERMINAL_LIMIT)) wanted.add(terminal.id);
@@ -1157,13 +1228,18 @@ export function useIOSWatchSync(
       if (link.status === "online") void attachForWatch(id).catch(() => {});
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, link, terminals]);
+  }, [active, link, computerKey, terminals]);
 
   // Timelines come from subscribed sessions: the few most recent, and the one the watch
   // has open. Through the refcount, so a phone screen closing the same session doesn't
   // close it under the watch.
   useEffect(() => {
     const held = heldSessionsRef.current;
+    if (heldSessionsKeyRef.current !== computerKey) {
+      for (const release of held.values()) release();
+      held.clear();
+      heldSessionsKeyRef.current = computerKey;
+    }
     const wanted = new Set<string>();
     if (active) {
       const live = sessions.filter((s) => !s.archived).sort((a, b) => b.updatedAt - a.updatedAt);
@@ -1182,7 +1258,7 @@ export function useIOSWatchSync(
         return () => {};
       });
     for (const id of wanted) if (!held.has(id)) held.set(id, subscribe(id));
-  }, [active, sessions, focusedSessionId, ctx.subscribeSession, ctx.actions]);
+  }, [active, computerKey, sessions, focusedSessionId, ctx.subscribeSession, ctx.actions]);
 
   useEffect(
     () => () => {
@@ -1279,7 +1355,7 @@ export function useIOSWatchSync(
           await completeNativeWatchCommand(id, false, "操作已过期，请在手表上重试");
           return;
         }
-        const result = await executeWatchCommand(command, ctxRef.current);
+        const result = await executeWatchCommand(command, () => ctxRef.current);
         rememberWatchCommand(id, result);
         // Woken in the background, the phone may be suspended once the reply is out:
         // send the state the command produced first.

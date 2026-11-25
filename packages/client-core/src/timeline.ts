@@ -76,9 +76,9 @@ export type TimelineItem =
       ts: number;
       endedTs?: number;
     }
-  | { kind: "plan"; id: string; entries: PlanEntry[]; title?: string; markdown?: string | null; path?: string | null; ts: number }
+  | { kind: "plan"; id: string; entries: PlanEntry[]; title?: string; explanation?: string; markdown?: string | null; path?: string | null; ts: number }
   | { kind: "notice"; id: string; level: "info" | "warning"; title: string; detail?: string; ts: number }
-  | { kind: "error"; id: string; code: string; message: string; hint?: string; ts: number }
+  | { kind: "error"; id: string; code: string; message: string; hint?: string; retryable?: boolean; ts: number }
   | { kind: "turn-end"; id: string; stopReason: StopReason; ts: number }
   | { kind: "driver"; id: string; driver: SessionDriver; ts: number }
   | {
@@ -160,14 +160,161 @@ export function emptyView(sessionId: string): SessionView {
 
 // ── helpers ──────────────────────────────────────────────────────────
 
-function upsert(view: SessionView, item: TimelineItem): SessionView {
-  const at = view.index[item.id];
-  if (at === undefined) {
-    return { ...view, items: [...view.items, item], index: { ...view.index, [item.id]: view.items.length } };
+/** Local unsent/failed messages stay anchored below all server history so replay never strands them at index 0. */
+function isUnsentLocal(item: TimelineItem): boolean {
+  return item.kind === "user" && Boolean(item.failed || (item.pending && !item.accepted));
+}
+
+function unsentTailStart(items: readonly TimelineItem[]): number {
+  let i = items.length;
+  while (i > 0 && isUnsentLocal(items[i - 1]!)) i -= 1;
+  return i;
+}
+
+function lastServerItem(items: readonly TimelineItem[]): TimelineItem | undefined {
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    if (!isUnsentLocal(items[i]!)) return items[i];
   }
-  const items = view.items.slice();
+  return undefined;
+}
+
+/**
+ * Per-batch ownership tracker: lets `applyEvents` and `prependEvents` clone
+ * `items`/`index`/`turnBreaks` at most once per batch instead of O(N²) per event,
+ * while keeping the caller's input `SessionView` strictly immutable.
+ */
+interface BatchState {
+  views: WeakSet<SessionView>;
+  items: WeakSet<TimelineItem[]>;
+  indexes: WeakSet<Record<string, number>>;
+  turnBreaks: WeakSet<string[]>;
+  streaming: WeakMap<TimelineItem[], Set<number>>;
+  subs: WeakMap<TimelineItem[], Set<number>>;
+}
+
+function createBatch(): BatchState {
+  return {
+    views: new WeakSet(),
+    items: new WeakSet(),
+    indexes: new WeakSet(),
+    turnBreaks: new WeakSet(),
+    streaming: new WeakMap(),
+    subs: new WeakMap(),
+  };
+}
+
+function rebuildBatchSets(batch: BatchState, items: TimelineItem[]): void {
+  const streaming = new Set<number>();
+  const subs = new Set<number>();
+  for (let i = 0; i < items.length; i += 1) {
+    const entry = items[i]!;
+    if ((entry.kind === "agent" || entry.kind === "thought") && entry.streaming) streaming.add(i);
+    if (entry.kind === "tool" && entry.sub) subs.add(i);
+  }
+  batch.streaming.set(items, streaming);
+  batch.subs.set(items, subs);
+}
+
+function trackBatchItem(batch: BatchState, items: TimelineItem[], idx: number, item: TimelineItem): void {
+  const streaming = batch.streaming.get(items);
+  if (streaming) {
+    if ((item.kind === "agent" || item.kind === "thought") && item.streaming) streaming.add(idx);
+    else streaming.delete(idx);
+  }
+  const subs = batch.subs.get(items);
+  if (subs) {
+    if (item.kind === "tool" && item.sub) subs.add(idx);
+    else subs.delete(idx);
+  }
+}
+
+function mutableItems(view: SessionView, batch?: BatchState): TimelineItem[] {
+  if (!batch) return view.items.slice();
+  if (batch.items.has(view.items)) return view.items;
+  const copy = view.items.slice();
+  batch.items.add(copy);
+  rebuildBatchSets(batch, copy);
+  return copy;
+}
+
+function mutableIndex(view: SessionView, batch?: BatchState): Record<string, number> {
+  if (!batch) return { ...view.index };
+  if (batch.indexes.has(view.index)) return view.index;
+  const copy = { ...view.index };
+  batch.indexes.add(copy);
+  return copy;
+}
+
+function patchView(view: SessionView, patch: Partial<SessionView>, batch?: BatchState): SessionView {
+  if (batch && batch.views.has(view)) {
+    Object.assign(view, patch);
+    return view;
+  }
+  const next: SessionView = { ...view, ...patch };
+  batch?.views.add(next);
+  return next;
+}
+
+function upsert(view: SessionView, item: TimelineItem, batch?: BatchState): SessionView {
+  const at = view.index[item.id];
+  const unsent = isUnsentLocal(item);
+  const tailStart = unsentTailStart(view.items);
+
+  if (at === undefined) {
+    const items = mutableItems(view, batch);
+    const index = mutableIndex(view, batch);
+    if (unsent || tailStart === items.length) {
+      const pos = items.length;
+      items.push(item);
+      index[item.id] = pos;
+      if (batch) trackBatchItem(batch, items, pos, item);
+    } else {
+      items.push(items[items.length - 1]!);
+      for (let i = items.length - 1; i > tailStart; i -= 1) {
+        const moved = items[i - 1]!;
+        items[i] = moved;
+        index[moved.id] = i;
+      }
+      items[tailStart] = item;
+      index[item.id] = tailStart;
+      if (batch) trackBatchItem(batch, items, tailStart, item);
+    }
+    return patchView(view, { items, index }, batch);
+  }
+
+  if (!unsent && at >= tailStart) {
+    const items = mutableItems(view, batch);
+    if (at === tailStart) {
+      items[at] = item;
+      if (batch) trackBatchItem(batch, items, at, item);
+      return patchView(view, { items }, batch);
+    }
+    const index = mutableIndex(view, batch);
+    for (let i = at; i > tailStart; i -= 1) {
+      const moved = items[i - 1]!;
+      items[i] = moved;
+      index[moved.id] = i;
+    }
+    items[tailStart] = item;
+    index[item.id] = tailStart;
+    if (batch) trackBatchItem(batch, items, tailStart, item);
+    return patchView(view, { items, index }, batch);
+  }
+
+  if (unsent && at < tailStart) {
+    const items = mutableItems(view, batch);
+    const index = mutableIndex(view, batch);
+    items.splice(at, 1);
+    items.push(item);
+    for (let i = at; i < items.length; i += 1) index[items[i]!.id] = i;
+    if (batch) rebuildBatchSets(batch, items);
+    return patchView(view, { items, index }, batch);
+  }
+
+  const items = mutableItems(view, batch);
   items[at] = item;
-  return { ...view, items };
+  if (batch) trackBatchItem(batch, items, at, item);
+  return patchView(view, { items }, batch);
 }
 
 function get<K extends TimelineItem["kind"]>(view: SessionView, id: string, kind: K): Extract<TimelineItem, { kind: K }> | undefined {
@@ -188,46 +335,95 @@ function withReplacedText<T extends TimelineItem>(item: T, replaced: boolean): T
   return item;
 }
 
+/** Tracks tool items whose output was replaced (`replaceOutput`) so joining across history pages doesn't duplicate superseded deltas. */
+const replacedOutput = new WeakSet<TimelineItem>();
+
+function withReplacedOutput<T extends TimelineItem>(item: T, replaced: boolean): T {
+  if (replaced) replacedOutput.add(item);
+  return item;
+}
+
+/** Tracks tool items whose content arrived via `appendContent` chunks (never full replace) so joining pages concatenates instead of overwriting. */
+const appendedContent = new WeakSet<TimelineItem>();
+
+function withAppendedContent<T extends TimelineItem>(item: T, appended: boolean): T {
+  if (appended) appendedContent.add(item);
+  return item;
+}
+
 /** Stops every streaming message (turn ended, or a message boundary). */
-function settleStreaming(view: SessionView, ts: number): SessionView {
+function settleStreaming(view: SessionView, ts: number, batch?: BatchState): SessionView {
+  if (batch && batch.items.has(view.items)) {
+    const active = batch.streaming.get(view.items);
+    if (!active || active.size === 0) return view;
+    for (const i of active) {
+      const item = view.items[i]!;
+      if ((item.kind === "agent" || item.kind === "thought") && item.streaming) {
+        view.items[i] = withReplacedText(
+          item.kind === "thought" ? { ...item, streaming: false, endedTs: item.endedTs ?? ts } : { ...item, streaming: false },
+          replacedText.has(item),
+        );
+      }
+    }
+    active.clear();
+    return view;
+  }
   let items: TimelineItem[] | undefined;
-  view.items.forEach((item, i) => {
+  for (let i = 0; i < view.items.length; i += 1) {
+    const item = view.items[i]!;
     if ((item.kind === "agent" || item.kind === "thought") && item.streaming) {
-      items ??= view.items.slice();
+      items ??= mutableItems(view, batch);
       items[i] = withReplacedText(
         item.kind === "thought" ? { ...item, streaming: false, endedTs: item.endedTs ?? ts } : { ...item, streaming: false },
         replacedText.has(item),
       );
+      batch?.streaming.get(items)?.delete(i);
     }
-  });
-  return items ? { ...view, items } : view;
+  }
+  return items ? patchView(view, { items }, batch) : view;
 }
 
 /** Stops streaming inside every sub-agent timeline too (the whole turn ended). */
-function settleAll(view: SessionView, ts: number): SessionView {
-  const settled = settleStreaming(view, ts);
-  let items: TimelineItem[] | undefined;
-  settled.items.forEach((item, i) => {
-    if (item.kind !== "tool" || !item.sub) return;
-    const sub = settleAll(item.sub, ts);
-    if (sub !== item.sub) {
-      items ??= settled.items.slice();
-      items[i] = { ...item, sub };
+function settleAll(view: SessionView, ts: number, batch?: BatchState): SessionView {
+  const settled = settleStreaming(view, ts, batch);
+  if (batch && batch.items.has(settled.items)) {
+    const subs = batch.subs.get(settled.items);
+    if (!subs || subs.size === 0) return settled;
+    for (const i of subs) {
+      const item = settled.items[i]!;
+      if (item.kind !== "tool" || !item.sub) continue;
+      const sub = settleAll(item.sub, ts, batch);
+      if (sub !== item.sub) {
+        settled.items[i] = withReplacedOutput({ ...item, sub }, replacedOutput.has(item));
+      }
     }
-  });
-  return items ? { ...settled, items } : settled;
+    return settled;
+  }
+  let items: TimelineItem[] | undefined;
+  for (let i = 0; i < settled.items.length; i += 1) {
+    const item = settled.items[i]!;
+    if (item.kind !== "tool" || !item.sub) continue;
+    const sub = settleAll(item.sub, ts, batch);
+    if (sub !== item.sub) {
+      items ??= mutableItems(settled, batch);
+      items[i] = withReplacedOutput({ ...item, sub }, replacedOutput.has(item));
+    }
+  }
+  return items ? patchView(settled, { items }, batch) : settled;
 }
 
 function parentOf(update: SessionUpdate): string | undefined {
   switch (update.sessionUpdate) {
     case "ls_message":
-      return update.parentToolCallId;
     case "agent_message_chunk":
     case "agent_thought_chunk":
     case "tool_call":
     case "tool_call_update":
     case "ls_message_done":
     case "ls_turn":
+    case "plan":
+    case "ls_notice":
+    case "ls_error":
       return update.parentToolCallId;
     default:
       return undefined;
@@ -249,11 +445,12 @@ function answered(questions: Question[], answers: QuestionAnswer[]): { question:
 }
 
 /** Routes a sub-agent's update into its spawning tool call's own timeline. */
-function applyToChild(view: SessionView, parentId: string, update: SessionUpdate, ts: number, key: string): SessionView {
+function applyToChild(view: SessionView, parentId: string, update: SessionUpdate, ts: number, key: string, batch?: BatchState): SessionView {
   if (!get(view, parentId, "tool")) {
     for (const item of view.items) {
       if (item.kind !== "tool" || !item.sub || !findTool(item.sub, parentId)) continue;
-      return upsert(view, { ...item, sub: applyToChild(item.sub, parentId, update, ts, key) });
+      const nextSub = applyToChild(item.sub, parentId, update, ts, key, batch);
+      return nextSub === item.sub ? view : upsert(view, withReplacedOutput({ ...item, sub: nextSub }, replacedOutput.has(item)), batch);
     }
   }
   const parent: Extract<TimelineItem, { kind: "tool" }> = get(view, parentId, "tool") ?? {
@@ -268,8 +465,10 @@ function applyToChild(view: SessionView, parentId: string, update: SessionUpdate
     ts,
   };
   const inner = { ...update, parentToolCallId: undefined } as SessionUpdate;
-  const sub = applyUpdate(parent.sub ?? emptyView(view.sessionId), inner, ts, key);
-  return sub === parent.sub ? view : upsert(view, { ...parent, sub });
+  const baseSub = parent.sub ?? emptyView(view.sessionId);
+  if (!parent.sub && batch) batch.views.add(baseSub);
+  const sub = applyUpdateInternal(baseSub, inner, ts, key, batch);
+  return sub === parent.sub ? view : upsert(view, withReplacedOutput({ ...parent, sub }, replacedOutput.has(parent)), batch);
 }
 
 /** The Claude app's end-of-turn box (its `wrap_up` tool): the recap, and what it asks. */
@@ -356,35 +555,61 @@ export function findTool(view: SessionView, id: string): Extract<TimelineItem, {
 // ── reducer ──────────────────────────────────────────────────────────
 
 export function applyUpdate(view: SessionView, update: SessionUpdate, ts: number, key: string): SessionView {
+  return applyUpdateInternal(view, update, ts, key);
+}
+
+function applyUpdateInternal(view: SessionView, update: SessionUpdate, ts: number, key: string, batch?: BatchState): SessionView {
   const parentId = parentOf(update);
-  if (parentId) return applyToChild(view, parentId, update, ts, key);
+  if (parentId) return applyToChild(view, parentId, update, ts, key, batch);
   switch (update.sessionUpdate) {
     case "ls_message": {
       const id = update.role === "thought" ? `thought:${update.messageId}` : update.messageId;
       const role = update.role === "session" ? "agent" : update.role;
       const existing = get(view, id, role);
       if (update.content === undefined && existing) {
-        return role === "agent" ? upsert(view, { ...existing, senderSessionId: update.senderSessionId ?? (existing.kind === "agent" ? existing.senderSessionId : undefined), recipientSessionId: update.recipientSessionId ?? (existing.kind === "agent" ? existing.recipientSessionId : undefined) } as TimelineItem) : view;
+        return role === "agent"
+          ? upsert(
+              view,
+              {
+                ...existing,
+                senderSessionId: update.senderSessionId ?? (existing.kind === "agent" ? existing.senderSessionId : undefined),
+                recipientSessionId: update.recipientSessionId ?? (existing.kind === "agent" ? existing.recipientSessionId : undefined),
+              } as TimelineItem,
+              batch,
+            )
+          : view;
       }
       const blocks = update.content ?? [];
       const text = blocks.filter((block) => block.type === "text").map((block) => block.text).join("");
       const at = existing?.ts ?? ts;
       if (role === "user") {
         const content = update.append && existing?.kind === "user" ? [...existing.blocks, ...blocks] : blocks;
-        return upsertUser(view, existing, { kind: "user", id, blocks: mergeText(content), agentMessages: agentInboxMessages(content), ts: at });
+        return upsertUser(view, existing, { kind: "user", id, blocks: mergeText(content), agentMessages: agentInboxMessages(content), ts: at }, batch);
       }
-      if (role === "thought") return upsert(view, { kind: "thought", id, text: (update.append && existing?.kind === "thought" ? existing.text : "") + text, streaming: view.turnActive, ts: at });
-      return upsert(view, { kind: "agent", id, text: (update.append && existing?.kind === "agent" ? existing.text : "") + text,
-        attachments: [...(update.append && existing?.kind === "agent" ? existing.attachments ?? [] : []), ...blocks.filter((block) => block.type !== "text")],
-        senderSessionId: update.senderSessionId ?? (existing?.kind === "agent" ? existing.senderSessionId : undefined),
-        recipientSessionId: update.recipientSessionId ?? (existing?.kind === "agent" ? existing.recipientSessionId : undefined), streaming: view.turnActive, ts: at });
+      if (role === "thought") {
+        return upsert(view, { kind: "thought", id, text: (update.append && existing?.kind === "thought" ? existing.text : "") + text, streaming: view.turnActive, ts: at }, batch);
+      }
+      return upsert(
+        view,
+        {
+          kind: "agent",
+          id,
+          text: (update.append && existing?.kind === "agent" ? existing.text : "") + text,
+          attachments: [...(update.append && existing?.kind === "agent" ? existing.attachments ?? [] : []), ...blocks.filter((block) => block.type !== "text")],
+          senderSessionId: update.senderSessionId ?? (existing?.kind === "agent" ? existing.senderSessionId : undefined),
+          recipientSessionId: update.recipientSessionId ?? (existing?.kind === "agent" ? existing.recipientSessionId : undefined),
+          streaming: view.turnActive,
+          ts: at,
+        },
+        batch,
+      );
     }
     case "user_message_chunk": {
       const id = update.messageId ?? `user-${key}`;
       const existing = get(view, id, "user");
       // The host's copy confirms (and replaces) an optimistic one with the same id.
       const blocks = existing && !existing.pending && !existing.failed ? [...existing.blocks, update.content] : [update.content];
-      return upsertUser(view, existing, { kind: "user", id, blocks: mergeText(blocks), agentMessages: agentInboxMessages(blocks), ts: existing?.ts ?? ts });
+      return upsertUser(view, existing, { kind: "user", id, blocks: mergeText(blocks), agentMessages: agentInboxMessages(blocks), ts: existing?.ts ?? ts }, batch);
     }
     case "agent_message_chunk": {
       const existing = get(view, update.messageId, "agent");
@@ -403,7 +628,7 @@ export function applyUpdate(view: SessionView, update: SessionUpdate, ts: number
         },
         Boolean(update.replace || (existing && replacedText.has(existing))),
       );
-      return upsert(view, next);
+      return upsert(view, next, batch);
     }
     case "agent_thought_chunk": {
       const id = `thought:${update.messageId}`;
@@ -418,36 +643,43 @@ export function applyUpdate(view: SessionView, update: SessionUpdate, ts: number
         },
         Boolean(update.replace || (existing && replacedText.has(existing))),
       );
-      return upsert(view, next);
+      return upsert(view, next, batch);
     }
     case "ls_message_done": {
       const id = update.role === "thought" ? `thought:${update.messageId}` : update.messageId;
       const agent = get(view, id, "agent");
-      if (agent) return upsert(view, withReplacedText({ ...agent, streaming: false, ...(update.questions?.length ? { questions: update.questions } : {}) }, replacedText.has(agent)));
+      if (agent) return upsert(view, withReplacedText({ ...agent, streaming: false, ...(update.questions?.length ? { questions: update.questions } : {}) }, replacedText.has(agent)), batch);
       const thought = get(view, id, "thought");
-      if (thought) return upsert(view, withReplacedText({ ...thought, streaming: false, endedTs: thought.endedTs ?? ts }, replacedText.has(thought)));
+      if (thought) return upsert(view, withReplacedText({ ...thought, streaming: false, endedTs: thought.endedTs ?? ts }, replacedText.has(thought)), batch);
       return view;
     }
     case "tool_call": {
       const existing = get(view, update.toolCallId, "tool");
       const done = update.status === "completed" || update.status === "failed";
-      return upsert(settleStreaming(view, ts), {
-        kind: "tool",
-        id: update.toolCallId,
-        title: update.title,
-        name: update.name ?? existing?.name,
-        toolKind: update.kind,
-        status: update.status,
-        rawInput: update.rawInput ?? existing?.rawInput,
-        rawOutput: update.rawOutput ?? existing?.rawOutput,
-        locations: update.locations ?? existing?.locations,
-        detail: update.detail ?? existing?.detail,
-        sub: existing?.sub,
-        content: update.content ?? existing?.content ?? [],
-        output: existing?.output ?? "",
-        ts: existing?.ts ?? ts,
-        endedTs: done ? ts : existing?.endedTs,
-      });
+      return upsert(
+        settleStreaming(view, ts, batch),
+        withReplacedOutput(
+          {
+            kind: "tool",
+            id: update.toolCallId,
+            title: update.title,
+            name: update.name ?? existing?.name,
+            toolKind: update.kind,
+            status: update.status,
+            rawInput: update.rawInput ?? existing?.rawInput,
+            rawOutput: update.rawOutput ?? existing?.rawOutput,
+            locations: update.locations ?? existing?.locations,
+            detail: update.detail ?? existing?.detail,
+            sub: existing?.sub,
+            content: update.content ?? existing?.content ?? [],
+            output: existing?.output ?? "",
+            ts: existing?.ts ?? ts,
+            endedTs: done ? ts : existing?.endedTs,
+          },
+          Boolean(existing && replacedOutput.has(existing)),
+        ),
+        batch,
+      );
     }
     case "tool_call_update": {
       const existing = get(view, update.toolCallId, "tool");
@@ -463,139 +695,243 @@ export function applyUpdate(view: SessionView, update: SessionUpdate, ts: number
       };
       const status = update.status ?? base.status;
       const done = status === "completed" || status === "failed";
-      return upsert(view, {
-        ...base,
-        title: update.title ?? base.title,
-        name: update.name ?? base.name,
-        toolKind: update.kind ?? base.toolKind,
-        rawInput: update.rawInput === undefined ? base.rawInput : update.rawInput,
-        locations: update.locations ?? base.locations,
-        detail: update.detail ?? base.detail,
-        status,
-        content: update.content ? update.replaceContent ? update.content : keepDiffs(base.content, update.content) : base.content,
-        output: update.replaceOutput ?? (update.appendOutput ? base.output + update.appendOutput : base.output),
-        rawOutput: update.rawOutput === undefined ? base.rawOutput : update.rawOutput,
-        endedTs: done ? (base.endedTs ?? ts) : update.status ? undefined : base.endedTs,
-        sub: done && base.sub ? settleAll(base.sub, ts) : base.sub,
-      });
+      const nextContent = update.content
+        ? update.appendContent
+          ? [...base.content, ...update.content]
+          : update.replaceContent
+            ? update.content
+            : keepDiffs(base.content, update.content)
+        : base.content;
+      const isAppendedOnly = update.content
+        ? Boolean(update.appendContent && (!existing || appendedContent.has(existing)))
+        : Boolean(existing && appendedContent.has(existing));
+      return upsert(
+        view,
+        withAppendedContent(
+          withReplacedOutput(
+            {
+              ...base,
+              title: update.title ?? base.title,
+              name: update.name ?? base.name,
+              toolKind: update.kind ?? base.toolKind,
+              rawInput: update.rawInput === undefined ? base.rawInput : update.rawInput,
+              locations: update.locations ?? base.locations,
+              detail: update.detail ?? base.detail,
+              status,
+              content: nextContent,
+              output: update.replaceOutput ?? (update.appendOutput ? base.output + update.appendOutput : base.output),
+              rawOutput: update.rawOutput === undefined ? base.rawOutput : update.rawOutput,
+              endedTs: done ? (base.endedTs ?? ts) : update.status ? undefined : base.endedTs,
+              sub: done && base.sub ? settleAll(base.sub, ts, batch) : base.sub,
+            },
+            update.replaceOutput !== undefined || Boolean(existing && replacedOutput.has(existing)),
+          ),
+          isAppendedOnly,
+        ),
+        batch,
+      );
     }
     case "plan": {
       // One card per plan, updated in place. Without an id that is one per turn; a plan the agent
       // names (one list it keeps working through, turn after turn) has one card, which an update
       // in a later turn takes down to that turn: its latest state is where the reader is.
       const id = update.planId ? `plan:${update.planId}` : view.planId ?? `plan-${key}`;
-      if (update.removed) return removeItem(view, id);
+      if (update.removed) return removeItemInternal(view, id, batch);
       const earlier = get(view, id, "plan");
-      const base = earlier && view.planId !== id ? moveOut(view, id) : view;
-      const next = upsert(base, { kind: "plan", id, entries: update.entries, title: update.title, markdown: update.markdown, path: update.path, ts: earlier?.ts ?? ts });
-      return { ...next, planId: id };
+      const base = earlier && view.planId !== id ? moveOut(view, id, batch) : view;
+      const next = upsert(
+        base,
+        {
+          kind: "plan",
+          id,
+          entries: update.entries,
+          title: update.title,
+          ...(update.explanation !== undefined ? { explanation: update.explanation } : {}),
+          markdown: update.markdown,
+          path: update.path,
+          ts: earlier?.ts ?? ts,
+        },
+        batch,
+      );
+      return patchView(next, { planId: id }, batch);
     }
     case "available_commands_update":
-      return { ...view, commands: update.availableCommands };
+      return patchView(view, { commands: update.availableCommands }, batch);
     case "ls_goal":
-      return { ...view, goal: update.goal };
+      return patchView(view, { goal: update.goal }, batch);
     case "current_mode_update":
-      return {
-        ...view,
-        modeId: update.currentModeId,
-        config: view.config.map((option) => (option.category === "mode" ? { ...option, current: update.currentModeId } : option)),
-      };
+      return patchView(
+        view,
+        {
+          modeId: update.currentModeId,
+          config: view.config.map((option) => (option.category === "mode" ? { ...option, current: update.currentModeId } : option)),
+        },
+        batch,
+      );
     case "ls_config":
-      return { ...view, config: update.options, modeId: update.options.find((o) => o.category === "mode")?.current ?? view.modeId };
+      return patchView(view, { config: update.options, modeId: update.options.find((o) => o.category === "mode")?.current ?? view.modeId }, batch);
     case "session_info_update":
-      return { ...view, title: update.title === null ? undefined : update.title ?? view.title };
+      return patchView(view, { title: update.title === null ? undefined : update.title ?? view.title }, batch);
     case "usage_update":
-      return { ...view, usage: { ...view.usage, usedTokens: update.usedTokens ?? view.usage?.usedTokens, contextWindow: update.contextWindow ?? view.usage?.contextWindow,
-        cost: update.cost === undefined ? view.usage?.cost : update.cost, tokens: update.tokens ?? view.usage?.tokens } };
+      return patchView(
+        view,
+        {
+          usage: {
+            ...view.usage,
+            usedTokens: update.usedTokens ?? view.usage?.usedTokens,
+            contextWindow: update.contextWindow ?? view.usage?.contextWindow,
+            cost: update.cost === undefined ? view.usage?.cost : update.cost,
+            tokens: update.tokens ?? view.usage?.tokens,
+          },
+        },
+        batch,
+      );
     case "ls_turn":
       if (update.state === "started") {
         // A repeated start (including older agents' mid-turn input) keeps its clock and plan;
         // a different native turn is new even if its predecessor's end was not observed.
         const continuing = view.turnActive && (!update.turnId || update.turnId === view.turnId);
-        return { ...view, turnActive: true, state: "running", turnId: update.turnId ?? (continuing ? view.turnId : undefined),
-          planId: continuing ? view.planId : undefined, turnStartedAt: continuing ? view.turnStartedAt ?? ts : ts };
+        return patchView(
+          view,
+          {
+            turnActive: true,
+            state: "running",
+            turnId: update.turnId ?? (continuing ? view.turnId : undefined),
+            planId: continuing ? view.planId : undefined,
+            turnStartedAt: continuing ? view.turnStartedAt ?? ts : ts,
+          },
+          batch,
+        );
       }
       {
         if (view.turnActive && update.turnId && view.turnId && update.turnId !== view.turnId) return view;
-        const settled = settleAll(view, ts);
-        const ended: SessionView = {
-          ...settled,
-          turnActive: false,
-          state: settled.permissions.some((permission) => permission.childSessionId) ? "waiting" : update.stopReason === "error" ? "error" : "idle",
-          permissions: settled.permissions.filter((permission) => permission.childSessionId),
-        };
-        const last = ended.items.at(-1)?.id;
-        const marked = last && ended.turnBreaks?.at(-1) !== last ? { ...ended, turnBreaks: [...(ended.turnBreaks ?? []), last] } : ended;
+        const settled = settleAll(view, ts, batch);
+        const ended = patchView(
+          settled,
+          {
+            turnActive: false,
+            state: settled.permissions.some((permission) => permission.childSessionId) ? "waiting" : update.stopReason === "error" ? "error" : "idle",
+            permissions: settled.permissions.filter((permission) => permission.childSessionId),
+          },
+          batch,
+        );
+        const last = lastServerItem(ended.items)?.id;
+        let marked = ended;
+        if (last && ended.turnBreaks?.at(-1) !== last) {
+          if (batch) {
+            let turnBreaks: string[];
+            if (ended.turnBreaks && batch.turnBreaks.has(ended.turnBreaks)) {
+              turnBreaks = ended.turnBreaks;
+              turnBreaks.push(last);
+            } else {
+              turnBreaks = [...(ended.turnBreaks ?? []), last];
+              batch.turnBreaks.add(turnBreaks);
+            }
+            marked = patchView(ended, { turnBreaks }, batch);
+          } else {
+            marked = { ...ended, turnBreaks: [...(ended.turnBreaks ?? []), last] };
+          }
+        }
         // A normal end is implied; limits and refusals must remain visible.
         return update.stopReason && update.stopReason !== "end_turn"
-          ? upsert(marked, { kind: "turn-end", id: `turn-end-${key}`, stopReason: update.stopReason, ts })
+          ? upsert(marked, { kind: "turn-end", id: `turn-end-${key}`, stopReason: update.stopReason, ts }, batch)
           : marked;
       }
     case "ls_status": {
       const turnActive = update.turnActive ?? (update.state === "running" || update.state === "waiting");
-      const base = !turnActive && view.turnActive ? settleAll(view, ts) : view;
+      const base = !turnActive && view.turnActive ? settleAll(view, ts, batch) : view;
       // Thread status can precede the new native start; the finished turn's clock and
       // anonymous plan must not carry into that gap or the start that follows it.
-      return { ...base, state: update.state, turnActive,
-        ...(turnActive && !view.turnActive ? { turnId: undefined, turnStartedAt: undefined, planId: undefined } : {}) };
+      return patchView(
+        base,
+        {
+          state: update.state,
+          turnActive,
+          ...(turnActive && !view.turnActive ? { turnId: undefined, turnStartedAt: undefined, planId: undefined } : {}),
+        },
+        batch,
+      );
     }
     case "ls_permission": {
       if (view.permissions.some((p) => p.requestId === update.requestId)) return view;
-      return {
-        ...settleStreaming(view, ts),
-        state: "waiting",
-        permissions: [
-          ...view.permissions,
-          {
-            requestId: update.requestId,
-            childSessionId: update.childSessionId,
-            toolCallId: update.toolCallId,
-            title: update.title,
-            detail: update.detail,
-            tool: update.tool,
-            url: update.url,
-            options: update.options,
-            questions: update.questions,
-            ts,
-          },
-        ],
-      };
+      return patchView(
+        settleStreaming(view, ts, batch),
+        {
+          state: "waiting",
+          permissions: [
+            ...view.permissions,
+            {
+              requestId: update.requestId,
+              childSessionId: update.childSessionId,
+              toolCallId: update.toolCallId,
+              title: update.title,
+              detail: update.detail,
+              tool: update.tool,
+              url: update.url,
+              options: update.options,
+              questions: update.questions,
+              ts,
+            },
+          ],
+        },
+        batch,
+      );
     }
     case "ls_permission_resolved": {
       const request = view.permissions.find((p) => p.requestId === update.requestId);
       if (!request) return view;
       const option = request.options.find((o) => o.optionId === update.optionId);
       const permissions = view.permissions.filter((p) => p.requestId !== update.requestId);
-      const next: SessionView = {
-        ...view,
-        permissions,
-        state: permissions.length > 0 ? "waiting" : view.turnActive ? "running" : view.state === "waiting" ? "idle" : view.state,
-      };
-      return upsert(next, {
-        kind: "permission-result",
-        id: `perm-${update.requestId}`,
-        title: request.questions ? questionTitle(request.title) : request.title,
-        detail: request.detail,
-        optionName: option && (request.questions ? questionOptionName(option) : option.name),
-        allowed: option ? option.kind.startsWith("allow") : undefined,
-        asked: request.questions ? true : undefined,
-        answers: request.questions && update.answers ? answered(request.questions, update.answers) : undefined,
-        ts,
-      });
+      const next = patchView(
+        view,
+        {
+          permissions,
+          state: permissions.length > 0 ? "waiting" : view.turnActive ? "running" : view.state === "waiting" ? "idle" : view.state,
+        },
+        batch,
+      );
+      return upsert(
+        next,
+        {
+          kind: "permission-result",
+          id: `perm-${update.requestId}`,
+          title: request.questions ? questionTitle(request.title) : request.title,
+          detail: request.detail,
+          optionName: option && (request.questions ? questionOptionName(option) : option.name),
+          allowed: option ? option.kind.startsWith("allow") : undefined,
+          asked: request.questions ? true : undefined,
+          answers: request.questions && update.answers ? answered(request.questions, update.answers) : undefined,
+          ts,
+        },
+        batch,
+      );
     }
     case "ls_driver": {
       if (view.driver === update.driver) return view;
-      const next = { ...view, driver: update.driver };
+      const hadDriver = view.driver !== undefined;
+      const next = patchView(view, { driver: update.driver }, batch);
       // The first report is just the starting state; later ones are handoffs worth showing.
-      return view.driver === undefined ? next : upsert(next, { kind: "driver", id: `driver-${key}`, driver: update.driver, ts });
+      return !hadDriver ? next : upsert(next, { kind: "driver", id: `driver-${key}`, driver: update.driver, ts }, batch);
     }
     case "ls_error":
-      return upsert(settleStreaming(view, ts), { kind: "error", id: `error-${key}`, code: update.code, message: update.message, hint: update.hint, ts });
+      return upsert(
+        settleStreaming(view, ts, batch),
+        {
+          kind: "error",
+          id: `error-${key}`,
+          code: update.code,
+          message: update.message,
+          hint: update.hint,
+          ...(update.retryable !== undefined ? { retryable: update.retryable } : {}),
+          ts,
+        },
+        batch,
+      );
     case "ls_notice": {
       // An agent retrying its connection reports each attempt; the latest replaces the one before.
-      const last = view.items.at(-1);
+      const last = lastServerItem(view.items);
       const id = last?.kind === "notice" && reconnectOf(update.title) && reconnectOf(last.title) ? last.id : `notice-${key}`;
-      return upsert(view, { kind: "notice", id, level: update.level, title: update.title, detail: update.detail, ts });
+      return upsert(view, { kind: "notice", id, level: update.level, title: update.title, detail: update.detail, ts }, batch);
     }
     default:
       return view;
@@ -621,7 +957,23 @@ export function applyEvent(view: SessionView, event: SessionEvent): SessionView 
 }
 
 export function applyEvents(view: SessionView, events: SessionEvent[]): SessionView {
-  return events.reduce(applyEvent, view);
+  let first = -1;
+  for (let i = 0; i < events.length; i += 1) {
+    if (events[i]!.seq > view.lastSeq) {
+      first = i;
+      break;
+    }
+  }
+  if (first === -1) return view;
+  const batch = createBatch();
+  let current = view;
+  for (let i = first; i < events.length; i += 1) {
+    const event = events[i]!;
+    if (event.seq <= current.lastSeq) continue;
+    const next = applyUpdateInternal(current, event.update, event.ts, String(event.seq), batch);
+    current = patchView(next, { lastSeq: event.seq }, batch);
+  }
+  return current;
 }
 
 /**
@@ -650,9 +1002,9 @@ const STUB_TITLES = new Set(["Tool", "Sub-agent"]);
  * A user message only the agent was meant to read (a reminder, a model switch) gets no item: it
  * would show as nothing, yet still split the run of steps around it.
  */
-function upsertUser(view: SessionView, existing: TimelineItem | undefined, item: Extract<TimelineItem, { kind: "user" }>): SessionView {
+function upsertUser(view: SessionView, existing: TimelineItem | undefined, item: Extract<TimelineItem, { kind: "user" }>, batch?: BatchState): SessionView {
   if (!existing && !item.agentMessages && userMessageView(item.blocks).hidden) return view;
-  return upsert(view, item);
+  return upsert(view, item, batch);
 }
 
 /** One item seen in two pages: `earlier` has how it began, `later` how it went on. */
@@ -677,20 +1029,32 @@ function joinItem(earlier: TimelineItem, later: TimelineItem): TimelineItem {
     return { ...later, blocks, agentMessages: agentInboxMessages(blocks), ts: earlier.ts };
   }
   if (earlier.kind === "tool" && later.kind === "tool") {
-    return {
-      ...later,
-      title: STUB_TITLES.has(later.title) ? earlier.title : later.title,
-      toolKind: earlier.toolKind,
-      rawInput: later.rawInput ?? earlier.rawInput,
-      rawOutput: later.rawOutput ?? earlier.rawOutput,
-      locations: later.locations ?? earlier.locations,
-      detail: later.detail ?? earlier.detail,
-      content: later.content.length ? keepDiffs(earlier.content, later.content) : earlier.content,
-      output: earlier.output + later.output,
-      sub: earlier.sub && later.sub ? joinViews(earlier.sub, later.sub) : (later.sub ?? earlier.sub),
-      ts: earlier.ts,
-      endedTs: later.endedTs ?? earlier.endedTs,
-    };
+    const outputReplaced = replacedOutput.has(later);
+    const content = later.content.length
+      ? appendedContent.has(later)
+        ? [...earlier.content, ...later.content]
+        : keepDiffs(earlier.content, later.content)
+      : earlier.content;
+    return withAppendedContent(
+      withReplacedOutput(
+        {
+          ...later,
+          title: STUB_TITLES.has(later.title) ? earlier.title : later.title,
+          toolKind: earlier.toolKind,
+          rawInput: later.rawInput ?? earlier.rawInput,
+          rawOutput: later.rawOutput ?? earlier.rawOutput,
+          locations: later.locations ?? earlier.locations,
+          detail: later.detail ?? earlier.detail,
+          content,
+          output: outputReplaced ? later.output : earlier.output + later.output,
+          sub: earlier.sub && later.sub ? joinViews(earlier.sub, later.sub) : (later.sub ?? earlier.sub),
+          ts: earlier.ts,
+          endedTs: later.endedTs ?? earlier.endedTs,
+        },
+        outputReplaced || replacedOutput.has(earlier),
+      ),
+      appendedContent.has(later) && appendedContent.has(earlier),
+    );
   }
   return later;
 }
@@ -728,10 +1092,14 @@ function joinViews(earlier: SessionView, later: SessionView): SessionView {
  * becomes one item again.
  */
 export function prependEvents(view: SessionView, events: SessionEvent[], startSeq: number): SessionView {
+  const batch = createBatch();
   let earlier = emptyView(view.sessionId);
-  for (const event of events) earlier = applyUpdate(earlier, event.update, event.ts, String(event.seq));
+  batch.views.add(earlier);
+  for (const event of events) {
+    earlier = applyUpdateInternal(earlier, event.update, event.ts, String(event.seq), batch);
+  }
   // Whatever was still streaming where the page ends is continued by the later items, or was cut off.
-  earlier = settleAll(earlier, events[events.length - 1]?.ts ?? 0);
+  earlier = settleAll(earlier, events[events.length - 1]?.ts ?? 0, batch);
   const joined = joinViews(earlier, view);
   // A status-only new turn has no clock yet. An older page can supply a start only
   // when native IDs prove it belongs to the same turn, not just another active one.
@@ -762,16 +1130,19 @@ export function markMessageAccepted(view: SessionView, clientMessageId: string):
  * Takes an item out of an earlier turn to put it in the running one. Where that turn ended stays
  * marked: if the item was the turn's last, the one before it is.
  */
-function moveOut(view: SessionView, id: string): SessionView {
+function moveOut(view: SessionView, id: string, batch?: BatchState): SessionView {
   const at = view.index[id];
-  const removed = removeItem(view, id);
-  if (at === undefined || !view.turnBreaks?.includes(id)) return removed;
-  const before = view.items[at - 1]?.id;
-  const turnBreaks = view.turnBreaks.flatMap((entry) => (entry !== id ? [entry] : before && !view.turnBreaks!.includes(before) ? [before] : []));
-  return { ...removed, turnBreaks };
+  const before = at !== undefined ? view.items[at - 1]?.id : undefined;
+  const hadBreak = at !== undefined && Boolean(view.turnBreaks?.includes(id));
+  const prevBreaks = view.turnBreaks;
+  const removed = removeItemInternal(view, id, batch);
+  if (!hadBreak || !prevBreaks) return removed;
+  const turnBreaks = prevBreaks.flatMap((entry) => (entry !== id ? [entry] : before && !prevBreaks.includes(before) ? [before] : []));
+  batch?.turnBreaks.add(turnBreaks);
+  return patchView(removed, { turnBreaks }, batch);
 }
 
-export function removeItem(view: SessionView, id: string): SessionView {
+function removeItemInternal(view: SessionView, id: string, batch?: BatchState): SessionView {
   const at = view.index[id];
   if (at === undefined) return view;
   const items = view.items.filter((_, i) => i !== at);
@@ -779,7 +1150,16 @@ export function removeItem(view: SessionView, id: string): SessionView {
   items.forEach((item, i) => {
     index[item.id] = i;
   });
-  return { ...view, items, index };
+  if (batch) {
+    batch.items.add(items);
+    batch.indexes.add(index);
+    rebuildBatchSets(batch, items);
+  }
+  return patchView(view, { items, index }, batch);
+}
+
+export function removeItem(view: SessionView, id: string): SessionView {
+  return removeItemInternal(view, id);
 }
 
 /**

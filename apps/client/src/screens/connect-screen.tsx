@@ -73,7 +73,7 @@ export function ConnectScreen() {
       } else {
         setDraft(discoveredUrl);
         setInvalid(false);
-        link.reconnectNow();
+        link.reconnectNow(true);
       }
       router.back();
       return;
@@ -88,21 +88,22 @@ export function ConnectScreen() {
     }
   };
 
-  const reconnect = () => {
+  const reconnect = (force = false) => {
     haptics.medium();
     if (hasComputer) {
       reconnectRelays();
-      link.reconnectNow();
+      link.reconnectNow(force);
     }
     router.back();
   };
 
   const connect = () => {
     if (throughGateway && draft.trim() === "") {
-      if (computer.lanUrl) {
+      const hadLan = Boolean(computer.lanUrl);
+      if (hadLan) {
         useComputers.getState().setLanUrl(computer.key, undefined);
       }
-      return reconnect();
+      return reconnect(hadLan);
     }
     if (!normalized) {
       setInvalid(true);
@@ -112,9 +113,9 @@ export function ConnectScreen() {
     haptics.medium();
     if (throughGateway) {
       useComputers.getState().setLanUrl(computer.key, normalized, { e2ee: lanE2ee });
-      link.reconnectNow();
+      link.reconnectNow(true);
     } else if (normalized === url && useComputers.getState().saved.direct.some((entry) => entry.url === normalized)) {
-      link.reconnectNow();
+      link.reconnectNow(true);
     } else {
       setUrl(normalized);
     }
@@ -277,7 +278,7 @@ export function ConnectScreen() {
                 onPress={() => {
                   useComputers.getState().setLanUrl(computer.key, undefined);
                   setDraft("");
-                  link.reconnectNow();
+                  link.reconnectNow(true);
                   router.back();
                 }}
               />

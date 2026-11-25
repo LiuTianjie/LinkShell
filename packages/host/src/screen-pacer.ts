@@ -80,7 +80,9 @@ export class Pacer {
 
   /** How long ago the oldest frame not yet shown was sent. */
   private lag(now: number): number {
-    const oldest = this.sentAt.get(this.shown + 1);
+    // Use the earliest retained entry rather than `shown + 1`: once `sentAt` evicts old entries
+    // past 600 unacked frames, `shown + 1` is gone and would falsely report 0 ms lag.
+    const oldest = this.sentAt.values().next().value;
     return oldest === undefined ? 0 : now - oldest;
   }
 

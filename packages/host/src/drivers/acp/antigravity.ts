@@ -22,6 +22,7 @@ import {
 } from "@linkshell/wire";
 import { QUESTION_OPTIONS } from "../../questions.js";
 import type { DriverBehavior } from "../behavior.js";
+import { inlineImage, MAX_INLINE_IMAGE } from "../images.js";
 import type { AttachContext, DiscoveredSession, ForkOptions, HistoryItem, SideOutput, SideRequest } from "../types.js";
 import { nestUnder } from "../nesting.js";
 import { AgySideRunner, resolveAgyBinary } from "./agy-side.js";
@@ -77,6 +78,8 @@ export const ANTIGRAVITY_ACP_TARGETS: Record<string, AntigravityReleaseTarget> =
     archiveUrl: "https://dl.google.com/agy-extensions/releases/windows/agy-acp-server-1.4.0-windows-aarch64.zip",
     binaryName: "agy_acp_server.exe",
     args: [],
+    // TODO: Verify upstream win32-arm64 archive checksum before enabling automated download;
+    // this value currently duplicates win32-x64 and will fail verification if upstream differs.
     sha256: "d62bc2a1ca587849ecce838574523886729be3fb12867d22a666f149401325de",
   },
 };
@@ -218,17 +221,144 @@ function readHead(filePath: string, bytes: number): string {
   }
 }
 
+function readTail(filePath: string, bytes: number): string {
+  let fd: number | undefined;
+  try {
+    fd = openSync(filePath, "r");
+    const size = fstatSync(fd).size;
+    if (size <= 0) return "";
+    const start = Math.max(0, size - bytes);
+    const length = size - start;
+    const buffer = Buffer.alloc(length);
+    const read = readSync(fd, buffer, 0, length, start);
+    return buffer.subarray(0, read).toString("utf8");
+  } catch {
+    return "";
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+
+interface ValidatedHubDescriptor {
+  httpPort: number;
+  pid: number;
+  csrfToken: string;
+  lsVersion?: string;
+  mtimeMs: number;
+}
+
+function readHubDescriptor(filePath: string, expectedPort?: number): ValidatedHubDescriptor | undefined {
+  let fd: number | undefined;
+  try {
+    fd = openSync(filePath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+    const file = fstatSync(fd);
+    if (!file.isFile() || file.size > 4096 || (process.getuid && (file.uid !== process.getuid() || (file.mode & 0o077) !== 0))) {
+      return undefined;
+    }
+    const hub = JSON.parse(readFileSync(fd, "utf8")) as {
+      httpPort?: unknown;
+      pid?: unknown;
+      csrfToken?: unknown;
+      lsVersion?: unknown;
+    };
+    const httpPort = Number(hub.httpPort);
+    if (
+      !Number.isSafeInteger(httpPort) ||
+      httpPort < 1 ||
+      httpPort > 65535 ||
+      (expectedPort !== undefined && httpPort !== expectedPort) ||
+      !Number.isSafeInteger(hub.pid) ||
+      (hub.pid as number) < 1 ||
+      typeof hub.csrfToken !== "string" ||
+      !hub.csrfToken.trim()
+    ) {
+      return undefined;
+    }
+    process.kill(hub.pid as number, 0); // A descriptor can outlive its desktop.
+    return {
+      httpPort,
+      pid: hub.pid as number,
+      csrfToken: hub.csrfToken,
+      ...(typeof hub.lsVersion === "string" && hub.lsVersion.trim() ? { lsVersion: hub.lsVersion.trim() } : {}),
+      mtimeMs: file.mtimeMs,
+    };
+  } catch {
+    return undefined;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+
+function listLiveHubDescriptors(dataDir: string): ValidatedHubDescriptor[] {
+  const daemonDir = join(dataDir, "daemon");
+  if (!existsSync(daemonDir)) return [];
+  const descriptors: ValidatedHubDescriptor[] = [];
+  try {
+    for (const entry of readdirSync(daemonDir)) {
+      const match = /^hub_(\d+)\.json$/.exec(entry);
+      if (!match) continue;
+      const descriptor = readHubDescriptor(join(daemonDir, entry), Number(match[1]));
+      if (descriptor) descriptors.push(descriptor);
+    }
+  } catch {
+    return [];
+  }
+  descriptors.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return descriptors;
+}
+
+function findLatestLogInDirs(roots: string[]): string | undefined {
+  let best: { path: string; mtimeMs: number } | undefined;
+  const consider = (candidate: string) => {
+    try {
+      const st = statSync(candidate);
+      if (!st.isFile()) return;
+      if (!best || st.mtimeMs > best.mtimeMs) best = { path: candidate, mtimeMs: st.mtimeMs };
+    } catch {
+      // ignore missing/unreadable file
+    }
+  };
+  for (const root of roots) {
+    if (!root || !existsSync(root)) continue;
+    consider(join(root, "language_server.log"));
+    try {
+      // Electron/VSCode-style apps on Windows can also place logs inside timestamped subdirectories.
+      const subdirs = readdirSync(root, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name)
+        .sort()
+        .reverse()
+        .slice(0, 6);
+      for (const sub of subdirs) {
+        consider(join(root, sub, "language_server.log"));
+      }
+    } catch {
+      // ignore unreadable log directory
+    }
+  }
+  return best?.path;
+}
+
 // Watchers, discovery and every RPC resolve the desktop; the answer only changes when the app is installed or moved.
 const DESKTOP_CACHE_MS = 5000;
 let desktopCache: { key: string; at: number; value: ResolvedAntigravityDesktop } | undefined;
 
 /**
- * Resolves an installed Antigravity Desktop app (`/Applications/Antigravity.app`)
+ * Resolves an installed Antigravity Desktop app (macOS, Windows, or Linux)
  * and its conversation store (`~/.gemini/antigravity`).
  */
 export function resolveAntigravityDesktop(env: NodeJS.ProcessEnv = process.env): ResolvedAntigravityDesktop | undefined {
   if (env.PATH === "" && !env.ANTIGRAVITY_APP_DATA_DIR) return undefined;
-  const key = `${env.HOME ?? ""}\n${env.ANTIGRAVITY_APP_DATA_DIR ?? ""}`;
+  const key = [
+    process.platform,
+    env.HOME ?? "",
+    env.USERPROFILE ?? "",
+    env.APPDATA ?? "",
+    env.LOCALAPPDATA ?? "",
+    env.XDG_CONFIG_HOME ?? "",
+    env.ANTIGRAVITY_APP_DATA_DIR ?? "",
+    env.ANTIGRAVITY_LOG_PATH ?? "",
+  ].join("\n");
   if (desktopCache && desktopCache.key === key && Date.now() - desktopCache.at < DESKTOP_CACHE_MS) return desktopCache.value;
   const value = resolveAntigravityDesktopUncached(env);
   desktopCache = value ? { key, at: Date.now(), value } : undefined;
@@ -236,13 +366,19 @@ export function resolveAntigravityDesktop(env: NodeJS.ProcessEnv = process.env):
 }
 
 function resolveAntigravityDesktopUncached(env: NodeJS.ProcessEnv): ResolvedAntigravityDesktop | undefined {
-  const home = env.HOME || homedir();
+  const home = env.HOME || env.USERPROFILE || homedir();
   const dataCandidates = [
     env.ANTIGRAVITY_APP_DATA_DIR?.trim(),
     join(home, ".gemini", "antigravity"),
     join(home, ".gemini", "antigravity-ide"),
   ].filter((entry): entry is string => Boolean(entry));
-  const dataDir = dataCandidates.find((dir) => existsSync(join(dir, "conversation_summaries.db")) || existsSync(join(dir, "brain")));
+  const dataDir = dataCandidates.find(
+    (dir) => existsSync(join(dir, "conversation_summaries.db")) || existsSync(join(dir, "brain")) || existsSync(join(dir, "daemon")),
+  );
+
+  const localAppData = env.LOCALAPPDATA?.trim() || join(home, "AppData", "Local");
+  const appData = env.APPDATA?.trim() || join(home, "AppData", "Roaming");
+  const programFiles = env.ProgramFiles?.trim() || "C:\\Program Files";
 
   const lsCandidates =
     process.platform === "darwin"
@@ -250,20 +386,49 @@ function resolveAntigravityDesktopUncached(env: NodeJS.ProcessEnv): ResolvedAnti
           "/Applications/Antigravity.app/Contents/Resources/bin/language_server",
           join(home, "Applications", "Antigravity.app", "Contents", "Resources", "bin", "language_server"),
         ]
-      : [];
+      : process.platform === "win32"
+        ? [
+            join(localAppData, "Programs", "Antigravity", "resources", "bin", "language_server.exe"),
+            join(localAppData, "Antigravity", "resources", "bin", "language_server.exe"),
+            join(programFiles, "Antigravity", "resources", "bin", "language_server.exe"),
+          ]
+        : [];
   const languageServerPath = lsCandidates.find((candidate) => isExecutable(candidate));
   if (!dataDir && !languageServerPath) return undefined;
 
-  const logCandidates =
-    process.platform === "darwin"
+  const explicitLog = env.ANTIGRAVITY_LOG_PATH?.trim();
+  const logCandidates = [
+    explicitLog,
+    ...(process.platform === "darwin"
       ? [join(home, "Library", "Logs", "Antigravity", "language_server.log")]
-      : [join(home, ".config", "Antigravity", "logs", "language_server.log")];
-  const logPath = logCandidates.find((candidate) => existsSync(candidate));
+      : process.platform === "win32"
+        ? [
+            join(appData, "Antigravity", "logs", "language_server.log"),
+            join(localAppData, "Antigravity", "logs", "language_server.log"),
+            join(home, ".config", "Antigravity", "logs", "language_server.log"),
+          ]
+        : [
+            ...(env.XDG_CONFIG_HOME?.trim() ? [join(env.XDG_CONFIG_HOME.trim(), "Antigravity", "logs", "language_server.log")] : []),
+            join(home, ".config", "Antigravity", "logs", "language_server.log"),
+          ]),
+  ].filter((entry): entry is string => Boolean(entry));
+  let logPath = logCandidates.find((candidate) => existsSync(candidate));
+  if (!logPath && process.platform === "win32") {
+    logPath = findLatestLogInDirs([
+      join(appData, "Antigravity", "logs"),
+      join(localAppData, "Antigravity", "logs"),
+    ]);
+  }
 
+  const resolvedDataDir = dataDir ?? join(home, ".gemini", "antigravity");
   let version = "desktop";
   if (logPath) {
     const match = /Language server version:\s*([^\s\r\n]+)/i.exec(readHead(logPath, 16 * 1024));
     if (match?.[1]) version = match[1];
+  }
+  if (version === "desktop") {
+    const liveHub = listLiveHubDescriptors(resolvedDataDir)[0];
+    if (liveHub?.lsVersion) version = liveHub.lsVersion;
   }
   if (version === "desktop" && process.platform === "darwin") {
     try {
@@ -276,7 +441,7 @@ function resolveAntigravityDesktopUncached(env: NodeJS.ProcessEnv): ResolvedAnti
   }
 
   return {
-    dataDir: dataDir ?? join(home, ".gemini", "antigravity"),
+    dataDir: resolvedDataDir,
     languageServerPath,
     logPath,
     version,
@@ -500,20 +665,56 @@ function readStepMediaBlocks(media: TranscriptMedia[] | undefined): ContentBlock
   const blocks: ContentBlock[] = [];
   for (const entry of media) {
     const mimeType = entry.mime_type || entry.mimeType || "image/png";
+    const isImage = mimeType.toLowerCase().startsWith("image/");
     const inline = entry.inline_data || entry.inlineData;
-    if (typeof inline === "string" && inline.length > 0) {
-      blocks.push({ type: "image", mimeType, data: inline });
+    const rawUri = entry.uri;
+    const filePath = typeof rawUri === "string" && rawUri.length > 0
+      ? (rawUri.startsWith("file://") ? fileURLToPath(rawUri) : rawUri)
+      : undefined;
+
+    if (!isImage) {
+      // Never stuff non-image binaries (e.g. multi-MB PDFs) into image blocks / SQLite.
+      if (filePath && rawUri) {
+        blocks.push({
+          type: "resource_link",
+          uri: rawUri.startsWith("file://") ? rawUri : pathToFileURL(filePath).href,
+          name: basename(filePath) || mimeType,
+          mimeType,
+        });
+      } else if (typeof inline === "string" && inline.length > 0) {
+        const kb = Math.max(1, Math.round((inline.length * 0.75) / 1024));
+        blocks.push({ type: "text", text: `[附件：${mimeType}，约 ${kb} KB]` });
+      }
       continue;
     }
-    const rawUri = entry.uri;
-    if (typeof rawUri === "string" && rawUri.length > 0) {
-      const filePath = rawUri.startsWith("file://") ? fileURLToPath(rawUri) : rawUri;
+
+    if (typeof inline === "string" && inline.length > 0) {
+      const image = inlineImage(inline, mimeType);
+      if (image) {
+        blocks.push(image);
+      } else {
+        const mb = Math.max(1, Math.round((inline.length * 0.75) / (1024 * 1024)));
+        blocks.push({ type: "text", text: `[图片过大（约 ${mb} MB），未内联]` });
+      }
+      continue;
+    }
+
+    if (filePath && rawUri) {
       try {
         if (existsSync(filePath)) {
           const stat = statSync(filePath);
-          if (stat.isFile() && stat.size > 0 && stat.size <= 15 * 1024 * 1024) {
-            const data = readFileSync(filePath).toString("base64");
-            blocks.push({ type: "image", mimeType, data });
+          if (stat.isFile() && stat.size > 0) {
+            if (stat.size * 1.37 <= MAX_INLINE_IMAGE) {
+              const image = inlineImage(readFileSync(filePath).toString("base64"), mimeType);
+              if (image) blocks.push(image);
+            } else {
+              blocks.push({
+                type: "resource_link",
+                uri: rawUri.startsWith("file://") ? rawUri : pathToFileURL(filePath).href,
+                name: basename(filePath) || mimeType,
+                mimeType,
+              });
+            }
           }
         }
       } catch {
@@ -1180,70 +1381,91 @@ async function lsAnswers(conn: LanguageServerConnection): Promise<boolean> {
 }
 
 async function findRunningLanguageServer(desktop: ResolvedAntigravityDesktop | undefined): Promise<LanguageServerConnection | undefined> {
-  if (!desktop?.logPath || !existsSync(desktop.logPath)) return undefined;
-  const logPath = desktop.logPath;
-  if (lsCache && lsCache.logPath === logPath && Date.now() - lsCache.at < LS_CACHE_MS) return lsCache.conn;
-  lsLookup ??= lookupLanguageServer(desktop, logPath).finally(() => {
+  if (!desktop) return undefined;
+  const cacheKey = `${desktop.dataDir}\n${desktop.logPath ?? ""}`;
+  if (lsCache && lsCache.logPath === cacheKey && Date.now() - lsCache.at < LS_CACHE_MS) return lsCache.conn;
+  lsLookup ??= lookupLanguageServer(desktop, cacheKey).finally(() => {
     lsLookup = undefined;
   });
   return lsLookup;
 }
 
-async function lookupLanguageServer(desktop: ResolvedAntigravityDesktop, logPath: string): Promise<LanguageServerConnection | undefined> {
-  // The log starts over with each launch; if it was appended to instead, the latest launch's port is the last one.
-  const ports = [...readHead(logPath, 64 * 1024).matchAll(/listening on \w+ port at (\d+) for HTTP\b/gi)].map((match) => Number(match[1]));
-  const httpPort = ports.at(-1);
-  if (!httpPort) {
-    lsCache = undefined;
-    return undefined;
-  }
-  // The desktop and other Google apps can publish hubs in the same directory. Only use
-  // the descriptor for the HTTP listener announced by *this desktop's* launch log.
-  const descriptor = join(desktop.dataDir, "daemon", `hub_${httpPort}.json`);
-  if (existsSync(descriptor)) {
-    let fd: number | undefined;
+async function listProcessCommandLines(): Promise<string[]> {
+  if (process.platform === "win32") {
     try {
-      fd = openSync(descriptor, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
-      const file = fstatSync(fd);
-      if (!file.isFile() || file.size > 4096 || (process.getuid && (file.uid !== process.getuid() || (file.mode & 0o077) !== 0))) {
-        lsCache = undefined;
-        return undefined;
-      }
-      const hub = JSON.parse(readFileSync(fd, "utf8"));
-      if (hub.httpPort !== httpPort || httpPort < 1 || httpPort > 65535 || !Number.isSafeInteger(hub.pid) || hub.pid < 1 || typeof hub.csrfToken !== "string" || !hub.csrfToken.trim()) {
-        lsCache = undefined;
-        return undefined;
-      }
-      process.kill(hub.pid, 0); // A descriptor can outlive its desktop.
-      const conn = { httpPort, csrfToken: hub.csrfToken };
-      lsCache = { logPath, at: Date.now(), conn };
-      return conn;
+      const { stdout } = await execFileAsync(
+        "powershell.exe",
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "Get-CimInstance Win32_Process -Filter \"Name LIKE 'language_server%'\" | Select-Object -ExpandProperty CommandLine",
+        ],
+        { timeout: 3000, windowsHide: true },
+      );
+      return stdout.split(/\r?\n/).filter(Boolean);
     } catch {
-      lsCache = undefined;
-      return undefined;
-    } finally {
-      if (fd !== undefined) closeSync(fd);
+      return [];
     }
   }
-  // Older desktops did not publish a per-user hub descriptor.
-  const tokens: string[] = [];
   try {
     const { stdout } = await execFileAsync("ps", ["-ax", "-o", "args="], { timeout: 3000 });
-    const lines = stdout.split("\n").filter((line) => line.includes("language_server") && line.includes("--csrf_token"));
-    // Another Antigravity product (the IDE) runs its own language_server: the desktop app's binary goes first.
-    const own = (line: string) => (desktop.languageServerPath && line.includes(desktop.languageServerPath) ? 1 : 0);
-    lines.sort((a, b) => own(b) - own(a));
-    for (const line of lines) {
-      const token = /--csrf_token[=\s]+([^\s]+)/.exec(line)?.[1];
-      if (token && !tokens.includes(token)) tokens.push(token);
-    }
+    return stdout.split("\n").filter(Boolean);
   } catch {
-    // ps unavailable: nothing to authenticate with
+    return [];
   }
-  for (const csrfToken of tokens) {
-    const conn = { httpPort, csrfToken };
-    if (tokens.length === 1 || (await lsAnswers(conn))) {
-      lsCache = { logPath, at: Date.now(), conn };
+}
+
+async function lookupLanguageServer(desktop: ResolvedAntigravityDesktop, cacheKey: string): Promise<LanguageServerConnection | undefined> {
+  const logPath = desktop.logPath && existsSync(desktop.logPath) ? desktop.logPath : undefined;
+  if (logPath) {
+    // The log starts over with each launch; if it was appended to instead, check both head and tail so the latest port wins.
+    const headPorts = [...readHead(logPath, 64 * 1024).matchAll(/listening on \w+ port at (\d+) for HTTP\b/gi)].map((match) => Number(match[1]));
+    const tailPorts = [...readTail(logPath, 256 * 1024).matchAll(/listening on \w+ port at (\d+) for HTTP\b/gi)].map((match) => Number(match[1]));
+    const httpPort = tailPorts.at(-1) ?? headPorts.at(-1);
+    if (httpPort) {
+      // The desktop and other Google apps can publish hubs in the same directory. Only use
+      // the descriptor for the HTTP listener announced by *this desktop's* launch log.
+      const descriptor = join(desktop.dataDir, "daemon", `hub_${httpPort}.json`);
+      if (existsSync(descriptor)) {
+        const hub = readHubDescriptor(descriptor, httpPort);
+        if (hub) {
+          const conn = { httpPort: hub.httpPort, csrfToken: hub.csrfToken };
+          lsCache = { logPath: cacheKey, at: Date.now(), conn };
+          return conn;
+        }
+        lsCache = undefined;
+        return undefined;
+      }
+      // Older desktops did not publish a per-user hub descriptor.
+      const tokens: string[] = [];
+      const lines = (await listProcessCommandLines()).filter((line) => line.includes("language_server") && line.includes("--csrf_token"));
+      const own = (line: string) => (desktop.languageServerPath && line.includes(desktop.languageServerPath) ? 1 : 0);
+      lines.sort((a, b) => own(b) - own(a));
+      for (const line of lines) {
+        const token = /--csrf_token[=\s]+([^\s"']+)/.exec(line)?.[1];
+        if (token && !tokens.includes(token)) tokens.push(token);
+      }
+      for (const csrfToken of tokens) {
+        const conn = { httpPort, csrfToken };
+        if (tokens.length === 1 || (await lsAnswers(conn))) {
+          lsCache = { logPath: cacheKey, at: Date.now(), conn };
+          return conn;
+        }
+      }
+      lsCache = undefined;
+      return undefined;
+    }
+  }
+
+  // On Windows (or custom Electron log layouts where language_server.log is in another location),
+  // fall back to live verified hub descriptors inside Antigravity's own `daemon/` directory
+  // and confirm the local Connect-RPC service answers GetStatus.
+  const liveHubs = listLiveHubDescriptors(desktop.dataDir);
+  for (const hub of liveHubs) {
+    const conn = { httpPort: hub.httpPort, csrfToken: hub.csrfToken };
+    if (await lsAnswers(conn)) {
+      lsCache = { logPath: cacheKey, at: Date.now(), conn };
       return conn;
     }
   }

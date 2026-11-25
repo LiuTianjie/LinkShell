@@ -223,6 +223,13 @@ export function useSessionUi(computerKey: string, sessionId: string): SessionUiE
 
 export const INSPECTOR_OPEN_FILE_EVENT = "linkshell-inspector-open-file";
 
+let dispatchingOpenFileHelper = false;
+
+/** True while `openFileInInspector` is synchronously broadcasting its event after already opening the tab. */
+export function isDispatchingOpenFileInInspector(): boolean {
+  return dispatchingOpenFileHelper;
+}
+
 export function openFileInInspector(
   computerKey: string,
   sessionId: string | undefined,
@@ -238,11 +245,16 @@ export function openFileInInspector(
       : path;
   openFileTabInInspector(computerKey, sessionId, spec, { openPanel: true });
   if (typeof window !== "undefined") {
-    window.dispatchEvent(
-      new CustomEvent(INSPECTOR_OPEN_FILE_EVENT, {
-        detail: { computerKey, sessionId, path, line },
-      }),
-    );
+    dispatchingOpenFileHelper = true;
+    try {
+      window.dispatchEvent(
+        new CustomEvent(INSPECTOR_OPEN_FILE_EVENT, {
+          detail: { computerKey, sessionId, path, line },
+        }),
+      );
+    } finally {
+      dispatchingOpenFileHelper = false;
+    }
   }
 }
 
@@ -356,6 +368,7 @@ export interface SessionCopy {
   connectingComputer: string;
 
   // Diff review
+  diffViewMode: string;
   reviewPlaceholder: string;
   saveComment: string;
   cancelAction: string;
@@ -498,6 +511,7 @@ const COPY_BY_LOCALE: Record<Locale, SessionCopy> = {
     sessionNotFound: "正在同步会话状态",
     connectingComputer: "正在连接电脑",
 
+    diffViewMode: "差异视图模式",
     reviewPlaceholder: "输入对这几行代码的修改意见",
     saveComment: "添加批注",
     cancelAction: "取消",
@@ -636,6 +650,7 @@ const COPY_BY_LOCALE: Record<Locale, SessionCopy> = {
     sessionNotFound: "Syncing session",
     connectingComputer: "Connecting to computer",
 
+    diffViewMode: "Diff view mode",
     reviewPlaceholder: "Write review feedback for this line",
     saveComment: "Add Comment",
     cancelAction: "Cancel",
@@ -774,6 +789,7 @@ const COPY_BY_LOCALE: Record<Locale, SessionCopy> = {
     sessionNotFound: "セッションを同期中",
     connectingComputer: "コンピュータに接続中",
 
+    diffViewMode: "差分表示モード",
     reviewPlaceholder: "この行へのレビューコメントを入力",
     saveComment: "コメント追加",
     cancelAction: "キャンセル",
@@ -941,12 +957,19 @@ export interface AtMentionMatch {
 export function detectAtFileMention(text: string, caretOffset: number): AtMentionMatch | null {
   const safeCaret = Math.max(0, Math.min(caretOffset, text.length));
   const before = text.slice(0, safeCaret);
-  const match = /(^|[\s([{'"`])@([^\s@]*)$/.exec(before);
+  const match = /(^|[\s([{'"`])@([^\s@'"`)\]}]*)$/.exec(before);
   if (!match) return null;
   const query = match[2] ?? "";
   if (query.includes("\n")) return null;
   const start = safeCaret - query.length - 1;
-  return { start, end: safeCaret, query };
+  // Reject double `@@` or mid-word handles like email addresses.
+  if (start > 0 && before[start - 1] === "@") return null;
+  // Extend replacement end across any trailing token characters when editing mid-mention.
+  let end = safeCaret;
+  while (end < text.length && !/[\s@'"`)\]},;:]/.test(text[end]!)) {
+    end += 1;
+  }
+  return { start, end, query };
 }
 
 /* ============================================================================

@@ -55,6 +55,7 @@ let window: BrowserWindow | undefined;
 let nativeModule: NativeModule | undefined;
 let visible = false;
 let systemShortcutCaptured = false;
+let menuShortcutsIgnored = false;
 let nativeScreenShown = false;
 let pageReady = false;
 let quitting = false;
@@ -110,12 +111,9 @@ const updater = new UpdaterController({
   flushOrConfirm,
   rememberBounds,
   quitForUpdate: async () => {
-    rememberBounds();
-    await settings.save();
     quitConfirmed = true;
     quitting = true;
-    trayMenu.stop();
-    await server.stop();
+    await shutdownForQuit();
     app.quit();
   },
 });
@@ -125,6 +123,9 @@ const remotePortProxies = new RemotePortProxyManager({
     if (!pageReady || !window || window.isDestroyed() || !server.policy?.isTrusted(window.webContents.getURL())) return false;
     send("linkshell-desktop-remote-port-req", payload);
     return true;
+  },
+  cancel: (reqId) => {
+    send("linkshell-desktop-remote-port-cancel", { reqId });
   },
 });
 
@@ -352,12 +353,17 @@ function createWindow() {
       safeDialogs: true,
     },
   });
+  const created = window;
   if (state.maximized) window.maximize();
   window.on("closed", () => {
+    if (window === created) window = undefined;
     clearPageReadyTimer();
     clearBoundsTimer();
+    clearHungTimer();
+    clearTimeout(fullScreenRetry);
     hideAfterLeaveFullScreen = false;
     pageReady = false;
+    menuShortcutsIgnored = false;
     resetSystemShortcutCapture();
     nativeModule?.setImmersiveFullScreen(false);
     nativeModule?.screenStop();
@@ -367,8 +373,8 @@ function createWindow() {
   const web = window.webContents;
   guard(web);
   window.on("focus", () => {
-    if (!visible && window?.isVisible() && !window.isMinimized()) setVisible(true);
-    if (WINDOWS) window?.flashFrame(false);
+    if (!created.isDestroyed() && !visible && created.isVisible() && !created.isMinimized()) setVisible(true);
+    if (WINDOWS && !created.isDestroyed()) created.flashFrame(false);
     syncImmersivePresentation();
     updateWindowSurface();
     updater.maybeAutoCheck();
@@ -376,7 +382,8 @@ function createWindow() {
   window.on("blur", () => {
     syncImmersivePresentation();
     updateWindowSurface();
-    window?.webContents.setIgnoreMenuShortcuts(false);
+    menuShortcutsIgnored = false;
+    if (!created.isDestroyed()) created.webContents.setIgnoreMenuShortcuts(false);
     resetSystemShortcutCapture();
   });
   window.on("resize", () => { updateWindowSurface(); scheduleRememberBounds(); });
@@ -384,33 +391,33 @@ function createWindow() {
   window.on("ready-to-show", () => {
     if (!quitting && (userRequestedShow || (!launch.hidden && !(launch.fusionConnect && launch.fusionLaunch)))) showWindow();
   });
-  window.on("show", () => setVisible(!window!.isMinimized()));
-  window.on("hide", () => { if (!window!.isVisible()) setVisible(false); });
+  window.on("show", () => { if (!created.isDestroyed()) setVisible(!created.isMinimized()); });
+  window.on("hide", () => { if (!created.isDestroyed() && !created.isVisible()) setVisible(false); });
   window.on("minimize", () => setVisible(false));
   window.on("restore", () => setVisible(true));
   window.on("close", (event) => {
     rememberBounds();
-    if (quitting) return;
+    if (quitting || created.isDestroyed()) return;
     event.preventDefault();
     wantedFullScreen = undefined;
     wantedImmersiveFullScreen = false;
     nativeModule?.setImmersiveFullScreen(false);
     if (isSimpleFullScreen()) {
-      window!.setSimpleFullScreen(false);
+      created.setSimpleFullScreen(false);
       if (preSimpleFullScreenBounds) {
-        window!.setBounds(preSimpleFullScreenBounds);
+        created.setBounds(preSimpleFullScreenBounds);
         preSimpleFullScreenBounds = undefined;
       }
-      if (MAC) window!.setWindowButtonPosition(TRAFFIC_LIGHTS);
+      if (MAC) created.setWindowButtonPosition(TRAFFIC_LIGHTS);
       send("linkshell-desktop-window", { fullscreen: false });
       send("linkshell-desktop-fullscreen", { fullscreen: false });
-      window!.hide();
+      created.hide();
       if (MAC) app.dock?.hide();
-    } else if (window!.isFullScreen()) {
+    } else if (created.isFullScreen()) {
       hideAfterLeaveFullScreen = true;
-      window!.setFullScreen(false);
+      created.setFullScreen(false);
     } else {
-      window!.hide();
+      created.hide();
       if (MAC) app.dock?.hide();
     }
   });
@@ -444,6 +451,7 @@ function createWindow() {
     if (details.isMainFrame && !details.isSameDocument) {
       clearPageReadyTimer();
       pageReady = false;
+      menuShortcutsIgnored = false;
       resetSystemShortcutCapture();
       nativeModule?.screenStop();
       setNativeScreenShown(false);
@@ -542,16 +550,44 @@ function guard(web: WebContents) {
     if (!server.policy || !(server.policy.isTrusted(url) || server.policy.allowsBlob(url) || url.startsWith("data:"))) { item.cancel(); return; }
     item.setSaveDialogOptions({ title: t("save.title"), buttonLabel: t("save.button"), defaultPath: item.getFilename() });
     item.once("done", (_done, state) => {
-      if (state === "interrupted" && window) void dialog.showMessageBox(window, { type: "warning", message: t("save.failed"), detail: t("save.failedDetail") });
+      if (state === "interrupted" && window && !window.isDestroyed()) void dialog.showMessageBox(window, { type: "warning", message: t("save.failed"), detail: t("save.failedDetail") });
     });
   });
+  if (!MAC) {
+    // Windows and Linux remove the Electron application menu, so wire standard zoom & DevTools shortcuts explicitly.
+    web.on("before-input-event", (event, input) => {
+      if (input.type !== "keyDown" || menuShortcutsIgnored) return;
+      const ctrlOnly = input.control && !input.alt && !input.meta;
+      if (ctrlOnly && !input.shift) {
+        if (input.key === "=" || input.key === "+" || input.code === "Equal" || input.code === "NumpadAdd") {
+          web.setZoomLevel(Math.min(5, web.getZoomLevel() + 0.5));
+          event.preventDefault();
+          return;
+        }
+        if (input.key === "-" || input.key === "_" || input.code === "Minus" || input.code === "NumpadSubtract") {
+          web.setZoomLevel(Math.max(-3, web.getZoomLevel() - 0.5));
+          event.preventDefault();
+          return;
+        }
+        if (input.key === "0" || input.code === "Digit0" || input.code === "Numpad0") {
+          web.setZoomLevel(0);
+          event.preventDefault();
+          return;
+        }
+      }
+      if (!app.isPackaged && ((ctrlOnly && input.shift && input.key.toLowerCase() === "i") || input.key === "F12")) {
+        web.toggleDevTools();
+        event.preventDefault();
+      }
+    });
+  }
 }
 
 function startServer() {
-  if (!window) return;
+  if (!window || window.isDestroyed()) return;
   showLoading();
   server.start((url) => {
-    if (!window) return;
+    if (!window || window.isDestroyed()) return;
     void window.loadURL(url.href).catch((error: Error & { code?: string }) => {
       if (error.code !== "ERR_ABORTED") showProblem(t("problem.open", { message: error.message }));
     });
@@ -559,7 +595,7 @@ function startServer() {
 }
 
 function showLoading() {
-  if (!window) return;
+  if (!window || window.isDestroyed()) return;
   const html = `<!doctype html><html lang="${locale}"><meta charset="utf-8"><meta name="color-scheme" content="light dark"><title>LinkShell</title><style>
     :root{color-scheme:light dark;font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
     body{margin:0;height:100vh;display:grid;place-items:center;background:light-dark(#f2f3f6,#090a0c);color:light-dark(rgb(20 21 24/.62),rgb(236 238 242/.62));-webkit-app-region:drag;user-select:none}
@@ -572,7 +608,7 @@ function showLoading() {
 }
 
 function showProblem(message: string) {
-  if (!window) return;
+  if (!window || window.isDestroyed()) return;
   const html = `<!doctype html><html lang="${locale}"><meta charset="utf-8"><meta name="color-scheme" content="light dark"><title>LinkShell</title><style>
     :root{color-scheme:light dark;font:14px/1.5 -apple-system,BlinkMacSystemFont,sans-serif;-webkit-font-smoothing:antialiased}
     body{margin:0;height:100vh;display:grid;place-items:center;background:transparent;color:light-dark(#1a1c1f,#dfdfdf);-webkit-app-region:drag}
@@ -599,7 +635,7 @@ async function retry() {
 function showWindow() {
   userRequestedShow = true;
   hideAfterLeaveFullScreen = false;
-  if (!window) return;
+  if (!window || window.isDestroyed()) return;
   if (MAC) void app.dock?.show();
   if (window.isMinimized()) window.restore();
   if (MAC) window.webContents.focus();
@@ -700,7 +736,7 @@ ipcMain.on("linkshell:fusion-hub", (event, body: unknown) => {
 
 ipcMain.handle("linkshell:invoke", async (event, body: unknown) => {
   const frame = event.senderFrame;
-  if (!window || event.sender !== window.webContents || !frame || !server.policy?.allowsBridge(frame.url, frame === event.sender.mainFrame)) {
+  if (!window || window.isDestroyed() || event.sender !== window.webContents || !frame || !server.policy?.allowsBridge(frame.url, frame === event.sender.mainFrame)) {
     return { ok: false, error: "来源不受信任" };
   }
   const payload = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
@@ -715,7 +751,7 @@ ipcMain.handle("linkshell:invoke", async (event, body: unknown) => {
 
 ipcMain.on("linkshell:message", (event, body: unknown) => {
   const frame = event.senderFrame;
-  if (!window || event.sender !== window.webContents || !frame || !server.policy?.allowsBridge(frame.url, frame === event.sender.mainFrame)) return;
+  if (!window || window.isDestroyed() || event.sender !== window.webContents || !frame || !server.policy?.allowsBridge(frame.url, frame === event.sender.mainFrame)) return;
   if (!body || typeof body !== "object") return;
   const message = body as Record<string, unknown>;
   switch (message.action) {
@@ -802,10 +838,13 @@ ipcMain.on("linkshell:message", (event, body: unknown) => {
       return;
     }
     case "screenKeys":
-      if (typeof message.captured === "boolean") window.webContents.setIgnoreMenuShortcuts(message.captured);
+      if (typeof message.captured === "boolean") {
+        menuShortcutsIgnored = message.captured;
+        if (!window.isDestroyed()) window.webContents.setIgnoreMenuShortcuts(message.captured);
+      }
       return;
     case "screenFullScreen":
-      if (window && typeof message.enabled === "boolean") {
+      if (window && !window.isDestroyed() && typeof message.enabled === "boolean") {
         wantedFullScreen = message.enabled;
         wantedImmersiveFullScreen = message.enabled && message.immersive === true;
         reconcileFullScreen();
@@ -989,8 +1028,9 @@ async function flushOrConfirm(continuing: string): Promise<boolean> {
     type: "warning" as const, message: t("flush.message"), detail: t("flush.detail"),
     buttons: [t("flush.back"), continuing], defaultId: 0, cancelId: 0,
   };
-  if (window) showWindow();
-  const { response } = window ? await dialog.showMessageBox(window, options) : await dialog.showMessageBox(options);
+  const liveWin = window && !window.isDestroyed() ? window : undefined;
+  if (liveWin) showWindow();
+  const { response } = liveWin ? await dialog.showMessageBox(liveWin, options) : await dialog.showMessageBox(options);
   return response === 1;
 }
 
@@ -1002,20 +1042,33 @@ app.on("before-quit", (event) => {
   void flushOrConfirm(t("flush.quit")).then(async (confirmed) => {
     if (!confirmed) { quitting = false; return; }
     quitConfirmed = true;
-    clearTimeout(resumeTimer);
-    resetSystemShortcutCapture();
-    nativeModule?.setImmersiveFullScreen(false);
-    nativeModule?.screenStop();
-    nativeScreenShown = false;
-    void mdnsBrowser.stop();
-    fusion.stopAll();
-    remotePortProxies.stopAll();
-    trayMenu.stop();
-    rememberBounds();
-    await Promise.all([settings.save(), server.stop()]);
+    await shutdownForQuit();
     app.quit();
   });
 });
+
+async function shutdownForQuit(): Promise<void> {
+  clearTimeout(resumeTimer);
+  resumeTimer = undefined;
+  clearTimeout(fullScreenRetry);
+  fullScreenRetry = undefined;
+  clearHungTimer();
+  clearPageReadyTimer();
+  clearBoundsTimer();
+  menuShortcutsIgnored = false;
+  resetSystemShortcutCapture();
+  nativeModule?.setImmersiveFullScreen(false);
+  nativeModule?.screenStop();
+  nativeScreenShown = false;
+  updater.stop();
+  void mdnsBrowser.stop();
+  fusion.stopAll();
+  remotePortProxies.stopAll();
+  trayMenu.stop();
+  keepAwake.set(false);
+  rememberBounds();
+  await Promise.all([settings.save(), server.stop()]);
+}
 
 app.on("activate", () => { showWindow(); updater.maybeAutoCheck(); });
 app.on("window-all-closed", () => { /* LinkShell stays in the menu bar. */ });

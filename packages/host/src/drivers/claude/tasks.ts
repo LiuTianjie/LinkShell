@@ -37,7 +37,7 @@ export class ClaudeTasks {
     const id = str(result.backgroundTaskId) ?? (launch?.kind === "monitor" ? str(result.taskId) : undefined);
     if (id && call && launch && !this.records.has(id)) {
       const text = typeof block?.content === "string" ? block.content : JSON.stringify(block?.content ?? "");
-      const path = /Output is being written to:\s*(\S+?\.output)(?:\s|\.|$)/.exec(text)?.[1];
+      const path = /Output is being written to:\s*(.+?\.output)(?:\s|\.(?:\s|$)|$)/.exec(text)?.[1];
       if (path) this.paths.set(id, path);
       // Fold a completion that arrived first into the initial snapshot.
       const { ts: startedAt, ...description } = launch;
@@ -105,7 +105,11 @@ export class ClaudeTasks {
   file(nativeId: string, taskId: string): string | undefined {
     const path = this.paths.get(taskId);
     if (!path || !/^[\w-]+$/.test(nativeId) || !/^[\w-]+$/.test(taskId)) return undefined;
-    const valid = (value: string) => value.includes("/claude-") && new RegExp(`/claude-\\d+/[^/]+/${nativeId}/tasks/${taskId}\\.output$`).test(value);
+    // Normalize Windows backslashes and allow Windows temp dirs where Claude omits a numeric UID.
+    const valid = (value: string) => {
+      const normalized = value.replace(/\\/g, "/");
+      return new RegExp(`/claude(?:-\\d+)?/[^/]+/${nativeId}/tasks/${taskId}\\.output$`).test(normalized);
+    };
     try {
       if (!valid(path)) return undefined;
       const resolved = realpathSync(path);

@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
@@ -163,10 +164,44 @@ namespace LinkShell.Windows {
             }
             Report(progress, 85, "文件解压完成", Megabytes(done) + " MB  ·  " + files + " 个文件");
         }
+        [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)] static extern bool QueryFullProcessImageNameW(IntPtr process, int flags, StringBuilder path, ref int length);
+        [DllImport("kernel32.dll", SetLastError = true)] static extern bool CloseHandle(IntPtr handle);
+
+        static string TryQueryProcessPath(Process process) {
+            const uint ProcessQueryLimitedInformation = 0x1000;
+            IntPtr handle = IntPtr.Zero;
+            try {
+                handle = OpenProcess(ProcessQueryLimitedInformation, false, unchecked((uint)process.Id));
+                if (handle != IntPtr.Zero) {
+                    int capacity = 1024;
+                    var buffer = new StringBuilder(capacity);
+                    if (QueryFullProcessImageNameW(handle, 0, buffer, ref capacity)) return buffer.ToString();
+                }
+            } catch (Win32Exception) {
+            } catch (InvalidOperationException) {
+            } finally {
+                if (handle != IntPtr.Zero) CloseHandle(handle);
+            }
+            try {
+                if (!process.HasExited) return process.MainModule.FileName;
+            } catch (Win32Exception) {
+            } catch (InvalidOperationException) {
+            } catch (UnauthorizedAccessException) {
+            }
+            return null;
+        }
+
         static void CheckRunning(string root) {
+            string target = Path.GetFullPath(Path.Combine(root, "LinkShell.exe"));
             foreach (var process in Process.GetProcessesByName("LinkShell")) {
                 try {
-                    if (!process.HasExited && String.Equals(process.MainModule.FileName, Path.Combine(root, "LinkShell.exe"), StringComparison.OrdinalIgnoreCase)) throw new IOException("LinkShell 界面仍在运行。请先从系统托盘退出，再点击重试安装。");
+                    string imagePath = TryQueryProcessPath(process);
+                    if (!String.IsNullOrEmpty(imagePath) && String.Equals(Path.GetFullPath(imagePath), target, StringComparison.OrdinalIgnoreCase)) {
+                        throw new IOException("LinkShell 界面仍在运行。请先从系统托盘退出，再点击重试安装。");
+                    }
+                } catch (Win32Exception) {
+                } catch (InvalidOperationException) {
                 } finally { process.Dispose(); }
             }
         }

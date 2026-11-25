@@ -74,9 +74,14 @@ export class AcpEditor {
   constructor(private readonly options: {
     capabilities(): AcpAgentCapabilities;
     settings(): AcpAgentSettings;
+    protocolVersion?(): 1 | 2;
     request<T>(method: string, params: unknown): Promise<T>;
     notify(method: string, params: unknown): void;
   }) {}
+
+  private suggestionIdField(id: string): { suggestionId: string } | { id: string } {
+    return this.options.protocolVersion?.() === 2 ? { suggestionId: id } : { id };
+  }
 
   private get encoding(): Encoding {
     const value = this.options.capabilities().positionEncoding ?? "utf-16";
@@ -131,7 +136,7 @@ export class AcpEditor {
     if (input.operation === "suggest") {
       const contextCaps = object(this.capabilities.context), documentCaps = object(object(this.capabilities.events).document);
       if (editor.text !== editor.diskText && !documentCaps.didChange && !contextCaps.recentFiles) throw RpcError.app("not_supported", "这个 AI 不能接收未保存的更改，请先保存文件");
-      for (const previous of editor.suggestions.keys()) this.options.notify("nes/reject", { sessionId: editor.nativeId, id: previous, reason: "replaced" });
+      for (const previous of editor.suggestions.keys()) this.options.notify("nes/reject", { sessionId: editor.nativeId, ...this.suggestionIdField(previous), reason: "replaced" });
       editor.suggestions.clear(); editor.preview = undefined;
       const position = encodedPosition(editor.text, input.position ?? { line: 0, character: 0 }, this.encoding);
       this.document(editor, "didFocus", { version: editor.version, position, visibleRange: { start: position, end: position } });
@@ -144,13 +149,20 @@ export class AcpEditor {
       const version = editor.version;
       const result = await this.options.request<{ suggestions: unknown[] }>("nes/suggest", { sessionId: editor.nativeId, uri, version, position, triggerKind: "manual", context });
       if (editor.version !== version) throw RpcError.app("busy", "文件已继续编辑，请重新获取建议");
-      const suggestions = (result.suggestions ?? []).flatMap((value) => { const parsed = editSuggestionSchema.safeParse(value); return parsed.success ? [parsed.data] : []; });
+      const suggestions = (result.suggestions ?? []).flatMap((value) => {
+        const record = object(value);
+        const normalized = typeof record.id !== "string" && typeof record.suggestionId === "string"
+          ? { ...record, id: record.suggestionId }
+          : value;
+        const parsed = editSuggestionSchema.safeParse(normalized);
+        return parsed.success ? [parsed.data] : [];
+      });
       for (const value of suggestions) editor.suggestions.set(value.id, { value, version });
       return { ...this.result(id, editor), suggestions };
     }
     if (input.operation === "reject") {
       if (!input.suggestionId || !editor.suggestions.has(input.suggestionId)) throw invalid("建议已失效");
-      this.options.notify("nes/reject", { sessionId: editor.nativeId, id: input.suggestionId, reason: "rejected" });
+      this.options.notify("nes/reject", { sessionId: editor.nativeId, ...this.suggestionIdField(input.suggestionId), reason: "rejected" });
       editor.suggestions.delete(input.suggestionId); editor.preview = undefined; return {};
     }
     if (input.operation === "preview") {
@@ -181,7 +193,7 @@ export class AcpEditor {
       if (moved) this.openDocument(editor);
       else this.changedDocument(editor, before);
       if (preview.kind !== "jump") this.document(editor, "didSave", {});
-      this.options.notify("nes/accept", { sessionId: editor.nativeId, id: preview.suggestionId });
+      this.options.notify("nes/accept", { sessionId: editor.nativeId, ...this.suggestionIdField(preview.suggestionId) });
       editor.suggestions.clear(); editor.preview = undefined;
       return { ...this.result(id, editor), position: preview.position };
     }

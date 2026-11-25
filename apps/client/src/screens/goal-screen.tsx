@@ -3,6 +3,7 @@ import { useLocalSearchParams } from "expo-router";
 import { View } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import type { GoalChange } from "@linkshell/wire";
+import { usePageInsets } from "@/components/adaptive-page";
 import { Text, TextInput } from "@/components/fixed-text";
 import { SheetHeader } from "@/components/sheet-header";
 import { Button } from "@/components/button";
@@ -14,6 +15,7 @@ import { type, radius } from "@/theme/type";
 
 export function GoalScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const insets = usePageInsets();
   useSessionSubscription(id);
   const session = useClient((state) => state.sessions[id]);
   const driver = useClient((state) => state.views[id]?.driver ?? state.sessions[id]?.driver);
@@ -64,7 +66,7 @@ export function GoalScreen() {
   };
   const readOnly = codex && driver === "desktop";
   const disabled = busy || !online || !offered || readOnly;
-  return <KeyboardAwareScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40, gap: 16 }} keyboardShouldPersistTaps="handled" bottomOffset={24}>
+  return <KeyboardAwareScrollView contentContainerStyle={{ padding: 16, paddingBottom: Math.max(40, insets.bottom + 24), gap: 16 }} keyboardShouldPersistTaps="handled" bottomOffset={24}>
     <SheetHeader title="持续目标" />
     <Text style={[type.subhead, { color: colors.secondaryLabel }]}>{codex ? "设定完成条件，让 Codex 持续推进；可以暂停、继续或清除目标。" : `设定完成条件，让 ${agentName} 持续推进；达到条件后自动清除，也可以提前清除。`}</Text>
     {goal ? <View style={{ gap: 6 }}>

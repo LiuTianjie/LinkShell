@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { connect as connectTcp } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -283,5 +283,63 @@ describe("startGateway", () => {
     await expect(startGateway({ port: first.port, host: "127.0.0.1", databasePath, log: () => {} })).rejects.toMatchObject({ code: "EADDRINUSE" });
     const second = await startGateway({ port: 0, host: "127.0.0.1", databasePath, log: () => {} });
     await second.close();
+  });
+
+  it("closes all sockets cleanly with 1001 ('going away'), checkpoints SQLite, enforces 0700/0600 perms, and lets peers auto-reconnect", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "lsh-graceful-"));
+    cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+    const dataDir = join(dir, "data");
+    const databasePath = join(dataDir, "relay.db");
+    const first = await startGateway({ port: 0, host: "127.0.0.1", databasePath, log: () => {} });
+    const port = first.port;
+    const wsUrl = `ws://127.0.0.1:${port}${RELAY_PATH}`;
+
+    if (process.platform !== "win32") {
+      expect(statSync(dataDir).mode & 0o777).toBe(0o700);
+      expect(statSync(databasePath).mode & 0o777).toBe(0o600);
+      for (const sidecar of [`${databasePath}-wal`, `${databasePath}-shm`]) {
+        if (existsSync(sidecar)) expect(statSync(sidecar).mode & 0o777).toBe(0o600);
+      }
+    }
+
+    // Track the exact WebSocket close code/reason received by an authenticated RelayClient AND an unauthenticated socket.
+    const closes: Array<{ code: number; reason: string }> = [];
+    const identity = createIdentity();
+    const client = new RelayClient({
+      url: wsUrl,
+      identity,
+      role: "machine",
+      name: "Zero-Downtime Host",
+      createSocket: (target) => {
+        const ws = new WebSocket(target);
+        ws.once("close", (code, reason) => closes.push({ code, reason: reason.toString("utf8") }));
+        return ws as unknown as RelaySocket;
+      },
+    });
+    client.start();
+    cleanups.push(() => client.stop());
+    expect(await client.waitOnline(5000)).toBe(true);
+
+    const raw = new WebSocket(wsUrl);
+    await new Promise<void>((resolve, reject) => {
+      raw.once("open", () => resolve());
+      raw.once("error", reject);
+    });
+    const rawClosed = new Promise<{ code: number; reason: string }>((resolve) => {
+      raw.once("close", (code, reason) => resolve({ code, reason: reason.toString("utf8") }));
+    });
+
+    // Graceful shutdown delivers 1001 ("going away") to both authenticated and unauthenticated sockets.
+    await first.close();
+    expect(await rawClosed).toEqual({ code: 1001, reason: "going away" });
+    await until(() => closes.length >= 1);
+    expect(closes[0]).toEqual({ code: 1001, reason: "going away" });
+
+    // WAL was checkpointed cleanly and the restarted gateway preserves the peer record and accepts instant auto-reconnect.
+    const second = await startGateway({ port, host: "127.0.0.1", databasePath, log: () => {} });
+    cleanups.push(() => second.close());
+    expect(second.relay.store.peer(identity.id)?.name).toBe("Zero-Downtime Host");
+    expect(await client.waitOnline(5000)).toBe(true);
+    expect(second.relay.connected).toBe(1);
   });
 });

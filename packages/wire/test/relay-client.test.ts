@@ -10,13 +10,20 @@ afterEach(() => {
 
 class Socket implements RelaySocket {
   readyState = 1;
+  bufferedAmount = 0;
   sent: ClientFrame[] = [];
+  terminated = 0;
+  throwOnSend = false;
   onopen: RelaySocket["onopen"] = null;
   onmessage: RelaySocket["onmessage"] = null;
   onclose: RelaySocket["onclose"] = null;
   onerror: RelaySocket["onerror"] = null;
-  send(data: string) { this.sent.push(JSON.parse(data) as ClientFrame); }
+  send(data: string) {
+    if (this.throwOnSend) throw new Error("socket broken");
+    this.sent.push(JSON.parse(data) as ClientFrame);
+  }
   close(code?: number, reason?: string) { this.readyState = 3; this.onclose?.({ code, reason }); }
+  terminate() { this.terminated += 1; this.readyState = 3; }
   message(frame: unknown) { this.onmessage?.({ data: JSON.stringify(frame) }); }
 }
 
@@ -242,6 +249,116 @@ describe("RelayClient resilience", () => {
       expect(sockets).toHaveLength(1);
       vi.advanceTimersByTime(1);
       expect(sockets).toHaveLength(2);
+    } finally {
+      client.stop();
+    }
+  });
+
+  it("exposes underlying socket bufferedAmount and guards send/request on closed sockets", async () => {
+    const sockets: Socket[] = [];
+    const client = new RelayClient({
+      identity: createIdentity(),
+      name: "Test",
+      role: "machine",
+      url: "ws://127.0.0.1/v2/connect",
+      pingMs: 0,
+      createSocket: () => {
+        const socket = new Socket();
+        sockets.push(socket);
+        return socket;
+      },
+    });
+    try {
+      expect(client.bufferedAmount).toBe(0);
+      client.start();
+      sockets[0]!.bufferedAmount = 4096;
+      expect(client.bufferedAmount).toBe(4096);
+      sockets[0]!.message({ t: "ready" });
+      sockets[0]!.throwOnSend = true;
+      expect(client.send("peer-1", { t: "data", ch: "c1", d: "1.x" })).toBe(false);
+      await expect(client.request("devices.list", {})).rejects.toMatchObject({ code: "offline" });
+    } finally {
+      client.stop();
+    }
+  });
+
+  it("detects silent dead sockets within ~30s by default instead of 75s", () => {
+    vi.useFakeTimers();
+    const sockets: Socket[] = [];
+    const client = new RelayClient({
+      identity: createIdentity(),
+      name: "Test",
+      role: "device",
+      url: "ws://127.0.0.1/v2/connect",
+      createSocket: () => {
+        const socket = new Socket();
+        sockets.push(socket);
+        return socket;
+      },
+    });
+    try {
+      client.start();
+      sockets[0]!.message({ t: "ready" });
+      expect(client.status).toBe("online");
+
+      // 10s + 20s pings go out without pong; by 30s (> 25s silence) the dead socket is terminated.
+      vi.advanceTimersByTime(29_999);
+      expect(client.status).toBe("online");
+      vi.advanceTimersByTime(1);
+      expect(sockets[0]!.terminated).toBe(1);
+      expect(client.status).toBe("offline");
+    } finally {
+      client.stop();
+    }
+  });
+
+  it("drops and redials hung connecting or half-open online sockets on reconnectNow", () => {
+    vi.useFakeTimers();
+    const sockets: Socket[] = [];
+    const client = new RelayClient({
+      identity: createIdentity(),
+      name: "Test",
+      role: "device",
+      url: "ws://127.0.0.1/v2/connect",
+      pingMs: 0,
+      createSocket: () => {
+        const socket = new Socket();
+        sockets.push(socket);
+        return socket;
+      },
+    });
+    try {
+      client.start();
+      expect(sockets).toHaveLength(1);
+
+      // Fresh connecting socket (< 5s) is kept by unforced reconnectNow.
+      vi.advanceTimersByTime(2_000);
+      client.reconnectNow();
+      expect(sockets).toHaveLength(1);
+
+      // Hung connecting socket (>= 5s) is replaced by unforced reconnectNow.
+      vi.advanceTimersByTime(3_000);
+      client.reconnectNow();
+      expect(sockets).toHaveLength(2);
+      expect(sockets[0]!.terminated).toBe(1);
+
+      // Half-open online socket: unforced reconnectNow probes it and drops it if silent.
+      sockets[1]!.message({ t: "ready" });
+      client.reconnectNow();
+      expect(sockets[1]!.sent.some((f) => f.t === "ping")).toBe(true);
+      vi.advanceTimersByTime(8_000);
+      expect(sockets[1]!.terminated).toBe(1);
+      expect(client.status).toBe("offline");
+
+      // Forced reconnectNow immediately drops even a freshly online socket and dials a new one.
+      client.reconnectNow();
+      expect(sockets).toHaveLength(3);
+      sockets[2]!.message({ t: "ready" });
+      expect(client.status).toBe("online");
+      client.reconnectNow({ force: true });
+      expect(sockets).toHaveLength(4);
+      expect(sockets[2]!.terminated).toBe(1);
+      expect(client.status).toBe("connecting");
     } finally {
       client.stop();
     }

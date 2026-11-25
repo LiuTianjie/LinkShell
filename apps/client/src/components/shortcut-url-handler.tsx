@@ -90,7 +90,7 @@ export function ShortcutUrlHandler() {
     }
 
     if (pendingAction === "approve-latest") {
-      if (!online) return;
+      if (!online || !sessionsLoaded) return;
       setPendingAction(null);
       const waiting = [...allSessions]
         .filter((s) => Boolean(s.permission))

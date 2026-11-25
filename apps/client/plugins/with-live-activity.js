@@ -1,4 +1,4 @@
-const { withXcodeProject, withEntitlementsPlist, withInfoPlist } = require("expo/config-plugins");
+const { withAppDelegate, withXcodeProject, withEntitlementsPlist, withInfoPlist } = require("expo/config-plugins");
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -448,6 +448,29 @@ module.exports = function withLiveActivity(config) {
   });
   config = withInfoPlist(config, (config) => {
     config.modResults.LinkShellLiveActivityAppGroup = appGroup;
+    return config;
+  });
+  // Install UNUserNotificationCenterDelegate synchronously before didFinishLaunchingWithOptions
+  // returns so iOS cold-launch approval button taps are never dropped.
+  config = withAppDelegate(config, (config) => {
+    if (config.modResults.language !== "swift") return config;
+    let src = config.modResults.contents;
+    if (!src.includes("LocalApprovalNotifications.shared.install()")) {
+      if (!src.includes("import LinkLayout")) {
+        src = `#if canImport(LinkLayout)\nimport LinkLayout\n#endif\n${src}`;
+      }
+      src = src.replace(
+        /return\s+super\.application\(application,\s*didFinishLaunchingWithOptions:\s*launchOptions\)/,
+        [
+          "let launched = super.application(application, didFinishLaunchingWithOptions: launchOptions)",
+          "    #if canImport(LinkLayout)",
+          "    LocalApprovalNotifications.shared.install()",
+          "    #endif",
+          "    return launched",
+        ].join("\n"),
+      );
+      config.modResults.contents = src;
+    }
     return config;
   });
   return withXcodeProject(config, (config) => {

@@ -235,7 +235,7 @@ export async function readFileAtLine(
   line?: number,
 ): Promise<FileReadResult> {
   let file = await read();
-  let lines = file.text?.split("\n").length ?? 0;
+  let lines = file.text ? file.text.split("\n").length : 0;
   while (
     file.kind === "text" &&
     line &&
@@ -243,7 +243,7 @@ export async function readFileAtLine(
     file.nextOffset !== undefined
   ) {
     const chunk = await read(file.nextOffset);
-    lines += (chunk.text?.split("\n").length ?? 1) - 1;
+    lines += chunk.text ? chunk.text.split("\n").length - 1 : 0;
     file = appendFileChunk(file, chunk);
   }
   return file;
@@ -302,6 +302,10 @@ function toLoadedFile(res: FileReadResult): LoadedFileState {
 }
 
 const READ_CHUNK_BYTES = 512_000;
+const VIRTUALIZE_LINE_THRESHOLD = 400;
+const SOURCE_LINE_HEIGHT_PX = 20;
+const SOURCE_OVERSCAN_LINES = 30;
+const DEFAULT_VIEWPORT_HEIGHT_PX = 600;
 
 function rpcAppCode(err: unknown): string | undefined {
   return err instanceof RpcError ? err.appCode : undefined;
@@ -389,6 +393,11 @@ export function FileViewerTabPanel({
 
   const sourcePreRef = useRef<HTMLPreElement | null>(null);
   const readSeqRef = useRef(0);
+  const scrollRafRef = useRef(0);
+  const [sourceScrollTop, setSourceScrollTop] = useState(0);
+  const [sourceViewportHeight, setSourceViewportHeight] = useState(
+    DEFAULT_VIEWPORT_HEIGHT_PX,
+  );
 
   const isDirty = Boolean(
     editing && loadedFile?.kind === "text" && draftText !== loadedFile.text,
@@ -426,14 +435,20 @@ export function FileViewerTabPanel({
   }, [effectivePath, parsedAnchor.endLine, parsedAnchor.startLine]);
 
   // An unsaved edit wins over "show me the file again"; the reload button can still discard it.
+  // Skip bumping reloadTick when effectivePath changed in the same render (e.g. tab rename),
+  // since the path change already triggers a single fs.read.
   const lastNonceRef = useRef(reloadNonce);
+  const lastPathRef = useRef(effectivePath);
   useEffect(() => {
+    const pathChanged = lastPathRef.current !== effectivePath;
+    lastPathRef.current = effectivePath;
     if (lastNonceRef.current === reloadNonce) return;
     lastNonceRef.current = reloadNonce;
+    if (pathChanged) return;
     if (!getFileDraft(draftOwner, sessionId, draftTabId)) {
       setReloadTick((n) => n + 1);
     }
-  }, [draftOwner, draftTabId, reloadNonce, sessionId]);
+  }, [draftOwner, draftTabId, effectivePath, reloadNonce, sessionId]);
 
   const readAt = useCallback(
     (path: string, offset?: number) => {
@@ -584,14 +599,6 @@ export function FileViewerTabPanel({
     }
     discardDraftAndReload();
   }, [dialogs, discardDraftAndReload, effectivePath, isDirty, ti]);
-
-  useEffect(() => {
-    if (!highlightRange || !sourcePreRef.current) return;
-    const row = sourcePreRef.current.querySelector<HTMLElement>(
-      `[data-line-number="${highlightRange.start}"]`,
-    );
-    row?.scrollIntoView({ block: "center" });
-  }, [highlightRange, loadedFile?.path, loadedFile?.text, markdownMode]);
 
   const confirmDiscardIfDirty = useCallback(async (): Promise<boolean> => {
     if (!isDirty) return true;
@@ -804,6 +811,84 @@ export function FileViewerTabPanel({
     () => (loadedFile?.kind === "text" ? loadedFile.text.split("\n") : []),
     [loadedFile],
   );
+  const isVirtualized = sourceLines.length > VIRTUALIZE_LINE_THRESHOLD;
+  const visibleWindow = useMemo(() => {
+    if (!isVirtualized) {
+      return { startIdx: 0, endIdx: sourceLines.length };
+    }
+    const viewport = Math.max(sourceViewportHeight, DEFAULT_VIEWPORT_HEIGHT_PX);
+    const startIdx = Math.max(
+      0,
+      Math.floor(sourceScrollTop / SOURCE_LINE_HEIGHT_PX) - SOURCE_OVERSCAN_LINES,
+    );
+    const endIdx = Math.min(
+      sourceLines.length,
+      Math.ceil((sourceScrollTop + viewport) / SOURCE_LINE_HEIGHT_PX) +
+        SOURCE_OVERSCAN_LINES,
+    );
+    return { startIdx, endIdx };
+  }, [isVirtualized, sourceLines.length, sourceScrollTop, sourceViewportHeight]);
+
+  // Measure the source viewport for windowed line rendering when showing large files.
+  useEffect(() => {
+    const el = sourcePreRef.current;
+    if (!el || !isVirtualized) return;
+    const syncHeight = () => {
+      if (el.clientHeight > 0) {
+        setSourceViewportHeight(el.clientHeight);
+      }
+    };
+    syncHeight();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(syncHeight);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [isVirtualized, loadedFile?.path, markdownMode, editing]);
+
+  useEffect(
+    () => () => {
+      if (scrollRafRef.current && typeof cancelAnimationFrame === "function") {
+        cancelAnimationFrame(scrollRafRef.current);
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const el = sourcePreRef.current;
+    if (!highlightRange || !el) return;
+    if (isVirtualized) {
+      const viewport = el.clientHeight || sourceViewportHeight || DEFAULT_VIEWPORT_HEIGHT_PX;
+      const targetTop = Math.max(
+        0,
+        (highlightRange.start - 1) * SOURCE_LINE_HEIGHT_PX - viewport / 2,
+      );
+      el.scrollTop = targetTop;
+      setSourceScrollTop(targetTop);
+      return;
+    }
+    const row = el.querySelector<HTMLElement>(
+      `[data-line-number="${highlightRange.start}"]`,
+    );
+    row?.scrollIntoView({ block: "center" });
+  }, [highlightRange, isVirtualized, loadedFile?.path, loadedFile?.text, markdownMode, sourceViewportHeight]);
+
+  const handleSourceScroll = useCallback(() => {
+    if (!isVirtualized) return;
+    const el = sourcePreRef.current;
+    if (!el) return;
+    const nextTop = el.scrollTop;
+    if (typeof requestAnimationFrame === "function") {
+      if (scrollRafRef.current) return;
+      scrollRafRef.current = requestAnimationFrame(() => {
+        scrollRafRef.current = 0;
+        const current = sourcePreRef.current;
+        if (current) setSourceScrollTop(current.scrollTop);
+      });
+    } else {
+      setSourceScrollTop(nextTop);
+    }
+  }, [isVirtualized]);
   const shouldHighlightSource = Boolean(
     loadedFile?.kind === "text" &&
       !editing &&
@@ -1327,57 +1412,78 @@ export function FileViewerTabPanel({
               ref={sourcePreRef}
               tabIndex={0}
               className="inspector-source-scroll"
+              data-virtualized={isVirtualized ? "true" : undefined}
+              onScroll={handleSourceScroll}
             >
-              {sourceLines.map((lineText, idx) => {
-                const lineNum = idx + 1;
-                const isHighlighted =
-                  highlightRange !== null &&
-                  lineNum >= highlightRange.start &&
-                  lineNum <= highlightRange.end;
-                const lineTokens = highlightedTokens?.[idx];
-                return (
-                  <div
-                    key={lineNum}
-                    data-line-number={lineNum}
-                    data-highlighted={isHighlighted ? "true" : undefined}
-                    className="inspector-source-line"
-                  >
-                    <button
-                      type="button"
-                      className="inspector-source-ln"
-                      onClick={(event) => {
-                        if (event.shiftKey && highlightRange) {
-                          setHighlightRange({
-                            start: Math.min(highlightRange.start, lineNum),
-                            end: Math.max(highlightRange.start, lineNum),
-                          });
-                        } else {
-                          setHighlightRange({ start: lineNum, end: lineNum });
-                        }
-                      }}
+              {isVirtualized && visibleWindow.startIdx > 0 ? (
+                <div
+                  aria-hidden="true"
+                  style={{ height: visibleWindow.startIdx * SOURCE_LINE_HEIGHT_PX }}
+                />
+              ) : null}
+              {sourceLines
+                .slice(visibleWindow.startIdx, visibleWindow.endIdx)
+                .map((lineText, offset) => {
+                  const idx = visibleWindow.startIdx + offset;
+                  const lineNum = idx + 1;
+                  const isHighlighted =
+                    highlightRange !== null &&
+                    lineNum >= highlightRange.start &&
+                    lineNum <= highlightRange.end;
+                  const lineTokens = highlightedTokens?.[idx];
+                  return (
+                    <div
+                      key={lineNum}
+                      data-line-number={lineNum}
+                      data-highlighted={isHighlighted ? "true" : undefined}
+                      className="inspector-source-line"
                     >
-                      {lineNum}
-                    </button>
-                    <span className="inspector-source-code">
-                      {lineTokens && lineTokens.length > 0
-                        ? lineTokens.map((tok, tIdx) =>
-                            tok.color ? (
-                              <span
-                                key={tIdx}
-                                data-syntax-token=""
-                                style={{ color: tok.color }}
-                              >
-                                {tok.content}
-                              </span>
-                            ) : (
-                              tok.content
-                            ),
-                          )
-                        : lineText || " "}
-                    </span>
-                  </div>
-                );
-              })}
+                      <button
+                        type="button"
+                        className="inspector-source-ln"
+                        onClick={(event) => {
+                          if (event.shiftKey && highlightRange) {
+                            setHighlightRange({
+                              start: Math.min(highlightRange.start, lineNum),
+                              end: Math.max(highlightRange.start, lineNum),
+                            });
+                          } else {
+                            setHighlightRange({ start: lineNum, end: lineNum });
+                          }
+                        }}
+                      >
+                        {lineNum}
+                      </button>
+                      <span className="inspector-source-code">
+                        {lineTokens && lineTokens.length > 0
+                          ? lineTokens.map((tok, tIdx) =>
+                              tok.color ? (
+                                <span
+                                  key={tIdx}
+                                  data-syntax-token=""
+                                  style={{ color: tok.color }}
+                                >
+                                  {tok.content}
+                                </span>
+                              ) : (
+                                tok.content
+                              ),
+                            )
+                          : lineText || " "}
+                      </span>
+                    </div>
+                  );
+                })}
+              {isVirtualized && visibleWindow.endIdx < sourceLines.length ? (
+                <div
+                  aria-hidden="true"
+                  style={{
+                    height:
+                      (sourceLines.length - visibleWindow.endIdx) *
+                      SOURCE_LINE_HEIGHT_PX,
+                  }}
+                />
+              ) : null}
             </pre>
           </>
         )}

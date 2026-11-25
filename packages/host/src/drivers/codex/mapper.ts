@@ -1,3 +1,4 @@
+import { createHash, type Hash } from "node:crypto";
 import { unwrapShellCommand } from "@linkshell/wire";
 import { sessionGoalSchema } from "@linkshell/wire";
 import type {
@@ -72,6 +73,8 @@ export interface CodexThreadState {
   begun?: Set<string>;
   /** Output streamed for tools that were already running when the thread was joined mid-turn. */
   joinedUnderWay?: Map<string, string>;
+  /** Streaming digest of live command output deltas so completion avoids duplicating identical output. */
+  commandStream?: Map<string, { hash: Hash; length: number }>;
 }
 
 /**
@@ -164,9 +167,20 @@ function userContent(item: Json): ContentBlock[] {
       case "text":
         if (str(input.text)) blocks.push({ type: "text", text: str(input.text)! });
         break;
-      case "image":
-        if (str(input.url)) blocks.push({ type: "image", mimeType: "image/*", uri: str(input.url) });
+      case "image": {
+        const url = str(input.url);
+        if (!url) break;
+        const dataUrl = /^data:(image\/[\w.+-]+);base64,([\s\S]+)$/i.exec(url);
+        if (dataUrl) {
+          // Normalize data URLs through inlineImage so HostStore externalizes >16 KB to BlobStore
+          // and oversized blobs are dropped instead of bloating SQLite.
+          const image = inlineImage(dataUrl[2], dataUrl[1]);
+          blocks.push(image ?? { type: "text", text: "[图片过大，未内联]" });
+        } else {
+          blocks.push({ type: "image", mimeType: "image/*", uri: url });
+        }
         break;
+      }
       case "localImage":
         if (str(input.path)) {
           blocks.push(imageFromPath(str(input.path)) ?? { type: "resource_link", uri: `file://${str(input.path)}`, name: str(input.path)! });
@@ -440,6 +454,23 @@ export function spawnedThreads(item: unknown): string[] {
   return arr(record.receiverThreadIds).filter((id): id is string => typeof id === "string");
 }
 
+function webSearchInfo(item: Json): { title: string; rawInput: Json; detail: Extract<ToolDetail, { type: "web_search" }> } {
+  const action = obj(item.action);
+  const actionType = str(action?.type);
+  const url = str(action?.url);
+  const pattern = str(action?.pattern);
+  const queries = arr(action?.queries).filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
+  const query = str(item.query) ?? str(action?.query) ?? queries[0];
+  let title = query ? `Search: ${query}` : "Web search";
+  if (actionType === "openPage" && url) title = `Open: ${url}`;
+  else if (actionType === "findInPage" && pattern) title = `Find “${pattern}”${url ? ` in ${url}` : ""}`;
+  return {
+    title,
+    rawInput: { ...(query !== undefined ? { query } : item.query !== undefined ? { query: item.query } : {}), ...(action ? { action } : {}) },
+    detail: { type: "web_search", ...(query ? { query } : {}) },
+  };
+}
+
 /** Updates that open a tool-like item. Returns undefined for non-tool items. */
 export function toolStart(item: Json, lookup?: McpToolLookup): Extract<SessionUpdate, { sessionUpdate: "tool_call" }> | undefined {
   const id = str(item.id);
@@ -458,7 +489,8 @@ export function toolStart(item: Json, lookup?: McpToolLookup): Extract<SessionUp
     }
     case "fileChange": {
       const content = patchContent(item.changes);
-      return { ...base, title: fileChangeTitle(content), kind: "edit", status: commandStatus(item.status), content };
+      const locations = content.flatMap((entry) => (entry.type === "patch" ? [{ path: entry.path }] : []));
+      return { ...base, title: fileChangeTitle(content), kind: "edit", status: commandStatus(item.status), content, ...(locations.length ? { locations } : {}) };
     }
     case "mcpToolCall":
       return {
@@ -477,15 +509,17 @@ export function toolStart(item: Json, lookup?: McpToolLookup): Extract<SessionUp
         status: commandStatus(item.status),
         rawInput: item.arguments,
       };
-    case "webSearch":
+    case "webSearch": {
+      const search = webSearchInfo(item);
       return {
         ...base,
-        title: str(item.query) ? `Search: ${str(item.query)}` : "Web search",
+        title: search.title,
         kind: "fetch",
-        status: "completed",
-        rawInput: { query: item.query },
-        detail: { type: "web_search", query: str(item.query) },
+        status: item.status === undefined ? "in_progress" : commandStatus(item.status),
+        rawInput: search.rawInput,
+        detail: search.detail,
       };
+    }
     case "imageView": {
       const image = imageFileContent(str(item.path));
       return {
@@ -564,12 +598,24 @@ function toolFinish(
   };
   switch (item.type) {
     case "commandExecution":
-      update.rawOutput = { exitCode: num(item.exitCode) ?? null, durationMs: num(item.durationMs) ?? null, declined: item.status === "declined", ...(typeof item.aggregatedOutput === "string" ? { aggregatedOutput: item.aggregatedOutput } : {}) };
+      // Keep only metadata in rawOutput; command stdout travels once via outputDelta/appendOutput/replaceOutput.
+      update.rawOutput = { exitCode: num(item.exitCode) ?? null, durationMs: num(item.durationMs) ?? null, declined: item.status === "declined" };
       if (options.includeOutput && str(item.aggregatedOutput)) update.appendOutput = str(item.aggregatedOutput);
       break;
-    case "fileChange":
-      update.content = patchContent(item.changes);
+    case "fileChange": {
+      const content = patchContent(item.changes);
+      const locations = content.flatMap((entry) => (entry.type === "patch" ? [{ path: entry.path }] : []));
+      update.content = content;
+      if (locations.length) update.locations = locations;
       break;
+    }
+    case "webSearch": {
+      const search = webSearchInfo(item);
+      update.title = search.title;
+      update.rawInput = search.rawInput;
+      update.detail = search.detail;
+      break;
+    }
     case "mcpToolCall": {
       const content = mcpOutput(item);
       if (content.length > 0) update.content = content;
@@ -736,6 +782,27 @@ function errorInfoCode(info: unknown): string | undefined {
 /** Items that are text someone wrote; the rest are tools of some kind. */
 const MESSAGE_ITEMS = new Set(["userMessage", "agentMessage", "plan", "reasoning"]);
 
+/** Server-wide Codex warnings that may arrive without a `threadId`. */
+export function mapGlobalNotice(method: string, rawParams: unknown): Extract<SessionUpdate, { sessionUpdate: "ls_notice" }> | undefined {
+  const params = obj(rawParams);
+  if (!params) return undefined;
+  if (method === "warning") {
+    const title = str(params.message);
+    return title ? { sessionUpdate: "ls_notice", level: "warning", title } : undefined;
+  }
+  if (method === "deprecationNotice") {
+    const title = str(params.summary);
+    return title ? { sessionUpdate: "ls_notice", level: "warning", title, ...(str(params.details) ? { detail: str(params.details) } : {}) } : undefined;
+  }
+  if (method === "configWarning") {
+    const title = str(params.summary);
+    if (!title) return undefined;
+    const detail = [str(params.path), str(params.details)].filter(Boolean).join("：") || undefined;
+    return { sessionUpdate: "ls_notice", level: "warning", title, ...(detail ? { detail } : {}) };
+  }
+  return undefined;
+}
+
 /** Maps one app-server notification to session updates. `lookupFor`: each thread's MCP tool lookup (see `McpToolLookup`). */
 export function mapNotification(
   method: string,
@@ -821,15 +888,67 @@ export function mapNotification(
       return [
         out({
           sessionUpdate: "usage_update",
-          usedTokens: num(last?.totalTokens ?? last?.total_tokens) ?? num(total?.totalTokens ?? total?.total_tokens),
+          // Never fall back to cumulative session totalTokens: usedTokens tracks the current context window.
+          usedTokens: num(last?.totalTokens ?? last?.total_tokens),
           contextWindow: num(usage?.modelContextWindow ?? usage?.model_context_window),
           ...(tokens ? { tokens } : {}),
           ...(accounting ? { accounting } : {}),
         }),
       ];
     }
-    case "turn/plan/updated":
-      return [out({ sessionUpdate: "plan", entries: planEntries(params.plan) })];
+    case "turn/plan/updated": {
+      const explanation = str(params.explanation);
+      return [out({ sessionUpdate: "plan", entries: planEntries(params.plan), ...(explanation ? { explanation } : {}) })];
+    }
+    case "model/rerouted": {
+      const fromModel = str(params.fromModel);
+      const toModel = str(params.toModel);
+      const reason = str(params.reason);
+      const title = fromModel && toModel ? `模型已切换：${fromModel} → ${toModel}` : toModel ? `模型已切换为 ${toModel}` : "模型已自动切换";
+      return [out({ sessionUpdate: "ls_notice", level: "warning", title, ...(reason ? { detail: reason } : {}) })];
+    }
+    case "warning":
+    case "deprecationNotice":
+    case "configWarning": {
+      const notice = mapGlobalNotice(method, params);
+      return notice ? [out(notice)] : [];
+    }
+    case "hook/started": {
+      const run = obj(params.run);
+      const id = str(run?.id);
+      if (!id) return [];
+      const eventName = str(run?.eventName);
+      return [
+        out({
+          sessionUpdate: "tool_call",
+          toolCallId: `hook:${id}`,
+          title: str(run?.statusMessage) ?? (eventName ? `Hook: ${eventName}` : "Hook"),
+          kind: "execute",
+          status: "in_progress",
+          rawInput: { ...(eventName ? { eventName } : {}), ...(str(run?.sourcePath) ? { sourcePath: str(run?.sourcePath) } : {}) },
+        }),
+      ];
+    }
+    case "hook/completed": {
+      const run = obj(params.run);
+      const id = str(run?.id);
+      if (!id) return [];
+      const status = run?.status === "failed" || run?.status === "blocked" ? "failed" : "completed";
+      const lines = arr(run?.entries).map((entry) => str(obj(entry)?.text)).filter((text): text is string => Boolean(text));
+      return [
+        out({
+          sessionUpdate: "tool_call_update",
+          toolCallId: `hook:${id}`,
+          status,
+          ...(lines.length ? { content: [{ type: "content", content: { type: "text", text: lines.join("\n") } }] } : {}),
+          rawOutput: {
+            ...(str(run?.status) ? { status: str(run?.status) } : {}),
+            ...(run?.durationMs != null ? { durationMs: Number(run.durationMs) } : {}),
+            ...(str(run?.statusMessage) ? { statusMessage: str(run?.statusMessage) } : {}),
+          },
+        }),
+      ];
+    }
     case "error": {
       const error = obj(params.error);
       // A retry ("Reconnecting... 2/5") keeps the turn going: a warning, which clients fold into one
@@ -865,9 +984,16 @@ export function mapNotification(
     case "item/reasoning/textDelta": {
       const itemId = str(params.itemId);
       const delta = str(params.delta);
-      return itemId && delta && fromItsStart(itemId)
-        ? [out({ sessionUpdate: "agent_thought_chunk", messageId: itemId, content: { type: "text", text: delta } })]
-        : [];
+      if (!itemId || !delta || !fromItsStart(itemId)) return [];
+      (state.streamed ??= new Set()).add(itemId);
+      return [out({ sessionUpdate: "agent_thought_chunk", messageId: itemId, content: { type: "text", text: delta } })];
+    }
+    case "item/reasoning/summaryPartAdded": {
+      const itemId = str(params.itemId);
+      const summaryIndex = num(params.summaryIndex);
+      if (!itemId || !summaryIndex || summaryIndex <= 0 || !fromItsStart(itemId)) return [];
+      (state.streamed ??= new Set()).add(itemId);
+      return [out({ sessionUpdate: "agent_thought_chunk", messageId: itemId, content: { type: "text", text: "\n\n" } })];
     }
     case "item/commandExecution/outputDelta": {
       const itemId = str(params.itemId);
@@ -876,13 +1002,38 @@ export function mapNotification(
       if (!itemId || !delta || !state.begun?.has(itemId)) return [];
       if (state.joinedUnderWay?.has(itemId)) {
         state.joinedUnderWay.set(itemId, state.joinedUnderWay.get(itemId)! + delta);
+      } else {
+        const streams = (state.commandStream ??= new Map());
+        let entry = streams.get(itemId);
+        if (!entry) {
+          entry = { hash: createHash("sha256"), length: 0 };
+          streams.set(itemId, entry);
+          if (streams.size > 500) streams.delete(streams.keys().next().value!);
+        }
+        entry.hash.update(delta, "utf8");
+        entry.length += delta.length;
       }
       return [out({ sessionUpdate: "tool_call_update", toolCallId: itemId, appendOutput: delta })];
     }
     case "item/fileChange/patchUpdated": {
       const itemId = str(params.itemId);
-      return itemId && state.begun?.has(itemId)
-        ? [out({ sessionUpdate: "tool_call_update", toolCallId: itemId, content: patchContent(params.changes) })]
+      if (!itemId || !state.begun?.has(itemId)) return [];
+      const content = patchContent(params.changes);
+      const locations = content.flatMap((entry) => (entry.type === "patch" ? [{ path: entry.path }] : []));
+      return [out({ sessionUpdate: "tool_call_update", toolCallId: itemId, content, ...(locations.length ? { locations } : {}) })];
+    }
+    case "item/fileChange/outputDelta": {
+      const itemId = str(params.itemId);
+      const delta = str(params.delta);
+      return itemId && delta && state.begun?.has(itemId)
+        ? [out({ sessionUpdate: "tool_call_update", toolCallId: itemId, appendOutput: delta })]
+        : [];
+    }
+    case "item/mcpToolCall/progress": {
+      const itemId = str(params.itemId);
+      const message = str(params.message);
+      return itemId && message && state.begun?.has(itemId)
+        ? [out({ sessionUpdate: "tool_call_update", toolCallId: itemId, appendOutput: message.endsWith("\n") ? message : `${message}\n` })]
         : [];
     }
     case "item/started": {
@@ -930,15 +1081,30 @@ export function mapNotification(
           const text = state.streamed?.delete(itemId) ? undefined : str(item.text);
           return text ? [out({ sessionUpdate: "agent_message_chunk", messageId: itemId, content: { type: "text", text } }), done] : [done];
         }
-        case "reasoning":
-          return [out({ sessionUpdate: "ls_message_done", messageId: itemId, role: "thought" }, itemId)];
+        case "reasoning": {
+          const done = out({ sessionUpdate: "ls_message_done", messageId: itemId, role: "thought" }, itemId);
+          if (state.streamed?.delete(itemId)) return [done];
+          const summary = arr(item.summary).filter((part): part is string => typeof part === "string");
+          const text = (summary.length > 0 ? summary : arr(item.content).filter((part): part is string => typeof part === "string")).join("\n\n");
+          return text ? [out({ sessionUpdate: "agent_thought_chunk", messageId: itemId, content: { type: "text", text } }), done] : [done];
+        }
         default: {
           if (item.type === "exitedReviewMode") state.reviewing = false;
           const streamed = state.joinedUnderWay?.get(itemId);
           state.joinedUnderWay?.delete(itemId);
-          const finish = toolFinish(item, { includeOutput: streamed === "" }, lookup);
-          if (finish && streamed && item.type === "commandExecution" && typeof item.aggregatedOutput === "string" && item.aggregatedOutput !== streamed) {
-            finish.replaceOutput = item.aggregatedOutput;
+          const cmdStream = state.commandStream?.get(itemId);
+          state.commandStream?.delete(itemId);
+          const includeOutput = streamed === "" || (streamed === undefined && cmdStream === undefined);
+          const finish = toolFinish(item, { includeOutput }, lookup);
+          if (finish && item.type === "commandExecution" && typeof item.aggregatedOutput === "string") {
+            if (streamed) {
+              if (item.aggregatedOutput !== streamed) finish.replaceOutput = item.aggregatedOutput;
+            } else if (cmdStream) {
+              const matches =
+                cmdStream.length === item.aggregatedOutput.length &&
+                cmdStream.hash.digest("hex") === createHash("sha256").update(item.aggregatedOutput, "utf8").digest("hex");
+              if (!matches) finish.replaceOutput = item.aggregatedOutput;
+            }
           }
           return finish ? [out(finish, itemId)] : [];
         }
@@ -1008,6 +1174,65 @@ export function mapApprovalRequest(method: string, rawParams: unknown, requestId
   }
 
   const isCommand = method === "item/commandExecution/requestApproval";
+  const decisionMap = new Map<string, unknown>();
+  const dynamicOptions: PermissionOption[] = [];
+  if (Array.isArray(params.availableDecisions)) {
+    const usedIds = new Set<string>();
+    const addOption = (baseId: string, name: string, kind: PermissionOption["kind"], decision: unknown) => {
+      let optionId = baseId;
+      let suffix = 2;
+      while (usedIds.has(optionId)) optionId = `${baseId}:${suffix++}`;
+      usedIds.add(optionId);
+      dynamicOptions.push({ optionId, name, kind });
+      decisionMap.set(optionId, decision);
+    };
+    for (const entry of params.availableDecisions) {
+      if (entry === "accept") addOption("accept", "Allow", "allow_once", "accept");
+      else if (entry === "acceptForSession") addOption("acceptForSession", "Allow for this session", "allow_always", "acceptForSession");
+      else if (entry === "decline") addOption("decline", "Decline", "reject_once", "decline");
+      else if (entry === "cancel") addOption("cancel", "Decline and stop", "reject_once", "cancel");
+      else {
+        const record = obj(entry);
+        if (!record) continue;
+        const exec = obj(record.acceptWithExecpolicyAmendment);
+        if (exec) {
+          const parts = arr(exec.execpolicy_amendment).filter((part): part is string => typeof part === "string");
+          const preview = parts.join(" ").slice(0, 48);
+          addOption("acceptWithExecpolicyAmendment", preview ? `Allow similar (${preview})` : "Allow similar commands", "allow_always", entry);
+          continue;
+        }
+        const netKey = record.applyNetworkPolicyAmendment !== undefined
+          ? "applyNetworkPolicyAmendment"
+          : record.acceptWithNetworkPolicyAmendment !== undefined
+            ? "acceptWithNetworkPolicyAmendment"
+            : undefined;
+        if (netKey) {
+          const net = obj(obj(record[netKey])?.network_policy_amendment);
+          const host = str(net?.host);
+          const action = str(net?.action);
+          const deny = action === "deny";
+          const label = deny
+            ? (host ? `Deny network: ${host}` : "Deny network host")
+            : (host ? `Allow network: ${host}` : "Allow network host");
+          addOption(deny ? `${netKey}:deny` : `${netKey}:allow`, label, deny ? "reject_always" : "allow_always", entry);
+        }
+      }
+    }
+  }
+  const options = dynamicOptions.length > 0 ? dynamicOptions : DECISION_OPTIONS;
+  let detail: string | undefined;
+  if (isCommand) {
+    const command = str(params.command) ? unwrapShell(str(params.command)!) : undefined;
+    const cwd = str(params.cwd);
+    const net = obj(params.networkApprovalContext);
+    const netHost = str(net?.host);
+    const netProtocol = str(net?.protocol);
+    const netLine = netHost ? `网络访问：${netProtocol ? `${netProtocol}://` : ""}${netHost}` : undefined;
+    detail = [command, netLine, cwd ? `目录：${cwd}` : undefined, reason].filter(Boolean).join("\n") || undefined;
+  } else {
+    const grantRoot = str(params.grantRoot);
+    detail = [reason, grantRoot ? `授权写入目录：${grantRoot}` : undefined].filter(Boolean).join("\n") || undefined;
+  }
   return {
     threadId,
     update: {
@@ -1015,12 +1240,10 @@ export function mapApprovalRequest(method: string, rawParams: unknown, requestId
       requestId,
       toolCallId,
       title: isCommand ? "Run command" : "Apply file changes",
-      detail: isCommand
-        ? (str(params.command) ? unwrapShell(str(params.command)!) : reason)
-        : (reason ?? str(params.grantRoot) ?? undefined),
-      options: DECISION_OPTIONS,
+      detail,
+      options,
     },
-    respond: (optionId) => ({ decision: optionId }),
+    respond: (optionId) => ({ decision: decisionMap.has(optionId) ? decisionMap.get(optionId) : optionId }),
   };
 }
 
@@ -1128,6 +1351,36 @@ export function mapQuestionRequest(method: string, rawParams: unknown, requestId
     const properties = obj(schema?.properties);
     const server = str(params.serverName);
     const cancel = () => ({ action: "cancel", content: null, _meta: null });
+    if (mode === "url") {
+      const rawUrl = str(params.url);
+      const elicitationId = str(params.elicitationId);
+      if (!rawUrl || !elicitationId) return undefined;
+      let parsedUrl: URL;
+      try { parsedUrl = new URL(rawUrl); } catch { return undefined; }
+      if (parsedUrl.protocol !== "https:" && parsedUrl.protocol !== "http:") return undefined;
+      return {
+        threadId,
+        update: {
+          sessionUpdate: "ls_permission",
+          requestId,
+          toolCallId: str(obj(params._meta)?.callId),
+          title: message ?? "打开外部授权页面",
+          detail: server ? `来自 MCP 服务 ${server}` : undefined,
+          url: { url: rawUrl, elicitationId },
+          options: [
+            { optionId: "accept", name: "打开授权页面", kind: "allow_once" },
+            { optionId: "decline", name: "拒绝", kind: "reject_once" },
+            { optionId: "cancel", name: "取消", kind: "reject_once" },
+          ],
+        },
+        respond: (optionId) => ({
+          action: optionId === "accept" ? "accept" : optionId === "cancel" ? "cancel" : "decline",
+          content: null,
+          _meta: null,
+        }),
+        cancel,
+      };
+    }
     // Computer Use asks for consent with an empty object schema: no fields to
     // fill in still needs a visible permission card and an explicit response.
     if (isForm && schema?.type === "object" && properties && Object.keys(properties).length === 0 && arr(schema.required).length === 0) {

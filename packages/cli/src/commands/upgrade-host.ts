@@ -1,10 +1,15 @@
 import type { GatewayStatus, MachineInfo } from "@linkshell/wire";
 import { ensureHostRunning, resolveGateway, withRunningHost } from "./host.js";
 import * as daemon from "../utils/daemon.js";
+import { restartManagedHostService } from "./service.js";
 
 interface HostSnapshot {
   machine: MachineInfo;
   gateway: GatewayStatus;
+}
+
+export interface UpgradeHostDeps {
+  restartManagedService?: (home: string) => Promise<"restarted" | "not-managed">;
 }
 
 function checkIdentity(before: HostSnapshot, after: HostSnapshot): void {
@@ -17,7 +22,7 @@ function checkIdentity(before: HostSnapshot, after: HostSnapshot): void {
 }
 
 /** Runs in the installed CLI, including when a second upgrade repairs an older host. */
-export async function upgradeRunningHost(version: string): Promise<void> {
+export async function upgradeRunningHost(version: string, deps: UpgradeHostDeps = {}): Promise<void> {
   const before = await withRunningHost(async (client) => ({
     machine: await client.call("machine.info", {}, 3000),
     gateway: await client.call("gateway.status", {}, 3000),
@@ -27,17 +32,36 @@ export async function upgradeRunningHost(version: string): Promise<void> {
     return;
   }
   if (before.machine.hostVersion !== version) {
-    const pid = daemon.readPid("host");
-    if (!pid) throw new Error("The running host has no PID file; could not restart it safely.");
-    const env = { ...process.env, ...daemon.readHostLaunch(pid) };
-    // Older hosts did not save launch options. Keep even an environment-only
-    // gateway choice while continuing to use the same home, keys and login.
-    if ((before.gateway.url ?? "off") !== (resolveGateway(daemon.linkshellDir()) ?? "off")) {
-      env.LINKSHELL_GATEWAY = before.gateway.url ?? "off";
+    const home = daemon.linkshellDir();
+    const restartManaged =
+      deps.restartManagedService ??
+      ((targetHome: string) => restartManagedHostService({ linkshellHome: targetHome, waitTimeoutMs: 20_000 }));
+
+    let managedOutcome: "restarted" | "not-managed" = "not-managed";
+    try {
+      managedOutcome = await restartManaged(home);
+    } catch (error) {
+      // If a supervised OS service exists and explicitly failed to restart, surface it instead of spawning an unsupervised duplicate.
+      if (deps.restartManagedService || (error instanceof Error && /systemctl|launchctl|schtasks|restarted/i.test(error.message))) {
+        throw error;
+      }
     }
-    process.stderr.write(`  Restarting host ${before.machine.hostVersion} → ${version} (running agent turns will stop)...\n`);
-    await daemon.stopDaemonAndWait("host", 30_000, pid);
-    await ensureHostRunning(env);
+
+    if (managedOutcome === "restarted") {
+      process.stderr.write(`  Restarted supervised host service ${before.machine.hostVersion} → ${version}.\n`);
+    } else {
+      const pid = daemon.readPid("host");
+      if (!pid) throw new Error("The running host has no PID file; could not restart it safely.");
+      const env = { ...process.env, ...daemon.readHostLaunch(pid) };
+      // Older hosts did not save launch options. Keep even an environment-only
+      // gateway choice while continuing to use the same home, keys and login.
+      if ((before.gateway.url ?? "off") !== (resolveGateway(home) ?? "off")) {
+        env.LINKSHELL_GATEWAY = before.gateway.url ?? "off";
+      }
+      process.stderr.write(`  Restarting host ${before.machine.hostVersion} → ${version} (running agent turns will stop)...\n`);
+      await daemon.stopDaemonAndWait("host", 30_000, pid);
+      await ensureHostRunning(env);
+    }
   }
 
   const after = await withRunningHost(async (client) => {

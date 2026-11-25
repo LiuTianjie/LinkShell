@@ -11,11 +11,19 @@ import Network
 public class LinkSocketModule: Module {
   private var connections: [String: LinkSocketConnection] = [:]
   private let lock = NSLock()
+  private let pathQueue = DispatchQueue(label: "linkshell.network.path")
+  private var pathMonitor: NWPathMonitor?
+  private var lastPathSignature: String?
+  private var pendingPathWork: DispatchWorkItem?
 
   public func definition() -> ModuleDefinition {
     Name("LinkSocket")
 
-    Events("onOpen", "onMessage", "onClose", "onError")
+    Events("onOpen", "onMessage", "onClose", "onError", "onNetworkPathChange")
+
+    OnCreate { [weak self] in
+      self?.startPathMonitor()
+    }
 
     Function("connect") { (id: String, url: String, direct: Bool) throws in
       guard let target = URL(string: url), let scheme = target.scheme?.lowercased(), scheme == "ws" || scheme == "wss" else {
@@ -36,7 +44,9 @@ public class LinkSocketModule: Module {
       self.connection(id)?.close(code: code, reason: reason)
     }
 
-    OnDestroy {
+    OnDestroy { [weak self] in
+      guard let self else { return }
+      self.stopPathMonitor()
       self.lock.lock()
       let all = Array(self.connections.values)
       self.connections.removeAll()
@@ -45,6 +55,81 @@ public class LinkSocketModule: Module {
         connection.close(code: 1001, reason: "going away")
       }
     }
+  }
+
+  private func startPathMonitor() {
+    pathQueue.async { [weak self] in
+      guard let self, self.pathMonitor == nil else { return }
+      let monitor = NWPathMonitor()
+      monitor.pathUpdateHandler = { [weak self] path in
+        self?.handlePathUpdate(path)
+      }
+      self.pathMonitor = monitor
+      monitor.start(queue: self.pathQueue)
+    }
+  }
+
+  private func stopPathMonitor() {
+    pathQueue.async { [weak self] in
+      guard let self else { return }
+      self.pendingPathWork?.cancel()
+      self.pendingPathWork = nil
+      self.pathMonitor?.pathUpdateHandler = nil
+      self.pathMonitor?.cancel()
+      self.pathMonitor = nil
+      self.lastPathSignature = nil
+    }
+  }
+
+  private func handlePathUpdate(_ path: NWPath) {
+    let status: String
+    switch path.status {
+    case .satisfied: status = "satisfied"
+    case .requiresConnection: status = "requiresConnection"
+    default: status = "unsatisfied"
+    }
+
+    let iface: String
+    if path.status != .satisfied {
+      iface = "none"
+    } else if path.usesInterfaceType(.wifi) {
+      iface = "wifi"
+    } else if path.usesInterfaceType(.wiredEthernet) {
+      iface = "wired"
+    } else if path.usesInterfaceType(.cellular) {
+      iface = "cellular"
+    } else {
+      iface = "other"
+    }
+
+    let interfaceNames = path.availableInterfaces.map { "\($0.name):\($0.index)" }.sorted().joined(separator: ",")
+    var gatewayKey = ""
+    if #available(iOS 14.2, *) {
+      gatewayKey = path.gateways.map { "\($0)" }.sorted().joined(separator: ",")
+    }
+    let signature = "\(status)|\(iface)|\(path.isExpensive)|\(path.isConstrained)|\(interfaceNames)|\(gatewayKey)"
+
+    // Record the initial baseline without emitting so cold start does not trigger redundant reconnects.
+    if lastPathSignature == nil {
+      lastPathSignature = signature
+      return
+    }
+    guard signature != lastPathSignature else { return }
+    lastPathSignature = signature
+
+    pendingPathWork?.cancel()
+    let payload: [String: Any?] = [
+      "status": status,
+      "interface": iface,
+      "isExpensive": path.isExpensive,
+      "isConstrained": path.isConstrained,
+    ]
+    let work = DispatchWorkItem { [weak self] in
+      guard let self, self.pathMonitor != nil else { return }
+      self.emit("onNetworkPathChange", payload)
+    }
+    pendingPathWork = work
+    pathQueue.asyncAfter(deadline: .now() + 0.3, execute: work)
   }
 
   fileprivate func connection(_ id: String) -> LinkSocketConnection? {
@@ -71,6 +156,8 @@ final class LinkSocketConnection {
   private let queue: DispatchQueue
   private let stateLock = NSLock()
   private var finished = false
+  private var isReady = false
+  private var cancelled = false
 
   init(id: String, url: URL, direct: Bool, module: LinkSocketModule) {
     self.id = id
@@ -92,8 +179,19 @@ final class LinkSocketConnection {
       guard let self else { return }
       switch state {
       case .ready:
-        self.module?.emit("onOpen", ["id": self.id])
-        self.receive()
+        let shouldOpen: Bool = {
+          self.stateLock.lock()
+          defer { self.stateLock.unlock() }
+          if self.finished { return false }
+          self.isReady = true
+          return true
+        }()
+        if shouldOpen {
+          self.module?.emit("onOpen", ["id": self.id])
+          self.receive()
+        } else {
+          self.cancelConnectionOnce()
+        }
       case .waiting(let error), .failed(let error):
         self.fail(error.localizedDescription)
       case .cancelled:
@@ -114,13 +212,41 @@ final class LinkSocketConnection {
   }
 
   func close(code: Int, reason: String) {
+    let wasReady: Bool = {
+      stateLock.lock()
+      defer { stateLock.unlock() }
+      return isReady
+    }()
+    finish(code: code, reason: reason)
+    // A connection that never reached .ready will never flush a close frame; cancel immediately
+    // so sockets and descriptors cannot leak during Happy Eyeballs races or offline retries.
+    guard wasReady else {
+      cancelConnectionOnce()
+      return
+    }
     let metadata = NWProtocolWebSocket.Metadata(opcode: .close)
     metadata.closeCode = (try? NWProtocolWebSocket.CloseCode(rawValue: UInt16(clamping: code))) ?? .protocolCode(.normalClosure)
     let context = NWConnection.ContentContext(identifier: "close", metadata: [metadata])
     connection.send(content: Data(reason.utf8), contentContext: context, isComplete: true, completion: .contentProcessed { [weak self] _ in
-      self?.connection.cancel()
+      self?.cancelConnectionOnce()
     })
-    finish(code: code, reason: reason)
+    // Guarantee cancellation even if the peer is half-open and .contentProcessed never fires.
+    queue.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+      self?.cancelConnectionOnce()
+    }
+  }
+
+  private func cancelConnectionOnce() {
+    let shouldCancel: Bool = {
+      stateLock.lock()
+      defer { stateLock.unlock() }
+      if cancelled { return false }
+      cancelled = true
+      return true
+    }()
+    if shouldCancel {
+      connection.cancel()
+    }
   }
 
   private func receive() {
@@ -142,7 +268,7 @@ final class LinkSocketConnection {
         else if case .applicationCode(let value) = metadata?.closeCode { code = Int(value) }
         else if case .privateCode(let value) = metadata?.closeCode { code = Int(value) }
         self.finish(code: code, reason: data.map { String(decoding: $0, as: UTF8.self) } ?? "")
-        self.connection.cancel()
+        self.cancelConnectionOnce()
         return
       default:
         break
@@ -164,7 +290,7 @@ final class LinkSocketConnection {
     guard markFinished() else { return }
     module?.emit("onError", ["id": id, "message": message])
     module?.emit("onClose", ["id": id, "code": 1006, "reason": message])
-    connection.cancel()
+    cancelConnectionOnce()
     module?.remove(id)
   }
 

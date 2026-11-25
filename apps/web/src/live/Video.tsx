@@ -74,6 +74,20 @@ export function ScreenToolsMenu({ container }: { container?: HTMLElement | null 
   }>({ curtain: false, lockOnDisconnect: false, supported: true });
   const [statusNote, setStatusNote] = useState<string>();
 
+  useEffect(() => {
+    let alive = true;
+    // Query host privacy state on mount so menu checkboxes reflect active curtain/lock settings.
+    void link
+      .call("screen.privacy", {})
+      .then((res) => {
+        if (alive) setPrivacy(res);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [link]);
+
   const flashNote = (note: string) => {
     setStatusNote(note);
     window.setTimeout(() => {

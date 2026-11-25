@@ -44,6 +44,7 @@ function signal(message) {
   if (!mine) return;
   if (message.t === "offer") {
     tried = true;
+    clearTimeout(patience);
     patience = setTimeout(() => connectionPatience(mine), patienceSeconds * 1000);
     if (failAfter) setTimeout(() => { if (rtc === mine) giveUp("asked to (failAfter)"); }, failAfter * 1000);
     // The answer is the browser's own, as it made it: the sender's playout-delay header has to survive in it,
@@ -114,9 +115,11 @@ function watch(mine) {
     if (loading.phase !== "ready") showProgress("receiving");
     clearTimeout(mine.away);
     mine.away = 0;
+    // Clear any offer/ICE-restart patience timer even when reconnecting an already-up peer.
+    clearTimeout(patience);
+    patience = 0;
     if (mine.up) return;
     mine.up = true;
-    clearTimeout(patience);
     if (loading.phase !== "ready") patience = setTimeout(frameless, 4000);
   }
 }
@@ -132,6 +135,11 @@ function away(mine, since) {
 
 function connectionPatience(mine) {
   if (rtc !== mine) return;
+  const state = mine.pc.connectionState || mine.pc.iceConnectionState;
+  if (state === "connected" || state === "completed") {
+    patience = 0;
+    return;
+  }
   if (!session.active()) patience = setTimeout(() => connectionPatience(mine), patienceSeconds * 1000);
   else giveUp("not connected within " + patienceSeconds + " s of the offer");
 }
@@ -170,6 +178,7 @@ function requestRelay() {
 
 function drop() {
   clearTimeout(patience);
+  patience = 0;
   stopPresenting();
   if (typeof resetAudioPlayback === "function") resetAudioPlayback();
   if (!rtc) return;

@@ -1,0 +1,26 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Monochrome terminal prompt glyph (>_ inside rounded frame) for Android status bar compliance -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M4.5,5.5L19.5,5.5A2,2 0 0,1 21.5,7.5L21.5,16.5A2,2 0 0,1 19.5,18.5L4.5,18.5A2,2 0 0,1 2.5,16.5L2.5,7.5A2,2 0 0,1 4.5,5.5Z"
+        android:strokeWidth="1.9"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineJoin="round" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M6.8,9.2L10.3,12L6.8,14.8"
+        android:strokeWidth="2.0"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M12.4,14.8L17.2,14.8"
+        android:strokeWidth="2.0"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round" />
+</vector>

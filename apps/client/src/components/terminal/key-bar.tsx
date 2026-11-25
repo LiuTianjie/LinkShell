@@ -12,14 +12,20 @@ type Key =
   | { id: string; label: string; send: string; modifiers?: TerminalKeyModifiers; arrow?: boolean }
   | { id: string; icon: Pick<IconProps, "sf" | "md">; send: string; label: string; modifiers?: TerminalKeyModifiers; arrow?: boolean };
 
-const KEYS: Key[] = [
+const KEYS_BEFORE_ARROWS: Key[] = [
   { id: "ctrl-c", label: "^C", send: "c", modifiers: { ctrl: true } },
   { id: "esc", label: "esc", send: "escape" },
   { id: "tab", label: "tab", send: "tab" },
+];
+
+const ARROW_KEYS: Key[] = [
   { id: "left", icon: { sf: "arrow.left", md: "arrow_back" }, send: "left", label: "左", arrow: true },
   { id: "down", icon: { sf: "arrow.down", md: "arrow_downward" }, send: "down", label: "下", arrow: true },
   { id: "up", icon: { sf: "arrow.up", md: "arrow_upward" }, send: "up", label: "上", arrow: true },
   { id: "right", icon: { sf: "arrow.right", md: "arrow_forward" }, send: "right", label: "右", arrow: true },
+];
+
+const KEYS_AFTER_ARROWS: Key[] = [
   { id: "shift-enter", label: "⇧↵", send: "enter", modifiers: { shift: true } },
   { id: "slash", label: "/", send: "/" },
   { id: "dash", label: "-", send: "-" },
@@ -147,6 +153,17 @@ export function KeyBar({
 }) {
   const touchOrigin = useRef<{ x: number; y: number; stepsX: number; stepsY: number } | null>(null);
   const [scrubHint, setScrubHint] = useState<string | null>(null);
+  const [scrubbing, setScrubbing] = useState(false);
+
+  const renderKeyPill = (key: Key) => (
+    <KeyPill key={key.id} label={key.label} onPress={() => onKey(key.send, key.modifiers)}>
+      {"icon" in key ? (
+        <Icon {...key.icon} size={13} color={colors.label} weight="semibold" />
+      ) : (
+        <Text style={{ fontFamily: mono, fontSize: 13, fontWeight: "500", color: colors.label }}>{key.label}</Text>
+      )}
+    </KeyPill>
+  );
 
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 8, paddingVertical: 6 }}>
@@ -162,6 +179,7 @@ export function KeyBar({
 
       <ScrollView
         horizontal
+        scrollEnabled={!scrubbing}
         showsHorizontalScrollIndicator={false}
         keyboardShouldPersistTaps="always"
         contentContainerStyle={{ gap: 5, alignItems: "center", paddingHorizontal: 2 }}
@@ -187,7 +205,9 @@ export function KeyBar({
           </KeyPill>
         ) : null}
 
-        {/* Arrow cluster also supports continuous horizontal/vertical trackpad scrubbing */}
+        {KEYS_BEFORE_ARROWS.map(renderKeyPill)}
+
+        {/* Scope trackpad arrow scrubbing strictly to the arrow cluster so scrolling other keys never spams arrows. */}
         <View
           style={{ flexDirection: "row", alignItems: "center", gap: 5 }}
           onTouchStart={(e) => {
@@ -206,6 +226,7 @@ export function KeyBar({
             const nextStepsX = swipeKeySteps(dx, 14);
             const nextStepsY = swipeKeySteps(dy, 18);
             if (nextStepsX !== origin.stepsX) {
+              if (!scrubbing) setScrubbing(true);
               const diff = nextStepsX - origin.stepsX;
               origin.stepsX = nextStepsX;
               const key = diff > 0 ? "right" : "left";
@@ -213,6 +234,7 @@ export function KeyBar({
               haptics.selection();
               setScrubHint(diff > 0 ? "→" : "←");
             } else if (nextStepsY !== origin.stepsY) {
+              if (!scrubbing) setScrubbing(true);
               const diff = nextStepsY - origin.stepsY;
               origin.stepsY = nextStepsY;
               const key = diff > 0 ? "down" : "up";
@@ -223,23 +245,19 @@ export function KeyBar({
           }}
           onTouchEnd={() => {
             touchOrigin.current = null;
+            setScrubbing(false);
             setScrubHint(null);
           }}
           onTouchCancel={() => {
             touchOrigin.current = null;
+            setScrubbing(false);
             setScrubHint(null);
           }}
         >
-          {KEYS.map((key) => (
-            <KeyPill key={key.id} label={key.label} onPress={() => onKey(key.send, key.modifiers)}>
-              {"icon" in key ? (
-                <Icon {...key.icon} size={13} color={colors.label} weight="semibold" />
-              ) : (
-                <Text style={{ fontFamily: mono, fontSize: 13, fontWeight: "500", color: colors.label }}>{key.label}</Text>
-              )}
-            </KeyPill>
-          ))}
+          {ARROW_KEYS.map(renderKeyPill)}
         </View>
+
+        {KEYS_AFTER_ARROWS.map(renderKeyPill)}
       </ScrollView>
 
       {scrubHint ? (

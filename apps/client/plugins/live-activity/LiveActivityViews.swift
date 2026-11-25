@@ -11,35 +11,85 @@ private func collectionURL(_ computerKey: String?, filter: String = "all") -> UR
 struct ActivityCountsView: View {
   let state: LinkShellAttentionAttributes.ContentState
   let computerKey: String?
+  var isWidthLimited = false
+
+  private var minTapHeight: CGFloat { isWidthLimited ? 32 : 36 }
 
   var body: some View {
-    HStack(spacing: 10) {
+    Group {
       if state.runningCount + state.waitingCount + state.failedCount > 1 {
-        count(state.runningCount, color: .white.opacity(0.58), label: "进行中", filter: "running")
-        count(state.waitingCount, color: ActivityPalette.waiting, label: "等你处理", filter: "attention")
-        count(state.failedCount, color: ActivityPalette.danger, label: "出错", filter: "failed")
+        ViewThatFits(in: .horizontal) {
+          if !isWidthLimited {
+            countsRow(spacing: 10, runningLabel: "进行中", waitingLabel: "等你处理", failedLabel: "出错")
+          }
+          countsRow(spacing: isWidthLimited ? 6 : 8, runningLabel: "运行", waitingLabel: "待处理", failedLabel: "出错")
+          compactDotCountsRow
+        }
       } else {
         Link(destination: activityURL(state.deepLink) ?? collectionURL(computerKey)) {
-          HStack(spacing: 4) {
-            Text("查看详情")
-            Image(systemName: "arrow.up.right").font(.system(size: 9, weight: .medium))
+          ViewThatFits(in: .horizontal) {
+            if !isWidthLimited {
+              detailLabel("查看详情")
+            }
+            detailLabel("详情")
           }
-          .foregroundColor(.white.opacity(0.6))
-          .frame(minHeight: 36)
+          .foregroundColor(.white.opacity(0.62))
+          .frame(minHeight: minTapHeight)
         }
       }
     }
-    .font(.system(size: 11, weight: .medium))
+    .font(.system(size: isWidthLimited ? 10.5 : 11, weight: .medium))
   }
 
-  @ViewBuilder private func count(_ value: Int, color: Color, label: String, filter: String) -> some View {
+  private func detailLabel(_ title: String) -> some View {
+    HStack(spacing: 4) {
+      Text(title).lineLimit(1)
+      Image(systemName: "arrow.up.right").font(.system(size: 9, weight: .medium))
+    }
+    .fixedSize(horizontal: true, vertical: false)
+  }
+
+  private func countsRow(spacing: CGFloat, runningLabel: String, waitingLabel: String, failedLabel: String) -> some View {
+    HStack(spacing: spacing) {
+      count(state.runningCount, color: .white.opacity(0.58), label: runningLabel, accessibilityLabel: "进行中", filter: "running")
+      count(state.waitingCount, color: ActivityPalette.waiting, label: waitingLabel, accessibilityLabel: "等你处理", filter: "attention")
+      count(state.failedCount, color: ActivityPalette.danger, label: failedLabel, accessibilityLabel: "出错", filter: "failed")
+    }
+    .fixedSize(horizontal: true, vertical: false)
+  }
+
+  private var compactDotCountsRow: some View {
+    HStack(spacing: 7) {
+      dotCount(state.runningCount, color: .white.opacity(0.62), accessibilityLabel: "进行中", filter: "running")
+      dotCount(state.waitingCount, color: ActivityPalette.waiting, accessibilityLabel: "等你处理", filter: "attention")
+      dotCount(state.failedCount, color: ActivityPalette.danger, accessibilityLabel: "出错", filter: "failed")
+    }
+    .fixedSize(horizontal: true, vertical: false)
+  }
+
+  @ViewBuilder private func count(_ value: Int, color: Color, label: String, accessibilityLabel: String, filter: String) -> some View {
     if value > 0 {
       Link(destination: collectionURL(computerKey, filter: filter)) {
         Text("\(value) \(label)").monospacedDigit()
+          .lineLimit(1)
           .foregroundColor(color)
-          .frame(minHeight: 36)
+          .frame(minHeight: minTapHeight)
       }
-      .accessibilityLabel("查看 \(value) 个\(label)任务")
+      .accessibilityLabel("查看 \(value) 个\(accessibilityLabel)任务")
+    }
+  }
+
+  @ViewBuilder private func dotCount(_ value: Int, color: Color, accessibilityLabel: String, filter: String) -> some View {
+    if value > 0 {
+      Link(destination: collectionURL(computerKey, filter: filter)) {
+        HStack(spacing: 3) {
+          Circle().fill(color).frame(width: 5, height: 5)
+          Text("\(value)").monospacedDigit().lineLimit(1)
+        }
+        .foregroundColor(color)
+        .frame(minHeight: minTapHeight)
+      }
+      .accessibilityLabel("查看 \(value) 个\(accessibilityLabel)任务")
     }
   }
 }
@@ -49,25 +99,44 @@ struct TaskPagerView: View {
   let activityID: String
   let state: LinkShellAttentionAttributes.ContentState
   let computerKey: String?
+  var isWidthLimited = false
+  var showsArrows = true
 
   var body: some View {
     if let tasks = state.tasks, tasks.count > 1 {
+      let currentIndex = (state.selectedIndex(activityID: activityID) ?? 0) + 1
+      let tapHeight: CGFloat = isWidthLimited ? 32 : 36
       HStack(spacing: 0) {
-        if #available(iOS 17.0, *) { pageButton(-1, symbol: "chevron.left", label: "上一个任务") }
+        if showsArrows, #available(iOS 17.0, *) { pageButton(-1, symbol: "chevron.left", label: "上一个任务") }
         Link(destination: collectionURL(computerKey)) {
-          HStack(spacing: 4) {
-            ForEach(tasks.indices, id: \.self) { index in
-              Capsule()
-                .fill(.white.opacity(index == state.selectedIndex(activityID: activityID) ? 0.85 : 0.22))
-                .frame(width: index == state.selectedIndex(activityID: activityID) ? 10 : 4, height: 4)
+          if isWidthLimited {
+            Text("\(currentIndex)/\(tasks.count)")
+              .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+              .monospacedDigit()
+              .lineLimit(1)
+              .padding(.horizontal, showsArrows ? 4 : 7)
+              .frame(minWidth: 22, minHeight: showsArrows ? tapHeight : 24)
+              .background {
+                if !showsArrows {
+                  Capsule().fill(Color.white.opacity(0.10))
+                }
+              }
+              .frame(minHeight: tapHeight)
+          } else {
+            HStack(spacing: 4) {
+              ForEach(tasks.indices, id: \.self) { index in
+                Capsule()
+                  .fill(.white.opacity(index == state.selectedIndex(activityID: activityID) ? 0.85 : 0.22))
+                  .frame(width: index == state.selectedIndex(activityID: activityID) ? 10 : 4, height: 4)
+              }
             }
+            .frame(minWidth: 24, minHeight: tapHeight)
           }
-          .frame(minWidth: 24, minHeight: 36)
         }
-        .accessibilityLabel("当前第 \((state.selectedIndex(activityID: activityID) ?? 0) + 1) 个任务，查看全部任务")
-        if #available(iOS 17.0, *) { pageButton(1, symbol: "chevron.right", label: "下一个任务") }
+        .accessibilityLabel("当前第 \(currentIndex) 个，共 \(tasks.count) 个任务，查看全部任务")
+        if showsArrows, #available(iOS 17.0, *) { pageButton(1, symbol: "chevron.right", label: "下一个任务") }
       }
-      .foregroundColor(.white.opacity(0.7))
+      .foregroundColor(.white.opacity(0.72))
       .fixedSize()
     }
   }
@@ -76,8 +145,8 @@ struct TaskPagerView: View {
   private func pageButton(_ direction: Int, symbol: String, label: String) -> some View {
     Button(intent: LinkShellActivityBrowseIntent(activityID: activityID, direction: direction)) {
       Image(systemName: symbol)
-        .font(.system(size: 11, weight: .semibold))
-        .frame(width: 36, height: 36)
+        .font(.system(size: isWidthLimited ? 10 : 11, weight: .semibold))
+        .frame(width: isWidthLimited ? 28 : 36, height: isWidthLimited ? 32 : 36)
         .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
@@ -90,18 +159,40 @@ struct ActivityFooterView: View {
   let activityID: String
   let state: LinkShellAttentionAttributes.ContentState
   let computerKey: String?
+  var isWidthLimited = false
 
   var body: some View {
-    HStack(spacing: 8) {
-      if !(state.actions ?? []).isEmpty || state.hasMoreActions == true {
+    let hasActions = !(state.actions ?? []).isEmpty || state.hasMoreActions == true
+    let hasMultipleTasks = (state.tasks?.count ?? 0) > 1
+    HStack(spacing: isWidthLimited ? 4 : 8) {
+      if hasActions {
         ActivityActionsView(state: state)
+          .layoutPriority(1)
       } else {
-        ActivityCountsView(state: state, computerKey: computerKey)
+        ActivityCountsView(state: state, computerKey: computerKey, isWidthLimited: isWidthLimited)
+          .layoutPriority(1)
       }
       Spacer(minLength: 0)
-      TaskPagerView(activityID: activityID, state: state, computerKey: computerKey)
+      // On narrow Dynamic Island widths (e.g. cover screens), collapse arrows when direct
+      // approval buttons are shown so interactive controls never get squeezed out.
+      if isWidthLimited && hasActions && hasMultipleTasks {
+        TaskPagerView(
+          activityID: activityID,
+          state: state,
+          computerKey: computerKey,
+          isWidthLimited: true,
+          showsArrows: false
+        )
+      } else {
+        TaskPagerView(
+          activityID: activityID,
+          state: state,
+          computerKey: computerKey,
+          isWidthLimited: isWidthLimited
+        )
+      }
     }
-    .frame(height: 36)
+    .frame(height: isWidthLimited ? 32 : 36)
   }
 }
 
@@ -109,11 +200,12 @@ struct ActivityFooterView: View {
 struct ActivityStatusLink: View {
   let state: LinkShellAttentionAttributes.ContentState
   let computerKey: String?
+  var size: CGFloat = 22
 
   var body: some View {
     let filter = state.phase == "failed" ? "failed" : state.phase.hasPrefix("waiting") ? "attention" : state.phase == "completed" ? "completed" : "running"
     Link(destination: collectionURL(computerKey, filter: filter)) {
-      StatusIndicatorView(state: state, size: 22, showsCount: false)
+      StatusIndicatorView(state: state, size: size, showsCount: false)
     }
     .accessibilityHint("查看这类任务")
   }
@@ -270,34 +362,56 @@ struct LinkShellAttentionWidget: Widget {
       let state = context.displayState
       return DynamicIsland {
         DynamicIslandExpandedRegion(.leading) {
-          HStack(spacing: 7) {
-            AgentBadgeView(agent: ActivityAgent(id: state.agent), size: 24)
-            ActivityTextView(text: state.project)
-              .font(.system(size: 12, weight: .medium))
-              .foregroundColor(.white.opacity(0.56))
-              .lineLimit(1)
+          CompactIslandRegion { isWidthLimited in
+            let header = state.project.isEmpty ? context.attributes.computerName : state.project
+            HStack(spacing: isWidthLimited ? 5 : 7) {
+              AgentBadgeView(agent: ActivityAgent(id: state.agent), size: isWidthLimited ? 22 : 24)
+              ActivityTextView(text: header)
+                .font(.system(size: isWidthLimited ? 11.5 : 12, weight: .medium))
+                .foregroundColor(.white.opacity(0.60))
+                .lineLimit(1)
+                .truncationMode(.tail)
+            }
+            .padding(.leading, isWidthLimited ? 2 : 4)
           }
-          .padding(.leading, 4)
         }
         DynamicIslandExpandedRegion(.trailing) {
-          ActivityStatusLink(state: state, computerKey: context.attributes.computerKey).padding(.trailing, 4)
+          CompactIslandRegion { isWidthLimited in
+            ActivityStatusLink(
+              state: state,
+              computerKey: context.attributes.computerKey,
+              size: isWidthLimited ? 20 : 22
+            )
+            .padding(.trailing, isWidthLimited ? 2 : 4)
+          }
         }
         DynamicIslandExpandedRegion(.bottom) {
-          VStack(alignment: .leading, spacing: 6) {
-            Link(destination: activityURL(state.deepLink) ?? collectionURL(context.attributes.computerKey)) {
-              VStack(alignment: .leading, spacing: 4) {
-                ActivityTextView(text: state.title)
-                  .font(.system(size: 14, weight: .semibold)).foregroundColor(.white).lineLimit(1)
-                ActivityTextView(text: state.effectiveSubtitle)
-                  .font(.system(size: 12)).foregroundColor(.white.opacity(0.65)).lineLimit(2)
-                  .frame(maxWidth: .infinity, alignment: .leading)
+          CompactIslandRegion { isWidthLimited in
+            VStack(alignment: .leading, spacing: isWidthLimited ? 4 : 6) {
+              Link(destination: activityURL(state.deepLink) ?? collectionURL(context.attributes.computerKey)) {
+                VStack(alignment: .leading, spacing: isWidthLimited ? 2 : 4) {
+                  ActivityTextView(text: state.title)
+                    .font(.system(size: isWidthLimited ? 13.5 : 14, weight: .semibold))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                  ActivityTextView(text: state.effectiveSubtitle)
+                    .font(.system(size: isWidthLimited ? 11.5 : 12))
+                    .foregroundColor(.white.opacity(0.66))
+                    .lineLimit(isWidthLimited ? 1 : 2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .multilineTextAlignment(.leading)
               }
-              .multilineTextAlignment(.leading)
+              ActivityFooterView(
+                activityID: context.activityID,
+                state: state,
+                computerKey: context.attributes.computerKey,
+                isWidthLimited: isWidthLimited
+              )
             }
-            ActivityFooterView(activityID: context.activityID, state: state, computerKey: context.attributes.computerKey)
+            .padding(.horizontal, isWidthLimited ? 2 : 6)
+            .padding(.top, isWidthLimited ? 2 : 4)
           }
-          .padding(.horizontal, 6)
-          .padding(.top, 4)
         }
       } compactLeading: {
         CompactIslandRegion { isWidthLimited in

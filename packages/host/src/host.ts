@@ -1,6 +1,7 @@
 import { readMachineHardware } from "./machine-form-factor.js";
 import { UsageStatistics } from "./usage.js";
 import {
+  accessSync,
   chmodSync,
   closeSync,
   constants as fsConstants,
@@ -26,7 +27,7 @@ import { SessionHub } from "./hub.js";
 import { connectHost } from "./rpc/client.js";
 import { AccessControl } from "./access.js";
 import { HostRpcServer } from "./rpc/server.js";
-import { GatewayLink } from "./gateway.js";
+import { ensureIdentity, GatewayLink } from "./gateway.js";
 import { HostStore } from "./store.js";
 import { removeLegacyCopilotHooks } from "./legacy.js";
 import { withoutClaudeSession } from "./shell-env.js";
@@ -55,18 +56,41 @@ export function defaultHome(): string {
   return process.env.LINKSHELL_HOME || join(homedir(), ".linkshell");
 }
 
-export function hostPaths(home = defaultHome()): HostPaths {
+function usableXdgRuntimeDir(xdg: string | undefined, tag: string): string | undefined {
+  const trimmed = xdg?.trim();
+  if (!trimmed) return undefined;
+  try {
+    const stat = lstatSync(trimmed);
+    if (stat.isSymbolicLink() || !stat.isDirectory()) return undefined;
+    accessSync(trimmed, fsConstants.W_OK);
+  } catch {
+    return undefined;
+  }
+  const candidate = join(trimmed, `linkshell-${tag}`);
+  return Buffer.byteLength(join(candidate, "codex.sock")) <= MAX_SOCKET_PATH ? candidate : undefined;
+}
+
+export function hostPaths(
+  home = defaultHome(),
+  options?: { platform?: NodeJS.Platform; env?: NodeJS.ProcessEnv; uid?: number },
+): HostPaths {
+  const targetPlatform = options?.platform ?? process.platform;
+  const targetEnv = options?.env ?? process.env;
+  const uid = options?.uid ?? process.getuid?.();
   let runDir = join(home, "run");
-  if (process.platform !== "win32" && Buffer.byteLength(join(runDir, "codex.sock")) > MAX_SOCKET_PATH) {
-    // Very long home directories: fall back to a short directory of this user's, one per home.
+  if (targetPlatform !== "win32" && Buffer.byteLength(join(runDir, "codex.sock")) > MAX_SOCKET_PATH) {
+    // Very long home directories: on Linux prefer `$XDG_RUNTIME_DIR` (survives systemd-tmpfiles-clean)
+    // before falling back to `/tmp`, using one short user-scoped directory per home.
     const tag = createHash("sha256").update(home).digest("hex").slice(0, 8);
-    runDir = join("/tmp", `linkshell-${process.getuid?.() ?? "user"}-${tag}`);
+    runDir =
+      (targetPlatform === "linux" ? usableXdgRuntimeDir(targetEnv.XDG_RUNTIME_DIR, tag) : undefined) ??
+      join("/tmp", `linkshell-${uid ?? "user"}-${tag}`);
   }
   return {
     home,
     runDir,
-    hostSocket: process.platform === "win32" ? windowsPipe(home, "host") : join(runDir, "host.sock"),
-    codexSocket: process.platform === "win32" ? windowsPipe(home, "codex") : join(runDir, "codex.sock"),
+    hostSocket: targetPlatform === "win32" ? windowsPipe(home, "host") : join(runDir, "host.sock"),
+    codexSocket: targetPlatform === "win32" ? windowsPipe(home, "codex") : join(runDir, "codex.sock"),
     database: join(home, "state.db"),
   };
 }
@@ -103,6 +127,8 @@ export interface HostOptions {
   /** Extra drivers (tests) or a full replacement of the default set. */
   drivers?: (paths: HostPaths) => AgentDriver[];
   tcpPort?: number;
+  /** Same-Wi-Fi LAN gateway port to advertise over mDNS (`linkshell host --lan`). */
+  lanPort?: number;
   log?: (message: string) => void;
   shutdown?: () => void;
   /**
@@ -153,13 +179,70 @@ function iceServersFromEnv(value: string | undefined): string[] | false {
     .filter(Boolean);
 }
 
-function isProcessAlive(pid: number): boolean {
-  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+export interface HostLockDeps {
+  platform?: NodeJS.Platform;
+  /** True only when `host.sock` was confirmed reachable; otherwise non-LinkShell Linux PIDs are reclaimed. */
+  socketReachable?: boolean;
+  killZero?: (pid: number) => void;
+  /** Returns raw `/proc/<pid>/cmdline` text, `null` when missing (`ENOENT`), or `undefined` if unreadable. */
+  readProcCmdline?: (pid: number) => string | null | undefined;
+}
+
+/** True when a Linux `/proc/<pid>/cmdline` belongs to a LinkShell host invocation. */
+export function isLinkShellHostCmdline(raw: string): boolean {
+  const normalized = raw.replace(/\0+/g, " ").trim();
+  if (!normalized) return false;
+  return /(?:^|[\s/\\_-])linkshell(?:[\s/\\._-]|$)/i.test(normalized);
+}
+
+function defaultReadProcCmdline(pid: number): string | null | undefined {
   try {
-    process.kill(pid, 0);
-    return true;
+    return readFileSync(`/proc/${pid}/cmdline`, "utf8");
   } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "EPERM";
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return null;
+    return undefined;
+  }
+}
+
+function isLockOwnerAlive(pid: number, deps?: HostLockDeps): boolean {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+  if (pid === process.pid) return true;
+  const killZero = deps?.killZero ?? ((target: number) => process.kill(target, 0));
+  try {
+    killZero(pid);
+  } catch {
+    // Both ESRCH (gone) and EPERM (another user's recycled PID after reboot/container restart)
+    // mean this PID is NOT our LinkShell host.
+    return false;
+  }
+  const targetPlatform = deps?.platform ?? process.platform;
+  if (targetPlatform === "linux") {
+    const readCmdline = deps?.readProcCmdline ?? defaultReadProcCmdline;
+    const cmdline = readCmdline(pid);
+    if (cmdline === null) return false;
+    if (typeof cmdline === "string" && cmdline.replace(/\0+/g, "").trim().length > 0) {
+      if (isLinkShellHostCmdline(cmdline)) return true;
+      return deps?.socketReachable === true;
+    }
+  }
+  return true;
+}
+
+function readConfiguredLanPort(home: string, optionPort?: number): number | undefined {
+  const parsePort = (value: unknown): number | undefined => {
+    const n = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value.trim()) : NaN;
+    return Number.isInteger(n) && n >= 1 && n <= 65535 ? n : undefined;
+  };
+  const fromOption = parsePort(optionPort);
+  if (fromOption !== undefined) return fromOption;
+  const fromEnv = parsePort(process.env.LINKSHELL_LAN_PORT);
+  if (fromEnv !== undefined) return fromEnv;
+  try {
+    const parsed = JSON.parse(readFileSync(join(home, "config.json"), "utf8")) as { lanPort?: unknown };
+    return parsePort(parsed.lanPort);
+  } catch {
+    return undefined;
   }
 }
 
@@ -201,7 +284,7 @@ function parseLockPid(raw: string): number | undefined {
  * reclaiming stale locks left by crashed processes so concurrent `startHost()`
  * invocations cannot race into `reapOrphans()` or `hub.start()`.
  */
-export function acquireHostLock(lockPath: string): () => void {
+export function acquireHostLock(lockPath: string, deps?: HostLockDeps): () => void {
   const token = randomUUID();
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
@@ -234,7 +317,7 @@ export function acquireHostLock(lockPath: string): () => void {
       } catch {
         existingPid = undefined;
       }
-      if (existingPid !== undefined && (existingPid === process.pid || isProcessAlive(existingPid))) {
+      if (existingPid !== undefined && isLockOwnerAlive(existingPid, deps)) {
         throw new Error(`a LinkShell host is already running (${lockPath}, pid ${existingPid})`, { cause: error });
       }
       if (existingPid === undefined && fresh) {
@@ -254,8 +337,14 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
   const log = options.log ?? ((message: string) => process.stderr.write(`${message}\n`));
   const paths = hostPaths(options.home);
   mkdirSync(paths.home, { recursive: true, mode: 0o700 });
+  if (process.platform !== "win32") {
+    chmodSync(paths.home, 0o700);
+  }
   ensureSecureRunDir(paths.runDir);
-  const releaseHostLock = acquireHostLock(join(paths.runDir, "host.lock"));
+  if (await isHostRunning(paths.hostSocket)) {
+    throw new Error(`a LinkShell host is already running (${paths.hostSocket})`);
+  }
+  const releaseHostLock = acquireHostLock(join(paths.runDir, "host.lock"), { socketReachable: false });
 
   let children: ReturnType<typeof openChildRegistry> | undefined;
   let store: HostStore | undefined;
@@ -322,9 +411,10 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
     }
     maintenanceTimer = setInterval(() => {
       try {
-        if (sessionHub.activeWorkDemand().sessionActive) return;
-        sessionHub.compactIdleSessions();
-        hostStore.runMaintenance();
+        const idle = !sessionHub.activeWorkDemand().sessionActive;
+        if (idle) sessionHub.compactIdleSessions();
+        // Always checkpoint WAL (PASSIVE while active) and prune external blobs even during long sessions.
+        hostStore.runMaintenance(Date.now(), { idle });
       } catch (error) {
         log(`[store] periodic maintenance failed: ${error instanceof Error ? error.message : String(error)}`);
       }
@@ -432,17 +522,22 @@ export async function startHost(options: HostOptions): Promise<RunningHost> {
     rpcServer.refreshKeepAwakeMetrics();
 
     const tcpPort = rpcServer.tcpAddress();
+    const configuredLanPort = readConfiguredLanPort(paths.home, options.lanPort);
+    const mdnsPort = tcpPort !== undefined && !rpcServer.isTcpLoopbackOnly() ? tcpPort : configuredLanPort;
     const shouldAdvertiseMdns =
-      tcpPort !== undefined &&
-      !rpcServer.isTcpLoopbackOnly() &&
+      mdnsPort !== undefined &&
       options.mdns !== false &&
       process.env.LINKSHELL_MDNS !== "off" &&
       (options.mdns === true || Boolean(options.spawnMdnsProcess) || !process.env.VITEST);
-    if (shouldAdvertiseMdns && tcpPort !== undefined) {
+    if (shouldAdvertiseMdns && mdnsPort !== undefined) {
+      // Ensure identity.json exists before computing the mDNS fingerprint so first-boot LAN
+      // discovery matches the real gateway identity instead of falling back to machineId.
+      ensureIdentity(paths.home);
       mdns = new MdnsAdvertiser({
-        port: tcpPort,
-        hostPort: tcpPort,
+        port: mdnsPort,
+        hostPort: mdnsPort,
         machineId,
+        machineName: machineName.value,
         fingerprint: hostFingerprint(paths.home, machineId),
         protocolVersion: HOST_PROTOCOL,
         spawnProcess: options.spawnMdnsProcess,

@@ -167,7 +167,17 @@ export function Connect({ close }: { close: () => void }) {
           />
         </Field>
         <Field data-disabled={blocked}>
-          <FieldLabel htmlFor={`${id}-password`}>密码</FieldLabel>
+          <div className="connect-label-row">
+            <FieldLabel htmlFor={`${id}-password`}>密码</FieldLabel>
+            <a
+              href="https://itool.tech/zh/forgot-password"
+              target="_blank"
+              rel="noreferrer"
+              className="connect-forgot-link"
+            >
+              忘记密码？
+            </a>
+          </div>
           <div className="connect-password-wrap">
             <Input
               id={`${id}-password`}

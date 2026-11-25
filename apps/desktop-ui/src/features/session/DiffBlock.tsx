@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import {
   changeLines,
   changeStat,
@@ -8,10 +8,15 @@ import {
 } from "@linkshell/client-core";
 import type { ToolCallContent } from "@linkshell/wire";
 import {
+  diffReviewSessionKey,
   diffReviewStore,
+  grammarForPath,
+  normalizeReviewPath,
   useDiffReviews,
+  useHighlight,
   useT,
   type DiffReviewComment,
+  type HighlightToken,
 } from "@/core";
 import { DesktopIcon } from "@/icons";
 import { Button, IconButton, Tooltip } from "@/primitives";
@@ -75,11 +80,28 @@ function buildHunksForChange(change: DiffOrPatchContent): DiffHunk[] {
   return hunks(changeLines(change));
 }
 
+function renderTokenLine(
+  tokens: HighlightToken[] | undefined,
+  fallbackText: string,
+): ReactNode {
+  if (!tokens || tokens.length === 0) return fallbackText || " ";
+  return tokens.map((tok, i) =>
+    tok.color ? (
+      <span key={i} data-syntax-token="" style={{ color: tok.color }}>
+        {tok.content}
+      </span>
+    ) : (
+      tok.content
+    ),
+  );
+}
+
 export interface DiffBlockProps {
   change: DiffOrPatchContent;
   computerKey: string;
   sessionId?: string;
   sessionKey?: string;
+  cwd?: string;
 }
 
 export function DiffBlock({
@@ -87,6 +109,7 @@ export function DiffBlock({
   computerKey,
   sessionId,
   sessionKey,
+  cwd,
 }: DiffBlockProps) {
   const t = useT();
   const copy = useSessionCopy();
@@ -99,25 +122,76 @@ export function DiffBlock({
   const [draftComment, setDraftComment] = useState("");
 
   const filePath = change.type === "patch" ? change.movePath ?? change.path : change.path;
+  const reviewPath = useMemo(() => normalizeReviewPath(filePath, cwd), [filePath, cwd]);
+  const reviewKey = diffReviewSessionKey(computerKey, sessionId) ?? sessionKey;
   const stat = useMemo(() => changeStat(change), [change]);
   const parsedHunks = useMemo(() => buildHunksForChange(change), [change]);
-  const allReviews = useDiffReviews(sessionKey);
+  const splitHunks = useMemo(
+    () =>
+      parsedHunks.map((hunk) => ({
+        hunk,
+        pairs: pairHunkLinesForSplit(hunk.lines),
+      })),
+    [parsedHunks],
+  );
+
+  // Highlight old and new sides in separate buffers so deleted syntax constructs cannot
+  // corrupt tokenization for added/context lines in either unified or split view.
+  const { oldCode, newCode, lineTokenIndex } = useMemo(() => {
+    const indexMap = new Map<DiffLine, { oldIdx?: number; newIdx?: number }>();
+    const oldLines: string[] = [];
+    const newLines: string[] = [];
+    for (const hunk of parsedHunks) {
+      for (const line of hunk.lines) {
+        let oldIdx: number | undefined;
+        let newIdx: number | undefined;
+        if (line.kind !== "add") {
+          oldIdx = oldLines.length;
+          oldLines.push(line.text);
+        }
+        if (line.kind !== "del") {
+          newIdx = newLines.length;
+          newLines.push(line.text);
+        }
+        indexMap.set(line, { oldIdx, newIdx });
+      }
+    }
+    return {
+      oldCode: oldLines.join("\n"),
+      newCode: newLines.join("\n"),
+      lineTokenIndex: indexMap,
+    };
+  }, [parsedHunks]);
+
+  const language = useMemo(() => grammarForPath(reviewPath), [reviewPath]);
+  const oldTokens = useHighlight(oldCode, language, oldCode.length > 0);
+  const newTokens = useHighlight(newCode, language, newCode.length > 0);
+  const tokensForLine = (line: DiffLine, side: "old" | "new") => {
+    const slot = lineTokenIndex.get(line);
+    if (!slot) return undefined;
+    if (side === "old") {
+      return slot.oldIdx !== undefined ? oldTokens?.[slot.oldIdx] : undefined;
+    }
+    return slot.newIdx !== undefined ? newTokens?.[slot.newIdx] : undefined;
+  };
+
+  const allReviews = useDiffReviews(reviewKey);
   const fileReviews = useMemo(
-    () => allReviews.filter((entry) => entry.path === filePath),
-    [allReviews, filePath],
+    () => allReviews.filter((entry) => entry.path === reviewPath),
+    [allReviews, reviewPath],
   );
 
   const openEditorForLine = (side: "old" | "new", lineNumber: number | undefined, text: string) => {
-    if (!sessionKey || lineNumber === undefined) return;
+    if (!reviewKey || lineNumber === undefined) return;
     setDraftAnchor({ side, line: lineNumber, excerpt: text });
     setDraftComment("");
   };
 
   const submitLineComment = () => {
-    if (!sessionKey || !draftAnchor || !draftComment.trim()) return;
+    if (!reviewKey || !draftAnchor || !draftComment.trim()) return;
     diffReviewStore.getState().addComment({
-      sessionKey,
-      path: filePath,
+      sessionKey: reviewKey,
+      path: reviewPath,
       side: draftAnchor.side,
       startLine: draftAnchor.line,
       endLine: draftAnchor.line,
@@ -126,6 +200,10 @@ export function DiffBlock({
     });
     setDraftAnchor(null);
     setDraftComment("");
+  };
+
+  const removeReview = (id: string) => {
+    if (reviewKey) diffReviewStore.getState().removeComment(reviewKey, id);
   };
 
   return (
@@ -138,12 +216,12 @@ export function DiffBlock({
           title={filePath}
         >
           <DesktopIcon name="diff-changes" size="xs" />
-          <span>{filePath}</span>
+          <span>{reviewPath}</span>
         </button>
 
         <div className="ls-diff-controls">
           <DiffStatBadge added={stat.added} removed={stat.removed} />
-          <div className="ls-diff-mode-toggle" role="group" aria-label="Diff view mode">
+          <div className="ls-diff-mode-toggle" role="group" aria-label={copy.diffViewMode}>
             <Tooltip content={t("desktop.timeline.unifiedDiff")}>
               <button
                 type="button"
@@ -179,7 +257,7 @@ export function DiffBlock({
                   key={hunkIdx}
                   hunk={hunk}
                   showSeparator={hunkIdx > 0}
-                  canComment={Boolean(sessionKey)}
+                  canComment={Boolean(reviewKey)}
                   commentLabel={t("desktop.timeline.addLineComment")}
                   reviews={fileReviews}
                   draftAnchor={draftAnchor}
@@ -188,75 +266,51 @@ export function DiffBlock({
                   onOpenComment={openEditorForLine}
                   onSubmitComment={submitLineComment}
                   onCancelComment={() => setDraftAnchor(null)}
-                  onDeleteReview={(id) =>
-                    sessionKey && diffReviewStore.getState().removeComment(sessionKey, id)
-                  }
+                  onDeleteReview={removeReview}
+                  tokensForLine={tokensForLine}
                   copy={copy}
                 />
               ))}
             </tbody>
           </table>
         ) : (
-          <div className="ls-diff-split">
-            {parsedHunks.map((hunk, hunkIdx) => {
-              const pairs = pairHunkLinesForSplit(hunk.lines);
-              return (
-                <div key={hunkIdx} style={{ display: "contents" }}>
-                  {hunkIdx > 0 && (
-                    <>
-                      <div className="ls-diff-hunk-sep">⋯</div>
-                      <div className="ls-diff-hunk-sep">⋯</div>
-                    </>
-                  )}
-                  {pairs.map((pair, pairIdx) => (
-                    <div key={pairIdx} style={{ display: "contents" }}>
-                      <SplitCell
-                        line={pair.oldLine}
-                        side="old"
-                        canComment={Boolean(sessionKey)}
+          <div className="ls-diff-split-hunks">
+            {splitHunks.map(({ pairs }, hunkIdx) => (
+              <div key={hunkIdx}>
+                {hunkIdx > 0 && <div className="ls-diff-hunk-sep">⋯</div>}
+                <table className="ls-diff-table ls-diff-split-table">
+                  <colgroup>
+                    <col className="ls-diff-col-ln" />
+                    <col className="ls-diff-col-code" />
+                    <col className="ls-diff-col-ln" />
+                    <col className="ls-diff-col-code" />
+                  </colgroup>
+                  <tbody>
+                    {pairs.map((pair, pairIdx) => (
+                      <SplitPairRows
+                        key={pairIdx}
+                        pair={pair}
+                        canComment={Boolean(reviewKey)}
                         commentLabel={t("desktop.timeline.addLineComment")}
+                        reviews={fileReviews}
+                        draftAnchor={draftAnchor}
+                        draftComment={draftComment}
+                        onDraftCommentChange={setDraftComment}
                         onOpenComment={openEditorForLine}
+                        onSubmitComment={submitLineComment}
+                        onCancelComment={() => setDraftAnchor(null)}
+                        onDeleteReview={removeReview}
+                        tokensForLine={tokensForLine}
+                        copy={copy}
                       />
-                      <SplitCell
-                        line={pair.newLine}
-                        side="new"
-                        canComment={Boolean(sessionKey)}
-                        commentLabel={t("desktop.timeline.addLineComment")}
-                        onOpenComment={openEditorForLine}
-                      />
-                    </div>
-                  ))}
-                </div>
-              );
-            })}
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))}
           </div>
         )}
       </div>
-
-      {mode === "split" && (draftAnchor || fileReviews.length > 0) && (
-        <div>
-          {fileReviews.map((review) => (
-            <SavedCommentRow
-              key={review.id}
-              review={review}
-              deleteLabel={copy.deleteComment}
-              onDelete={() =>
-                sessionKey && diffReviewStore.getState().removeComment(sessionKey, review.id)
-              }
-            />
-          ))}
-          {draftAnchor && (
-            <InlineCommentComposer
-              lineLabel={`L${draftAnchor.line}`}
-              value={draftComment}
-              onChange={setDraftComment}
-              onSave={submitLineComment}
-              onCancel={() => setDraftAnchor(null)}
-              copy={copy}
-            />
-          )}
-        </div>
-      )}
     </div>
   );
 }
@@ -274,6 +328,7 @@ interface UnifiedHunkRowsProps {
   onSubmitComment: () => void;
   onCancelComment: () => void;
   onDeleteReview: (id: string) => void;
+  tokensForLine: (line: DiffLine, side: "old" | "new") => HighlightToken[] | undefined;
   copy: ReturnType<typeof useSessionCopy>;
 }
 
@@ -290,6 +345,7 @@ function UnifiedHunkRows({
   onSubmitComment,
   onCancelComment,
   onDeleteReview,
+  tokensForLine,
   copy,
 }: UnifiedHunkRowsProps) {
   return (
@@ -316,6 +372,7 @@ function UnifiedHunkRows({
             key={idx}
             line={line}
             sign={sign}
+            tokens={tokensForLine(line, side)}
             canComment={canComment && lineNum !== undefined}
             commentLabel={commentLabel}
             onCommentClick={() => onOpenComment(side, lineNum, line.text)}
@@ -337,6 +394,7 @@ function UnifiedHunkRows({
 function UnifiedLineFragment({
   line,
   sign,
+  tokens,
   canComment,
   commentLabel,
   onCommentClick,
@@ -351,6 +409,7 @@ function UnifiedLineFragment({
 }: {
   line: DiffLine;
   sign: string;
+  tokens: HighlightToken[] | undefined;
   canComment: boolean;
   commentLabel: string;
   onCommentClick: () => void;
@@ -381,7 +440,7 @@ function UnifiedLineFragment({
               +
             </button>
           )}
-          {line.text || " "}
+          {renderTokenLine(tokens, line.text)}
         </td>
       </tr>
       {matchingReviews.map((review) => (
@@ -413,65 +472,156 @@ function UnifiedLineFragment({
   );
 }
 
-function SplitCell({
-  line,
-  side,
+function SplitPairRows({
+  pair,
   canComment,
   commentLabel,
+  reviews,
+  draftAnchor,
+  draftComment,
+  onDraftCommentChange,
   onOpenComment,
+  onSubmitComment,
+  onCancelComment,
+  onDeleteReview,
+  tokensForLine,
+  copy,
 }: {
-  line: DiffLine | undefined;
-  side: "old" | "new";
+  pair: SplitPair;
   canComment: boolean;
   commentLabel: string;
+  reviews: readonly DiffReviewComment[];
+  draftAnchor: { side: "old" | "new"; line: number; excerpt: string } | null;
+  draftComment: string;
+  onDraftCommentChange: (next: string) => void;
   onOpenComment: (side: "old" | "new", line: number | undefined, text: string) => void;
+  onSubmitComment: () => void;
+  onCancelComment: () => void;
+  onDeleteReview: (id: string) => void;
+  tokensForLine: (line: DiffLine, side: "old" | "new") => HighlightToken[] | undefined;
+  copy: ReturnType<typeof useSessionCopy>;
 }) {
-  if (!line) {
-    return (
-      <div className="ls-diff-split-pane" data-kind="empty">
-        <table className="ls-diff-table">
-          <tbody>
-            <tr className="ls-diff-row">
-              <td className="ls-diff-ln" />
-              <td className="ls-diff-code"> </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    );
-  }
-  const lineNumber = side === "old" ? line.old : line.new;
-  const kind =
-    side === "old"
-      ? line.kind === "del"
-        ? "del"
-        : "same"
-      : line.kind === "add"
-        ? "add"
-        : "same";
+  const leftLine = pair.oldLine;
+  const rightLine = pair.newLine;
+  const leftNum = leftLine?.old;
+  const rightNum = rightLine?.new;
+  const leftKind = !leftLine ? "empty" : leftLine.kind === "del" ? "del" : "same";
+  const rightKind = !rightLine ? "empty" : rightLine.kind === "add" ? "add" : "same";
+
+  const leftReviews =
+    leftNum !== undefined
+      ? reviews.filter((item) => item.side === "old" && item.startLine === leftNum)
+      : [];
+  const rightReviews =
+    rightNum !== undefined
+      ? reviews.filter((item) => item.side === "new" && item.startLine === rightNum)
+      : [];
+  const editingLeft =
+    draftAnchor !== null && draftAnchor.side === "old" && leftNum !== undefined && draftAnchor.line === leftNum;
+  const editingRight =
+    draftAnchor !== null && draftAnchor.side === "new" && rightNum !== undefined && draftAnchor.line === rightNum;
+
   return (
-    <div className="ls-diff-split-pane">
-      <table className="ls-diff-table">
-        <tbody>
-          <tr className="ls-diff-row" data-kind={kind}>
-            <td className="ls-diff-ln">{lineNumber ?? ""}</td>
-            <td className="ls-diff-code">
-              {canComment && lineNumber !== undefined && (
+    <>
+      <tr className="ls-diff-row ls-diff-split-tr">
+        <td className="ls-diff-ln ls-diff-split-cell" data-kind={leftKind}>
+          {leftNum ?? ""}
+        </td>
+        <td className="ls-diff-code ls-diff-split-cell ls-diff-split-divider" data-kind={leftKind}>
+          {leftLine ? (
+            <>
+              {canComment && leftNum !== undefined && (
                 <button
                   type="button"
                   className="ls-diff-comment-btn"
                   aria-label={commentLabel}
-                  onClick={() => onOpenComment(side, lineNumber, line.text)}
+                  title={commentLabel}
+                  onClick={() => onOpenComment("old", leftNum, leftLine.text)}
                 >
                   +
                 </button>
               )}
-              {line.text || " "}
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+              {renderTokenLine(tokensForLine(leftLine, "old"), leftLine.text)}
+            </>
+          ) : (
+            " "
+          )}
+        </td>
+        <td className="ls-diff-ln ls-diff-split-cell" data-kind={rightKind}>
+          {rightNum ?? ""}
+        </td>
+        <td className="ls-diff-code ls-diff-split-cell" data-kind={rightKind}>
+          {rightLine ? (
+            <>
+              {canComment && rightNum !== undefined && (
+                <button
+                  type="button"
+                  className="ls-diff-comment-btn"
+                  aria-label={commentLabel}
+                  title={commentLabel}
+                  onClick={() => onOpenComment("new", rightNum, rightLine.text)}
+                >
+                  +
+                </button>
+              )}
+              {renderTokenLine(tokensForLine(rightLine, "new"), rightLine.text)}
+            </>
+          ) : (
+            " "
+          )}
+        </td>
+      </tr>
+      {leftReviews.map((review) => (
+        <tr key={review.id}>
+          <td colSpan={4}>
+            <SavedCommentRow
+              review={review}
+              deleteLabel={copy.deleteComment}
+              onDelete={() => onDeleteReview(review.id)}
+            />
+          </td>
+        </tr>
+      ))}
+      {editingLeft && (
+        <tr>
+          <td colSpan={4}>
+            <InlineCommentComposer
+              lineLabel={`L${leftNum}`}
+              value={draftComment}
+              onChange={onDraftCommentChange}
+              onSave={onSubmitComment}
+              onCancel={onCancelComment}
+              copy={copy}
+            />
+          </td>
+        </tr>
+      )}
+      {rightReviews.map((review) => (
+        <tr key={review.id}>
+          <td colSpan={4}>
+            <SavedCommentRow
+              review={review}
+              deleteLabel={copy.deleteComment}
+              onDelete={() => onDeleteReview(review.id)}
+            />
+          </td>
+        </tr>
+      ))}
+      {editingRight && (
+        <tr>
+          <td colSpan={4}>
+            <InlineCommentComposer
+              lineLabel={`L${rightNum}`}
+              value={draftComment}
+              onChange={onDraftCommentChange}
+              onSave={onSubmitComment}
+              onCancel={onCancelComment}
+              copy={copy}
+            />
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 

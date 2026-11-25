@@ -21,6 +21,8 @@ const harness = vi.hoisted(() => {
     completeCmd: vi.fn(() => Promise.resolve()),
     onWatchCmd: undefined as undefined | ((event: { id: string }) => void),
     removeWatchCmd: vi.fn(),
+    watchStatus: { supported: true, paired: true, installed: true, reachable: true, independent: false as boolean | undefined },
+    onWatchStatus: undefined as undefined | ((status: { supported: boolean; paired: boolean; installed: boolean; reachable: boolean; independent?: boolean }) => void),
     beginRender() {
       refIdx = 0;
       slotIdx = 0;
@@ -106,9 +108,13 @@ vi.mock("../modules/link-layout", () => ({
     harness.onWatchCmd = listener;
     return () => harness.removeWatchCmd();
   },
-  getNativeWatchStatus: () =>
-    Promise.resolve({ supported: true, paired: true, installed: true, reachable: true }),
-  subscribeNativeWatchStatus: () => () => {},
+  getNativeWatchStatus: () => Promise.resolve(harness.watchStatus),
+  subscribeNativeWatchStatus: (listener: (status: { supported: boolean; paired: boolean; installed: boolean; reachable: boolean; independent?: boolean }) => void) => {
+    harness.onWatchStatus = listener;
+    return () => {
+      if (harness.onWatchStatus === listener) harness.onWatchStatus = undefined;
+    };
+  },
 }));
 
 const {
@@ -971,5 +977,136 @@ describe("Apple Watch client synchronization & command execution", () => {
     } finally {
       harness.resetStateful();
     }
+  });
+
+  it("stops Companion session subscriptions and snapshot streaming when Watch reports independent mode", async () => {
+    const actions = makeActions();
+    const subscribeSession = vi.fn(() => vi.fn());
+    const prevStatus = harness.watchStatus;
+    harness.watchStatus = { supported: true, paired: true, installed: true, reachable: true, independent: true };
+    try {
+      useIOSWatchSync(
+        { computerKey: "mac-1", computerName: "Studio Mac", sessions: [runningSession], terminals: [], online: true },
+        {
+          computerKey: "mac-1",
+          online: true,
+          sessions: { "s-run": runningSession },
+          computers: [{ key: "mac-1", name: "Studio Mac", online: true, selected: true }],
+          selectComputer: vi.fn(),
+          actions,
+          subscribeSession,
+        },
+        true,
+        undefined,
+        false,
+      );
+      const cleanups = harness.effects
+        .map((effect) => effect())
+        .filter((cleanup): cleanup is () => void => typeof cleanup === "function");
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      expect(subscribeSession).not.toHaveBeenCalled();
+      expect(harness.syncWatch).not.toHaveBeenCalled();
+      cleanups.forEach((c) => c());
+    } finally {
+      harness.watchStatus = prevStatus;
+    }
+  });
+
+  it("re-reads live WatchActionContext via getter after ensureOnline reconnect and refresh", async () => {
+    const actions = makeActions();
+    let liveCtx = {
+      computerKey: "mac-1",
+      online: false,
+      sessions: {} as Record<string, SessionSummary>,
+      computers: [{ key: "mac-1", name: "Studio Mac", online: false, selected: true }],
+      selectComputer: vi.fn(),
+      actions,
+      ensureOnline: vi.fn(async () => {
+        // Reconnect hydrates the latest permission state on the live context.
+        liveCtx = {
+          ...liveCtx,
+          online: true,
+          sessions: { "s-wait": waitingSession },
+        };
+        return true;
+      }),
+    };
+
+    const result = await executeWatchCommand(
+      {
+        id: "cmd-reconnect-approve",
+        kind: "action",
+        action: {
+          id: "allow",
+          kind: "permission",
+          label: "允许",
+          role: "allow",
+          computerKey: "mac-1",
+          sessionId: "s-wait",
+          requestId: "req-42",
+          optionId: "allow_once",
+        },
+      },
+      () => liveCtx,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(liveCtx.ensureOnline).toHaveBeenCalledOnce();
+    expect(actions.refresh).toHaveBeenCalledOnce();
+    expect(actions.respond).toHaveBeenCalledWith("s-wait", "req-42", "allow_once");
+  });
+
+  it("guards createWatchSnapshotScheduler with single-flight coalescing so sends never overlap", async () => {
+    let activeSends = 0;
+    let maxConcurrent = 0;
+    const resolvers: Array<(ok: boolean) => void> = [];
+    const send = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          activeSends += 1;
+          maxConcurrent = Math.max(maxConcurrent, activeSends);
+          resolvers.push((ok) => {
+            activeSends -= 1;
+            resolve(ok);
+          });
+        }),
+    );
+
+    const scheduler = createWatchSnapshotScheduler(send);
+    let seq = 1;
+    const build = () =>
+      buildClientWatchSnapshot({
+        computerKey: "mac-1",
+        computerName: "Studio Mac",
+        sessions: [{ ...runningSession, lastSeq: seq, preview: `step-${seq}` }],
+        terminals: [],
+        online: true,
+        now: Date.now(),
+      });
+
+    // First immediate flush starts in-flight send #1.
+    scheduler.schedule(build);
+    expect(send).toHaveBeenCalledTimes(1);
+
+    // Multiple overlapping flushes arrive while #1 is still unresolved: must NOT overlap!
+    seq = 2;
+    const p2 = scheduler.flush();
+    seq = 3;
+    const p3 = scheduler.flush();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(maxConcurrent).toBe(1);
+
+    // Complete send #1 -> scheduler triggers a single coalesced send #2 carrying latest seq=3.
+    resolvers.shift()?.(true);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(maxConcurrent).toBe(1);
+
+    resolvers.shift()?.(true);
+    await Promise.all([p2, p3]);
+    expect(send).toHaveBeenCalledTimes(2);
+    scheduler.dispose();
   });
 });

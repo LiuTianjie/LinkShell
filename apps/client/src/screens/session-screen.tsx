@@ -149,6 +149,7 @@ export function SessionContent({
   navigation = !embedded,
   toolbarActions = [],
   onOpenPanel,
+  onDismiss,
   panelsBeside = false,
   navigationTitle,
   consumedBottomInset = 0,
@@ -161,9 +162,14 @@ export function SessionContent({
   consumedBottomInset?: number;
   toolbarActions?: HeaderAction[];
   onOpenPanel?: (panel: Panel) => void;
+  onDismiss?: () => void;
   panelsBeside?: boolean;
   initialQuickVoice?: boolean;
 }) {
+  const leaveSession = useCallback(() => {
+    if (onDismiss) onDismiss();
+    else if (!embedded) router.back();
+  }, [onDismiss, embedded]);
   const workspace = useSessionWorkspace();
   const folded = useSessionFoldLayout();
   const { locale, speechLocale, t, pick } = useLocale();
@@ -451,7 +457,7 @@ export function SessionContent({
                 en: "It may have been removed on your computer.",
                 ja: "PC 上で削除された可能性があります。",
               })}
-              action={{ title: pick({ zh: "返回", en: "Back", ja: "戻る" }), onPress: () => router.back() }}
+              action={{ title: pick({ zh: "返回", en: "Back", ja: "戻る" }), onPress: leaveSession }}
             />
           ) : (
             <LoadingState label={t("connection.connecting")} />
@@ -807,7 +813,7 @@ export function SessionContent({
                           : { sf: "archivebox", md: "archive" },
                         onPress: () => {
                           void toggleArchived(summary, actions).then((done) => {
-                            if (done && !summary.archived) router.back();
+                            if (done && !summary.archived) leaveSession();
                           });
                         },
                       },
@@ -839,7 +845,7 @@ export function SessionContent({
                         title: t("session.delete"),
                         icon: { sf: "trash", md: "delete" },
                         destructive: true,
-                        onPress: () => confirmDelete(summary, actions, () => router.back()),
+                        onPress: () => confirmDelete(summary, actions, leaveSession),
                       },
                     ],
                   },

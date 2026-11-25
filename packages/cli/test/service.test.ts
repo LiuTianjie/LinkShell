@@ -6,19 +6,29 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  LINUX_GATEWAY_SERVICE_UNIT,
   LINUX_SERVICE_UNIT,
   MACOS_SERVICE_LABEL,
   WINDOWS_TASK_NAME,
   WINDOWS_WRAPPER_NAME,
+  checkLinuxLinger,
+  extractGatewayFromServiceFile,
+  formatCommandFailure,
   getServiceStatus,
   parseLinuxServiceStatus,
+  parseLinuxSystemdShowStatus,
   parseMacServiceStatus,
+  parseSystemdShowProperties,
   parseWindowsServiceStatus,
+  planInstallGatewayService,
   planInstallService,
+  planUninstallGatewayService,
   planUninstallService,
+  restartManagedHostService,
   runInstallService,
   runServiceStatus,
   runUninstallService,
+  stopManagedHostService,
   type CommandResult,
   type ServiceFs,
 } from "../src/commands/service.js";
@@ -125,6 +135,10 @@ describe("service install planning across platforms", () => {
     expect(plan.fileContent).toContain('ExecStart=/usr/bin/node "/opt/link shell/dist/index.js" host --_foreground-host');
     expect(plan.fileContent).toContain("Restart=on-failure");
     expect(plan.fileContent).toContain("RestartSec=3");
+    expect(plan.fileContent).toContain("KillMode=mixed");
+    expect(plan.fileContent).toContain("TimeoutStopSec=15");
+    expect(plan.fileContent).toContain("StartLimitIntervalSec=60");
+    expect(plan.fileContent).toContain("StartLimitBurst=5");
     expect(plan.fileContent).toContain("StandardOutput=append:/var/tmp/linkshell-home/host.log");
     expect(plan.fileContent).toContain("StandardError=append:/var/tmp/linkshell-home/host.log");
     expect(plan.fileContent).toContain('Environment="LINKSHELL_HOME=/var/tmp/linkshell-home"');
@@ -401,12 +415,13 @@ describe("service execution, --dry-run, and uninstall", () => {
     ).resolves.toMatchObject({ serviceName: LINUX_SERVICE_UNIT });
   });
 
-  it("installs, restarts when active, and uninstalls the Linux systemd user service", async () => {
+  it("installs, restarts when active, checks linger, and uninstalls the Linux systemd user service", async () => {
     const tempHome = makeTempDir("lsh-svc-linux-");
     const calls: string[] = [];
-    const runner = vi.fn(async (_command: string, args: string[]): Promise<CommandResult> => {
-      calls.push(args.join(" "));
+    const runner = vi.fn(async (command: string, args: string[]): Promise<CommandResult> => {
+      calls.push(`${command} ${args.join(" ")}`);
       if (args[1] === "is-active") return { exitCode: 0, stdout: "active\n", stderr: "" };
+      if (command === "loginctl" && args[0] === "show-user") return { exitCode: 0, stdout: "yes\n", stderr: "" };
       return { exitCode: 0, stdout: "", stderr: "" };
     });
 
@@ -414,20 +429,23 @@ describe("service execution, --dry-run, and uninstall", () => {
       {
         platform: "linux",
         homeDir: tempHome,
+        user: "alice",
         nodePath: "/usr/bin/node",
         execArgv: [],
         entryScript: "/usr/lib/linkshell/index.js",
-        env: { HOME: tempHome },
+        env: { HOME: tempHome, PATH: "/home/alice/.nvm/versions/node/v22.13.0/bin:/usr/bin:/bin" },
       },
       { runner, stopExistingHost: async () => false, stdout: () => {} },
     );
 
     expect(existsSync(plan.filePath)).toBe(true);
+    expect(plan.fileContent).toContain('Environment="PATH=/home/alice/.nvm/versions/node/v22.13.0/bin:/usr/bin:/bin"');
     expect(calls).toEqual([
-      "--user is-active linkshell-host.service",
-      "--user daemon-reload",
-      "--user enable --now linkshell-host.service",
-      "--user restart linkshell-host.service",
+      "systemctl --user is-active linkshell-host.service",
+      "systemctl --user daemon-reload",
+      "systemctl --user enable --now linkshell-host.service",
+      "systemctl --user restart linkshell-host.service",
+      "loginctl show-user alice -p Linger --value",
     ]);
 
     calls.length = 0;
@@ -438,8 +456,8 @@ describe("service execution, --dry-run, and uninstall", () => {
 
     expect(existsSync(plan.filePath)).toBe(false);
     expect(calls).toEqual([
-      "--user disable --now linkshell-host.service",
-      "--user daemon-reload",
+      "systemctl --user disable --now linkshell-host.service",
+      "systemctl --user daemon-reload",
     ]);
   });
 
@@ -733,5 +751,163 @@ describe("service-status parsing and output", () => {
     // Ensure a stray test file was not created in tempHome
     writeFileSync(join(tempHome, ".keep"), "");
     expect(existsSync(join(tempHome, ".keep"))).toBe(true);
+  });
+
+  it("parses locale-safe systemctl --user show properties, handles linger enable/banner, readiness timeout, and Linux failure hints", async () => {
+    const props = parseSystemdShowProperties(
+      "LoadState=loaded\nActiveState=active\nSubState=running\nUnitFileState=enabled\nMainPID=5150\nExecMainStatus=0\n",
+    );
+    expect(props).toMatchObject({ LoadState: "loaded", ActiveState: "active", MainPID: "5150" });
+
+    const unit = "/home/alice/.config/systemd/user/linkshell-host.service";
+    const parsed = parseLinuxSystemdShowStatus(
+      true,
+      {
+        exitCode: 0,
+        stdout: "LoadState=loaded\nActiveState=active\nSubState=running\nUnitFileState=enabled\nMainPID=5150\nExecMainStatus=0\n",
+        stderr: "",
+      },
+      unit,
+      false,
+    );
+    expect(parsed).toEqual({
+      platform: "linux",
+      serviceName: LINUX_SERVICE_UNIT,
+      filePath: unit,
+      installed: true,
+      loaded: true,
+      running: true,
+      enabled: true,
+      pid: 5150,
+      linger: false,
+      state: "running",
+    });
+
+    // Linger fallback to /var/lib/systemd/linger/<user> when loginctl fails
+    expect(
+      await checkLinuxLinger({
+        user: "alice",
+        runner: async () => ({ exitCode: 1, stdout: "", stderr: "no loginctl" }),
+        fs: { existsSync: (p) => p === "/var/lib/systemd/linger/alice" },
+      }),
+    ).toBe(true);
+
+    // Linger denied during runInstallService prints actionable sudo loginctl enable-linger banner
+    const tempHome = makeTempDir("lsh-svc-linger-");
+    let out = "";
+    const runner = vi.fn(async (cmd: string, args: string[]): Promise<CommandResult> => {
+      if (cmd === "systemctl" && args[1] === "is-active") return { exitCode: 3, stdout: "inactive\n", stderr: "" };
+      if (cmd === "loginctl" && args[0] === "show-user") return { exitCode: 0, stdout: "no\n", stderr: "" };
+      if (cmd === "loginctl" && args[0] === "enable-linger") return { exitCode: 1, stdout: "", stderr: "Access denied" };
+      return { exitCode: 0, stdout: "", stderr: "" };
+    });
+    await runInstallService(
+      { platform: "linux", homeDir: tempHome, user: "alice", entryScript: "/usr/bin/linkshell", env: { HOME: tempHome } },
+      { runner, stopExistingHost: async () => false, waitForHostReady: async () => true, stdout: (t) => { out += t; } },
+    );
+    expect(out).toContain("sudo loginctl enable-linger alice");
+
+    // Readiness wait timeout surfaces clear journalctl guidance
+    await expect(
+      runInstallService(
+        { platform: "linux", homeDir: tempHome, user: "alice", entryScript: "/usr/bin/linkshell", env: { HOME: tempHome } },
+        { runner, stopExistingHost: async () => false, waitForHostReady: async () => false, stdout: () => {} },
+      ),
+    ).rejects.toThrow(/journalctl --user -u linkshell-host\.service/);
+
+    // Clear Linux systemd failure hints
+    expect(
+      formatCommandFailure(
+        { command: "systemctl", args: ["--user", "daemon-reload"] },
+        { exitCode: 1, stdout: "", stderr: "Failed to connect to bus: No medium found" },
+      ),
+    ).toContain("XDG_RUNTIME_DIR");
+
+    expect(
+      formatCommandFailure(
+        { command: "systemctl", args: ["--user", "daemon-reload"] },
+        { exitCode: 1, stdout: "", stderr: "System has not been booted with systemd as init system" },
+      ),
+    ).toContain("linkshell host --daemon");
+  });
+
+  it("stops and restarts systemd-managed host services cleanly while refreshing changed unit files", async () => {
+    const tempHome = makeTempDir("lsh-svc-lifecycle-");
+    const unitPath = join(tempHome, ".config", "systemd", "user", LINUX_SERVICE_UNIT);
+    const files = new Map<string, string>([
+      [
+        unitPath,
+        '[Unit]\nDescription=LinkShell Host\n\n[Service]\nExecStart=/old/node /old/index.js host --_foreground-host\nEnvironment="LINKSHELL_GATEWAY=wss://self.example"\n',
+      ],
+    ]);
+    const fsMock: ServiceFs = {
+      existsSync: (p) => files.has(p),
+      mkdirSync: () => {},
+      readFileSync: (p) => files.get(p) ?? "",
+      writeFileSync: (p, data) => { files.set(p, data); },
+      rmSync: (p) => { files.delete(p); },
+    };
+    const calls: string[] = [];
+    const runner = vi.fn(async (cmd: string, args: string[]): Promise<CommandResult> => {
+      calls.push(`${cmd} ${args.join(" ")}`);
+      if (cmd === "systemctl" && args[1] === "show") {
+        return {
+          exitCode: 0,
+          stdout: "LoadState=loaded\nActiveState=active\nSubState=running\nUnitFileState=enabled\nMainPID=2222\nExecMainStatus=0\n",
+          stderr: "",
+        };
+      }
+      if (cmd === "loginctl") return { exitCode: 0, stdout: "yes\n", stderr: "" };
+      return { exitCode: 0, stdout: "", stderr: "" };
+    });
+
+    expect(extractGatewayFromServiceFile("linux", files.get(unitPath)!)).toBe("wss://self.example");
+
+    const restartOutcome = await restartManagedHostService(
+      {
+        platform: "linux",
+        homeDir: tempHome,
+        nodePath: "/new/node",
+        execArgv: [],
+        entryScript: "/new/index.js",
+        env: { HOME: tempHome, PATH: "/new:/usr/bin" },
+      },
+      { fs: fsMock, runner, waitForHostReady: async () => true },
+    );
+    expect(restartOutcome).toBe("restarted");
+    expect(files.get(unitPath)).toContain("ExecStart=/new/node /new/index.js host --_foreground-host");
+    expect(files.get(unitPath)).toContain('Environment="LINKSHELL_GATEWAY=wss://self.example"');
+    expect(calls).toContain("systemctl --user daemon-reload");
+    expect(calls).toContain("systemctl --user restart linkshell-host.service");
+
+    calls.length = 0;
+    const stopOutcome = await stopManagedHostService(
+      { platform: "linux", homeDir: tempHome, entryScript: "/new/index.js", env: { HOME: tempHome } },
+      { fs: fsMock, runner },
+    );
+    expect(stopOutcome).toBe("stopped");
+    expect(calls).toContain("systemctl --user stop linkshell-host.service");
+
+    // Gateway systemd unit planning
+    const gwPlan = planInstallGatewayService({
+      platform: "linux",
+      homeDir: "/home/alice",
+      nodePath: "/usr/bin/node",
+      execArgv: [],
+      entryScript: "/usr/lib/linkshell/index.js",
+      port: 9000,
+      host: "127.0.0.1",
+      env: { HOME: "/home/alice", PATH: "/usr/bin" },
+    });
+    expect(gwPlan.serviceName).toBe(LINUX_GATEWAY_SERVICE_UNIT);
+    expect(gwPlan.fileContent).toContain("gateway --_foreground-gw --port 9000 --host 127.0.0.1");
+    expect(gwPlan.fileContent).toContain("KillMode=mixed");
+    const gwUninstall = planUninstallGatewayService({
+      platform: "linux",
+      homeDir: "/home/alice",
+      entryScript: "/usr/lib/linkshell/index.js",
+      env: { HOME: "/home/alice" },
+    });
+    expect(gwUninstall.serviceName).toBe(LINUX_GATEWAY_SERVICE_UNIT);
   });
 });

@@ -238,6 +238,8 @@ export interface ClientStoreOptions {
   lazyImages?: boolean;
   /** How many characters of pictures to keep in memory (default 24 MB). */
   imageCacheChars?: number;
+  /** Maximum number of closed session views to keep cached in memory (default 12). */
+  maxClosedViews?: number;
 }
 
 function defaultId(): string {
@@ -263,7 +265,10 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
   let flushTimer: ReturnType<typeof setTimeout> | undefined;
   // A subscription's backlog can span many socket frames. Keep it off screen until its
   // response arrives; cached messages remain readable while this snapshot is assembled.
-  const replaying = new Map<string, { events: SessionEvent[]; startSeq?: number }>();
+  const replaying = new Map<string, { events: SessionEvent[]; seqs: Map<number, number>; startSeq?: number }>();
+  // Closed session views kept warm for quick switching, ordered oldest -> most recently closed.
+  const closedViews = new Set<string>();
+  const maxClosedViews = Math.max(0, options.maxClosedViews ?? 12);
   const earlierRequests = new Map<string, symbol>();
   const cancelEarlier = (sessionId: string) => {
     earlierRequests.delete(sessionId);
@@ -345,6 +350,40 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
     store.setState((state) => applyBatch(state, batch));
   };
 
+  // What this device's queued messages said, to edit one (the host's queue only lists text).
+  const queuedContent = new Map<string, ContentBlock[]>();
+  const rememberQueued = (clientMessageId: string, content: ContentBlock[]) => {
+    queuedContent.set(clientMessageId, content);
+    if (queuedContent.size > 50) queuedContent.delete(queuedContent.keys().next().value as string);
+  };
+
+  /** Removes outbox entries that the host's authoritative `summary.queue` already confirmed. */
+  const clearQueuedOutbox = (
+    outboxIn: ClientState["outbox"],
+    viewsIn: ClientState["views"],
+    summary: SessionSummary,
+  ): { outbox: ClientState["outbox"]; views: ClientState["views"] } => {
+    let outbox = outboxIn;
+    let views = viewsIn;
+    if (!summary.queue?.length) return { outbox, views };
+    for (const entry of summary.queue) {
+      const queuedId = entry.clientMessageId;
+      const pendingEntry = outbox[queuedId];
+      if (!pendingEntry || pendingEntry.sessionId !== summary.id) continue;
+      if (outbox === outboxIn) outbox = { ...outboxIn };
+      delete outbox[queuedId];
+      outboxCreatedAt.delete(queuedId);
+      dismissedOutbox.add(queuedId);
+      rememberQueued(queuedId, pendingEntry.content);
+      const currentView = views[summary.id];
+      if (currentView && currentView.index[`local-${queuedId}`] !== undefined) {
+        const nextView = removeItem(currentView, `local-${queuedId}`);
+        if (nextView !== currentView) views = { ...views, [summary.id]: nextView };
+      }
+    }
+    return { outbox, views };
+  };
+
   /**
    * A session's subscription was answered: the host sends the whole backlog
    * first, so apply it, then the session can show.
@@ -357,13 +396,23 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
     replaying.delete(sessionId);
     store.setState((state) => {
       const snapshot = applyBatch(state, replay?.events ?? [], replay?.startSeq === undefined ? undefined : { sessionId, startSeq: replay.startSeq });
+      const baseViews = "views" in snapshot ? snapshot.views : state.views;
+      const baseOutbox = "outbox" in snapshot && snapshot.outbox ? snapshot.outbox : state.outbox;
+      const cleared = clearQueuedOutbox(baseOutbox, baseViews, summary);
       let promptProgress = snapshot.promptProgress;
       // After reconnecting, an authoritative snapshot replaces any old local wait.
       if (restored && promptProgress[sessionId]?.phase !== "sending") {
         promptProgress = { ...promptProgress };
         delete promptProgress[sessionId];
       }
-      return { ...snapshot, promptProgress, sessions: { ...state.sessions, [sessionId]: summary }, ready: { ...state.ready, [sessionId]: true } };
+      return {
+        ...snapshot,
+        ...(cleared.views === baseViews ? {} : { views: cleared.views }),
+        ...(cleared.outbox === baseOutbox ? {} : { outbox: cleared.outbox }),
+        promptProgress,
+        sessions: { ...state.sessions, [sessionId]: summary },
+        ready: { ...state.ready, [sessionId]: true },
+      };
     });
     void store.getState().loadTasks(sessionId).catch(() => {});
   };
@@ -383,13 +432,6 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
   // Sub-agent conversations being fetched: live events that arrive meanwhile are applied after.
   const loadingSubagents = new Map<string, SessionEvent[]>();
 
-  // What this device's queued messages said, to edit one (the host's queue only lists text).
-  const queuedContent = new Map<string, ContentBlock[]>();
-  const rememberQueued = (clientMessageId: string, content: ContentBlock[]) => {
-    queuedContent.set(clientMessageId, content);
-    if (queuedContent.size > 50) queuedContent.delete(queuedContent.keys().next().value as string);
-  };
-
   // Pictures already fetched, most recently used last.
   const images = new Map<string, Promise<string>>();
   const imageSizes = new Map<string, number>();
@@ -403,6 +445,7 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
   /** A deleted session: gone from every list and view. */
   function forget(sessionId: string): void {
     replaying.delete(sessionId);
+    closedViews.delete(sessionId);
     earlierRequests.delete(sessionId);
     store.setState((state) => {
       const without = <T,>(record: Record<string, T>) => {
@@ -503,6 +546,7 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
         flushEvents();
         finish();
         if (!(clientMessageId in get().outbox)) {
+          if (get().sessions[pending.sessionId]?.queue?.some((entry) => entry.clientMessageId === clientMessageId)) return "queued" as const;
           const view = get().views[pending.sessionId];
           const idx = view?.index[`local-${clientMessageId}`];
           const item = idx === undefined ? undefined : view?.items[idx];
@@ -598,6 +642,7 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
 
       openSession(sessionId) {
         if (get().open[sessionId]) return;
+        closedViews.delete(sessionId);
         set((state) => ({
           open: { ...state.open, [sessionId]: true },
           views: state.views[sessionId] ? state.views : { ...state.views, [sessionId]: emptyView(sessionId) },
@@ -613,12 +658,27 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
         replaying.delete(sessionId);
         cancelEarlier(sessionId);
         link.unsubscribe(sessionId);
+        closedViews.delete(sessionId);
+        closedViews.add(sessionId);
         set((state) => {
           const open = { ...state.open };
           delete open[sessionId];
           const ready = { ...state.ready };
           delete ready[sessionId];
-          return { open, ready };
+          let views = state.views;
+          if (closedViews.size > maxClosedViews) {
+            const outboxSessions = new Set(Object.values(state.outbox).map((entry) => entry.sessionId));
+            for (const candidate of [...closedViews]) {
+              if (closedViews.size <= maxClosedViews) break;
+              if (open[candidate] || outboxSessions.has(candidate) || state.promptProgress[candidate]) continue;
+              closedViews.delete(candidate);
+              if (candidate in views) {
+                if (views === state.views) views = { ...state.views };
+                delete views[candidate];
+              }
+            }
+          }
+          return views === state.views ? { open, ready } : { open, ready, views };
         });
       },
 
@@ -669,7 +729,12 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
         const pending = get().outbox[clientMessageId];
         if (!pending) return;
         updateView(pending.sessionId, (view) => addOptimisticMessage(view, clientMessageId, pending.content));
-        await deliver(clientMessageId);
+        const delivery = await deliver(clientMessageId);
+        // If the retried prompt queued behind an active turn, drop the optimistic timeline bubble
+        // so it shows only in `summary.queue` instead of sticking around as a ghost `pending` bubble.
+        if (delivery === "queued") {
+          updateView(pending.sessionId, (view) => removeItem(view, `local-${clientMessageId}`));
+        }
       },
 
       discard(clientMessageId) {
@@ -1110,7 +1175,7 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
     if (!store.getState().open[sessionId]) return;
     cancelEarlier(sessionId);
     if (store.getState().open[sessionId] && !store.getState().ready[sessionId]) {
-      replaying.set(sessionId, { startSeq, events: [] });
+      replaying.set(sessionId, { startSeq, events: [], seqs: new Map() });
       return;
     }
     flushEvents();
@@ -1129,7 +1194,13 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
         promptProgress = { ...promptProgress };
         delete promptProgress[summary.id];
       }
-      return { sessions: { ...state.sessions, [summary.id]: summary }, promptProgress };
+      const cleared = clearQueuedOutbox(state.outbox, state.views, summary);
+      return {
+        sessions: { ...state.sessions, [summary.id]: summary },
+        promptProgress,
+        ...(cleared.outbox === state.outbox ? {} : { outbox: cleared.outbox }),
+        ...(cleared.views === state.views ? {} : { views: cleared.views }),
+      };
     });
   });
   // Only live events animate as they arrive. A history replay becomes one ready snapshot.
@@ -1140,8 +1211,14 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
     if (!state.open[event.sessionId]) return;
     if (!state.ready[event.sessionId]) {
       let replay = replaying.get(event.sessionId);
-      if (!replay) replaying.set(event.sessionId, (replay = { events: [] }));
-      replay.events.push(event);
+      if (!replay) replaying.set(event.sessionId, (replay = { events: [], seqs: new Map() }));
+      // Deduplicate by seq so subscribe retries never double-buffer the same replay backlog.
+      const existing = replay.seqs.get(event.seq);
+      if (existing !== undefined) replay.events[existing] = event;
+      else {
+        replay.seqs.set(event.seq, replay.events.length);
+        replay.events.push(event);
+      }
       return;
     }
     pending.push(event);

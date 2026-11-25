@@ -10,6 +10,22 @@ import { RpcError, type TerminalInfo } from "@linkshell/wire";
 import type { HostStore, TerminalRecord } from "./store.js";
 import { TerminalState } from "./terminal-state.js";
 import { trackPid } from "./children.js";
+import { resolveDefaultShell } from "./shell-env.js";
+
+/**
+ * Default UTF-8 locale when the host environment omitted one. On minimal Linux
+ * containers `en_US.UTF-8` is frequently not generated, whereas `C.UTF-8` is.
+ */
+export function defaultTerminalLocale(
+  env: Record<string, string | undefined>,
+  platform: NodeJS.Platform = process.platform,
+): string | undefined {
+  if (platform === "linux") {
+    if (env.LANG || env.LC_ALL) return env.LANG;
+    return "C.UTF-8";
+  }
+  return env.LANG ?? "en_US.UTF-8";
+}
 
 // Plain shells on the host, kept open while devices come and go: any command,
 // like an SSH session that survives the phone locking.
@@ -25,6 +41,8 @@ const { Terminal: ScreenMirror } = xtermHeadless;
 
 /** Screen history kept per terminal for redraws. */
 const BUFFER_BYTES = 1024 * 1024;
+/** Hard memory ceiling if async xterm parsing lags behind a burst (never evicts parsed chunks before this). */
+const MAX_UNPARSED_BUFFER_BYTES = 4 * BUFFER_BYTES;
 /** Scrollback kept by the mirror, and sent to a device opening the terminal. */
 const SCROLLBACK = 2000;
 /** Scrollback saved, so an ended terminal can still be read. */
@@ -76,6 +94,8 @@ class Terminal {
   private readonly serializer = new SerializeAddon();
   /** The last chunk the mirror has parsed (it parses asynchronously). */
   private parsedSeq = 0;
+  /** The `seq` at the latest resize; clients behind this must receive a reset snapshot. */
+  private resizeSeq = 0;
   private state?: TerminalState;
   private stateSnapshot?: { frame: number; cols: number; rows: number; data: string };
 
@@ -189,8 +209,8 @@ class Terminal {
     this.flushFrames();
     this.listeners.add(listener);
     const first = this.chunks[0]?.seq ?? this.seq + 1;
-    // Everything after fromSeq is still here: send just that.
-    if (fromSeq !== undefined && fromSeq <= this.seq && fromSeq >= first - 1) {
+    // Everything after fromSeq is still here and no resize happened in between: send just that.
+    if (fromSeq !== undefined && fromSeq <= this.seq && fromSeq >= first - 1 && fromSeq >= this.resizeSeq) {
       return { replay: this.chunks.filter((chunk) => chunk.seq > fromSeq).map((chunk) => chunk.data).join(""), reset: false, seq: this.seq };
     }
     return { replay: this.snapshot(), reset: true, seq: this.seq };
@@ -210,9 +230,18 @@ class Terminal {
     this.flush();
     this.cols = cols;
     this.rows = rows;
+    this.resizeSeq = this.seq;
     this.recordFrame("");
     this.pty.resize(cols, rows);
-    this.mirror.resize(cols, rows);
+    // Keep xterm-headless resize ordered after any queued async writes so pre-resize chunks
+    // are parsed at the geometry they were produced for.
+    if (this.parsedSeq >= this.seq) {
+      this.mirror.resize(cols, rows);
+    } else {
+      this.mirror.write("", () => {
+        if (!this.closed) this.mirror.resize(cols, rows);
+      });
+    }
     try { this.state?.resize(cols, rows); }
     catch { this.state?.dispose(); this.state = undefined; this.stateSnapshot = undefined; }
   }
@@ -270,10 +299,23 @@ class Terminal {
         console.warn("Terminal snapshot mirror unavailable:", error instanceof Error ? error.message : error);
         this.state?.dispose(); this.state = undefined; this.stateSnapshot = undefined;
       }
-      this.mirror.write(chunk.data, () => { this.parsedSeq = chunk.seq; });
+      this.mirror.write(chunk.data, () => {
+        this.parsedSeq = chunk.seq;
+        this.trimChunks();
+      });
       this.bytes += chunk.data.length;
-      while (this.bytes > BUFFER_BYTES && this.chunks.length > 1) this.bytes -= this.chunks.shift()!.data.length;
+      this.trimChunks();
       for (const listener of this.listeners) listener(chunk.seq, chunk.data, { frame: this.frame, cols: this.cols, rows: this.rows });
+    }
+  }
+
+  /** Never evict chunks the async mirror hasn't parsed yet (up to a hard ceiling) so snapshot() has no gap. */
+  private trimChunks(): void {
+    while (this.bytes > BUFFER_BYTES && this.chunks.length > 1 && this.chunks[0]!.seq <= this.parsedSeq) {
+      this.bytes -= this.chunks.shift()!.data.length;
+    }
+    while (this.bytes > MAX_UNPARSED_BUFFER_BYTES && this.chunks.length > 1) {
+      this.bytes -= this.chunks.shift()!.data.length;
     }
   }
 
@@ -351,7 +393,8 @@ export class TerminalManager {
       for (const terminal of this.terminals.values()) {
         // The foreground process ("vim", "npm") is the most useful name for a terminal.
         if (terminal.refreshTitle()) this.emit(terminal.info());
-        if (terminal.dirty && Date.now() - terminal.activeAt < 60_000) this.save(terminal);
+        // Always flush dirty snapshots even after >60s idle or laptop sleep (`save` clears `dirty`).
+        if (terminal.dirty) this.save(terminal);
       }
     }, SAVE_EVERY_MS);
     this.timer.unref();
@@ -386,11 +429,12 @@ export class TerminalManager {
     const cwd = options.cwd ?? homedir();
     if (!existsSync(cwd) || !statSync(cwd).isDirectory()) throw RpcError.app("invalid_params", `找不到文件夹：${cwd}`);
     const base = this.env ?? process.env;
-    const shell = options.launch?.command ?? (process.platform === "win32" ? "powershell.exe" : base.SHELL || "/bin/zsh");
+    const shell = options.launch?.command ?? resolveDefaultShell(base);
     const env: Record<string, string> = {};
     for (const [key, value] of Object.entries(base)) if (value !== undefined) env[key] = value;
     Object.assign(env, { TERM: "xterm-256color", COLORTERM: "truecolor", TERM_PROGRAM: "LinkShell" });
-    env.LANG ??= "en_US.UTF-8";
+    const locale = defaultTerminalLocale(env);
+    if (locale !== undefined) env.LANG = locale;
     // Let Claude Code use its DECSTBM renderer, which scrolls the transcript
     // with scroll regions (SU/SD) instead of repainting whole rows. The phone's
     // ghostty core animates those region scrolls with a short ease, so a

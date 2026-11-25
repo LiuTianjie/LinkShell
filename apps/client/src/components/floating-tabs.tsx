@@ -1,6 +1,6 @@
 import { BlurTargetView, BlurView } from "expo-blur";
 import { TabList, TabSlot, Tabs, TabTrigger, type TabTriggerSlotProps } from "expo-router/ui";
-import { forwardRef, useEffect, useRef, useState } from "react";
+import { createContext, forwardRef, use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Platform, Pressable, useColorScheme, View, type View as RNView } from "react-native";
 import { Text } from "@/components/fixed-text";
 import Animated, { Easing, ReduceMotion, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
@@ -18,6 +18,26 @@ export const TAB_BAR_HEIGHT = 64;
 const SIDE_MARGIN = 24;
 const GAP_BELOW = 10;
 
+interface FloatingTabsVisibility {
+  hidden: boolean;
+  setHidden(owner: object, hidden: boolean): void;
+}
+
+const FloatingTabsVisibilityContext = createContext<FloatingTabsVisibility | null>(null);
+
+/** Hide the Android floating capsule while a full-screen detail pane covers a tab (e.g. folded mid-session). */
+export function useHideFloatingTabs(hidden: boolean) {
+  const ctx = use(FloatingTabsVisibilityContext);
+  const owner = useRef({}).current;
+  useEffect(() => {
+    if (!ctx) return;
+    ctx.setHidden(owner, hidden);
+    return () => {
+      ctx.setHidden(owner, false);
+    };
+  }, [ctx, owner, hidden]);
+}
+
 /**
  * iOS's native tab bar above the home indicator. A list that doesn't let the system inset it
  * (contentInsetAdjustmentBehavior "never") leaves this, plus the safe area, itself.
@@ -27,7 +47,9 @@ export const IOS_TAB_BAR_HEIGHT = 49;
 /** Space scroll views should leave under their content for the floating bar. */
 export function useFloatingTabInset(): number {
   const insets = useSafeAreaInsets();
-  return Platform.OS === "ios" ? 0 : TAB_BAR_HEIGHT + GAP_BELOW + insets.bottom + 8;
+  const ctx = use(FloatingTabsVisibilityContext);
+  if (Platform.OS === "ios" || ctx?.hidden) return 0;
+  return TAB_BAR_HEIGHT + GAP_BELOW + insets.bottom + 8;
 }
 
 export interface FloatingTab {
@@ -161,39 +183,61 @@ function Capsule({ tabs, focused, blurTarget }: { tabs: FloatingTab[]; focused: 
 
 /** Headless expo-router tabs with the floating capsule. */
 export function FloatingTabs({ tabs }: { tabs: FloatingTab[] }) {
+  // Subscribe to scheme changes so Android literal colors refresh without remounting the tab tree.
+  useColorScheme();
   const insets = useSafeAreaInsets();
   const target = useRef<RNView | null>(null);
   const [focused, setFocused] = useState(0);
+  const hiddenOwners = useRef(new Set<object>());
+  const [hidden, setHiddenState] = useState(false);
+
+  const setHidden = useCallback((owner: object, nextHidden: boolean) => {
+    const had = hiddenOwners.current.has(owner);
+    if (nextHidden === had) return;
+    if (nextHidden) hiddenOwners.current.add(owner);
+    else hiddenOwners.current.delete(owner);
+    setHiddenState(hiddenOwners.current.size > 0);
+  }, []);
+
+  const visibility = useMemo<FloatingTabsVisibility>(() => ({ hidden, setHidden }), [hidden, setHidden]);
+  const sideLeft = Math.max(SIDE_MARGIN, insets.left + 12);
+  const sideRight = Math.max(SIDE_MARGIN, insets.right + 12);
 
   return (
-    <Tabs style={{ flex: 1 }}>
-      {/* The blur target takes no colour props; the page colour lives inside it. */}
-      <BlurTargetView ref={target} style={{ flex: 1 }}>
-        <View style={{ flex: 1, backgroundColor: colors.background }}>
-          <TabSlot />
-        </View>
-      </BlurTargetView>
-      <TabList
-        style={{
-          position: "absolute",
-          left: SIDE_MARGIN,
-          right: SIDE_MARGIN,
-          bottom: insets.bottom + GAP_BELOW,
-          height: TAB_BAR_HEIGHT,
-          flexDirection: "row",
-          paddingHorizontal: 6,
-        }}
-      >
-        <View pointerEvents="none" style={{ position: "absolute", inset: 0 }}>
-          <Capsule tabs={tabs} focused={focused} blurTarget={target} />
-        </View>
-        {tabs.map((tab, index) => (
-          <TabTrigger key={tab.name} name={tab.name} href={tab.href as never} asChild>
-            <FocusReporter tab={tab} onFocused={() => setFocused(index)} />
-          </TabTrigger>
-        ))}
-      </TabList>
-    </Tabs>
+    <FloatingTabsVisibilityContext value={visibility}>
+      <Tabs style={{ flex: 1 }}>
+        {/* The blur target takes no colour props; the page colour lives inside it. */}
+        <BlurTargetView ref={target} style={{ flex: 1 }}>
+          <View style={{ flex: 1, backgroundColor: colors.background }}>
+            <TabSlot />
+          </View>
+        </BlurTargetView>
+        <TabList
+          pointerEvents={hidden ? "none" : "auto"}
+          accessibilityElementsHidden={hidden}
+          importantForAccessibility={hidden ? "no-hide-descendants" : "auto"}
+          style={{
+            position: "absolute",
+            left: sideLeft,
+            right: sideRight,
+            bottom: insets.bottom + GAP_BELOW,
+            height: TAB_BAR_HEIGHT,
+            flexDirection: "row",
+            paddingHorizontal: 6,
+            display: hidden ? "none" : "flex",
+          }}
+        >
+          <View pointerEvents="none" style={{ position: "absolute", inset: 0 }}>
+            <Capsule tabs={tabs} focused={focused} blurTarget={target} />
+          </View>
+          {tabs.map((tab, index) => (
+            <TabTrigger key={tab.name} name={tab.name} href={tab.href as never} asChild>
+              <FocusReporter tab={tab} onFocused={() => setFocused(index)} />
+            </TabTrigger>
+          ))}
+        </TabList>
+      </Tabs>
+    </FloatingTabsVisibilityContext>
   );
 }
 

@@ -9,9 +9,9 @@ import { useIOSWatchSync } from "@/lib/watch-sync";
 
 /** Also mounted on cold launches straight from an activity. */
 export function IOSAttentionSync() {
-  const { computer } = useConnection();
   useLiveActivityPush();
-  return <ComputerAttentionSync key={computer.key} />;
+  // Never key by `computer.key`: unmounting mid-Watch-command aborts replies and tears down schedulers.
+  return <ComputerAttentionSync />;
 }
 
 function ComputerAttentionSync() {

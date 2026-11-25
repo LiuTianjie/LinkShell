@@ -208,3 +208,37 @@ test('C# 5 static validator catches forbidden C# 6+ constructs while ignoring co
   `;
   assert.deepEqual(findCSharp6PlusViolations(validCSharp5), []);
 });
+
+test('Windows native helpers maintain multi-GPU, dynamic display, monotonic tick, COM release and PerMonitorV2 invariants', () => {
+  const read = name => readFileSync(resolve('src', name), 'utf8');
+  const screen = read('Screen.cs');
+  assert.match(screen, /\bEnumDisplayMonitors\b/);
+  assert.match(screen, /Write\(EnumerateDisplays\(\)\.Select/);
+  assert.match(screen, /SetStretchBltMode\(dc,\s*4\)/);
+
+  const videoCapture = read('VideoCapture.cs');
+  assert.match(videoCapture, /LINKSHELL_WINDOWS_PROFILE/);
+  assert.match(videoCapture, /Math\.Min\(2560,\s*width\)/);
+  assert.match(videoCapture, /16000000/);
+  assert.match(videoCapture, /flags=bicubic/);
+  assert.match(videoCapture, /scale_d3d11=width=.*:format=nv12/);
+  assert.match(videoCapture, /-bufsize "\s*\+\s*\(bitrate \/ 2\)/);
+  assert.doesNotMatch(videoCapture, /-force_key_frames/);
+  assert.doesNotMatch(videoCapture, /-header_spacing\s+1/);
+
+  const dxgi = read('DesktopDuplication.cs');
+  assert.match(dxgi, /\bCreateDXGIFactory1\b/);
+  assert.match(dxgi, /\bEnumAdapters1\b/);
+
+  const fusion = read('Fusion.cs');
+  assert.doesNotMatch(fusion, /\bEnvironment\.TickCount\b/);
+  assert.doesNotMatch(fusion, /\bEnvironment\.TickCount64\b/);
+  assert.match(fusion, /\bFinalReleaseComObject\b/);
+
+  const installerEngine = read('InstallerEngine.cs');
+  assert.match(installerEngine, /\bQueryFullProcessImageNameW\b/);
+  assert.match(installerEngine, /catch\s*\(Win32Exception\)/);
+
+  const manifest = read('app.manifest');
+  assert.match(manifest, /PerMonitorV2/);
+});

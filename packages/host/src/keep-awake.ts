@@ -23,10 +23,15 @@ export interface KeepAwakeAssertion {
   readonly alive: boolean;
 }
 
+export interface KeepAwakeExitInfo {
+  permanent?: boolean;
+  reason?: string;
+}
+
 export type SpawnAssertion = (
   platform: NodeJS.Platform,
   pid: number,
-  onUnexpectedExit: () => void,
+  onUnexpectedExit: (info?: KeepAwakeExitInfo) => void,
   log: (message: string) => void,
 ) => KeepAwakeAssertion | undefined;
 
@@ -102,33 +107,72 @@ export function keepAwakeCommand(platform: NodeJS.Platform, pid = process.pid): 
   return undefined;
 }
 
+/**
+ * Detects environments where Linux `systemd-inhibit` cannot work (Docker, WSL2 without systemd,
+ * missing D-Bus session/logind) so KeepAwakeManager latches unavailable instead of spamming logs.
+ */
+export function isPermanentKeepAwakeExit(
+  platform: NodeJS.Platform,
+  code: number | null,
+  stderr: string,
+  lifetimeMs: number,
+): boolean {
+  if (platform !== "linux") return false;
+  if (code === null || code === 0) return false;
+  if (code === 127) return true;
+  if (/d-?bus|connect to .*bus|systemd|not been booted|org\.freedesktop\.login1|failed to inhibit/i.test(stderr)) {
+    return true;
+  }
+  return lifetimeMs < 2_000;
+}
+
 export const defaultSpawnAssertion: SpawnAssertion = (platform, pid, onUnexpectedExit, log) => {
   const spec = keepAwakeCommand(platform, pid);
-  if (!spec) return undefined;
+  if (!spec) {
+    onUnexpectedExit({ permanent: true, reason: `unsupported platform ${platform}` });
+    return undefined;
+  }
+  const spawnedAt = Date.now();
   let child: ChildProcess;
   try {
     child = spawn(spec.command, spec.args, {
-      stdio: spec.stdinPipe ? ["pipe", "ignore", "ignore"] : "ignore",
+      stdio: spec.stdinPipe ? ["pipe", "ignore", platform === "linux" ? "pipe" : "ignore"] : "ignore",
       windowsHide: true,
     });
   } catch (error) {
-    log(`[keep-awake] failed to spawn ${spec.command}: ${error instanceof Error ? error.message : String(error)}`);
+    const permanent = (error as NodeJS.ErrnoException).code === "ENOENT";
+    const reason = error instanceof Error ? error.message : String(error);
+    log(`[keep-awake] failed to spawn ${spec.command}: ${reason}${permanent ? "; disabling keep-awake for this session" : ""}`);
+    if (permanent) onUnexpectedExit({ permanent: true, reason });
     return undefined;
   }
   trackChild(child, "keep-awake", spec.command, spec.args, false);
   child.unref();
+  let stderrBuf = "";
+  child.stderr?.on("data", (chunk: Buffer) => {
+    if (stderrBuf.length < 1024) stderrBuf = (stderrBuf + chunk.toString("utf8")).slice(0, 1024);
+  });
   let released = false;
   let alive = true;
-  const markGone = () => {
+  const markGone = (info?: KeepAwakeExitInfo) => {
     if (!alive) return;
     alive = false;
-    if (!released) onUnexpectedExit();
+    if (!released) onUnexpectedExit(info);
   };
   child.once("error", (error) => {
-    log(`[keep-awake] ${spec.command} unavailable: ${error.message}`);
+    const permanent = (error as NodeJS.ErrnoException).code === "ENOENT";
+    log(`[keep-awake] ${spec.command} unavailable: ${error.message}${permanent ? "; disabling keep-awake for this session" : ""}`);
+    markGone({ permanent, reason: error.message });
+  });
+  child.once("exit", (code) => {
+    if (!released && isPermanentKeepAwakeExit(platform, code, stderrBuf, Date.now() - spawnedAt)) {
+      const detail = stderrBuf.trim() || `exit ${code}`;
+      log(`[keep-awake] ${spec.command} unavailable (${detail}); disabling keep-awake for this session`);
+      markGone({ permanent: true, reason: detail });
+      return;
+    }
     markGone();
   });
-  child.once("exit", markGone);
   return {
     get alive() {
       return alive;
@@ -182,6 +226,7 @@ export class KeepAwakeManager {
   private mode: KeepAwakeMode;
   private assertion?: KeepAwakeAssertion;
   private currentReason?: string;
+  private unavailable = false;
   private stopped = false;
   private readonly platform: NodeJS.Platform;
   private readonly pid: number;
@@ -194,6 +239,10 @@ export class KeepAwakeManager {
     this.pid = options.pid ?? process.pid;
     this.spawnAssertion = options.spawnAssertion ?? defaultSpawnAssertion;
     this.log = options.log ?? (() => {});
+  }
+
+  get isUnavailable(): boolean {
+    return this.unavailable;
   }
 
   start(): void {
@@ -220,12 +269,13 @@ export class KeepAwakeManager {
     const reason = demandReason(this.mode, this.options.signals());
     this.currentReason = reason;
     if (reason) {
-      if (!this.assertion?.alive) {
+      if (!this.unavailable && !this.assertion?.alive) {
         this.assertion?.release();
         this.assertion = this.spawnAssertion(
           this.platform,
           this.pid,
-          () => {
+          (info) => {
+            if (info?.permanent) this.unavailable = true;
             this.assertion = undefined;
             this.options.onChange?.(this.status());
           },

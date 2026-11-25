@@ -172,6 +172,51 @@ describe("notification actions, Android foreground guard, & iOS local approval f
     scheduler.dispose();
   });
 
+  it("awaits in-flight syncActivity instead of firing a duplicate local approval notification", async () => {
+    let resolveActivity!: (ok: boolean) => void;
+    const syncActivity = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveActivity = resolve;
+        }),
+    );
+    const syncLocal = vi.fn(async (_payload: LocalApprovalNotificationPayload) => true);
+    const cancelLocal = vi.fn(async (_id: string) => {});
+
+    const scheduler = attention.createAttentionSyncScheduler({
+      throttleMs: 0,
+      setShortcuts: vi.fn(async () => {}),
+      syncActivity,
+      isLiveActivityAvailable: vi.fn(async () => true),
+      syncLocalApproval: syncLocal,
+      cancelLocalApproval: cancelLocal,
+    });
+
+    const input = () => ({
+      computerName: "Studio Mac",
+      computerKey: "comp-1",
+      sessions: [approvalSession],
+      terminals: [],
+      online: true,
+      pinned: [],
+      enabled: true,
+    });
+
+    // Two back-to-back flushes while syncActivity is still in flight for the same activityKey.
+    scheduler.schedule(input, { immediate: true });
+    scheduler.flush();
+    await new Promise((r) => setTimeout(r, 0));
+
+    // Must not prematurely fall back to a local notification while Live Activity is still in flight.
+    expect(syncLocal).not.toHaveBeenCalled();
+    expect(syncActivity).toHaveBeenCalledTimes(1);
+
+    resolveActivity(true);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(syncLocal).not.toHaveBeenCalled();
+    scheduler.dispose();
+  });
+
   it("drains and deduplicates native notification actions and resolves deepLink routes", async () => {
     const queue = ["act-1", "act-2"];
     let listener: ((event: { id: string }) => void) | undefined;

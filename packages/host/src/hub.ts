@@ -95,6 +95,7 @@ export class SessionHub {
   private readonly sides: SideChats;
   private readonly idleTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly compactionTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly pacingCancels = new Map<Subscriber, () => void>();
   private readonly createsInFlight = new Map<string, Promise<SessionSummary>>();
   private readonly recentCreates = new Map<string, { sessionId: string; promptDone: boolean; expiresAt: number }>();
   private readonly promptsInFlight = new Map<string, Promise<"started" | "steered" | "queued">>();
@@ -147,6 +148,7 @@ export class SessionHub {
       const live = this.live.get(sessionId);
       if (!live) return;
       live.attached = false;
+      live.driverAttached = false;
       if (live.subscribers.size === 0) this.detachWhenIdle(sessionId);
     },
     queue: (agent, nativeId, items) => {
@@ -155,6 +157,9 @@ export class SessionHub {
       if (!stored) return;
       this.liveFor(sessionId).queue = items.length ? items : undefined;
       this.emitSummary(stored);
+    },
+    releaseClientMessage: (agent, nativeId, clientMessageId) => {
+      this.store.releaseClientMessage(sessionIdFor(agent, nativeId), clientMessageId);
     },
     removed: (agent, nativeId) => this.forget(sessionIdFor(agent, nativeId)),
     nativeRecordsChanged: (agent, nativeIds) => {
@@ -974,11 +979,63 @@ export class SessionHub {
       }
     }
     let cursor = startSeq;
-    for (;;) {
-      const batch = this.store.readEvents(sessionId, cursor, 200);
-      for (const event of batch) if (!this.store.isHistoryLoadEvent(event)) subscriber.event(event);
-      if (batch.length === 0) break;
-      cursor = batch[batch.length - 1]!.seq;
+    const batchSize = subscriber.bufferedAmount ? 50 : 200;
+    const BACKLOG_HIGH_WATER = 512 * 1024;
+    const BACKLOG_LOW_WATER = 128 * 1024;
+    let bridge: Subscriber | undefined;
+    let liveQueue: SessionEvent[] | undefined;
+    let cancelled = false;
+
+    const ensureBridge = () => {
+      if (bridge) return;
+      liveQueue = [];
+      bridge = {
+        event: (event) => liveQueue!.push(event),
+        notice: (notice) => subscriber.notice?.(notice),
+      };
+      live.subscribers.add(bridge);
+      this.pacingCancels.set(subscriber, () => {
+        cancelled = true;
+      });
+    };
+
+    try {
+      for (;;) {
+        const batch = this.store.readEvents(sessionId, cursor, batchSize);
+        if (batch.length === 0) break;
+        for (const event of batch) {
+          if (cancelled) break;
+          if (!this.store.isHistoryLoadEvent(event)) subscriber.event(event);
+        }
+        if (cancelled) break;
+        cursor = batch[batch.length - 1]!.seq;
+        if (batch.length < batchSize) break;
+        if (subscriber.bufferedAmount && subscriber.bufferedAmount() > BACKLOG_HIGH_WATER) {
+          ensureBridge();
+          // Pace large replays so the gateway WebSocket flushes instead of tripping 1013 backpressure.
+          const deadline = Date.now() + 2_000;
+          do {
+            await new Promise<void>((resolve) => {
+              const t = setTimeout(resolve, 15);
+              t.unref?.();
+            });
+          } while (!cancelled && subscriber.bufferedAmount() > BACKLOG_LOW_WATER && Date.now() < deadline);
+          if (cancelled) break;
+        }
+      }
+    } finally {
+      this.pacingCancels.delete(subscriber);
+      if (bridge) live.subscribers.delete(bridge);
+    }
+
+    if (cancelled) {
+      if (live.subscribers.size === 0) this.detachWhenIdle(sessionId);
+      return { session: this.getSession(sessionId), startSeq };
+    }
+    if (liveQueue) {
+      for (const event of liveQueue) {
+        if (event.seq > cursor && !this.store.isHistoryLoadEvent(event)) subscriber.event(event);
+      }
     }
     live.subscribers.add(subscriber);
     clearTimeout(this.idleTimers.get(sessionId));
@@ -1099,18 +1156,27 @@ export class SessionHub {
     return this.store.readEvent(sessionId, seq);
   }
 
+  readBlob(uri: string): string | undefined {
+    return this.store.blobs.getBase64(uri);
+  }
+
   /** What still holds at `seq` from the events before it: settings, an open turn, unanswered approvals. */
   private standingBefore(sessionId: string, seq: number, live: LiveSession): SessionEvent[] {
     return computeStandingBefore(this.store, sessionId, seq, live, this.subagentsOf(sessionId, live));
   }
 
   unsubscribe(sessionId: string, subscriber: Subscriber): void {
+    const cancelPacing = this.pacingCancels.get(subscriber);
+    if (cancelPacing) {
+      this.pacingCancels.delete(subscriber);
+      cancelPacing();
+    }
     const live = this.live.get(sessionId);
     if (!live?.subscribers.delete(subscriber) || live.subscribers.size > 0) return;
     const summary = this.store.getSession(sessionId);
     if (summary) this.drivers.get(summary.agent)?.watched?.(summary.nativeId, false);
     if (live.pendingCompaction && !live.turnActive) this.scheduleDeferredCompaction(sessionId);
-    this.detachWhenIdle(sessionId);
+    this.detachWhenIdle(sessionId, summary?.archived ? 0 : IDLE_DETACH_MS);
   }
 
   /**
@@ -1126,7 +1192,7 @@ export class SessionHub {
     }
     const driver = this.drivers.get(summary.agent);
     const current = this.live.get(sessionId);
-    if (!current || (current.attached && !driver?.detachWhenIdle)) return;
+    if (!current || ((current.attached || current.driverAttached) && !driver?.detachWhenIdle)) return;
     clearTimeout(this.idleTimers.get(sessionId));
     const timer = setTimeout(() => {
       this.idleTimers.delete(sessionId);
@@ -1139,13 +1205,19 @@ export class SessionHub {
         || [...(live.subagents?.values() ?? [])].some((state) => subagentRunning(state));
       // Something is under way: looked at again later.
       if (working) return this.detachWhenIdle(sessionId, delay);
-      if (!live.attached) {
-        this.evictIfIdle(sessionId, live);
+      // Archived sessions clear `live.attached` so re-opening re-imports history, yet their driver
+      // (e.g. Claude's 400ms transcript poller) is still attached until `driver.detach()` runs.
+      const needsDetach = (live.attached || live.driverAttached) && Boolean(driver?.detachWhenIdle);
+      if (!needsDetach) {
+        if (!live.attached) {
+          live.driverAttached = false;
+          this.evictIfIdle(sessionId, live);
+        }
         return;
       }
-      if (!driver?.detachWhenIdle) return;
       live.attached = false;
-      live.detaching = driver.detach(summary.nativeId)
+      live.driverAttached = false;
+      live.detaching = driver!.detach(summary.nativeId)
         .catch((error: unknown) => this.log(`[hub] idle detach ${sessionId}: ${String(error)}`))
         .finally(() => {
           live.detaching = undefined;
@@ -1158,13 +1230,15 @@ export class SessionHub {
 
   private evictIfIdle(sessionId: string, live: LiveSession): void {
     if (this.live.get(sessionId) !== live) return;
-    if (live.attached || live.attaching || live.detaching || live.importing || live.buffer) return;
+    if (live.attached || live.driverAttached || live.attaching || live.detaching || live.importing || live.buffer) return;
     if (live.subscribers.size > 0 || live.turnActive || live.permissions.size > 0) return;
     if (live.queue?.length || live.held.length > 0 || live.sendingHeld || live.settingsChange) return;
     const tasks = this.tasksOf(sessionId, live);
     if ([...tasks.values()].some((task) => task.state === "running")) return;
     if ([...(live.subagents?.values() ?? [])].some((state) => subagentRunning(state))) return;
     if (live.pendingCompaction) this.compactSessionChunks(sessionId);
+    live.messageText.clear();
+    this.pendingQuestions.delete(sessionId);
     for (const key of this.claimedPermissions) {
       if (key.startsWith(`${sessionId}\n`)) this.claimedPermissions.delete(key);
     }
@@ -1303,20 +1377,52 @@ export class SessionHub {
     if (!live || !summary || live.held.length === 0 || live.turnActive || live.sendingHeld || live.settingsChange) return;
     const driver = this.drivers.get(summary.agent);
     if (!driver) return;
-    const next = live.held.shift()!;
     live.sendingHeld = true;
-    this.announce(sessionId);
+    let recheckTurnSeq: number | undefined;
     try {
-      await this.deliver(summary, driver, next.content, next.clientMessageId);
-    } catch (error) {
-      this.store.releaseClientMessage(sessionId, next.clientMessageId);
-      this.commit(sessionId, {
-        sessionUpdate: "ls_error",
-        code: error instanceof RpcError ? (error.appCode ?? "send_failed") : "send_failed",
-        message: `排队的消息没能发出：${error instanceof Error ? error.message : String(error)}`,
-      });
+      while (live.held.length > 0 && !live.turnActive && !live.settingsChange) {
+        const currentSummary = this.store.getSession(sessionId);
+        if (!currentSummary) break;
+        const next = live.held.shift()!;
+        const turnSeqBefore = live.turnSeq ?? 0;
+        const noticeSeqBefore = live.noticeSeq ?? 0;
+        this.announce(sessionId);
+        let delivery: "started" | "steered" | "queued";
+        try {
+          delivery = await this.deliver(currentSummary, driver, next.content, next.clientMessageId);
+        } catch (error) {
+          this.store.releaseClientMessage(sessionId, next.clientMessageId);
+          this.commit(sessionId, {
+            sessionUpdate: "ls_error",
+            code: error instanceof RpcError ? (error.appCode ?? "send_failed") : "send_failed",
+            message: `排队的消息没能发出：${error instanceof Error ? error.message : String(error)}`,
+          });
+          continue;
+        }
+        if (delivery === "queued" || live.turnActive) break;
+        // Local slash commands (/status, /goal, /reload-skills, ...) complete synchronously with a
+        // notice and never emit `ls_turn`; keep draining instead of stalling the remaining queue.
+        if ((live.turnSeq ?? 0) === turnSeqBefore && (live.noticeSeq ?? 0) > noticeSeqBefore) continue;
+        if ((live.turnSeq ?? 0) !== turnSeqBefore) continue;
+        // A slash command that neither opened a turn nor emitted a notice might still be starting
+        // an async turn (e.g. /compact) or might never emit ls_turn: release `sendingHeld` first
+        // and recheck briefly so a no-turn slash command never stalls the held queue.
+        if (live.held.length > 0 && textOf(next.content).trimStart().startsWith("/")) {
+          recheckTurnSeq = turnSeqBefore;
+        }
+        break;
+      }
     } finally {
       live.sendingHeld = false;
+    }
+    if (recheckTurnSeq !== undefined) {
+      const expected = recheckTurnSeq;
+      const timer = setTimeout(() => {
+        const current = this.live.get(sessionId);
+        if (!current || current.turnActive || (current.turnSeq ?? 0) !== expected || current.held.length === 0) return;
+        void this.sendHeld(sessionId);
+      }, 100);
+      timer.unref?.();
     }
   }
 
@@ -1336,6 +1442,10 @@ export class SessionHub {
     const updated = this.reconcileAppArchive(this.store.patchSession(sessionId, { archived }));
     this.emitSummary(updated);
     this.announceRelated(sessionId);
+    if (updated.archived) {
+      const live = this.live.get(sessionId);
+      if (live && live.subscribers.size === 0) this.detachWhenIdle(sessionId, 0);
+    }
     return this.decorate(updated);
   }
 
@@ -1417,7 +1527,10 @@ export class SessionHub {
     clearTimeout(this.compactionTimers.get(sessionId));
     this.compactionTimers.delete(sessionId);
     this.activeGoals.delete(sessionId);
+    const live = this.live.get(sessionId);
+    live?.messageText.clear();
     this.live.delete(sessionId);
+    this.pendingQuestions.delete(sessionId);
     for (const [key, entry] of this.recentCreates) {
       if (entry.sessionId === sessionId) this.recentCreates.delete(key);
     }
@@ -1433,6 +1546,10 @@ export class SessionHub {
     this.forkOrigins.delete(sessionId);
     this.emitRemoved(sessionId);
     this.announceRelated(sessionId);
+    this.related.delete(sessionId);
+    for (const [parent, children] of this.related) {
+      if (children.delete(sessionId) && children.size === 0) this.related.delete(parent);
+    }
   }
 
   private emitRemoved(sessionId: string): void {
@@ -1671,25 +1788,32 @@ export class SessionHub {
           // The log only grows at its end. A message before what it already has is one an earlier
           // reading skipped (a reader that now shows more), not something that happened since:
           // added now it would land at the bottom, out of place, so it is only marked as seen.
-          const logged = history.map((item) => this.store.isItemLogged(sessionId, item.itemId));
-          const lastLogged = logged.lastIndexOf(true);
-          for (const [index, item] of history.entries()) {
-            ts = Math.min(Math.max(item.ts ?? ts, ts), summary.updatedAt);
-            if (logged[index]) continue;
-            if (index < lastLogged && item.updates.every((update) => update.sessionUpdate === "user_message_chunk")) {
+          this.store.transaction(() => {
+            const logged = history.map((item) => this.store.isItemLogged(sessionId, item.itemId));
+            const lastLogged = logged.lastIndexOf(true);
+            for (const [index, item] of history.entries()) {
+              ts = Math.min(Math.max(item.ts ?? ts, ts), summary.updatedAt);
+              if (logged[index]) continue;
+              if (index < lastLogged && item.updates.every((update) => update.sessionUpdate === "user_message_chunk")) {
+                this.store.markItemLogged(sessionId, item.itemId);
+                continue;
+              }
+              for (const update of item.updates) this.commit(sessionId, update, undefined, ts);
               this.store.markItemLogged(sessionId, item.itemId);
-              continue;
             }
-            for (const update of item.updates) this.commit(sessionId, update, undefined, ts);
-            this.store.markItemLogged(sessionId, item.itemId);
-          }
+          });
         } finally {
           live.importing = false;
           live.turnActive = turnActive;
           const stored = this.store.getSession(sessionId);
           if (live.importChanged && stored) this.emitSummary(stored);
         }
-        live.attached = !this.store.getSession(sessionId)?.archived;
+        const archived = Boolean(this.store.getSession(sessionId)?.archived);
+        live.attached = !archived;
+        live.driverAttached = true;
+        if (archived && live.subscribers.size === 0 && driver.detachWhenIdle) {
+          this.detachWhenIdle(sessionId, 0);
+        }
       } finally {
         const buffered = live.buffer ?? [];
         live.buffer = undefined;
@@ -1781,6 +1905,19 @@ export class SessionHub {
   private commit(sessionId: string, update: SessionUpdate, itemId?: string, ts?: number): void {
     const live = this.liveFor(sessionId);
     if (update.sessionUpdate === "ls_permission_resolved" && !live.permissions.has(update.requestId)) return;
+    if (update.sessionUpdate === "available_commands_update" || update.sessionUpdate === "ls_config") {
+      // Restarts and re-attaches re-emit identical catalogs; skip duplicate SQLite rows.
+      const latest = this.store.latestOfKind(sessionId, update.sessionUpdate, Number.MAX_SAFE_INTEGER)[0];
+      if (latest && JSON.stringify(latest.update) === JSON.stringify(update)) {
+        this.applyToSummary(sessionId, live, update);
+        return;
+      }
+    }
+    if (update.sessionUpdate === "ls_turn" && !update.parentToolCallId) {
+      live.turnSeq = (live.turnSeq ?? 0) + 1;
+    } else if (update.sessionUpdate === "ls_notice") {
+      live.noticeSeq = (live.noticeSeq ?? 0) + 1;
+    }
     const event = this.store.appendEvent(sessionId, update, ts, isActivity(update));
     if (itemId) this.store.markItemLogged(sessionId, itemId);
     this.applyToSummary(sessionId, live, update);

@@ -256,4 +256,119 @@ describe("HostStreams race cleanup and capped direct.offer retries", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(offers).toBe(4);
   });
+
+  it("aligns connectTimeoutMs with direct.offer timeout and recovers via cooldown or forced connect(true)", async () => {
+    vi.useFakeTimers();
+    const link = fakeOnlineLink();
+    const offerTimeouts: number[] = [];
+    link.call.mockImplementation(async (method: string, _params: unknown, timeout?: number) => {
+      if (method === "direct.offer") {
+        offerTimeouts.push(timeout ?? -1);
+        throw new Error("UDP blocked");
+      }
+      return {};
+    });
+
+    const connector = vi.fn((): DirectConnection => ({
+      offer: () => Promise.resolve("v=0"),
+      accept: () => Promise.resolve(),
+      send: () => {},
+      onState: () => {},
+      onMessage: () => {},
+      close: () => {},
+    }));
+
+    const streams = new HostStreams(link as unknown as HostLink, {
+      connector,
+      iceServers: () => ["stun:stun.example.com:3478"],
+      connectTimeoutMs: 18_000,
+      cooldownMs: 120_000,
+    });
+
+    // Exhaust all 3 attempts (0s, +15s, +45s).
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(15_000);
+    await vi.advanceTimersByTimeAsync(45_000);
+    expect(offerTimeouts).toEqual([18_000, 18_000, 18_000]);
+
+    // Unforced connect during cooldown does not retry.
+    streams.connect();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(offerTimeouts).toHaveLength(3);
+
+    // Forced connect(true) (e.g. network transition) resets the pause immediately.
+    streams.connect(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(offerTimeouts).toHaveLength(4);
+
+    // Exhaust again (attempt 2 at +15s, attempt 3 at +45s), then verify automatic recovery after cooldownMs.
+    await vi.advanceTimersByTimeAsync(15_000);
+    await vi.advanceTimersByTimeAsync(45_000);
+    expect(offerTimeouts).toHaveLength(6);
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(offerTimeouts).toHaveLength(7);
+    streams.stop();
+  });
+
+  it("buffers more than 64 early frames losslessly without silent drops", async () => {
+    const link = fakeOnlineLink();
+    let resolveOpen!: (value: { streamId: string }) => void;
+    link.call.mockImplementation((method: string) => {
+      if (method === "proxy.open") {
+        return new Promise<{ streamId: string }>((resolve) => {
+          resolveOpen = resolve;
+        });
+      }
+      return Promise.resolve({});
+    });
+
+    const streams = new HostStreams(link as unknown as HostLink, { iceServers: () => undefined });
+    const received: string[] = [];
+    const opening = streams.open(4000, {
+      data: (bytes) => received.push(new TextDecoder().decode(bytes)),
+      closed: () => {},
+    });
+
+    // Emit 120 early frames while proxy.open is still in flight.
+    for (let i = 0; i < 120; i += 1) {
+      link.notify("proxy.data", { streamId: "burst-1", data: btoa(`f${i}`) });
+    }
+    resolveOpen({ streamId: "burst-1" });
+    await opening;
+
+    expect(received).toHaveLength(120);
+    expect(received[0]).toBe("f0");
+    expect(received[119]).toBe("f119");
+    streams.stop();
+  });
+
+  it("exposes RelayClient bufferedAmount and fails TunnelSocket when relay.send returns false", async () => {
+    const device = createIdentity();
+    const machine = createIdentity();
+    const machinePub = publicIdentity(machine);
+    const relay = Object.assign(new FakeRelay(), {
+      bufferedAmount: 4096,
+      sendResult: true,
+      send(to: string, frame: TunnelFrame): boolean {
+        this.sent.push({ to, frame });
+        return this.sendResult;
+      },
+    });
+
+    const tunnel = new TunnelSocket(relay as unknown as RelayClient, device, machinePub);
+    expect(tunnel.bufferedAmount).toBe(4096);
+    const errors: unknown[] = [];
+    tunnel.onerror = (err) => errors.push(err);
+
+    await Promise.resolve();
+    const hello = relay.sent[0]!.frame as Extract<TunnelFrame, { k: "hello" }>;
+    relay.emitFrame(machinePub, answerTunnel(machine, publicIdentity(device), hello).welcome);
+    expect(tunnel.readyState).toBe(1);
+
+    // If relay.send() returns false, TunnelSocket fails immediately instead of silently dropping the sealed frame.
+    relay.sendResult = false;
+    tunnel.send("payload");
+    expect(tunnel.readyState).toBe(3);
+    expect(errors).toEqual([{ message: "与网关的连接断开了", code: undefined }]);
+  });
 });

@@ -2,7 +2,7 @@ import "@/lib/crypto-polyfill";
 import { DarkTheme, DefaultTheme, ThemeProvider } from "expo-router/react-navigation";
 import { Stack } from "expo-router/stack";
 import { StatusBar } from "expo-status-bar";
-import { Fragment } from "react";
+import { useMemo } from "react";
 import { Platform, useColorScheme } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
@@ -10,6 +10,7 @@ import { nativeStatusBar } from "@/lib/native-status-bar";
 import { ClientProvider } from "@/lib/client";
 import { ScreenSessionProvider } from "@/lib/screen-session";
 import { AndroidAttentionSync } from "@/components/android-attention-sync";
+import { fixedHeaderFontSize } from "@/components/headers";
 import { IOSAttentionSync } from "@/components/ios-attention-sync";
 import { LanDiscoverySync } from "@/components/lan-discovery-sync";
 import { LiveActivityActionNavigation } from "@/components/live-activity-action-navigation";
@@ -17,7 +18,7 @@ import { NotificationActionSync } from "@/components/notification-action-sync";
 import { ShortcutUrlHandler } from "@/components/shortcut-url-handler";
 import { useLocale } from "@/lib/locale";
 import { colors, palette } from "@/theme/colors";
-import { radius } from "@/theme/type";
+import { radius, type } from "@/theme/type";
 
 export const unstable_settings = {
   // Keep a home screen beneath Live Activity deep links, including cold launches.
@@ -31,12 +32,39 @@ const dark = { ...DarkTheme, colors: { ...DarkTheme.colors, primary: palette.dar
 // iOS's glass material would show the page behind through every field.
 export default function RootLayout() {
   const scheme = useColorScheme();
+  const isDark = scheme === "dark";
   const { t, pick } = useLocale();
-  const sheetContent = { backgroundColor: colors.sheet };
+  // Derive theme-dependent options reactively instead of keying/remounting `<Stack>`,
+  // which would wipe the user's navigation stack and local screen state on Android theme toggle.
+  const sheetContent = useMemo(
+    () => ({ backgroundColor: colors.sheet }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `colors.sheet` is a getter reading system scheme on Android.
+    [isDark],
+  );
+  const stackScreenOptions = useMemo(
+    () => ({
+      headerBackButtonDisplayMode: "minimal" as const,
+      ...(nativeStatusBar ? ({ statusBarStyle: "auto", statusBarHidden: false } as const) : {}),
+      headerStyle: { backgroundColor: colors.background as string },
+      ...(Platform.OS === "android"
+        ? {
+            headerTintColor: colors.label as string,
+            headerTitleStyle: {
+              fontSize: fixedHeaderFontSize(type.title3.fontSize),
+              fontWeight: "600" as const,
+              color: colors.label as string,
+            },
+            contentStyle: { backgroundColor: colors.background },
+          }
+        : {}),
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `colors.*` getters track Android scheme changes.
+    [isDark],
+  );
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <KeyboardProvider>
-        <ThemeProvider value={scheme === "dark" ? dark : light}>
+        <ThemeProvider value={isDark ? dark : light}>
           <ClientProvider>
             <ScreenSessionProvider>
             {Platform.OS === "ios" ? <IOSAttentionSync /> : null}
@@ -45,11 +73,8 @@ export default function RootLayout() {
             <LanDiscoverySync />
             <NotificationActionSync />
             <ShortcutUrlHandler />
-            {/* Android's literal theme colors must reach memoized rows and native
-                views too; rebuild the tree when the system appearance changes. */}
-            <Fragment key={Platform.OS === "android" ? (scheme ?? "light") : "tree"}>
-              {!nativeStatusBar ? <StatusBar style="auto" /> : null}
-              <Stack screenOptions={{ headerBackButtonDisplayMode: "minimal", ...(nativeStatusBar ? { statusBarStyle: "auto", statusBarHidden: false } as const : {}), headerStyle: { backgroundColor: colors.background as string } }}>
+            {!nativeStatusBar ? <StatusBar style={scheme ? (isDark ? "light" : "dark") : "auto"} /> : null}
+            <Stack screenOptions={stackScreenOptions}>
                 {/* Its title is what a pushed page's back button says to VoiceOver: not the group's "(tabs)". */}
                 <Stack.Screen name="(tabs)" options={{ headerShown: false, title: pick({ zh: "返回", en: "Back", ja: "戻る" }) }} />
                 <Stack.Screen name="usage" options={{ title: t("nav.usage") }} />
@@ -213,7 +238,6 @@ export default function RootLayout() {
                   }}
                 />
               </Stack>
-            </Fragment>
             </ScreenSessionProvider>
           </ClientProvider>
         </ThemeProvider>

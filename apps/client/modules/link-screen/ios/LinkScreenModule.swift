@@ -42,11 +42,19 @@ final class LinkScreenView: ExpoView {
     clipsToBounds = true
     backgroundColor = .black
     let center = NotificationCenter.default
+    // Transient inactive transitions (Control Center, Face ID, Duo fold) only pause capture/rendering;
+    // only moving to background tears down the WebRTC session.
     observers.append(center.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
-      self?.applicationActive = false; self?.disconnect()
+      self?.applicationActive = false
+      self?.pauseForInactive()
+    })
+    observers.append(center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+      self?.applicationActive = false
+      self?.disconnect()
     })
     observers.append(center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
-      self?.applicationActive = true; self?.connect()
+      self?.applicationActive = true
+      self?.resumeFromActive()
     })
     for name in [ProcessInfo.thermalStateDidChangeNotification, Notification.Name.NSProcessInfoPowerStateDidChange] {
       observers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
@@ -61,6 +69,7 @@ final class LinkScreenView: ExpoView {
     for observer in observers { NotificationCenter.default.removeObserver(observer) }
     controls.detach()
     connection?.stop()
+    renderer?.stop()
   }
 
   func setURL(_ value: String) {
@@ -103,6 +112,27 @@ final class LinkScreenView: ExpoView {
       controls.session(["active": true, "maxFps": receiverRate])
     } else {
       disconnect()
+      connect()
+    }
+  }
+
+  private func pauseForInactive() {
+    connection?.setActive(false)
+    renderer?.pause()
+    if supportsPause {
+      controls.session(["active": false, "maxFps": receiverRate])
+    }
+  }
+
+  private func resumeFromActive() {
+    guard active, window != nil else { return }
+    if let connection {
+      connection.setActive(true)
+      renderer?.start(fps: receiverRate)
+      if supportsPause {
+        controls.session(["active": true, "maxFps": receiverRate])
+      }
+    } else {
       connect()
     }
   }

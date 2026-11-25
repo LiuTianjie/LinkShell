@@ -2,10 +2,11 @@ import { useEffect, useState } from "react";
 import {
   CLOSE_TAB_EVENT,
   DESKTOP_APPEARANCE_EVENT,
-  DESKTOP_COMMAND_EVENT,
   getDesktopCapability,
   getShellAppearance,
   GO_TO_FILE_EVENT,
+  isImeComposing,
+  keysBelongToRemoteOrPreview,
   postDesktopMessage,
   reportDesktopRendererReady,
   type DesktopAppearance,
@@ -19,7 +20,6 @@ import {
   localeStore,
   pollManagementInBackground,
   readLocal,
-  routerStore,
   startManagement,
   startSessionAttention,
   STORAGE_KEYS,
@@ -41,7 +41,6 @@ import {
   RemoteScreenWorkspace,
 } from "./features/remote";
 import {
-  INSPECTOR_OPEN_FILE_EVENT,
   NewSessionWorkspace,
   SessionHeaderActions,
   SessionWorkspace,
@@ -103,7 +102,9 @@ function DesktopWorkspaceRoot() {
     // ⌃Tab walks the inspector's tabs from anywhere in the window, as in an editor.
     const onTabCycle = (event: KeyboardEvent) => {
       if (event.key !== "Tab" || !event.ctrlKey || event.metaKey || event.altKey) return;
-      if (event.defaultPrevented) return;
+      if (event.defaultPrevented || isImeComposing(event)) return;
+      if (keysBelongToRemoteOrPreview()) return;
+      if (document.querySelector("dialog[open]")) return;
       if (cycleInspectorTab(event.shiftKey ? -1 : 1)) event.preventDefault();
     };
     window.addEventListener(CLOSE_TAB_EVENT, onCloseTab);
@@ -144,56 +145,13 @@ function DesktopWorkspaceRoot() {
       }
     };
 
-    // Bridge Timeline/Markdown/Diff file-jump events into InspectorWorkbench even if Inspector was closed.
-    let pendingFileRaf = 0;
-    const onOpenFileInInspector = (event: Event) => {
-      const detail = (
-        event as CustomEvent<{
-          computerKey?: string;
-          sessionId?: string;
-          path?: string;
-          line?: number;
-        }>
-      ).detail;
-      if (!detail?.path) return;
-      const spec =
-        typeof detail.line === "number" && detail.line > 0
-          ? `${detail.path}#L${detail.line}`
-          : detail.path;
-      routerStore.getState().toggleInspector(true, "files");
-      if (pendingFileRaf && typeof cancelAnimationFrame === "function") {
-        cancelAnimationFrame(pendingFileRaf);
-      }
-      const dispatchJump = () => {
-        pendingFileRaf = 0;
-        window.dispatchEvent(
-          new CustomEvent(DESKTOP_COMMAND_EVENT, {
-            detail: { command: "open-file", path: spec },
-          }),
-        );
-      };
-      if (typeof requestAnimationFrame === "function") {
-        pendingFileRaf = requestAnimationFrame(dispatchJump);
-      } else {
-        queueMicrotask(dispatchJump);
-      }
-    };
-
     window.addEventListener(DESKTOP_APPEARANCE_EVENT, onShellAppearance);
-    window.addEventListener(INSPECTOR_OPEN_FILE_EVENT, onOpenFileInInspector);
     mediaQuery?.addEventListener("change", onSystemColorSchemeChange);
 
     reportDesktopRendererReady();
 
     return () => {
-      if (pendingFileRaf && typeof cancelAnimationFrame === "function") {
-        cancelAnimationFrame(pendingFileRaf);
-      }
       mediaQuery?.removeEventListener("change", onSystemColorSchemeChange);
-      window.removeEventListener(
-        INSPECTOR_OPEN_FILE_EVENT,
-        onOpenFileInInspector,
-      );
       window.removeEventListener(DESKTOP_APPEARANCE_EVENT, onShellAppearance);
       detachStorageTheme();
       stopAttention();

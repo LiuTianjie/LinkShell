@@ -24,8 +24,13 @@ program
   )
   .version(pkg.version);
 
-program.command("app")
-  .description("Open the native Mac status app (included with the CLI)")
+program
+  .command("app", { hidden: process.platform !== "darwin" && process.platform !== "win32" })
+  .description(
+    process.platform === "win32"
+      ? "Open the LinkShell desktop window"
+      : "Open the native Mac status app (included with the CLI)",
+  )
   .action(async () => { const { openDesktop } = await import("./commands/desktop.js"); await openDesktop(); });
 
 program.command("desktop", { hidden: true })
@@ -119,7 +124,7 @@ const hostCmd = program
       process.stderr.write(`\n  LinkShell host running (${socket})\n`);
       if (running && running.hostVersion !== pkg.version) {
         process.stderr.write(`  It is still ${running.hostVersion}; this CLI is ${pkg.version}. To update it (stops running agent turns):\n`);
-        process.stderr.write(`    linkshell host stop && linkshell host --daemon\n`);
+        process.stderr.write("    linkshell host restart\n");
       }
       // A gateway given to a host that was already running applies now.
       if (gatewayUpdated && running) {
@@ -127,8 +132,8 @@ const hostCmd = program
         if (gateway) process.stderr.write(`  Gateway: ${describeGateway(gateway)}\n`);
       }
       process.stderr.write(`  Log:    ${daemon.getLogFile("host")}\n`);
-      process.stderr.write(`  Status: linkshell host status\n`);
-      process.stderr.write(`  Stop:   linkshell host stop\n`);
+      process.stderr.write("  Status: linkshell host status\n");
+      process.stderr.write("  Stop:   linkshell host stop\n");
       // The first start here: the rest of the setup happens now, while someone is at the computer.
       const { offerSetup } = await import("./commands/setup.js");
       if (await offerSetup(pkg.version)) process.exit(process.exitCode ?? 0);
@@ -153,17 +158,40 @@ const hostCmd = program
 hostCmd
   .command("status")
   .description("Show the host, its agents and sessions")
-  .action(async () => {
+  .option("--json", "Output host status as JSON")
+  .action(async (options: { json?: boolean }) => {
     const { printHostStatus } = await import("./commands/host.js");
-    await printHostStatus();
+    await printHostStatus({ json: options.json === true, cliVersion: pkg.version });
   });
 
 hostCmd
   .command("stop")
-  .description("Stop the background host")
+  .description("Stop the background or service-managed host")
   .action(async () => {
-    const daemon = await import("./utils/daemon.js");
-    process.stderr.write(await daemon.stopDaemonAndWait("host") ? "  LinkShell host stopped\n" : "  LinkShell host is not running\n");
+    const { stopHost } = await import("./commands/host.js");
+    const result = await stopHost();
+    process.stderr.write(
+      result.stopped
+        ? result.managed
+          ? "  LinkShell host service stopped\n"
+          : "  LinkShell host stopped\n"
+        : "  LinkShell host is not running\n",
+    );
+  });
+
+hostCmd
+  .command("restart")
+  .description("Restart the LinkShell host (service-aware; preserves launch settings)")
+  .action(async () => {
+    const { restartHost, assertHostRuntime, silenceSqliteWarning } = await import("./commands/host.js");
+    assertHostRuntime();
+    silenceSqliteWarning();
+    const result = await restartHost();
+    process.stderr.write(
+      result.managed
+        ? `  LinkShell host service restarted (${result.socket})\n`
+        : `  LinkShell host restarted (${result.socket})\n`,
+    );
   });
 
 hostCmd
@@ -198,12 +226,52 @@ hostCmd
     await runServiceStatus({ json: options.json === true });
   });
 
+// Top-level alias for `linkshell host restart`
+program
+  .command("restart")
+  .description("Restart the LinkShell host (alias for `linkshell host restart`)")
+  .action(async () => {
+    const { restartHost, assertHostRuntime, silenceSqliteWarning } = await import("./commands/host.js");
+    assertHostRuntime();
+    silenceSqliteWarning();
+    const result = await restartHost();
+    process.stderr.write(
+      result.managed
+        ? `  LinkShell host service restarted (${result.socket})\n`
+        : `  LinkShell host restarted (${result.socket})\n`,
+    );
+  });
+
+// ── logs ────────────────────────────────────────────────────────────
+
+program
+  .command("logs")
+  .description("View or follow LinkShell host, gateway, or upgrade logs")
+  .option("-f, --follow", "Stream new log lines as they are written")
+  .option("-n, --lines <count>", "Number of trailing lines to show", "50")
+  .option("--service <name>", "Which log to read: host, gateway, or upgrade", "host")
+  .option("--journal", "Read from systemd journald on Linux (`journalctl --user`)")
+  .action(async (options: { follow?: boolean; lines: string; service: string; journal?: boolean }) => {
+    const { runLogs } = await import("./commands/logs.js");
+    await runLogs({
+      service: options.service,
+      lines: Number(options.lines),
+      follow: options.follow === true,
+      journal: options.journal === true,
+    });
+  });
+
 program
   .command("pair")
   .description("Pair a phone with this computer through the gateway (shows a QR code)")
-  .action(async () => {
+  .option("--no-qr", "Print the pairing code and link without rendering a QR code")
+  .option("--json", "Output pairing code and link as JSON without waiting")
+  .action(async (options: { qr?: boolean; json?: boolean }) => {
     const { runPair } = await import("./commands/pair.js");
-    await runPair();
+    await runPair({
+      noQr: options.qr === false,
+      json: options.json === true,
+    });
   });
 
 const passwordCmd = program
@@ -233,13 +301,22 @@ passwordCmd
 const devicesCmd = program
   .command("devices")
   .description("List the phones paired with this computer")
-  .action(async () => {
+  .option("--json", "Output paired devices as JSON")
+  .action(async (options: { json?: boolean }) => {
     const { withRunningHost, assertHostRuntime } = await import("./commands/host.js");
     assertHostRuntime();
     const gateway = await withRunningHost((client) => client.call("gateway.status", {}));
     if (!gateway) {
-      process.stderr.write("  LinkShell host is not running. Start it with: linkshell host --daemon\n");
+      if (options.json) {
+        process.stdout.write(`${JSON.stringify({ running: false, devices: [] }, null, 2)}\n`);
+      } else {
+        process.stderr.write("  LinkShell host is not running. Start it with: linkshell host --daemon\n");
+      }
       process.exitCode = 1;
+      return;
+    }
+    if (options.json) {
+      process.stdout.write(`${JSON.stringify({ running: true, devices: gateway.devices }, null, 2)}\n`);
       return;
     }
     if (gateway.devices.length === 0) {
@@ -306,38 +383,31 @@ const gatewayCmd = program
   .command("gateway")
   .description("Run a gateway of your own: it relays encrypted frames between your computers and phones, and brokers pairing")
   .option("--port <port>", "Listen port", "8787")
+  .option("--host <addr>", "Bind address (e.g. 127.0.0.1 when behind Nginx/Caddy reverse proxy)")
   .option("--daemon", "Run in background (detached)")
   .option("--_foreground-gw", undefined) // internal
-  .action(async (options) => {
+  .action(async (options: { port: string; host?: string; daemon?: boolean; _foregroundGw?: boolean }) => {
+    const port = Number(options.port);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      throw new Error(`Invalid --port value "${options.port}". Expected 1-65535.`);
+    }
     if (options.daemon && !options._foregroundGw) {
-      const daemon = await import("./utils/daemon.js");
-      const existingPid = daemon.readPid("gateway");
-      if (existingPid) {
-        process.stderr.write(`  Gateway already running (PID ${existingPid})\n`);
-        process.stderr.write(`  Run: linkshell gateway stop\n\n`);
-        return;
-      }
-      const pid = daemon.spawnDaemon("gateway", ["gateway", "--_foreground-gw", "--port", String(options.port)]);
-      process.stderr.write(`\n  LinkShell Gateway started in background\n`);
-      process.stderr.write(`  PID: ${pid}\n`);
-      process.stderr.write(`  Port: ${options.port}\n`);
-      process.stderr.write(`  Log: ${daemon.getLogFile("gateway")}\n\n`);
-      process.stderr.write(`  Stop:   linkshell gateway stop\n`);
-      process.stderr.write(`  Status: linkshell gateway status\n`);
-      process.stderr.write(`  Logs:   tail -f ${daemon.getLogFile("gateway")}\n\n`);
+      const { startGatewayDaemon } = await import("./commands/gateway.js");
+      await startGatewayDaemon(port, options.host);
       return;
     }
     const { runGatewayForeground } = await import("./commands/gateway.js");
-    await runGatewayForeground(pkg.version, Number(options.port));
+    await runGatewayForeground(pkg.version, port, options.host);
   });
 
 gatewayCmd
   .command("stop")
-  .description("Stop the background gateway")
+  .description("Stop the background or service-managed gateway")
   .action(async () => {
-    const { stopDaemon } = await import("./utils/daemon.js");
-    if (stopDaemon("gateway")) {
-      process.stderr.write("  Gateway stopped.\n");
+    const { stopGateway } = await import("./commands/gateway.js");
+    const result = await stopGateway();
+    if (result.stopped) {
+      process.stderr.write(result.managed ? "  Gateway service stopped.\n" : "  Gateway stopped.\n");
     } else {
       process.stderr.write("  No running gateway found.\n");
     }
@@ -345,24 +415,48 @@ gatewayCmd
 
 gatewayCmd
   .command("status")
-  .description("Check if the gateway is running")
-  .action(async () => {
-    const { readPid, getLogFile } = await import("./utils/daemon.js");
-    const pid = readPid("gateway");
-    if (pid) {
-      process.stderr.write(`\n  Gateway is running\n`);
-      process.stderr.write(`  PID: ${pid}\n`);
-      process.stderr.write(`  Log: ${getLogFile("gateway")}\n\n`);
-    } else {
-      process.stderr.write("  Gateway is not running.\n");
-    }
+  .description("Check if the gateway is running and probe /healthz")
+  .option("--json", "Output gateway status as JSON")
+  .option("--port <port>", "Override port to probe")
+  .option("--host <addr>", "Override host address to probe")
+  .action(async (options: { json?: boolean; port?: string; host?: string }) => {
+    const { printGatewayStatus } = await import("./commands/gateway.js");
+    await printGatewayStatus({
+      json: options.json === true,
+      port: options.port ? Number(options.port) : undefined,
+      host: options.host,
+    });
+  });
+
+gatewayCmd
+  .command("install-service")
+  .description("Install LinkShell gateway as an OS user service (Linux systemd --user / macOS launchd)")
+  .option("--dry-run", "Print the generated service config and commands without applying them")
+  .option("--port <port>", "Listen port", "8787")
+  .option("--host <addr>", "Bind address (e.g. 127.0.0.1)")
+  .action(async (options: { dryRun?: boolean; port: string; host?: string }) => {
+    const { runInstallGatewayService } = await import("./commands/service.js");
+    await runInstallGatewayService({
+      dryRun: options.dryRun === true,
+      port: Number(options.port),
+      host: options.host,
+    });
+  });
+
+gatewayCmd
+  .command("uninstall-service")
+  .description("Uninstall the LinkShell gateway OS user service")
+  .option("--dry-run", "Print the file removal and commands without applying them")
+  .action(async (options: { dryRun?: boolean }) => {
+    const { runUninstallGatewayService } = await import("./commands/service.js");
+    await runUninstallGatewayService({ dryRun: options.dryRun === true });
   });
 
 // ── screen ──────────────────────────────────────────────────────────
 
 program
   .command("screen")
-  .description("Set this computer up for watching and controlling its screen from the phone (the two macOS permissions; on Linux, ffmpeg)")
+  .description("Set this computer up for watching and controlling its screen from the phone (macOS permissions; Linux X11/Wayland capture & input)")
   .option("--check", "Only say what is and isn't ready")
   .action(async (options) => {
     const { runScreenSetup } = await import("./commands/screen.js");
@@ -375,17 +469,19 @@ program
 
 program
   .command("stop")
-  .description("Stop all running LinkShell processes")
+  .description("Stop all running LinkShell processes (service-aware)")
   .action(async () => {
-    const { stopDaemon, stopDaemonAndWait } = await import("./utils/daemon.js");
-    const hostStopped = await stopDaemonAndWait("host");
+    const { stopDaemon } = await import("./utils/daemon.js");
+    const { stopHost } = await import("./commands/host.js");
+    const { stopGateway } = await import("./commands/gateway.js");
+    const hostResult = await stopHost();
     // A bridge left running by a 1.x install: nothing else here can end it.
     const bridgeStopped = stopDaemon("bridge");
-    const gatewayStopped = stopDaemon("gateway");
-    if (hostStopped) process.stderr.write("  Host stopped.\n");
+    const gatewayResult = await stopGateway();
+    if (hostResult.stopped) process.stderr.write(hostResult.managed ? "  Host service stopped.\n" : "  Host stopped.\n");
     if (bridgeStopped) process.stderr.write("  1.x bridge stopped.\n");
-    if (gatewayStopped) process.stderr.write("  Gateway server stopped.\n");
-    if (!hostStopped && !bridgeStopped && !gatewayStopped) {
+    if (gatewayResult.stopped) process.stderr.write(gatewayResult.managed ? "  Gateway service stopped.\n" : "  Gateway server stopped.\n");
+    if (!hostResult.stopped && !bridgeStopped && !gatewayResult.stopped) {
       process.stderr.write("  No running processes found.\n");
     }
   });
@@ -395,25 +491,24 @@ program
 program
   .command("status")
   .description("Show the host, its gateway connection, and anything else LinkShell runs here")
-  .action(async () => {
-    const { readPid, getLogFile } = await import("./utils/daemon.js");
+  .option("--json", "Output status as JSON")
+  .action(async (options: { json?: boolean }) => {
     const { printHostStatus, assertHostRuntime } = await import("./commands/host.js");
     assertHostRuntime();
-    process.stdout.write("\n");
-    await printHostStatus();
-    const gatewayPid = readPid("gateway");
-    if (gatewayPid) process.stdout.write(`  Gateway server: running (PID ${gatewayPid}), log ${getLogFile("gateway")}\n`);
-    process.stdout.write("\n");
+    if (!options.json) process.stdout.write("\n");
+    await printHostStatus({ json: options.json === true, cliVersion: pkg.version, includeGatewayServer: true });
+    if (!options.json) process.stdout.write("\n");
   });
 
 // ── doctor / setup ──────────────────────────────────────────────────
 
 program
   .command("doctor")
-  .description("Check that this computer is ready: Node, agents, the host and its gateway")
+  .description("Check that this computer is ready: Node, SQLite, PTY, agents, permissions, the host and its gateway")
   .option("--gateway <url>", "Also check that this gateway answers")
-  .action(async (options) => {
-    await runDoctor(pkg.version, options.gateway);
+  .option("--json", "Output diagnostics as JSON")
+  .action(async (options: { gateway?: string; json?: boolean }) => {
+    await runDoctor(pkg.version, options.gateway, { json: options.json === true });
   });
 
 program
@@ -427,16 +522,27 @@ program
 program
   .command("upgrade")
   .description("Upgrade LinkShell and automatically restart an outdated host")
-  .action(async () => {
-    await runUpgrade(pkg.version);
+  .option("--check", "Check CLI and running host versions without making changes")
+  .action(async (options: { check?: boolean }) => {
+    await runUpgrade(pkg.version, { check: options.check === true });
   });
 
 program
   .command("login")
-  .description("Log in to LinkShell (official gateway, no pairing needed)")
-  .action(async () => {
-    const result = await runLogin();
-    if (!result) return;
+  .description("Log in to LinkShell (official gateway, no pairing needed; supports SSH/headless)")
+  .option("--email [address]", "Sign in directly with email and password (no browser needed)")
+  .option("--password-stdin", "Read account password from stdin (use with --email <address>)")
+  .option("--no-browser", "Print the sign-in URL without launching a local browser")
+  .action(async (options: { email?: string | boolean; passwordStdin?: boolean; browser?: boolean }) => {
+    const result = await runLogin({
+      email: options.email,
+      passwordStdin: options.passwordStdin === true,
+      noBrowser: options.browser === false,
+    });
+    if (!result) {
+      process.exitCode = 1;
+      return;
+    }
 
     const { joinGatewayAfterLogin } = await import("./commands/host.js");
     await joinGatewayAfterLogin(result.plan);
@@ -448,6 +554,19 @@ program
   .description("Log out of LinkShell")
   .action(async () => {
     await runLogout();
+  });
+
+program
+  .command("completion <shell>")
+  .description("Generate shell completion script (bash, zsh, or fish)")
+  .action(async (shell: string) => {
+    const { runCompletion } = await import("./commands/completion.js");
+    try {
+      runCompletion(shell);
+    } catch (error) {
+      process.stderr.write(`  ${error instanceof Error ? error.message : String(error)}\n`);
+      process.exitCode = 1;
+    }
   });
 
 // `linkshell` by itself, on a computer where nothing has been set up yet: the setup, rather than a page of help.

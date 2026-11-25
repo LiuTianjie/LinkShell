@@ -14,12 +14,27 @@ import {
 /** The subset of the WebSocket API LinkShell needs (browser, React Native and `ws` all fit). */
 export interface SocketLike {
   readonly readyState: number;
+  readonly bufferedAmount?: number;
   send(data: string): void;
   close(code?: number, reason?: string): void;
+  terminate?(): void;
   onopen: ((event: unknown) => void) | null;
   onclose: ((event: unknown) => void) | null;
   onerror: ((event: unknown) => void) | null;
   onmessage: ((event: { data: unknown }) => void) | null;
+}
+
+function dropSocket(socket: SocketLike): void {
+  socket.onopen = null;
+  socket.onmessage = null;
+  socket.onerror = null;
+  socket.onclose = null;
+  try {
+    if (typeof socket.terminate === "function") socket.terminate();
+    else socket.close();
+  } catch {
+    // Ignore teardown errors on an already broken socket.
+  }
 }
 
 /** `locked`: connected, but the computer has an access password and this device hasn't given it (`unlock`). */
@@ -158,8 +173,9 @@ export class HostLink {
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     this.probePromise = undefined;
     this.peer?.close("连接已停止");
-    this.socket?.close();
+    const socket = this.socket;
     this.socket = undefined;
+    if (socket) dropSocket(socket);
     for (const wake of this.waiters) wake();
   }
 
@@ -180,8 +196,7 @@ export class HostLink {
       const stuck = this.socket;
       this.socket = undefined;
       this.peer?.close("正在重新连接");
-      stuck.onclose = null;
-      stuck.close();
+      dropSocket(stuck);
     }
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = undefined;
@@ -198,7 +213,7 @@ export class HostLink {
     if (this.statusValue !== "online" || !socket || !this.peer) return Promise.resolve(false);
     if (this.probePromise) return this.probePromise;
     const active = this.peer
-      .request("machine.info", {}, timeoutMs)
+      .request("machine.info", { ping: true }, timeoutMs)
       .then(
         () => true,
         () => {
@@ -340,9 +355,24 @@ export class HostLink {
     if (heartbeat > 0) {
       this.heartbeatTimer = setInterval(() => {
         if (this.socket !== socket) return;
-        this.peer?.request("machine.info", {}, 10_000).catch(() => {
+        // `{ ping: true }` tells upgraded hosts to skip auth subprocess refreshes on routine heartbeats,
+        // while older hosts accept it harmlessly (`z.looseObject({})`).
+        this.peer?.request("machine.info", { ping: true }, 10_000).catch(() => {
           // The socket looks open but nothing answers (common after a network change).
-          if (this.socket === socket) socket.close();
+          // Force-drop immediately instead of waiting on a half-open socket.close() handshake.
+          if (this.socket !== socket || this.statusValue === "stopped") return;
+          if (this.statusValue === "online" || this.statusValue === "locked") {
+            this.reconnectNow(true);
+            return;
+          }
+          if (this.heartbeatTimer) {
+            clearInterval(this.heartbeatTimer);
+            this.heartbeatTimer = undefined;
+          }
+          this.peer?.close("电脑没有响应");
+          this.socket = undefined;
+          dropSocket(socket);
+          this.scheduleReconnect("电脑没有响应");
         });
       }, heartbeat);
     }
@@ -359,8 +389,7 @@ export class HostLink {
         }
         this.peer?.close("电脑没有响应");
         this.socket = undefined;
-        socket.onclose = null;
-        socket.close();
+        dropSocket(socket);
         this.scheduleReconnect(error instanceof RpcError ? translateSocketError(error.message) : "电脑没有响应");
         return;
       }
@@ -380,7 +409,7 @@ export class HostLink {
       }
       this.saveToken(unlocked.token);
     }
-    await this.goOnline(socket);
+    this.goOnline(socket);
   }
 
   /**
@@ -393,7 +422,7 @@ export class HostLink {
     const result = await this.peer.request<{ token: string }>("access.unlock", { password }, 20_000);
     if (this.socket !== socket) return;
     this.saveToken(result.token);
-    await this.goOnline(socket);
+    this.goOnline(socket);
   }
 
   private loadToken(): string | undefined {
@@ -405,28 +434,30 @@ export class HostLink {
     else this.heldToken = token;
   }
 
-  private async goOnline(socket: SocketLike): Promise<void> {
-    // Online first, so calls made now go through; anyone waiting is woken once every open
-    // session is restored, so nothing they render is missing what happened while offline.
-    this.setStatus("online", "");
-    await Promise.all([...this.subscriptions.keys()].map((sessionId) => this.restore(sessionId, socket)));
-    if (this.socket !== socket) return;
+  private goOnline(socket: SocketLike): void {
+    // Resolve online readiness immediately so RPC calls (`sessions.list`, prompts, permissions,
+    // terminals, screen) aren't blocked for up to ~96s when one open session is slow to restore.
+    const useLatest = this.latest;
     this.latest = false;
+    this.setStatus("online", "");
     for (const wake of [...this.waiters]) wake();
     for (const listener of this.onlineListeners) listener();
+    for (const sessionId of [...this.subscriptions.keys()]) {
+      void this.restore(sessionId, socket, useLatest);
+    }
   }
 
   /**
    * Subscribes again after a (re)connect; one that fails is tried twice more, then left to
    * `restoreLater` so the reconnect isn't held up by it.
    */
-  private async restore(sessionId: string, socket: SocketLike): Promise<void> {
+  private async restore(sessionId: string, socket: SocketLike, latest = false): Promise<void> {
     const subscription = this.subscriptions.get(sessionId);
     if (!subscription) return;
     for (let attempt = 0; attempt < 3; attempt++) {
       if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 2000 * attempt));
       if (this.socket !== socket || this.subscriptions.get(sessionId) !== subscription) return;
-      const result = await this.sendSubscribe(sessionId);
+      const result = await this.sendSubscribe(sessionId, latest);
       if (this.socket !== socket || this.subscriptions.get(sessionId) !== subscription) return;
       if (result?.session) {
         // Its backlog has arrived — also for a session opened while the link was down, which nothing else answers.
@@ -434,20 +465,20 @@ export class HostLink {
         return;
       }
     }
-    void this.restoreLater(sessionId, socket);
+    void this.restoreLater(sessionId, socket, latest);
   }
 
   /**
    * Keeps trying, less and less often, for as long as this connection lasts: given up on, the
    * session would show nothing new until it was closed and opened again.
    */
-  private async restoreLater(sessionId: string, socket: SocketLike): Promise<void> {
+  private async restoreLater(sessionId: string, socket: SocketLike, latest = false): Promise<void> {
     const subscription = this.subscriptions.get(sessionId);
     if (!subscription) return;
     for (let attempt = 0; ; attempt++) {
       await new Promise((resolve) => setTimeout(resolve, Math.min(30_000, 5000 * 2 ** attempt)));
       if (this.socket !== socket || this.subscriptions.get(sessionId) !== subscription) return;
-      const result = await this.sendSubscribe(sessionId);
+      const result = await this.sendSubscribe(sessionId, latest);
       if (this.socket !== socket || this.subscriptions.get(sessionId) !== subscription) return;
       if (result?.session) {
         for (const listener of this.restoredListeners) listener(result.session);
@@ -456,7 +487,7 @@ export class HostLink {
     }
   }
 
-  private sendSubscribe(sessionId: string) {
+  private sendSubscribe(sessionId: string, latest = false) {
     const subscription = this.subscriptions.get(sessionId);
     const peer = this.peer;
     if (!subscription || !peer) return Promise.resolve(undefined);
@@ -466,7 +497,7 @@ export class HostLink {
         sessionId,
         fromSeq: subscription.cursor(),
         lazyImages: this.options.lazyImages,
-        latest: this.latest || undefined,
+        latest: latest || undefined,
       })
       // A closed and reopened conversation owns a new subscription: an older response
       // must not make its unfinished history appear ready.

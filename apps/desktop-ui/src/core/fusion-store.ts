@@ -708,6 +708,8 @@ export function createFusionController(deps: FusionControllerDeps = {}) {
             icons: { ...prev.icons, ...reply.icons },
           }));
         }
+      } catch {
+        // Keep loading subsequent batches even if one IPC icon request fails or times out.
       } finally {
         for (const bundle of batch) {
           loadingIcons.delete(`${computerKey}:${hostSlug}:${bundle}`);

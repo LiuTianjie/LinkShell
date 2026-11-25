@@ -14,12 +14,14 @@ import {
   MANAGE_PAGES,
   routerStore,
   saveLocal,
+  sessionGroup,
   sessionTitle,
   stopComputerFusion,
   STORAGE_KEYS,
   useActiveDesktopPlatform,
   useI18n,
   useRouter,
+  waitingLabel,
   type Computer,
   type ManagePage,
 } from "../../core";
@@ -28,7 +30,7 @@ import {
   formatShortcut,
 } from "../../bridge/shortcuts";
 import { AgentMark, DesktopIcon, type DesktopIconName } from "../../icons";
-import { Dialog, isImeComposing, Kbd } from "../../primitives";
+import { Dialog, isImeComposing, Kbd, StatusDot } from "../../primitives";
 import { applyDesktopAppearance, type ThemeMode } from "../../theme";
 import {
   computerPlatformIcon,
@@ -38,8 +40,78 @@ import {
   sessionRecency,
   switchToComputer,
   useConnectionStore,
+  useRetainedMetadataConnections,
 } from "./shell-helpers";
 import type { DesktopPlatform } from "../../bridge/desktop-bridge";
+import type { SessionSummary } from "@linkshell/wire";
+
+function scoreTokenMatch(token: string, text: string, rawText = text): number {
+  if (!token) return 0;
+  const idx = text.indexOf(token);
+  if (idx >= 0) {
+    let score = 100 - Math.min(idx, 60);
+    const camelBoundary =
+      idx > 0 && /[a-z]/.test(rawText[idx - 1]!) && /[A-Z]/.test(rawText[idx]!);
+    if (idx === 0) score += 40;
+    else if (/[\s/\\._:-]/.test(text[idx - 1]!) || camelBoundary) score += 25;
+    return score;
+  }
+  // Fuzzy subsequence fallback: matches characters in order, rewarding tight runs and word starts.
+  let ti = 0;
+  let score = 0;
+  let consecutive = 0;
+  let firstMatch = -1;
+  let lastMatch = -1;
+  for (let i = 0; i < text.length && ti < token.length; i++) {
+    if (text[i] === token[ti]) {
+      if (firstMatch < 0) firstMatch = i;
+      consecutive = lastMatch === i - 1 ? consecutive + 1 : 1;
+      const camelBoundary =
+        i > 0 && /[a-z]/.test(rawText[i - 1]!) && /[A-Z]/.test(rawText[i]!);
+      const boundary = i === 0 || /[\s/\\._:-]/.test(text[i - 1]!) || camelBoundary;
+      score += 10 + consecutive * 6 + (boundary ? 12 : 0);
+      lastMatch = i;
+      ti += 1;
+    }
+  }
+  if (ti < token.length) return -1;
+  const span = lastMatch - firstMatch + 1;
+  return Math.max(1, score - Math.max(0, span - token.length) * 2);
+}
+
+/** Returns `-1` when no match, or a positive relevance score favoring exact prefixes & tight fuzzy runs. */
+export function fuzzyMatchScore(
+  query: string,
+  title: string,
+  subtitle = "",
+  keywords = "",
+  group = "",
+): number {
+  const trimmed = query.trim().toLowerCase();
+  if (!trimmed) return 0;
+  const tokens = trimmed.split(/\s+/).filter(Boolean);
+  const titleLower = title.toLowerCase();
+  const subLower = subtitle.toLowerCase();
+  const extraRaw = `${keywords} ${group}`;
+  const extraLower = extraRaw.toLowerCase();
+  const combinedRaw = `${title} ${subtitle} ${extraRaw}`;
+  const combined = `${titleLower} ${subLower} ${extraLower}`;
+  let total = 0;
+  for (const tok of tokens) {
+    const tScore = scoreTokenMatch(tok, titleLower, title);
+    const sScore = scoreTokenMatch(tok, subLower, subtitle);
+    const eScore = scoreTokenMatch(tok, extraLower, extraRaw);
+    const best = Math.max(tScore * 2, sScore * 1.3, eScore);
+    if (best < 0) {
+      const cScore = scoreTokenMatch(tok, combined, combinedRaw);
+      if (cScore < 0) return -1;
+      total += cScore;
+    } else {
+      total += best;
+    }
+  }
+  return total;
+}
 
 export interface CommandCenterProps {
   onRequestNewSession: (computerKey?: string, cwd?: string) => void;
@@ -94,6 +166,8 @@ export function CommandCenter({
   const names = useStore(computerNames.store);
   const fusionByComputer = useStore(fusionStore, (s) => s.byComputer);
   const sessionsMap = useConnectionStore(activeConnection, (s) => s.sessions);
+  const projectsList = useConnectionStore(activeConnection, (s) => s.projects);
+  const retainedConnections = useRetainedMetadataConnections(computers, open);
 
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
@@ -126,11 +200,131 @@ export function CommandCenter({
 
   const allItems = useMemo<CommandActionItem[]>(() => {
     const items: CommandActionItem[] = [];
+    const groupTriage = t("desktop.timeline.waitingAction");
     const groupFusion = t("desktop.fusion.title");
     const groupQuick = t("desktop.shell.paletteWorkspace");
     const groupSessions = t("desktop.nav.sessions");
+    const groupProjects = t("desktop.nav.projects");
     const groupComputers = t("desktop.nav.computers");
     const groupSystem = t("desktop.localManagement");
+
+    // Aggregate all sessions and projects across every online computer + activeConnection.
+    const computerByKey = new Map<string, Computer>();
+    for (const c of computers) computerByKey.set(c.key, c);
+    if (localComputer && !computerByKey.has(localComputer.key)) {
+      computerByKey.set(localComputer.key, localComputer);
+    }
+    if (activeConnection && !computerByKey.has(activeConnection.computer.key)) {
+      computerByKey.set(activeConnection.computer.key, activeConnection.computer);
+    }
+
+    const sessionEntries: Array<{
+      computerKey: string;
+      computer?: Computer;
+      computerLabel: string;
+      session: SessionSummary;
+    }> = [];
+    const seenSessions = new Set<string>();
+    const projectEntries: Array<{
+      computerKey: string;
+      computer?: Computer;
+      computerLabel: string;
+      path: string;
+      name: string;
+    }> = [];
+    const seenProjects = new Set<string>();
+
+    const collectFromSnapshot = (
+      compKey: string,
+      comp: Computer | undefined,
+      sessRecord: Record<string, SessionSummary> | undefined,
+      projs: readonly { cwd: string; name?: string }[] | undefined,
+    ) => {
+      const compLabel = displayComputerName(comp, names, locale);
+      for (const session of Object.values(sessRecord ?? {})) {
+        if (session.archived) continue;
+        const dedupeKey = `${compKey}\n${session.id}`;
+        if (seenSessions.has(dedupeKey)) continue;
+        seenSessions.add(dedupeKey);
+        sessionEntries.push({
+          computerKey: compKey,
+          computer: comp,
+          computerLabel: compLabel,
+          session,
+        });
+        if (session.cwd) {
+          const pKey = `${compKey}\n${session.cwd}`;
+          if (!seenProjects.has(pKey)) {
+            seenProjects.add(pKey);
+            projectEntries.push({
+              computerKey: compKey,
+              computer: comp,
+              computerLabel: compLabel,
+              path: session.cwd,
+              name: folderBasename(session.cwd),
+            });
+          }
+        }
+      }
+      for (const proj of projs ?? []) {
+        if (!proj.cwd) continue;
+        const pKey = `${compKey}\n${proj.cwd}`;
+        if (seenProjects.has(pKey)) continue;
+        seenProjects.add(pKey);
+        projectEntries.push({
+          computerKey: compKey,
+          computer: comp,
+          computerLabel: compLabel,
+          path: proj.cwd,
+          name: proj.name || folderBasename(proj.cwd),
+        });
+      }
+    };
+
+    if (activeConnection) {
+      collectFromSnapshot(
+        activeConnection.computer.key,
+        activeConnection.computer,
+        sessionsMap,
+        projectsList,
+      );
+    }
+    for (const [compKey, conn] of Object.entries(retainedConnections)) {
+      if (activeConnection && compKey === activeConnection.computer.key) continue;
+      const snap = conn.store.getState();
+      collectFromSnapshot(
+        compKey,
+        computerByKey.get(compKey) ?? conn.computer,
+        snap.sessions,
+        snap.projects,
+      );
+    }
+
+    sessionEntries.sort((a, b) => sessionRecency(b.session) - sessionRecency(a.session));
+    const multiComputer = computerByKey.size > 1;
+
+    // 0. Quick Approval / Triage Navigation — blocked sessions waiting for user approval/answer
+    const waitingEntries = sessionEntries.filter(
+      ({ session }) => sessionGroup(session) === "waiting",
+    );
+    for (const entry of waitingEntries) {
+      const title = sessionTitle(entry.session);
+      const waitText = waitingLabel(entry.session, locale);
+      const folder = folderBasename(entry.session.cwd);
+      const subParts = [waitText, folder, multiComputer ? entry.computerLabel : ""].filter(Boolean);
+      items.push({
+        id: `triage-${entry.computerKey}-${entry.session.id}`,
+        group: groupTriage,
+        title,
+        subtitle: subParts.join(" · "),
+        keywords: `triage approval approve waiting question 审批 批准 等待 回答 ${title} ${folder} ${entry.computerLabel} ${entry.session.agent}`,
+        icon: <StatusDot tone="waiting" size="sm" />,
+        run: () => {
+          if (entry.computer) engine.select(entry.computer);
+          openSession(entry.computerKey, entry.session.id);
+        },
+      });
+    }
 
     // 1. Global First-Class Fusion Mode Commands — reachable from ANY computer (including desktop:local)!
     const fusionEnv = currentFusionCapabilityEnv(activePlatform);
@@ -308,23 +502,42 @@ export function CommandCenter({
       },
     );
 
-    // 3. Active & Recent Sessions on Selected Computer
-    const liveSessions = Object.values(sessionsMap)
-      .filter((s) => !s.archived)
-      .sort((a, b) => sessionRecency(b) - sessionRecency(a))
-      .slice(0, 24);
-
-    for (const session of liveSessions) {
-      const title = sessionTitle(session);
-      const folder = folderBasename(session.cwd);
+    // 3. All Active & Recent Sessions across all computers (no 24-session pre-filter cap)
+    for (const entry of sessionEntries) {
+      const title = sessionTitle(entry.session);
+      const folder = folderBasename(entry.session.cwd);
+      const sub =
+        multiComputer && entry.computerKey !== activeComputerKey
+          ? `${folder} · ${entry.computerLabel}`
+          : folder;
       items.push({
-        id: `session-${session.id}`,
+        id: `session-${entry.computerKey}-${entry.session.id}`,
         group: groupSessions,
         title,
-        subtitle: folder,
-        keywords: `${title} ${folder} ${session.agent} session 会话`,
-        icon: <AgentMark agent={session.agent} size={16} />,
-        run: () => openSession(activeComputerKey, session.id),
+        subtitle: sub,
+        keywords: `${title} ${folder} ${entry.session.cwd} ${entry.computerLabel} ${entry.session.agent} session 会话`,
+        icon: <AgentMark agent={entry.session.agent} size={16} />,
+        run: () => {
+          if (entry.computer) engine.select(entry.computer);
+          openSession(entry.computerKey, entry.session.id);
+        },
+      });
+    }
+
+    // 3b. All Projects across all computers
+    for (const proj of projectEntries) {
+      const sub = multiComputer ? `${proj.path} · ${proj.computerLabel}` : proj.path;
+      items.push({
+        id: `project-${proj.computerKey}-${proj.path}`,
+        group: groupProjects,
+        title: proj.name,
+        subtitle: sub,
+        keywords: `project folder dir 项目 目录 新建 ${proj.name} ${proj.path} ${proj.computerLabel}`,
+        icon: "folder-open",
+        run: () => {
+          if (proj.computer) engine.select(proj.computer);
+          onRequestNewSession(proj.computerKey, proj.path);
+        },
       });
     }
 
@@ -421,10 +634,12 @@ export function CommandCenter({
   }, [
     activeComputer,
     activeComputerKey,
+    activeConnection,
     activePlatform,
     computers,
     inSession,
     fusionByComputer,
+    localComputer,
     locale,
     names,
     navigate,
@@ -434,6 +649,8 @@ export function CommandCenter({
     openScreen,
     openSession,
     openSystemModal,
+    projectsList,
+    retainedConnections,
     sessionsMap,
     setConnectModalOpen,
     setShortcutSheetOpen,
@@ -444,21 +661,41 @@ export function CommandCenter({
   ]);
 
   const filteredItems = useMemo(() => {
-    const trimmed = query.trim().toLowerCase();
+    const trimmed = query.trim();
     if (!trimmed) return allItems;
-    const tokens = trimmed.split(/\s+/).filter(Boolean);
-    return allItems.filter((item) => {
-      const haystack = `${item.title} ${item.subtitle ?? ""} ${item.keywords} ${item.group}`.toLowerCase();
-      return tokens.every((tok) => haystack.includes(tok));
-    });
+    const scored: Array<{ item: CommandActionItem; score: number; order: number }> = [];
+    for (let i = 0; i < allItems.length; i++) {
+      const item = allItems[i]!;
+      const score = fuzzyMatchScore(
+        trimmed,
+        item.title,
+        item.subtitle ?? "",
+        item.keywords,
+        item.group,
+      );
+      if (score >= 0) {
+        scored.push({ item, score, order: i });
+      }
+    }
+    scored.sort((a, b) => b.score - a.score || a.order - b.order);
+    return scored.map((entry) => entry.item);
   }, [allItems, query]);
 
   useEffect(() => {
     setActiveIndex(0);
   }, [query]);
 
-  const activeOptionId = filteredItems[activeIndex]
-    ? `ls-command-option-${filteredItems[activeIndex].id.replace(/[^a-zA-Z0-9_-]/g, "_")}`
+  useEffect(() => {
+    setActiveIndex((prev) =>
+      filteredItems.length === 0 ? 0 : Math.min(prev, filteredItems.length - 1),
+    );
+  }, [filteredItems.length]);
+
+  const safeActiveIndex =
+    filteredItems.length === 0 ? 0 : Math.min(activeIndex, filteredItems.length - 1);
+
+  const activeOptionId = filteredItems[safeActiveIndex]
+    ? `ls-command-option-${filteredItems[safeActiveIndex].id.replace(/[^a-zA-Z0-9_-]/g, "_")}`
     : undefined;
 
   // Arrow keys move the highlight; keep it on screen like any native list.
@@ -530,11 +767,11 @@ export function CommandCenter({
                 }
               } else if (event.key === "Enter") {
                 event.preventDefault();
-                executeItem(filteredItems[activeIndex]);
+                executeItem(filteredItems[safeActiveIndex]);
               }
             }}
           />
-          <Kbd shortcut="Esc" />
+          <Kbd platform={activePlatform} shortcut="Esc" />
         </div>
 
         <div
@@ -549,7 +786,7 @@ export function CommandCenter({
               <div key={group.name} className="command-center__group">
                 <div className="command-center__group-label">{group.name}</div>
                 {group.entries.map(({ item, flatIndex }) => {
-                  const isActive = flatIndex === activeIndex;
+                  const isActive = flatIndex === safeActiveIndex;
                   return (
                     <button
                       key={item.id}
@@ -561,7 +798,7 @@ export function CommandCenter({
                       data-active={isActive ? "true" : undefined}
                       className="command-center__item"
                       onPointerMove={() => {
-                        if (activeIndex !== flatIndex) setActiveIndex(flatIndex);
+                        if (safeActiveIndex !== flatIndex) setActiveIndex(flatIndex);
                       }}
                       onClick={() => executeItem(item)}
                     >
@@ -578,7 +815,7 @@ export function CommandCenter({
                           <span className="command-center__item-sub">{item.subtitle}</span>
                         ) : null}
                       </span>
-                      {item.shortcut ? <Kbd>{item.shortcut}</Kbd> : null}
+                      {item.shortcut ? <Kbd platform={activePlatform}>{item.shortcut}</Kbd> : null}
                     </button>
                   );
                 })}
@@ -592,11 +829,11 @@ export function CommandCenter({
         <div className="command-center__footer">
           <div className="command-center__hints">
             <span className="command-center__hint">
-              <Kbd>↑↓</Kbd>
+              <Kbd platform={activePlatform}>↑↓</Kbd>
               <span>{t("desktop.shell.paletteNavigate")}</span>
             </span>
             <span className="command-center__hint">
-              <Kbd>↵</Kbd>
+              <Kbd platform={activePlatform} shortcut="Enter" />
               <span>{t("desktop.shell.paletteRun")}</span>
             </span>
           </div>

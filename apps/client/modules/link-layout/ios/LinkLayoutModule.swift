@@ -6,6 +6,65 @@ import UIKit
 import ActivityKit
 #endif
 
+/// Strict non-reentrant FIFO queue so ActivityKit calls never race across suspension points.
+private actor LiveActivitySerialQueue {
+  private var tail: Task<Void, Never>?
+
+  func enqueue<T: Sendable>(_ operation: @escaping @MainActor () async -> T) async -> T {
+    let previous = tail
+    let job = Task<T, Never> { @MainActor in
+      await previous?.value
+      return await operation()
+    }
+    tail = Task { _ = await job.value }
+    return await job.value
+  }
+}
+
+private struct LiveActivitySyncInput: Sendable {
+  let active: Bool
+  let computerKey: String?
+  let computerName: String
+  let phase: String
+  let title: String
+  let subtitle: String
+  let project: String
+  let agent: String
+  let agents: [String]?
+  let actionsData: Data?
+  let hasMoreActions: Bool?
+  let tasksData: Data?
+  let noticeId: String?
+  let waitingCount: Int
+  let runningCount: Int
+  let failedCount: Int
+  let deepLink: String
+
+  init(payload: [String: Any]) {
+    let rawKey = (payload["computerKey"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+    self.active = (payload["active"] as? Bool) ?? false
+    self.computerKey = (rawKey?.isEmpty == false) ? rawKey : nil
+    self.computerName = (payload["computerName"] as? String) ?? "电脑"
+    self.phase = (payload["phase"] as? String) ?? "running"
+    self.title = (payload["title"] as? String) ?? "会话进行中"
+    self.subtitle = (payload["subtitle"] as? String) ?? ""
+    self.project = (payload["project"] as? String) ?? ""
+    self.agent = (payload["agent"] as? String) ?? "claude"
+    self.agents = payload["agents"] as? [String]
+    self.actionsData = (payload["actions"] as? [[String: Any]]).flatMap {
+      try? JSONSerialization.data(withJSONObject: $0)
+    }
+    self.hasMoreActions = payload["hasMoreActions"] as? Bool
+    self.tasksData = (payload["tasks"] as? [[String: Any]]).flatMap {
+      try? JSONSerialization.data(withJSONObject: $0)
+    }
+    self.noticeId = payload["noticeId"] as? String
+    self.waitingCount = (payload["waitingCount"] as? Int) ?? 0
+    self.runningCount = (payload["runningCount"] as? Int) ?? 0
+    self.failedCount = (payload["failedCount"] as? Int) ?? 0
+    self.deepLink = (payload["deepLink"] as? String) ?? "linkshell:///"
+  }
+}
 
 public class LinkLayoutModule: Module {
   private weak var presentationScene: UIWindowScene?
@@ -20,6 +79,8 @@ public class LinkLayoutModule: Module {
   private var lastLevelSentAt: TimeInterval = 0
   private var simulatorWaveTimer: Timer?
   private var activeActivityId: String?
+  private let activityQueue = LiveActivitySerialQueue()
+  private var activityUpdatesTask: Task<Void, Never>?
   private var pushTokenTasks: [String: Task<Void, Never>] = [:]
   private var pushToStartTask: Task<Void, Never>?
   private var activityStateTasks: [String: Task<Void, Never>] = [:]
@@ -58,6 +119,8 @@ public class LinkLayoutModule: Module {
       self?.lanDiscovery = nil
       if let self {
         Task { @MainActor in
+          self.activityUpdatesTask?.cancel()
+          self.activityUpdatesTask = nil
           self.pushToStartTask?.cancel()
           self.pushToStartTask = nil
           self.pushTokenTasks.values.forEach { $0.cancel() }
@@ -446,14 +509,165 @@ public class LinkLayoutModule: Module {
     Bundle.main.object(forInfoDictionaryKey: "LinkShellLiveActivityPushURL") as? String ?? ""
   }
 
+  private static func normalizedComputerKey(_ key: String?) -> String? {
+    guard let trimmed = key?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+      return nil
+    }
+    return trimmed
+  }
+
+  private static func isRemoteReady(_ activityId: String) -> Bool {
+    UserDefaults.standard.bool(forKey: "LinkShellLiveActivity.remote." + activityId)
+  }
+
   @MainActor private func observeExistingActivities() {
-    if #available(iOS 16.2, *), !Self.pushServiceURL.isEmpty {
-      for activity in Activity<LinkShellAttentionAttributes>.activities { observePushToken(activity) }
+    #if canImport(ActivityKit)
+    if #available(iOS 16.2, *) {
+      for activity in Activity<LinkShellAttentionAttributes>.activities {
+        observeActivityLifecycle(activity)
+      }
+      observeActivityUpdates()
+      Task { [weak self] in
+        await self?.reconcileNativeLiveActivities()
+      }
     }
     if #available(iOS 17.2, *), !Self.pushServiceURL.isEmpty {
       observePushToStartToken()
     }
+    #endif
   }
+
+  #if canImport(ActivityKit)
+  @available(iOS 16.2, *)
+  @MainActor private func observeActivityUpdates() {
+    guard activityUpdatesTask == nil else { return }
+    activityUpdatesTask = Task { [weak self] in
+      // Catch push-to-start activities created while the app is running or suspended
+      // so they are immediately deduplicated, observed, and handed off to JS/Host.
+      for await activity in Activity<LinkShellAttentionAttributes>.activityUpdates {
+        if Task.isCancelled { break }
+        guard let self else { break }
+        await self.handleObservedActivity(activity)
+      }
+    }
+  }
+
+  @available(iOS 16.2, *)
+  private func handleObservedActivity(_ activity: Activity<LinkShellAttentionAttributes>) async {
+    await activityQueue.enqueue { [weak self] in
+      guard let self else { return }
+      guard activity.activityState == .active || activity.activityState == .stale else { return }
+      self.observeActivityLifecycle(activity)
+      let key = Self.normalizedComputerKey(activity.attributes.computerKey)
+      await self.reconcileActivitiesLocked(preferredActivityId: activity.id, targetComputerKey: key)
+      let survived = Activity<LinkShellAttentionAttributes>.activities.contains {
+        $0.id == activity.id && ($0.activityState == .active || $0.activityState == .stale)
+      }
+      guard survived else { return }
+      if !Self.pushServiceURL.isEmpty {
+        if activity.pushToken != nil && !Self.isRemoteReady(activity.id) {
+          self.beginPushRegistrationTask()
+        }
+        self.sendEvent("onLiveActivityPushToken", ["activityId": activity.id])
+      }
+    }
+  }
+
+  @available(iOS 16.2, *)
+  private func reconcileNativeLiveActivities(preferredActivityId: String? = nil, targetComputerKey: String? = nil) async {
+    await activityQueue.enqueue { [weak self] in
+      guard let self else { return }
+      await self.reconcileActivitiesLocked(preferredActivityId: preferredActivityId, targetComputerKey: targetComputerKey)
+    }
+  }
+
+  @available(iOS 16.2, *)
+  @MainActor private func activityRank(
+    _ activity: Activity<LinkShellAttentionAttributes>,
+    index: Int,
+    pushEnabled: Bool,
+    preferredActivityId: String?
+  ) -> (Int, Int, Int, Int, Int, Int) {
+    let stateScore = activity.activityState == .active ? 2 : 1
+    let modeScore = (activity.attributes.remoteUpdates ?? false) == pushEnabled ? 1 : 0
+    let remoteScore = (pushEnabled && Self.isRemoteReady(activity.id)) ? 1 : 0
+    let tokenScore = (pushEnabled && activity.pushToken != nil) ? 1 : 0
+    let preferredScore: Int
+    if let preferredActivityId, activity.id == preferredActivityId {
+      preferredScore = 2
+    } else if let activeActivityId, activity.id == activeActivityId {
+      preferredScore = 1
+    } else {
+      preferredScore = 0
+    }
+    return (stateScore, modeScore, remoteScore, tokenScore, preferredScore, index)
+  }
+
+  @available(iOS 16.2, *)
+  @MainActor private func bestActivity(
+    in group: [Activity<LinkShellAttentionAttributes>],
+    pushEnabled: Bool,
+    preferredActivityId: String?
+  ) -> Activity<LinkShellAttentionAttributes>? {
+    group.enumerated().max { lhs, rhs in
+      activityRank(lhs.element, index: lhs.offset, pushEnabled: pushEnabled, preferredActivityId: preferredActivityId)
+        < activityRank(rhs.element, index: rhs.offset, pushEnabled: pushEnabled, preferredActivityId: preferredActivityId)
+    }?.element
+  }
+
+  @available(iOS 16.2, *)
+  @MainActor private func endActivityLocked(_ activity: Activity<LinkShellAttentionAttributes>) async {
+    pushTokenTasks.removeValue(forKey: activity.id)?.cancel()
+    activityStateTasks.removeValue(forKey: activity.id)?.cancel()
+    UserDefaults.standard.removeObject(forKey: "LinkShellLiveActivity.remote." + activity.id)
+    LiveActivityBrowsing.clear(activityID: activity.id)
+    if activeActivityId == activity.id { activeActivityId = nil }
+    await activity.end(nil, dismissalPolicy: .immediate)
+    sendEvent("onLiveActivityPushToken", ["activityId": activity.id, "ended": true])
+  }
+
+  /// Enforces strictly at most 1 live activity per computerKey and cleans up untagged zombies.
+  @available(iOS 16.2, *)
+  @MainActor private func reconcileActivitiesLocked(
+    preferredActivityId: String? = nil,
+    targetComputerKey: String? = nil
+  ) async {
+    let pushEnabled = !Self.pushServiceURL.isEmpty
+    let live = Activity<LinkShellAttentionAttributes>.activities.filter {
+      $0.activityState == .active || $0.activityState == .stale
+    }
+    var grouped: [String: [Activity<LinkShellAttentionAttributes>]] = [:]
+    var untagged: [Activity<LinkShellAttentionAttributes>] = []
+    for activity in live {
+      if let key = Self.normalizedComputerKey(activity.attributes.computerKey) {
+        grouped[key, default: []].append(activity)
+      } else {
+        untagged.append(activity)
+      }
+    }
+
+    if !grouped.isEmpty || targetComputerKey != nil {
+      for zombie in untagged {
+        await endActivityLocked(zombie)
+      }
+    } else if untagged.count > 1,
+              let keeper = bestActivity(in: untagged, pushEnabled: pushEnabled, preferredActivityId: preferredActivityId) {
+      for duplicate in untagged where duplicate.id != keeper.id {
+        await endActivityLocked(duplicate)
+      }
+    }
+
+    for (_, group) in grouped {
+      guard let keeper = bestActivity(in: group, pushEnabled: pushEnabled, preferredActivityId: preferredActivityId) else {
+        continue
+      }
+      observeActivityLifecycle(keeper)
+      for duplicate in group where duplicate.id != keeper.id {
+        await endActivityLocked(duplicate)
+      }
+    }
+  }
+  #endif
 
   @available(iOS 17.2, *)
   @MainActor private func observePushToStartToken() {
@@ -484,27 +698,31 @@ public class LinkLayoutModule: Module {
   }
 
   @available(iOS 16.2, *)
-  @MainActor private func observePushToken(_ activity: Activity<LinkShellAttentionAttributes>) {
-    guard !Self.pushServiceURL.isEmpty, pushTokenTasks[activity.id] == nil else { return }
-    pushTokenTasks[activity.id] = Task { [weak self] in
-      for await _ in activity.pushTokenUpdates {
-        if Task.isCancelled { break }
-        self?.sendEvent("onLiveActivityPushToken", ["activityId": activity.id])
+  @MainActor private func observeActivityLifecycle(_ activity: Activity<LinkShellAttentionAttributes>) {
+    if !Self.pushServiceURL.isEmpty, pushTokenTasks[activity.id] == nil {
+      pushTokenTasks[activity.id] = Task { [weak self] in
+        for await _ in activity.pushTokenUpdates {
+          if Task.isCancelled { break }
+          self?.sendEvent("onLiveActivityPushToken", ["activityId": activity.id])
+        }
       }
     }
-    activityStateTasks[activity.id] = Task { [weak self] in
-      for await state in activity.activityStateUpdates {
-        if Task.isCancelled { break }
-        if state == .ended || state == .dismissed {
-          if state == .dismissed, let computerKey = activity.attributes.computerKey {
-            UserDefaults.standard.set(activity.content.state.workloadKey, forKey: "LinkShellLiveActivity.dismissed." + computerKey)
+    if activityStateTasks[activity.id] == nil {
+      activityStateTasks[activity.id] = Task { [weak self] in
+        for await state in activity.activityStateUpdates {
+          if Task.isCancelled { break }
+          if state == .ended || state == .dismissed {
+            if state == .dismissed, let computerKey = Self.normalizedComputerKey(activity.attributes.computerKey) {
+              UserDefaults.standard.set(activity.content.state.workloadKey, forKey: "LinkShellLiveActivity.dismissed." + computerKey)
+            }
+            UserDefaults.standard.removeObject(forKey: "LinkShellLiveActivity.remote." + activity.id)
+            LiveActivityBrowsing.clear(activityID: activity.id)
+            self?.pushTokenTasks.removeValue(forKey: activity.id)?.cancel()
+            self?.activityStateTasks.removeValue(forKey: activity.id)
+            if self?.activeActivityId == activity.id { self?.activeActivityId = nil }
+            self?.sendEvent("onLiveActivityPushToken", ["activityId": activity.id, "ended": true])
+            break
           }
-          UserDefaults.standard.removeObject(forKey: "LinkShellLiveActivity.remote." + activity.id)
-          LiveActivityBrowsing.clear(activityID: activity.id)
-          self?.pushTokenTasks.removeValue(forKey: activity.id)?.cancel()
-          self?.activityStateTasks.removeValue(forKey: activity.id)
-          self?.sendEvent("onLiveActivityPushToken", ["activityId": activity.id, "ended": true])
-          break
         }
       }
     }
@@ -513,14 +731,35 @@ public class LinkLayoutModule: Module {
   @MainActor private func liveActivityPushRegistrations() -> [[String: String]] {
     guard !Self.pushServiceURL.isEmpty else { return [] }
     var registrations: [[String: String]] = []
+    #if canImport(ActivityKit)
     if #available(iOS 16.2, *) {
-      for activity in Activity<LinkShellAttentionAttributes>.activities where activity.activityState == .active || activity.activityState == .stale {
-        observePushToken(activity)
-        guard let token = activity.pushToken, let computerKey = activity.attributes.computerKey else { continue }
-        if !UserDefaults.standard.bool(forKey: "LinkShellLiveActivity.remote." + activity.id) { beginPushRegistrationTask() }
-        registrations.append(["activityId": activity.id, "computerKey": computerKey, "token": token.map { String(format: "%02x", $0) }.joined()])
+      let live = Activity<LinkShellAttentionAttributes>.activities.filter {
+        $0.activityState == .active || $0.activityState == .stale
+      }
+      var grouped: [String: [Activity<LinkShellAttentionAttributes>]] = [:]
+      var needsReconcile = false
+      for activity in live {
+        observeActivityLifecycle(activity)
+        guard let computerKey = Self.normalizedComputerKey(activity.attributes.computerKey) else {
+          needsReconcile = true
+          continue
+        }
+        grouped[computerKey, default: []].append(activity)
+      }
+      for (computerKey, group) in grouped {
+        if group.count > 1 { needsReconcile = true }
+        guard let winner = bestActivity(in: group, pushEnabled: true, preferredActivityId: nil),
+              let token = winner.pushToken else { continue }
+        if !Self.isRemoteReady(winner.id) { beginPushRegistrationTask() }
+        registrations.append(["activityId": winner.id, "computerKey": computerKey, "token": token.map { String(format: "%02x", $0) }.joined()])
+      }
+      if needsReconcile {
+        Task { [weak self] in
+          await self?.reconcileNativeLiveActivities()
+        }
       }
     }
+    #endif
     return registrations
   }
 
@@ -552,76 +791,79 @@ public class LinkLayoutModule: Module {
     return (db, normalized)
   }
 
-  @MainActor private func syncNativeLiveActivity(payload: [String: Any]) async -> Bool {
+  private func syncNativeLiveActivity(payload: [String: Any]) async -> Bool {
+    let input = LiveActivitySyncInput(payload: payload)
+    return await activityQueue.enqueue { [weak self] in
+      guard let self else { return false }
+      return await self.syncNativeLiveActivityLocked(input: input)
+    }
+  }
+
+  @MainActor private func syncNativeLiveActivityLocked(input: LiveActivitySyncInput) async -> Bool {
     #if canImport(ActivityKit)
     if #available(iOS 16.2, *) {
       guard ActivityAuthorizationInfo().areActivitiesEnabled else {
         return false
       }
       let pushEnabled = !Self.pushServiceURL.isEmpty
-      let computerKey = payload["computerKey"] as? String
+      let computerKey = input.computerKey
+      // Always deduplicate per computerKey and clear untagged zombies BEFORE any early return,
+      // including when the surviving activity is already remotely managed by Host.
+      await reconcileActivitiesLocked(targetComputerKey: computerKey)
+      let surviving = Activity<LinkShellAttentionAttributes>.activities.first {
+        ($0.activityState == .active || $0.activityState == .stale)
+          && Self.normalizedComputerKey($0.attributes.computerKey) == computerKey
+      }
       // Once delegated, the host owns foreground and background updates alike.
       // A cached phone snapshot must not end an activity before its final alert.
-      let remotelyManaged = Activity<LinkShellAttentionAttributes>.activities.contains {
-        ($0.activityState == .active || $0.activityState == .stale) && $0.attributes.computerKey == computerKey
-          && UserDefaults.standard.bool(forKey: "LinkShellLiveActivity.remote." + $0.id)
-      }
-      if remotelyManaged { return true }
-      let active = (payload["active"] as? Bool) ?? false
-      if !active {
-        if let computerKey { UserDefaults.standard.removeObject(forKey: "LinkShellLiveActivity.dismissed." + computerKey) }
-        await endNativeLiveActivity(computerKey: computerKey)
+      if let surviving, Self.isRemoteReady(surviving.id) {
+        observeActivityLifecycle(surviving)
+        activeActivityId = surviving.id
         return true
       }
-      let computerName = (payload["computerName"] as? String) ?? "电脑"
+      if !input.active {
+        if let computerKey { UserDefaults.standard.removeObject(forKey: "LinkShellLiveActivity.dismissed." + computerKey) }
+        await endNativeLiveActivityLocked(computerKey: computerKey)
+        return true
+      }
       let state = LinkShellAttentionAttributes.ContentState(
-        phase: (payload["phase"] as? String) ?? "running",
-        title: (payload["title"] as? String) ?? "会话进行中",
-        subtitle: (payload["subtitle"] as? String) ?? "",
-        project: (payload["project"] as? String) ?? "",
-        agent: (payload["agent"] as? String) ?? "claude",
-        agents: payload["agents"] as? [String],
-        actions: (payload["actions"] as? [[String: Any]]).flatMap { actions in
-          guard let data = try? JSONSerialization.data(withJSONObject: actions) else { return nil }
-          return try? JSONDecoder().decode([LiveActivityAction].self, from: data)
-        },
-        hasMoreActions: payload["hasMoreActions"] as? Bool,
-        tasks: (payload["tasks"] as? [[String: Any]]).flatMap { tasks in
-          guard let data = try? JSONSerialization.data(withJSONObject: tasks) else { return nil }
-          return try? JSONDecoder().decode([LiveActivityTask].self, from: data)
-        },
-        noticeId: payload["noticeId"] as? String,
+        phase: input.phase,
+        title: input.title,
+        subtitle: input.subtitle,
+        project: input.project,
+        agent: input.agent,
+        agents: input.agents,
+        actions: input.actionsData.flatMap { try? JSONDecoder().decode([LiveActivityAction].self, from: $0) },
+        hasMoreActions: input.hasMoreActions,
+        tasks: input.tasksData.flatMap { try? JSONDecoder().decode([LiveActivityTask].self, from: $0) },
+        noticeId: input.noticeId,
         selectionVersion: nil,
         remotePending: pushEnabled ? true : nil,
-        waitingCount: (payload["waitingCount"] as? Int) ?? 0,
-        runningCount: (payload["runningCount"] as? Int) ?? 0,
-        failedCount: (payload["failedCount"] as? Int) ?? 0,
-        deepLink: (payload["deepLink"] as? String) ?? "linkshell:///"
+        waitingCount: input.waitingCount,
+        runningCount: input.runningCount,
+        failedCount: input.failedCount,
+        deepLink: input.deepLink
       )
       // Delivery may be deferred by iOS. Keep the latest snapshot until an
       // explicit state change instead of declaring a live task dead on a timer.
       let content = ActivityContent(state: state, staleDate: nil)
-      for activity in Activity<LinkShellAttentionAttributes>.activities {
-        guard activity.activityState == .active || activity.activityState == .stale else { continue }
-        // Switching the foreground connection must not revoke another computer's
-        // background delivery grant or dismiss its outstanding approval.
-        guard activity.attributes.computerKey == computerKey else { continue }
-        if (activity.attributes.remoteUpdates ?? false) != pushEnabled {
-          await activity.end(nil, dismissalPolicy: .immediate)
-          continue
+      if let existing = surviving {
+        if (existing.attributes.remoteUpdates ?? false) != pushEnabled {
+          await endActivityLocked(existing)
+        } else {
+          observeActivityLifecycle(existing)
+          await existing.update(content)
+          activeActivityId = existing.id
+          return true
         }
-        observePushToken(activity)
-        await activity.update(content)
-        activeActivityId = activity.id
-        return true
       }
       do {
         guard UIApplication.shared.applicationState == .active else { return false }
         if let computerKey,
            UserDefaults.standard.string(forKey: "LinkShellLiveActivity.dismissed." + computerKey) == state.workloadKey { return true }
-        let attributes = LinkShellAttentionAttributes(computerName: computerName, computerKey: computerKey, remoteUpdates: pushEnabled)
+        let attributes = LinkShellAttentionAttributes(computerName: input.computerName, computerKey: computerKey, remoteUpdates: pushEnabled)
         let created = try Activity.request(attributes: attributes, content: content, pushType: pushEnabled ? .token : nil)
-        observePushToken(created)
+        observeActivityLifecycle(created)
         sendEvent("onLiveActivityPushToken", ["activityId": created.id])
         activeActivityId = created.id
         return true
@@ -633,16 +875,30 @@ public class LinkLayoutModule: Module {
     return false
   }
 
-  @MainActor private func endNativeLiveActivity(computerKey: String? = nil) async {
+  private func endNativeLiveActivity(computerKey: String? = nil) async {
+    await activityQueue.enqueue { [weak self] in
+      guard let self else { return }
+      await self.endNativeLiveActivityLocked(computerKey: computerKey)
+    }
+  }
+
+  @MainActor private func endNativeLiveActivityLocked(computerKey: String? = nil) async {
     #if canImport(ActivityKit)
     if #available(iOS 16.2, *) {
-      activeActivityId = nil
-      endPushRegistrationTask()
-      for activity in Activity<LinkShellAttentionAttributes>.activities {
-        if let computerKey, activity.attributes.computerKey != computerKey { continue }
-        await activity.end(nil, dismissalPolicy: .immediate)
-        sendEvent("onLiveActivityPushToken", ["activityId": activity.id, "ended": true])
+      let targetKey = Self.normalizedComputerKey(computerKey)
+      if targetKey == nil {
+        activeActivityId = nil
+        endPushRegistrationTask()
       }
+      for activity in Activity<LinkShellAttentionAttributes>.activities {
+        let activityKey = Self.normalizedComputerKey(activity.attributes.computerKey)
+        if let targetKey, let activityKey, activityKey != targetKey { continue }
+        await endActivityLocked(activity)
+      }
+      let remaining = Activity<LinkShellAttentionAttributes>.activities.contains {
+        $0.activityState == .active || $0.activityState == .stale
+      }
+      if !remaining { endPushRegistrationTask() }
     }
     #endif
   }

@@ -20,7 +20,7 @@ export const ACP_AGENTS: AcpAgentSpec[] = [
   { id: "copilot", label: "Copilot", tier: "remote", command: "copilot", args: ["--acp"], discover: true },
   { id: "grok", label: "Grok", tier: "remote", command: "grok", args: ["agent", "stdio"], discover: true, cachedAuthMethod: "cached_token" },
   { id: "opencode", label: "OpenCode", tier: "remote", command: "opencode", args: ["acp"] },
-  { id: "cursor", label: "Cursor", tier: "remote", command: "cursor-agent", args: ["acp"] },
+  { id: "cursor", label: "Cursor", tier: "remote", command: "cursor-agent", args: ["acp"], alternatives: [{ command: "agent", args: ["acp"] }] },
   // Open-source multi-model ACP CLIs widely used with Chinese and international models.
   { id: "cline", label: "Cline", tier: "remote", command: "cline", args: ["--acp"] },
   { id: "kilo", label: "Kilo Code", tier: "remote", command: "kilo", args: ["acp"] },

@@ -222,6 +222,12 @@ export function TimelineView({
   const turnActive = view.turnActive || session.state === "running";
 
   const noteAnchor = useCallback(() => {
+    // While following the bottom we never restore a top anchor, so skip layout reads to avoid
+    // forced reflows on every streaming frame.
+    if (followRef.current) {
+      anchorRef.current = null;
+      return;
+    }
     const scroller = scrollerRef.current;
     const track = trackRef.current;
     if (!scroller || !track) return;
@@ -247,19 +253,24 @@ export function TimelineView({
     if (!scroller) return;
     if (followRef.current) {
       writeScrollTop(scroller, scroller.scrollHeight);
-    } else {
-      const anchor = anchorRef.current;
-      if (anchor) {
-        const viewTop = scroller.getBoundingClientRect().top;
-        const moved = anchor.node.isConnected
-          ? anchor.node.getBoundingClientRect().top - viewTop - anchor.offset
-          : // The row was replaced (a folded run regrouped): hold the distance from the end.
-            scroller.scrollHeight - scroller.scrollTop - anchor.fromBottom;
-        if (Math.abs(moved) >= 0.5) writeScrollTop(scroller, scroller.scrollTop + moved);
-      }
+      anchorRef.current = null;
+      return;
     }
-    noteAnchor();
-  }, [noteAnchor, writeScrollTop]);
+    const anchor = anchorRef.current;
+    if (anchor) {
+      const viewTop = scroller.getBoundingClientRect().top;
+      const moved = anchor.node.isConnected
+        ? anchor.node.getBoundingClientRect().top - viewTop - anchor.offset
+        : // The row was replaced (a folded run regrouped): hold the distance from the end.
+          scroller.scrollHeight - scroller.scrollTop - anchor.fromBottom;
+      if (Math.abs(moved) >= 0.5) writeScrollTop(scroller, scroller.scrollTop + moved);
+    }
+      const distance = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
+      if (distance < FOLLOW_DISTANCE_PX) {
+        markAtBottom(true);
+      }
+      noteAnchor();
+  }, [markAtBottom, noteAnchor, writeScrollTop]);
 
   // Text released by the streaming smoother, images and highlighting all change height without a
   // new render here; the observer sees every one of them before paint.
@@ -341,17 +352,19 @@ export function TimelineView({
   // Reading back starts with the wheel, a key or the scrollbar, before the scroll event lands;
   // stop following right away or a streamed chunk would pull the view back down first.
   const stopFollowing = () => {
+    if (!followRef.current) return;
     followRef.current = false;
+    noteAnchor();
   };
 
   const scrollToBottom = () => {
     const scroller = scrollerRef.current;
     if (!scroller) return;
     followRef.current = true;
+    anchorRef.current = null;
     markAtBottom(true);
     // Instant: a smooth scroll's own intermediate events would read as reading back.
     writeScrollTop(scroller, scroller.scrollHeight);
-    noteAnchor();
   };
 
   const historicalCutoff = Math.max(0, rows.length - 12);
@@ -429,7 +442,7 @@ export function TimelineView({
                 cwd={session.cwd}
                 sessionKey={sessionKey}
                 searchQuery={searchQuery}
-                isTurnActive={turnActive}
+                isTurnActive={row.item.kind === "notice" && turnActive}
                 showItemQuestions={showItemQuestions}
                 wrapUpOpen={row.item.id === openWrapUpId}
                 onOpenImage={openImage}
@@ -487,7 +500,9 @@ export function TimelineView({
           )}
         </div>
 
-        {/* Sticky inside the scroller: it sits just above the composer whatever its height. */}
+        <div className="ls-timeline-bottom-fade" aria-hidden="true" />
+
+        {/* Sticky above `.ls-timeline-bottom-fade` so it stays unmasked while honoring scroll-state. */}
         <div className="ls-jump-bottom-anchor">
           <button
             type="button"
@@ -1161,6 +1176,7 @@ function ToolCallRow({
             computerKey={connection.computer.key}
             sessionId={sessionId}
             sessionKey={sessionKey}
+            cwd={cwd}
           />
         ))}
 

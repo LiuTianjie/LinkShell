@@ -225,7 +225,8 @@ export function dropRelayIfUnused(gateway: string): void {
   useComputers.setState((state) => {
     const { [url]: _status, ...relayStatus } = state.relayStatus;
     const { [url]: _discovery, ...discovery } = state.discovery;
-    return { relayStatus, discovery };
+    const { [url]: _live, ...live } = state.live;
+    return { relayStatus, discovery, live };
   });
 }
 
@@ -392,6 +393,7 @@ export const useComputers = create<ComputersState>((set, get) => ({
   async remove(key, options) {
     const current = get().saved;
     const relayEntry = current.relay.find((entry) => relayKey(entry.gateway, entry.machine.id) === key);
+    const directEntry = current.direct.find((entry) => `direct:${entry.url}` === key);
     // Unpairing happens at the gateway. Out of its reach, dropping the computer here would only
     // hide it until the next list brought it back, so it stays and the caller says why.
     const gatewayOf = relayEntry?.gateway ?? Object.entries(get().live).find(([gateway, machines]) => machines.some((entry) => relayKey(gateway, entry.id) === key))?.[0];
@@ -411,15 +413,35 @@ export const useComputers = create<ComputersState>((set, get) => ({
       selected: current.selected === key ? undefined : current.selected,
     };
     persist(saved);
-    set({ saved });
-    if (relayEntry) return true;
+    set((state) => ({
+      saved,
+      ...(relayEntry
+        ? {
+            live: {
+              ...state.live,
+              [relayEntry.gateway]: (state.live[relayEntry.gateway] ?? []).filter(
+                (entry) => entry.id !== relayEntry.machine.id,
+              ),
+            },
+          }
+        : {}),
+    }));
+    if (relayEntry) {
+      dropRelayIfUnused(relayEntry.gateway);
+      return true;
+    }
+    if (directEntry?.fallbackGateway) {
+      dropRelayIfUnused(directEntry.fallbackGateway);
+    }
     // Not paired, so here through the account: only the gateway can forget it.
     for (const [gateway, machines] of Object.entries(get().live)) {
       const machine = machines.find((entry) => relayKey(gateway, entry.id) === key);
       if (!machine) continue;
       await relayFor(gateway).request("machines.forget", { machineId: machine.id }).catch(() => {});
       await get().refresh(gateway);
-      return !(get().live[gateway] ?? []).some((entry) => entry.id === machine.id);
+      const removed = !(get().live[gateway] ?? []).some((entry) => entry.id === machine.id);
+      if (removed) dropRelayIfUnused(gateway);
+      return removed;
     }
     return true;
   },
@@ -558,13 +580,47 @@ export function listComputers(
   return annotateComputersWithLan(out, state.lanHosts);
 }
 
+/** True when `saved.selected` refers to an account-only computer whose gateway list has not settled yet. */
+export function isAwaitingSelectedAccountComputer(
+  state: Pick<ComputersState, "saved" | "live"> & {
+    lanHosts?: readonly DiscoveredLanHost[];
+    discovery?: Record<string, DiscoveryStatus>;
+  },
+  signedIn?: boolean,
+): boolean {
+  const selectedKey = state.saved.selected;
+  if (!selectedKey || !state.discovery) return false;
+  if (selectedKey.startsWith("direct:")) return false;
+  const hash = selectedKey.indexOf("#");
+  if (hash <= 0) return false;
+  const all = listComputers(state);
+  if (all.some((computer) => computer.key === selectedKey)) return false;
+  const isSignedIn = signedIn ?? Boolean(useAccount.getState?.()?.session);
+  if (!isSignedIn) return false;
+  const selectedGateway = normalizeGateway(selectedKey.slice(0, hash));
+  if (selectedGateway !== normalizeGateway(DEFAULT_GATEWAY)) return false;
+  const status = state.discovery[selectedGateway];
+  return status === undefined || status === "loading";
+}
+
 /** The selected computer, or the best default: an online one, else the first. */
 export function selectedComputer(
-  state: Pick<ComputersState, "saved" | "live"> & { lanHosts?: readonly DiscoveredLanHost[] },
+  state: Pick<ComputersState, "saved" | "live"> & {
+    lanHosts?: readonly DiscoveredLanHost[];
+    discovery?: Record<string, DiscoveryStatus>;
+  },
+  options?: { signedIn?: boolean },
 ): Computer | undefined {
   const all = listComputers(state);
+  const selectedKey = state.saved.selected;
+  if (selectedKey) {
+    const exact = all.find((computer) => computer.key === selectedKey);
+    if (exact) return exact;
+    if (isAwaitingSelectedAccountComputer(state, options?.signedIn)) {
+      return undefined;
+    }
+  }
   return (
-    all.find((computer) => computer.key === state.saved.selected) ??
     all.find((computer) => computer.kind === "relay" && computer.machine.online) ??
     all[0]
   );

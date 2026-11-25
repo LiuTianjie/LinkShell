@@ -8,6 +8,7 @@ vi.mock("react-native", () => ({
     select: <T,>(options: Record<string, T>) => options[environment.os] ?? options.default,
   },
   Appearance: { getColorScheme: () => environment.scheme },
+  PixelRatio: { getFontScale: () => 1 },
   DynamicColorIOS: (pair: unknown) => ({ dynamic: pair }),
   PlatformColor: (...paths: string[]) => ({ resource_paths: paths }),
 }));

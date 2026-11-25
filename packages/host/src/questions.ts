@@ -34,7 +34,14 @@ function options(source: unknown): Question["options"] {
   const titled = arr(schema?.oneOf ?? schema?.anyOf).flatMap((entry) => {
     const option = obj(entry);
     const value = str(option?.const);
-    return value === undefined ? [] : [{ value, label: str(option?.title) ?? value, description: str(option?.description) }];
+    if (value === undefined) return [];
+    const preview = str(obj(obj(option?._meta)?.["_claude/askUserQuestionOption"])?.preview);
+    return [{
+      value,
+      label: str(option?.title) ?? value,
+      description: str(option?.description),
+      ...(preview ? { preview } : {}),
+    }];
   });
   if (titled.length > 0) return titled;
   const names = arr(schema?.enumNames);
@@ -42,12 +49,20 @@ function options(source: unknown): Question["options"] {
   return plain.length > 0 ? plain : undefined;
 }
 
-/** The fields that only carry a free-text answer for another field. */
-function companions(properties: Json): Map<string, string> {
+function isChoiceProperty(property: Json | undefined): boolean {
+  if (!property) return false;
+  if (property.type === "string") return options(property) !== undefined;
+  if (property.type === "array") return options(property.items) !== undefined;
+  return false;
+}
+
+/** The fields that only carry an optional free-text answer for another choice/multi-select field. */
+function companions(properties: Json, required: ReadonlySet<string>): Map<string, string> {
   const found = new Map<string, string>();
   for (const key of Object.keys(properties)) {
+    if (required.has(key)) continue;
     const base = /^(.+)_(custom|other)$/.exec(key)?.[1];
-    if (base && properties[base] !== undefined && obj(properties[key])?.type === "string") found.set(key, base);
+    if (base && isChoiceProperty(obj(properties[base])) && obj(properties[key])?.type === "string") found.set(key, base);
   }
   return found;
 }
@@ -60,7 +75,7 @@ export function formQuestions(schema: unknown, message?: string): Form | undefin
   const properties = obj(obj(schema)?.properties);
   if (!properties) return undefined;
   const required = new Set(arr(obj(schema)?.required).filter((entry): entry is string => typeof entry === "string"));
-  const companionOf = companions(properties);
+  const companionOf = companions(properties, required);
   const keys = Object.keys(properties).filter((key) => !companionOf.has(key));
   const form: Form = { questions: [], fields: [] };
   for (const key of keys) {
@@ -115,7 +130,7 @@ export function formContent(form: Form, answers: QuestionAnswer[]): Record<strin
     const [first] = answer.values;
     if (field.type === "array") {
       content[field.key] = answer.values;
-    } else if (first !== undefined && (first !== "" || field.type === "string")) {
+    } else if (first !== undefined && (first !== "" || (field.type === "string" && question.kind === "text"))) {
       if (field.type === "boolean") content[field.key] = first === "true";
       else if (field.type === "string") content[field.key] = first;
       else if (Number.isFinite(Number(first))) content[field.key] = Number(first);

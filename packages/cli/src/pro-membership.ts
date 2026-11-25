@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fetchProMembership, MembershipError, type MembershipTier } from "../../client-core/src/pro-membership.js";
 import { getValidToken, loadAuth, SUPABASE_ANON_KEY, SUPABASE_URL } from "./auth.js";
@@ -38,8 +38,16 @@ export function cacheMembership(userId: string, membership: DesktopMembership, o
     // A slower request begun earlier cannot replace a newer observation.
     if (previous.userId === userId && previous.observedAt > observedAt) return;
   } catch { /* There may not be a prior account observation. */ }
-  mkdirSync(linkshellDir(), { recursive: true });
-  writeFileSync(cachePath(), JSON.stringify({ userId, ...membership, observedAt }) + "\n", { encoding: "utf8", mode: 0o600 });
+  const dir = linkshellDir();
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  if (process.platform !== "win32") {
+    try { chmodSync(dir, 0o700); } catch {}
+  }
+  const file = cachePath();
+  writeFileSync(file, JSON.stringify({ userId, ...membership, observedAt }) + "\n", { encoding: "utf8", mode: 0o600 });
+  if (process.platform !== "win32") {
+    try { chmodSync(file, 0o600); } catch {}
+  }
 }
 
 async function accountToken(expectedUserId?: string): Promise<{ userId: string; accessToken: string }> {

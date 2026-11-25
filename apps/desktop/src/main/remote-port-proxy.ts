@@ -14,6 +14,7 @@ export interface RemotePortRequestPayload {
 
 export interface RemotePortProxyOptions {
   dispatch: (payload: RemotePortRequestPayload) => boolean;
+  cancel?: (reqId: string) => void;
   idleMs?: number;
   requestTimeoutMs?: number;
   maxRequestBodyBytes?: number;
@@ -37,6 +38,7 @@ interface PendingRequest {
   method: string;
   res: ServerResponse;
   timer: NodeJS.Timeout;
+  streaming: boolean;
 }
 
 const DEFAULT_IDLE_MS = 15 * 60_000;
@@ -148,6 +150,7 @@ function writePlainError(res: ServerResponse, status: number, message: string, h
  */
 export class RemotePortProxyManager {
   private readonly dispatch: (payload: RemotePortRequestPayload) => boolean;
+  private readonly onCancel?: (reqId: string) => void;
   private readonly idleMs: number;
   private readonly requestTimeoutMs: number;
   private readonly maxRequestBodyBytes: number;
@@ -157,6 +160,7 @@ export class RemotePortProxyManager {
 
   constructor(options: RemotePortProxyOptions) {
     this.dispatch = options.dispatch;
+    this.onCancel = options.cancel;
     this.idleMs = options.idleMs ?? DEFAULT_IDLE_MS;
     this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     this.maxRequestBodyBytes = options.maxRequestBodyBytes ?? DEFAULT_MAX_REQUEST_BODY_BYTES;
@@ -190,18 +194,117 @@ export class RemotePortProxyManager {
     return promise;
   }
 
+  private applyResponseHeaders(item: PendingRequest, rawStatus: number, rawHeaders: unknown): void {
+    const grouped = new Map<string, { name: string; values: string[] }>();
+    for (const [rawName, rawValue] of normalizeReplyHeaders(rawHeaders)) {
+      const name = rawName.trim();
+      const lower = name.toLowerCase();
+      if (!name || HOP_BY_HOP_HEADERS.has(lower)) continue;
+      if (/[\r\n]/.test(name) || /[\r\n]/.test(rawValue)) continue;
+      const value =
+        lower === "location" ? rewriteLoopbackLocation(rawValue, item.remotePort, item.localPort) : rawValue;
+      const bucket = grouped.get(lower);
+      if (bucket) bucket.values.push(value);
+      else grouped.set(lower, { name, values: [value] });
+    }
+    item.res.statusCode = rawStatus;
+    for (const { name, values } of grouped.values()) {
+      item.res.setHeader(name, values.length === 1 ? values[0]! : values);
+    }
+  }
+
+  private armPendingTimer(item: PendingRequest): void {
+    clearTimeout(item.timer);
+    item.timer = setTimeout(() => {
+      const pending = this.pending.get(item.reqId);
+      if (!pending) return;
+      this.pending.delete(item.reqId);
+      this.onCancel?.(item.reqId);
+      if (!pending.res.headersSent) {
+        writePlainError(pending.res, 502, "远程端口响应超时", pending.method === "HEAD");
+      } else if (!pending.res.writableEnded && !pending.res.destroyed) {
+        pending.res.destroy();
+      }
+    }, this.requestTimeoutMs);
+    item.timer.unref?.();
+  }
+
   reply(params: Record<string, unknown>): { ok: boolean } {
     const reqId = typeof params.reqId === "string" ? params.reqId : "";
     if (!reqId) return { ok: false };
     const item = this.pending.get(reqId);
     if (!item) return { ok: false };
-    this.pending.delete(reqId);
-    clearTimeout(item.timer);
 
     const owner = this.proxies.get(item.proxyKey);
     if (owner) this.touchIdle(owner);
 
     const { res } = item;
+    const phase = typeof params.phase === "string" ? params.phase : undefined;
+
+    if (phase === "head") {
+      if (res.writableEnded || res.destroyed) {
+        this.pending.delete(reqId);
+        clearTimeout(item.timer);
+        return { ok: false };
+      }
+      const rawStatus = typeof params.status === "number" ? Math.trunc(params.status) : undefined;
+      const errorText = typeof params.error === "string" && params.error.trim() ? params.error.trim() : undefined;
+      if (rawStatus === undefined || rawStatus < 100 || rawStatus > 599) {
+        this.pending.delete(reqId);
+        clearTimeout(item.timer);
+        writePlainError(res, 502, errorText ?? "远程端口请求失败", item.method === "HEAD");
+        return { ok: true };
+      }
+      this.applyResponseHeaders(item, rawStatus, params.headers);
+      const bodylessStatus = rawStatus === 204 || rawStatus === 304 || (rawStatus >= 100 && rawStatus < 200);
+      if (bodylessStatus || item.method === "HEAD") {
+        this.pending.delete(reqId);
+        clearTimeout(item.timer);
+        res.end();
+        return { ok: true };
+      }
+      item.streaming = true;
+      res.flushHeaders();
+      this.armPendingTimer(item);
+      return { ok: true };
+    }
+
+    if (phase === "chunk") {
+      if (!item.streaming || res.writableEnded || res.destroyed) {
+        this.pending.delete(reqId);
+        clearTimeout(item.timer);
+        return { ok: false };
+      }
+      this.armPendingTimer(item);
+      if (typeof params.bodyBase64 === "string" && params.bodyBase64.length > 0) {
+        const chunk = Buffer.from(params.bodyBase64, "base64");
+        if (chunk.byteLength > 0) res.write(chunk);
+      }
+      return { ok: true };
+    }
+
+    if (phase === "end") {
+      this.pending.delete(reqId);
+      clearTimeout(item.timer);
+      if (!res.writableEnded && !res.destroyed) res.end();
+      return { ok: true };
+    }
+
+    if (phase === "error") {
+      this.pending.delete(reqId);
+      clearTimeout(item.timer);
+      const errorText = typeof params.error === "string" && params.error.trim() ? params.error.trim() : "远程端口请求失败";
+      if (!res.headersSent) {
+        writePlainError(res, 502, errorText, item.method === "HEAD");
+      } else if (!res.writableEnded && !res.destroyed) {
+        res.destroy();
+      }
+      return { ok: true };
+    }
+
+    // Legacy single-shot reply path (kept backwards-compatible).
+    this.pending.delete(reqId);
+    clearTimeout(item.timer);
     if (res.writableEnded || res.destroyed) return { ok: false };
 
     const rawStatus = typeof params.status === "number" ? Math.trunc(params.status) : undefined;
@@ -219,23 +322,7 @@ export class RemotePortProxyManager {
           ? Buffer.from(errorText, "utf8")
           : Buffer.alloc(0);
 
-    const grouped = new Map<string, { name: string; values: string[] }>();
-    for (const [rawName, rawValue] of normalizeReplyHeaders(params.headers)) {
-      const name = rawName.trim();
-      const lower = name.toLowerCase();
-      if (!name || HOP_BY_HOP_HEADERS.has(lower)) continue;
-      if (/[\r\n]/.test(name) || /[\r\n]/.test(rawValue)) continue;
-      const value =
-        lower === "location" ? rewriteLoopbackLocation(rawValue, item.remotePort, item.localPort) : rawValue;
-      const bucket = grouped.get(lower);
-      if (bucket) bucket.values.push(value);
-      else grouped.set(lower, { name, values: [value] });
-    }
-
-    res.statusCode = rawStatus;
-    for (const { name, values } of grouped.values()) {
-      res.setHeader(name, values.length === 1 ? values[0]! : values);
-    }
+    this.applyResponseHeaders(item, rawStatus, params.headers);
 
     const bodylessStatus = rawStatus === 204 || rawStatus === 304 || (rawStatus >= 100 && rawStatus < 200);
     if (!bodylessStatus) {
@@ -256,7 +343,12 @@ export class RemotePortProxyManager {
     for (const [reqId, item] of this.pending) {
       this.pending.delete(reqId);
       clearTimeout(item.timer);
-      writePlainError(item.res, 502, "远程端口代理已关闭", item.method === "HEAD");
+      this.onCancel?.(reqId);
+      if (!item.res.headersSent) {
+        writePlainError(item.res, 502, "远程端口代理已关闭", item.method === "HEAD");
+      } else if (!item.res.writableEnded && !item.res.destroyed) {
+        item.res.destroy();
+      }
     }
   }
 
@@ -362,29 +454,25 @@ export class RemotePortProxyManager {
       const body = chunks.length > 0 ? Buffer.concat(chunks, totalBytes) : Buffer.alloc(0);
       const reqId = randomUUID();
 
-      const timer = setTimeout(() => {
-        const pending = this.pending.get(reqId);
-        if (!pending) return;
-        this.pending.delete(reqId);
-        writePlainError(pending.res, 502, "远程端口响应超时", pending.method === "HEAD");
-      }, this.requestTimeoutMs);
-      timer.unref?.();
-
-      this.pending.set(reqId, {
+      const item: PendingRequest = {
         reqId,
         proxyKey: entry.key,
         remotePort: entry.remotePort,
         localPort: entry.localPort,
         method,
         res,
-        timer,
-      });
+        timer: setTimeout(() => {}, 0),
+        streaming: false,
+      };
+      this.pending.set(reqId, item);
+      this.armPendingTimer(item);
 
       res.on("close", () => {
         const pending = this.pending.get(reqId);
         if (!pending) return;
         this.pending.delete(reqId);
         clearTimeout(pending.timer);
+        this.onCancel?.(reqId);
       });
 
       const dispatched = this.dispatch({
@@ -399,7 +487,7 @@ export class RemotePortProxyManager {
 
       if (!dispatched) {
         this.pending.delete(reqId);
-        clearTimeout(timer);
+        clearTimeout(item.timer);
         writePlainError(res, 502, "LinkShell 工作台窗口未就绪，无法转发远程端口请求", method === "HEAD");
       }
     });
@@ -422,7 +510,12 @@ export class RemotePortProxyManager {
       if (item.proxyKey !== key) continue;
       this.pending.delete(reqId);
       clearTimeout(item.timer);
-      writePlainError(item.res, 502, "远程端口代理已关闭", item.method === "HEAD");
+      this.onCancel?.(reqId);
+      if (!item.res.headersSent) {
+        writePlainError(item.res, 502, "远程端口代理已关闭", item.method === "HEAD");
+      } else if (!item.res.writableEnded && !item.res.destroyed) {
+        item.res.destroy();
+      }
     }
     entry.server.close();
     for (const socket of entry.sockets) {

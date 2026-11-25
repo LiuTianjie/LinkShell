@@ -37,7 +37,7 @@ namespace LinkShell.Windows {
             RECT frame;
             if (!WindowFrame(window, out frame)) throw new ArgumentException("窗口已关闭");
             var center = new System.Drawing.Point((frame.Left + frame.Right) / 2, (frame.Top + frame.Bottom) / 2);
-            bounds = System.Windows.Forms.Screen.FromPoint(center).Bounds;
+            bounds = DisplayBoundsAt(center);
             int w = Math.Max(2, Math.Min(3840, canvasWidth) / 2 * 2), h = Math.Max(2, Math.Min(2160, canvasHeight) / 2 * 2);
             string source = "gfxcapture=hwnd=" + hwnd + ":capture_border=1:capture_cursor=0:width=" + w + ":height=" + h + ":resize_mode=crop:max_framerate=" + Math.Max(1, Math.Min(60, fps)) + ",";
             RunVideo(w, h, fps, bitrate, executable, source);
@@ -47,18 +47,20 @@ namespace LinkShell.Windows {
             bounds = Display(screen);
             if (!Path.IsPathRooted(executable) || !File.Exists(executable)) throw new ArgumentException("Windows 视频组件缺失");
             fps = Math.Max(1, Math.Min(60, fps));
-            bitrate = Math.Max(300000, Math.Min(12000000, bitrate));
-            // Level 4.2 fits 1080p60; never upscale or claim a higher profile than the SDP offers.
-            double scale = Math.Min(1, Math.Min(Math.Max(320, Math.Min(1920, width)) / (double)bounds.Width, 1080.0 / bounds.Height));
+            bitrate = Math.Max(300000, Math.Min(16000000, bitrate));
+            // Allow up to 1440p when requested (Level 5.1); keep 1080p ceiling otherwise and never upscale.
+            int maxW = width > 1920 ? Math.Min(2560, width) : Math.Max(320, Math.Min(1920, width));
+            double maxH = width > 1920 ? 1440.0 : 1080.0;
+            double scale = Math.Min(1, Math.Min(maxW / (double)bounds.Width, maxH / bounds.Height));
             int w = Math.Max(2, (int)(bounds.Width * scale) / 2 * 2), h = Math.Max(2, (int)(bounds.Height * scale) / 2 * 2);
-            uint vendor; int output = DesktopDuplication.VideoOutput(bounds, out vendor);
-            RunVideo(w, h, fps, bitrate, executable, "ddagrab=output_idx=" + output + ":framerate=" + fps + ":draw_mouse=0,", vendor);
+            uint vendor; int adapterIndex; int output = DesktopDuplication.VideoOutput(bounds, out vendor, out adapterIndex);
+            RunVideo(w, h, fps, bitrate, executable, "ddagrab=output_idx=" + output + ":framerate=" + fps + ":draw_mouse=0,", vendor, adapterIndex);
         }
 
-        static void RunVideo(int w, int h, int fps, int bitrate, string executable, string source, uint vendor = 0) {
+        static void RunVideo(int w, int h, int fps, int bitrate, string executable, string source, uint vendor = 0, int adapterIndex = 0) {
             if (!Path.IsPathRooted(executable) || !File.Exists(executable)) throw new ArgumentException("Windows 视频组件缺失");
             fps = Math.Max(1, Math.Min(60, fps));
-            bitrate = Math.Max(300000, Math.Min(12000000, bitrate));
+            bitrate = Math.Max(300000, Math.Min(16000000, bitrate));
             // A window's capture only wants to know whose encoder to try first: a display that
             // can't be duplicated (rotated, on another adapter) must not stop the window's picture.
             if (vendor == 0) { try { uint found; DesktopDuplication.VideoOutput(bounds, out found); vendor = found; } catch (Exception) { vendor = 0; } }
@@ -88,29 +90,43 @@ namespace LinkShell.Windows {
                     foreach (var attempt in attempts) {
                         if (ended) return;
                         EnsureDesktop();
-                        if (RunVideoEncoder(job, destination, executable, source, w, h, fps, bitrate, attempt.Key, attempt.Value)) return;
+                        if (RunVideoEncoder(job, destination, executable, source, w, h, fps, bitrate, attempt.Key, attempt.Value, adapterIndex)) return;
                     }
                 }
                 if (!ended) throw new InvalidOperationException("这台电脑的硬件视频编码不可用，将使用兼容画面");
             } finally { CloseHandle(job); }
         }
 
-        static bool RunVideoEncoder(IntPtr job, Stream destination, string executable, string source, int width, int height, int fps, int bitrate, string encoder, bool compatible) {
+        static bool RunVideoEncoder(IntPtr job, Stream destination, string executable, string source, int width, int height, int fps, int bitrate, string encoder, bool compatible, int adapterIndex) {
             string filter = source;
             bool framed = Environment.GetEnvironmentVariable("LINKSHELL_VIDEO_FRAMED") == "1";
             // Older drivers reject D3D11_BIND_VIDEO_ENCODER surfaces. Use the vendor's scaler
             // where available, then allow CPU conversion while retaining hardware encoding.
-            if (compatible) filter += "hwdownload,format=bgra,scale=" + width + ":" + height + ":flags=fast_bilinear,format=nv12";
+            bool needsScale = width != bounds.Width || height != bounds.Height;
+            if (compatible) filter += needsScale ? "hwdownload,format=bgra,scale=" + width + ":" + height + ":flags=bicubic,format=nv12" : "hwdownload,format=bgra,format=nv12";
             else if (encoder == "h264_amf") filter += "vpp_amf=w=" + width + ":h=" + height + ":format=nv12";
             else if (encoder == "h264_qsv") filter += "hwmap=derive_device=qsv,vpp_qsv=w=" + width + ":h=" + height + ":format=nv12";
-            else filter += "scale_d3d11=width=" + width + ":height=" + height + ":format=bgra";
-            string tuning = encoder == "h264_amf" ? "-usage ultralowlatency -quality speed -rc cbr -async_depth 1 -header_spacing 1 -preanalysis 0 -forced_idr 1" :
-                encoder == "h264_nvenc" ? "-preset p1 -tune ull -rc cbr -zerolatency 1 -delay 0 -rc-lookahead 0" :
-                encoder == "h264_qsv" ? "-preset veryfast -async_depth 1 -look_ahead 0" : "-hw_encoding 1 -scenario display_remoting";
-            string args = "-hide_banner -loglevel warning -nostats -f lavfi -i \"" + filter + "\" -an -c:v " + encoder + " " + tuning +
-                // Level 4.2 stops at 1080p; a Fusion window's canvas is its monitor, up to 4K (5.1).
-                (encoder == "h264_nvenc" ? " -profile:v baseline -level:v " + (width * height > 2088960 ? "5.1" : "4.2") : encoder == "h264_amf" ? " -profile:v constrained_baseline -level:v " + (width * height > 2088960 ? "51" : "42") : " -profile:v 66 -level:v " + (width * height > 2088960 ? "51" : "42")) + " -bf 0 -g " + fps + " -b:v " + bitrate + " -maxrate " + bitrate + " -bufsize " + (bitrate / 4) +
-                " -force_key_frames \"expr:gte(t,n_forced)\" -fps_mode passthrough" +
+            else filter += "scale_d3d11=width=" + width + ":height=" + height + ":format=nv12";
+            bool baseline = String.Equals(Environment.GetEnvironmentVariable("LINKSHELL_WINDOWS_PROFILE"), "baseline", StringComparison.OrdinalIgnoreCase);
+            bool level51 = width * height > 2088960;
+            // Default to CABAC Main without B-frames for sharper desktop text; keep Baseline fallback for constrained receivers.
+            string tuning = encoder == "h264_amf" ? "-usage ultralowlatency -quality balanced -rc cbr -async_depth 1 -preanalysis 0" :
+                encoder == "h264_nvenc" ? "-preset p3 -tune ull -rc cbr -zerolatency 1 -delay 0 -rc-lookahead 0 -spatial-aq 1 -aq-strength 8" :
+                encoder == "h264_qsv" ? "-preset fast -async_depth 1 -look_ahead 0" : "-hw_encoding 1 -scenario display_remoting -quality 75";
+            string profileOption = encoder == "h264_nvenc"
+                ? " -profile:v " + (baseline ? "baseline" : "main") + " -level:v " + (level51 ? "5.1" : "4.2")
+                : encoder == "h264_amf"
+                    ? " -profile:v " + (baseline ? "constrained_baseline" : "main") + " -level:v " + (level51 ? "51" : "42")
+                    : encoder == "h264_qsv"
+                        ? " -profile:v " + (baseline ? "baseline" : "main") + " -level:v " + (level51 ? "51" : "42")
+                        : " -profile:v " + (baseline ? "66" : "77") + " -level:v " + (level51 ? "51" : "42");
+            // 3-second GOP with a 500 ms VBV buffer prevents frequent forced IDRs from starving text detail.
+            int gop = Math.Max(fps * 2, Math.Min(180, fps * 3));
+            string adapterOption = adapterIndex > 0 ? "-init_hw_device d3d11va=ls:" + adapterIndex + " -filter_hw_device ls " : "";
+            string args = "-hide_banner -loglevel warning -nostats " + adapterOption + "-f lavfi -i \"" + filter + "\" -an -c:v " + encoder + " " + tuning +
+                // Level 4.2 stops at 1080p; 1440p and a Fusion window's canvas up to 4K use 5.1.
+                profileOption + " -bf 0 -g " + gop + " -b:v " + bitrate + " -maxrate " + bitrate + " -bufsize " + (bitrate / 2) +
+                " -fps_mode passthrough" +
                 // Framed (the host asks): AVI, each picture in a chunk that says its length and is
                 // written as it is encoded, so the host hands it on at its last byte. Raw H.264
                 // only says where a picture starts: each waited for the next one, a frame late.
@@ -163,7 +179,7 @@ namespace LinkShell.Windows {
 
         static bool DisplayFromCacheChanged() {
             // Bounds matching also rejects removal or a rotation while this helper owns a capture.
-            return !System.Windows.Forms.Screen.AllScreens.Any(s => s.Bounds == bounds);
+            return !EnumerateDisplays().Any(s => s.Bounds == bounds);
         }
 
         [ComImport, Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]

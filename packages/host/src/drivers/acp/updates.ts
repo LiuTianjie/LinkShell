@@ -1,6 +1,6 @@
 import { StringDecoder } from "node:string_decoder";
 import { sessionUpdateSchema, type ContentBlock, type SessionUpdate, type ToolCallStatus } from "@linkshell/wire";
-import { normalizeAcpUpdate, toContentBlock } from "./mapper.js";
+import { normalizeAcpUpdate, toContentBlock, toolContent, withoutContext } from "./mapper.js";
 
 type Json = Record<string, unknown>;
 const object = (value: unknown): Json => value && typeof value === "object" && !Array.isArray(value) ? value as Json : {};
@@ -40,9 +40,30 @@ export class AcpUpdates {
     if (kind === "plan_removed" && typeof update.planId === "string") return [{ sessionUpdate: "plan", entries: [], planId: update.planId, removed: true }];
     if (kind === "session_message" || kind === "session_message_chunk" || (version === 2 && ["user_message", "agent_message", "agent_thought"].includes(String(kind)))) {
       const id = optional(update.messageId); if (!id) return [];
-      const content = kind === "session_message_chunk" ? blocks([update.content]) : update.content === undefined ? undefined : blocks(update.content);
+      let content = kind === "session_message_chunk" ? blocks([update.content]) : update.content === undefined ? undefined : blocks(update.content);
+      if (kind === "user_message" && content) {
+        content = content.flatMap((block) => { const cleaned = withoutContext(block); return cleaned ? [cleaned] : []; });
+        if (content.length === 0) return [];
+      }
       return [{ sessionUpdate: "ls_message", messageId: id, role: kind === "user_message" ? "user" : kind === "agent_thought" ? "thought" : kind === "agent_message" ? "agent" : "session",
         content, append: kind === "session_message_chunk" || undefined, senderSessionId: optional(update.senderSessionId), recipientSessionId: optional(update.recipientSessionId) }];
+    }
+    if (kind === "tool_call_content_chunk") {
+      const toolCallId = optional(update.toolCallId); if (!toolCallId) return [];
+      const content = toolContent([update.content]);
+      if (!content?.length) return [];
+      const result: SessionUpdate[] = [{ sessionUpdate: "tool_call_update", toolCallId, appendContent: true, content }];
+      if (version === 2) {
+        for (const item of content) {
+          if (item.type !== "terminal") continue;
+          const terminal = this.terminal(item.terminalId);
+          if (!terminal.calls.has(toolCallId)) {
+            terminal.calls.add(toolCallId);
+            result.push(this.terminalUpdate(toolCallId, terminal));
+          }
+        }
+      }
+      return result;
     }
     if (version === 2 && (kind === "terminal_update" || kind === "terminal_output_chunk")) {
       const id = optional(update.terminalId); if (!id) return [];
@@ -55,7 +76,8 @@ export class AcpUpdates {
       if (kind === "terminal_update") {
         if (update.output !== undefined) {
           terminal.decoder = new StringDecoder("utf8");
-          terminal.output = terminal.decoder.write(Buffer.from(optional(object(update.output).data) ?? "", "base64"));
+          const rawData = optional(object(update.output).data);
+          terminal.output = rawData ? Buffer.from(rawData, "base64").toString("utf8") : "";
           replaced = true;
         }
         if (update.command !== undefined) terminal.command = optional(update.command);

@@ -61,6 +61,11 @@ export class TrayMenuController {
 
   stop(): void {
     this.menuBar?.stop();
+    this.menuBar = undefined;
+    if (this.tray && !this.tray.isDestroyed()) this.tray.destroy();
+    this.tray = undefined;
+    for (const notification of this.notifications.values()) notification.close();
+    this.notifications.clear();
   }
 
   noteUpdate(name: string, version?: unknown): void {

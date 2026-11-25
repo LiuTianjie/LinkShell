@@ -12,6 +12,7 @@ import type {
   SessionSummary,
 } from "@linkshell/wire";
 import {
+  diffReviewSessionKey,
   diffReviewStore,
   draftKeyFor,
   formatDiffReviewPrompt,
@@ -21,7 +22,6 @@ import {
   useDiffReviews,
   useT,
   type Connection,
-  type PastedTextBlock,
 } from "@/core";
 import { AgentMark, DesktopIcon } from "@/icons";
 import {
@@ -74,6 +74,7 @@ export function SessionComposer({
   const copy = useSessionCopy();
   const computerKey = connection.computer.key;
   const sessionKey = sessionKeyOf(computerKey, session.id);
+  const reviewKey = diffReviewSessionKey(computerKey, session.id) ?? sessionKey;
 
   const online = useClientSelector(connection, (s) => s.status === "online", false);
   const agentInfo = useClientSelector(
@@ -150,13 +151,13 @@ export function SessionComposer({
     [queueing, session.queue],
   );
 
-  const reviews = useDiffReviews(sessionKey);
+  const reviews = useDiffReviews(reviewKey);
 
   const draftKey = draftKeyFor(computerKey, session.id);
-  const { text, setText, clearSubmitted } = useComposerDraft(draftKey);
+  const { text, setText, clearSubmitted, pastedBlocks, setPastedBlocks } =
+    useComposerDraft(draftKey);
 
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
-  const [pastedBlocks, setPastedBlocks] = useState<PastedTextBlock[]>([]);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | undefined>();
 
@@ -381,9 +382,9 @@ export function SessionComposer({
       if (!useOverride) {
         clearSubmitted(submittedText);
         revokeAttachmentPreviews(currentAttachments);
+        setPastedBlocks((prev) => prev.filter((item) => !currentPasted.includes(item)));
         if (aliveRef.current) {
           setAttachments((prev) => prev.filter((item) => !currentAttachments.includes(item)));
-          setPastedBlocks((prev) => prev.filter((item) => !currentPasted.includes(item)));
         }
       }
       return true;
@@ -400,7 +401,7 @@ export function SessionComposer({
     const prompt = formatDiffReviewPrompt(reviews);
     if (!prompt) return;
     if (await submitMessage({ overrideText: prompt })) {
-      diffReviewStore.getState().clearSession(sessionKey);
+      diffReviewStore.getState().clearSession(reviewKey);
     }
   };
 
@@ -448,7 +449,7 @@ export function SessionComposer({
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => diffReviewStore.getState().clearSession(sessionKey)}
+                onClick={() => diffReviewStore.getState().clearSession(reviewKey)}
               >
                 {copy.clearReviews}
               </Button>

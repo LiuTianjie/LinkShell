@@ -1,5 +1,6 @@
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
+import { usePageInsets } from "@/components/adaptive-page";
 import { Button } from "@/components/button";
 import { Alert, Platform, ScrollView, StyleSheet, Switch, View } from "react-native";
 import { Text } from "@/components/fixed-text";
@@ -7,11 +8,13 @@ import { SheetHeader } from "@/components/sheet-header";
 import { ConfigMenu } from "@/components/config-menu";
 import { useActions, useClient, useSessionSubscription } from "@/lib/client";
 import { optionLabel } from "@/lib/labels";
+import { sheetBottom } from "@/lib/sheet-bottom";
 import { colors } from "@/theme/colors";
 import { type, radius } from "@/theme/type";
 
 export function SessionSettingsScreen() {
   const { id, option: selected } = useLocalSearchParams<{ id: string; option?: string }>();
+  const insets = usePageInsets();
   useSessionSubscription(id);
   const config = useClient((state) => state.views[id]?.config);
   const summary = useClient((state) => state.sessions[id]);
@@ -35,7 +38,18 @@ export function SessionSettingsScreen() {
     return () => { alive = false; };
   }, [actions, online, summary?.agent, summary?.cwd, id, modelsRevision]);
   const options = [...(config ?? [])].sort((a, b) => Number(b.id === selected) - Number(a.id === selected));
-  return <ScrollView contentContainerStyle={{ padding: 16, paddingTop: Platform.OS === "android" ? 24 : 16, gap: 12 }} keyboardShouldPersistTaps="handled">
+  return <ScrollView
+    style={{ flexGrow: 0, backgroundColor: colors.sheet }}
+    contentInsetAdjustmentBehavior="never"
+    contentContainerStyle={{
+      paddingTop: Platform.OS === "android" ? 24 : 16,
+      paddingBottom: sheetBottom(insets.bottom, { floating: true }),
+      paddingLeft: Math.max(16, insets.left + 16),
+      paddingRight: Math.max(16, insets.right + 16),
+    }}
+    keyboardShouldPersistTaps="handled"
+  >
+    <View collapsable={false} style={{ width: "100%", maxWidth: 680, alignSelf: "center", gap: 12 }}>
     <SheetHeader title="会话设置" />
     {modelsError ? <View style={{ gap: 8 }}><Text style={[type.footnote, { color: colors.danger }]}>模型更新失败：{modelsError}</Text><Button title="重试读取模型" onPress={() => setModelsRevision((value) => value + 1)} /></View> : null}
     {heldElsewhere ? <Text style={[type.footnote, { color: colors.secondaryLabel, paddingHorizontal: 4 }]}>会话同时开在电脑的另一个 Codex 里，修改将同步到下一轮对话。</Text> : null}
@@ -50,5 +64,6 @@ export function SessionSettingsScreen() {
     {usage?.tokens ? <Text style={[type.footnote, { color: colors.secondaryLabel }]}>输入 {usage.tokens.inputTokens.toLocaleString()} · 输出 {usage.tokens.outputTokens.toLocaleString()} · 总计 {usage.tokens.totalTokens.toLocaleString()} tokens</Text> : null}
     {usage?.cost ? <Text style={[type.footnote, { color: colors.secondaryLabel }]}>累计费用 {usage.cost.currency} {usage.cost.amount.toLocaleString(undefined, { maximumFractionDigits: 6 })}</Text> : null}
     {acp && summary ? <Button title="会话工具与附加目录" onPress={() => router.push({ pathname: "/acp", params: { agent: summary.agent, sessionId: id } })} /> : null}
+    </View>
   </ScrollView>;
 }

@@ -61,7 +61,32 @@ function settleInitialFocus(el: HTMLDialogElement): void {
   el.focus();
 }
 
+const openDialogStack: HTMLDialogElement[] = [];
+
+function pushOpenDialog(el: HTMLDialogElement): void {
+  const idx = openDialogStack.indexOf(el);
+  if (idx >= 0) openDialogStack.splice(idx, 1);
+  openDialogStack.push(el);
+}
+
+function removeOpenDialog(el: HTMLDialogElement): void {
+  const idx = openDialogStack.indexOf(el);
+  if (idx >= 0) openDialogStack.splice(idx, 1);
+}
+
+function hasOpenNestedPopover(el: HTMLDialogElement): boolean {
+  try {
+    if (el.querySelector(":popover-open")) return true;
+  } catch {
+    // Environments without `:popover-open` selector support fall through to data-state checks.
+  }
+  return Boolean(
+    el.querySelector('[data-state="open"][role="menu"], [data-popover-open="true"]'),
+  );
+}
+
 function openModalElement(el: HTMLDialogElement): void {
+  pushOpenDialog(el);
   if (el.open) return;
   if (typeof el.showModal === "function") {
     try {
@@ -76,6 +101,7 @@ function openModalElement(el: HTMLDialogElement): void {
 }
 
 function closeModalElement(el: HTMLDialogElement, returnValue?: string): void {
+  removeOpenDialog(el);
   if (!el.open && !el.hasAttribute("open")) return;
   if (typeof el.close === "function") {
     try {
@@ -129,12 +155,15 @@ export const Dialog = forwardRef<HTMLDialogElement, DialogProps>(
     // Imperative `.showModal()` / `.close()` synchronization (`dialog` MWG rule).
     useEffect(() => {
       const el = internalRef.current;
-      if (!el) return;
+      if (!el) return undefined;
       if (open) {
         openModalElement(el);
       } else {
         closeModalElement(el);
       }
+      return () => {
+        removeOpenDialog(el);
+      };
     }, [open]);
 
     // Fallback Escape & backdrop light-dismiss ONLY for non-Chromium test environments (`jsdom`)
@@ -144,8 +173,15 @@ export const Dialog = forwardRef<HTMLDialogElement, DialogProps>(
       if (!open || !el || "closedBy" in el) return undefined;
 
       const onKeyDown = (event: KeyboardEvent) => {
-        if (event.key === "Escape" && !preventDismiss) {
+        if (event.key !== "Escape" || event.defaultPrevented || isImeComposing(event)) {
+          return;
+        }
+        // Only the topmost stacked modal handles Escape, and popovers/menus inside it dismiss first.
+        if (openDialogStack[openDialogStack.length - 1] !== el) return;
+        if (hasOpenNestedPopover(el)) return;
+        if (!preventDismiss) {
           event.preventDefault();
+          event.stopImmediatePropagation();
           closeModalElement(el, "");
         }
       };
@@ -176,12 +212,13 @@ export const Dialog = forwardRef<HTMLDialogElement, DialogProps>(
         className={cn("ls-dialog", className)}
         onClose={(event) => {
           const el = event.currentTarget;
+          removeOpenDialog(el);
           const returnValue = el.returnValue ?? "";
           el.returnValue = "";
           onOpenChangeRef.current?.(false, returnValue);
         }}
         onCancel={(event) => {
-          if (preventDismiss) {
+          if (preventDismiss || hasOpenNestedPopover(event.currentTarget)) {
             event.preventDefault();
           }
         }}

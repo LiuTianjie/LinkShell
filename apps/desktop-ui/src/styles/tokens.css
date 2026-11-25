@@ -101,7 +101,8 @@
       inset 0 1px 0 rgba(255, 255, 255, 0.045)
     );
 
-    --ls-focus-ring: 0 0 0 2px var(--ls-accent-soft);
+    --ls-focus-ring: 0 0 0 2px var(--ls-accent);
+    --ls-focus-outline: 2px solid var(--ls-accent);
     --ls-backdrop: light-dark(rgba(12, 14, 18, 0.36), rgba(0, 0, 0, 0.64));
 
     --ls-shadow-control: light-dark(
@@ -133,12 +134,12 @@
     --ls-scrollbar-thumb-hover: light-dark(#606672, #8b92a0);
 
     /* -----------------------------------------------------------------------
-     * 5. Crisp Emerald & Coral Diff + Shiki Syntax Highlighting Tokens
+     * 5. Canonical Diff (brand-colors.json locked) & Shiki Syntax Tokens
      * ----------------------------------------------------------------------- */
-    --ls-diff-add: light-dark(rgba(26, 127, 55, 0.11), rgba(63, 185, 80, 0.15));
-    --ls-diff-del: light-dark(rgba(207, 34, 46, 0.10), rgba(248, 81, 73, 0.15));
-    --ls-diff-add-fg: light-dark(#1a7f37, #3fb950);
-    --ls-diff-del-fg: light-dark(#cf222e, #f85149);
+    --ls-diff-add: light-dark(rgba(15, 149, 96, 0.12), rgba(61, 214, 140, 0.14));
+    --ls-diff-del: light-dark(rgba(220, 61, 61, 0.10), rgba(255, 107, 107, 0.14));
+    --ls-diff-add-fg: light-dark(#0b7a4f, #7fddb4);
+    --ls-diff-del-fg: light-dark(#b42f2f, #ff9a9a);
 
     --code-foreground: currentColor;
     --code-background: transparent;

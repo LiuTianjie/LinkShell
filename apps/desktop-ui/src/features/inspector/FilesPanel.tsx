@@ -646,7 +646,7 @@ export function FilesPanel({
               <IconButton
                 icon="close"
                 size="icon-sm"
-                label={ti("clearComments")}
+                label={ti("clearSearch")}
                 onClick={() => setSearchQuery("")}
               />
             ) : undefined

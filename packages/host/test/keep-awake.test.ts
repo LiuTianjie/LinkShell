@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   KeepAwakeManager,
   WINDOWS_KEEP_AWAKE_SCRIPT,
+  isPermanentKeepAwakeExit,
   keepAwakeCommand,
   readKeepAwakeMode,
   writeKeepAwakeMode,
@@ -137,6 +138,46 @@ describe("Smart On-Demand Keep-Awake & Battery Telemetry", () => {
     expect(spawns).toBe(3);
     manager.stop();
     expect(releases).toBe(3);
+  });
+
+  it("latches permanently unavailable on Linux when systemd-inhibit is missing or D-Bus is absent", () => {
+    expect(isPermanentKeepAwakeExit("linux", 1, "Failed to connect to bus: No such file or directory", 50)).toBe(true);
+    expect(isPermanentKeepAwakeExit("linux", 127, "", 5000)).toBe(true);
+    expect(isPermanentKeepAwakeExit("linux", 0, "", 10)).toBe(false);
+    expect(isPermanentKeepAwakeExit("darwin", 1, "Failed to connect to bus", 10)).toBe(false);
+
+    const home = tempHome();
+    let signals: KeepAwakeSignals = { sessionActive: true };
+    let spawns = 0;
+    const logs: string[] = [];
+
+    const manager = new KeepAwakeManager({
+      home,
+      signals: () => signals,
+      platform: "linux",
+      pid: 4242,
+      log: (m) => logs.push(m),
+      spawnAssertion: (_platform, _pid, onUnexpectedExit, log) => {
+        spawns++;
+        log("[keep-awake] systemd-inhibit unavailable: ENOENT");
+        onUnexpectedExit({ permanent: true, reason: "ENOENT" });
+        return undefined;
+      },
+    });
+
+    manager.start();
+    expect(spawns).toBe(1);
+    expect(manager.isUnavailable).toBe(true);
+    expect(manager.status().active).toBe(false);
+
+    // Subsequent turns / reconciles must NOT re-spawn or spam host.log.
+    signals = { sessionActive: false };
+    manager.reconcile();
+    signals = { sessionActive: true };
+    manager.reconcile();
+    manager.setMode("always");
+    expect(spawns).toBe(1);
+    expect(logs).toHaveLength(1);
   });
 
   it("parses macOS pmset and Linux /sys/class/power_supply battery readings accurately", () => {

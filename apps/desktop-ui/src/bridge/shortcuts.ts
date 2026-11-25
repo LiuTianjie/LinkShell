@@ -3,7 +3,6 @@ import type { DesktopI18nKey } from "../core/i18n";
 import {
   DESKTOP_COMMAND_EVENT,
   getActiveDesktopPlatform,
-  isWindowsDesktop,
   reportDesktopRendererReady,
 } from "./desktop-bridge";
 
@@ -90,9 +89,10 @@ export const SHIFT_TAB_SHORTCUT: ShortcutBinding = {
   mod: false,
 };
 
-export const FULLSCREEN_SHORTCUT: ShortcutBinding = isWindowsDesktop
-  ? { key: "f11", mod: false }
-  : { key: "f", ctrl: true, mod: true };
+export const FULLSCREEN_SHORTCUT: ShortcutBinding =
+  getActiveDesktopPlatform() === "macos"
+    ? { key: "f", ctrl: true, mod: true }
+    : { key: "f11", mod: false };
 
 /** Bindings owned by features rather than the shell, listed so the sheet only shows what really works. */
 export const SHORTCUT_SHEET_EXTRAS: readonly ShortcutSheetExtra[] = [
@@ -143,9 +143,9 @@ export function requestComposerFocus(): void {
   window.dispatchEvent(new CustomEvent(FOCUS_COMPOSER_EVENT));
 }
 
-function displayKeyName(key: string, windows: boolean): string {
+function displayKeyName(key: string, nonMac: boolean): string {
   if (key === "tab") return "Tab";
-  if (key === "enter") return windows ? "Enter" : "↵";
+  if (key === "enter") return nonMac ? "Enter" : "↵";
   if (key === "escape") return "Esc";
   if (key.startsWith("f") && key.length > 1) return key.toUpperCase();
   return key.length === 1 ? key.toUpperCase() : key;
@@ -159,9 +159,9 @@ export function shortcutParts(
   platform: ShortcutPlatform = getActiveDesktopPlatform(),
 ): string[] {
   const usesMod = binding.mod !== false;
-  const win = platform === "windows";
-  const key = displayKeyName(binding.key, win);
-  if (win) {
+  const nonMac = platform !== "macos";
+  const key = displayKeyName(binding.key, nonMac);
+  if (nonMac) {
     const parts: string[] = [];
     if (usesMod || binding.ctrl) parts.push("Ctrl");
     if (binding.shift) parts.push("Shift");
@@ -183,7 +183,7 @@ export function formatShortcut(
   platform: ShortcutPlatform = getActiveDesktopPlatform(),
 ): string {
   const parts = shortcutParts(binding, platform);
-  return platform === "windows" ? parts.join("+") : parts.join("");
+  return platform !== "macos" ? parts.join("+") : parts.join("");
 }
 
 function resolvePhysicalKey(event: KeyboardEvent): string {
@@ -223,10 +223,11 @@ function resolvePhysicalKey(event: KeyboardEvent): string {
 export function matchesShortcut(
   event: KeyboardEvent,
   binding: ShortcutBinding,
+  platform: ShortcutPlatform = getActiveDesktopPlatform(),
 ): boolean {
   if (isImeComposing(event)) return false;
   const usesMod = binding.mod !== false;
-  if (getActiveDesktopPlatform() === "windows") {
+  if (platform !== "macos") {
     const wantCtrl = usesMod || Boolean(binding.ctrl);
     if (event.ctrlKey !== wantCtrl || event.metaKey) return false;
   } else {

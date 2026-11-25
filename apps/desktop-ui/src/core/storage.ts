@@ -358,6 +358,14 @@ export async function fetchDesktopLocalComputer(
 
 /** Test-only helper to reset in-memory bootstrap and storage state between cases. */
 export function resetDesktopStorageForTests(initialStorage: Record<string, unknown> = {}): void {
+  if (typeof localStorage !== "undefined") {
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (k?.startsWith("linkshell.desktop.")) {
+        localStorage.removeItem(k);
+      }
+    }
+  }
   bootstrapState = {
     identity: fallbackIdentity ?? (fallbackIdentity = createIdentity()),
     storage: cloneJsonValue(initialStorage),

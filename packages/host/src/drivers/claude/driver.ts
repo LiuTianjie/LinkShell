@@ -1,8 +1,9 @@
-import { execFile, spawn } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { accessSync, constants, existsSync, mkdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { delimiter, dirname, extname, isAbsolute, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { RpcError, questionReplies, type AsyncQuestion, type ContentBlock, type SessionConfigOption, type SessionState, type SessionUpdate } from "@linkshell/wire";
 import { trackChild } from "../../children.js";
@@ -11,7 +12,7 @@ import { AcpItemTracker, modelOption, toConfigOptions, toHistory, type SourcedCo
 import { parseClaudeAuthStatus, runStatusCommand } from "../auth.js";
 import type { AttachContext, DesktopLaunch, DesktopLaunchContext, DiscoveredSession, ForkOptions, HistoryItem, LaunchSpec, SessionLineage, SideOutput, SideRequest } from "../types.js";
 import type { DriverBehavior } from "../behavior.js";
-import { descendsFrom, isDesktopApp, sessionHolders, type SessionHolder } from "./holders.js";
+import { allSessionHolders, descendsFrom, isDesktopApp, sessionHolders, type SessionHolder } from "./holders.js";
 import { processEnv, routingFrom, type ClaudeRouting } from "./routing.js";
 import { ClaudeTasks } from "./tasks.js";
 import { stopTaskGroup } from "./task-process.js";
@@ -322,10 +323,13 @@ export class ClaudeDriver extends AcpDriver {
   /** Per session: the API of the Claude on the computer, where it isn't the host's (see followHolder). In memory only: it holds credentials. */
   private readonly routes = new Map<string, ClaudeRouting>();
   /** Sent from a device while another Claude was mid-turn in the session; goes out when that turn ends. */
-  private readonly waiting = new Map<string, { content: ContentBlock[]; clientMessageId: string }[]>();
+  private readonly waiting = new Map<string, { content: ContentBlock[]; clientMessageId: string; context?: string }[]>();
   /** Checks that sessions driven from a device haven't been reopened on the computer. */
   private remoteWatch?: ReturnType<typeof setInterval>;
   private remoteWatchRun?: Promise<void>;
+  private readonly watchCache = new Map<string, { mtimeMs: number; size: number; checkedAt: number }>();
+  private tickHolders?: Map<string, SessionHolder[]>;
+  private tickPsLines?: string[];
 
   override async start(host: import("../types.js").DriverHost) {
     if (!this.adapterMissing) return super.start(host);
@@ -478,7 +482,7 @@ export class ClaudeDriver extends AcpDriver {
     const path = findTranscript(this.configDir, nativeId, cwd);
     if (!path) return this.modes.has(nativeId) || this.host?.desktop(this.id, nativeId) ? "idle" : "offline";
     try {
-      const holders = sessionHolders(this.configDir, nativeId);
+      const holders = this.holdersOf(nativeId);
       if (this.host?.desktop(this.id, nativeId) || holders.length > 0) {
         if (waitingAsk(path)) return "waiting";
         // Its own word counts agents it left working in the background, which a transcript ending in a finished turn doesn't show.
@@ -682,9 +686,12 @@ export class ClaudeDriver extends AcpDriver {
     this.backgroundAgents.delete(nativeId);
     this.observed.delete(nativeId);
     this.tasks.delete(nativeId);
+    this.routes.delete(nativeId);
+    this.watchCache.delete(nativeId);
     await super.detach(nativeId);
     this.unwrittenSessions.delete(nativeId);
     this.streamedTranscripts.delete(nativeId);
+    this.maybeStopWatch();
   }
 
   /**
@@ -698,16 +705,14 @@ export class ClaudeDriver extends AcpDriver {
     if (!source) throw RpcError.app("not_ready", "这个 Claude 会话还没有任何消息，没有可分叉的内容");
     const upToMessageId = options.upTo ? turnEndUuid(source, options.upTo.itemId, options.upTo.turn) : undefined;
     if (options.upTo && !upToMessageId) throw RpcError.app("not_found", "找不到要分叉的那一轮");
-    const { forkSession } = await import("@anthropic-ai/claude-agent-sdk");
-    const previous = process.env.CLAUDE_CONFIG_DIR;
-    process.env.CLAUDE_CONFIG_DIR = this.configDir;
-    let forked: string;
-    try {
-      forked = (await forkSession(nativeId, { dir: options.sourceCwd, upToMessageId })).sessionId;
-    } finally {
-      if (previous === undefined) delete process.env.CLAUDE_CONFIG_DIR;
-      else process.env.CLAUDE_CONFIG_DIR = previous;
-    }
+    // Run in a child Node process with CLAUDE_CONFIG_DIR passed explicitly in env so we never
+    // mutate global process.env across awaits and race concurrent host operations.
+    const { sessionId: forked } = await runClaudeSdkOp<{ sessionId: string }>(
+      this.configDir,
+      this.env,
+      "fork",
+      { nativeId, dir: options.sourceCwd, upToMessageId },
+    );
     if (options.cwd !== options.sourceCwd) {
       const made = findTranscript(this.configDir, forked, options.sourceCwd);
       if (!made) throw RpcError.app("not_found", "分叉出的会话没有写出来");
@@ -721,16 +726,7 @@ export class ClaudeDriver extends AcpDriver {
 
   /** Claude's own title record (what /rename writes), so `claude --resume` shows it too. */
   async rename(nativeId: string, title: string): Promise<void> {
-    const { renameSession } = await import("@anthropic-ai/claude-agent-sdk");
-    const previous = process.env.CLAUDE_CONFIG_DIR;
-    // The SDK finds transcripts through CLAUDE_CONFIG_DIR, as Claude does.
-    process.env.CLAUDE_CONFIG_DIR = this.configDir;
-    try {
-      await renameSession(nativeId, title);
-    } finally {
-      if (previous === undefined) delete process.env.CLAUDE_CONFIG_DIR;
-      else process.env.CLAUDE_CONFIG_DIR = previous;
-    }
+    await runClaudeSdkOp(this.configDir, this.env, "rename", { nativeId, title });
   }
 
   override async delete(nativeId: string): Promise<void> {
@@ -739,6 +735,8 @@ export class ClaudeDriver extends AcpDriver {
     if (transcript) await super.delete(nativeId);
     else this.sessions.delete(nativeId);
     this.modes.delete(nativeId);
+    this.routes.delete(nativeId);
+    this.watchCache.delete(nativeId);
     this.unwrittenSessions.delete(nativeId);
     this.streamedTranscripts.delete(nativeId);
     this.hiddenTools.delete(nativeId);
@@ -747,10 +745,11 @@ export class ClaudeDriver extends AcpDriver {
     this.activity.delete(nativeId);
     this.tasks.get(nativeId)?.lostHolder();
     this.tasks.delete(nativeId);
+    this.maybeStopWatch();
     if (transcript) sweepTranscript(transcript);
   }
 
-  override async prompt(nativeId: string, content: ContentBlock[], clientMessageId: string): Promise<"started" | "steered" | "queued"> {
+  override async prompt(nativeId: string, content: ContentBlock[], clientMessageId: string, context?: string): Promise<"started" | "steered" | "queued"> {
     await this.reconcileDesktopWriter(nativeId);
     // That turn stopped on a question and waits for its answer, not for time:
     // what the phone sends is the answer. Claude takes answers to AskUserQuestion
@@ -762,12 +761,12 @@ export class ClaudeDriver extends AcpDriver {
       await this.ensureRemote(nativeId);
       // The question's card would otherwise run forever: its answer is the message below.
       this.emit(nativeId, { sessionUpdate: "tool_call_update", toolCallId: ask.toolCallId, status: "completed" });
-      return super.prompt(nativeId, answerContent(content, ask), clientMessageId);
+      return super.prompt(nativeId, answerContent(content, ask), clientMessageId, context);
     }
     // Another Claude is in the middle of a turn here: the message waits for it to finish.
     if (this.waiting.get(nativeId)?.length || (await this.elsewhere(nativeId))?.working) {
       const waiting = this.waiting.get(nativeId) ?? [];
-      waiting.push({ content, clientMessageId });
+      waiting.push({ content, clientMessageId, context });
       this.waiting.set(nativeId, waiting);
       this.reportWaiting(nativeId);
       this.startWatch();
@@ -775,7 +774,7 @@ export class ClaudeDriver extends AcpDriver {
     }
     // Sending from a device is taking the session over.
     await this.ensureRemote(nativeId);
-    return super.prompt(nativeId, content, clientMessageId);
+    return super.prompt(nativeId, content, clientMessageId, context);
   }
 
   override unqueue(nativeId: string, clientMessageId: string): boolean {
@@ -815,10 +814,18 @@ export class ClaudeDriver extends AcpDriver {
     if (!waiting?.length) return;
     this.waiting.delete(nativeId);
     this.reportWaiting(nativeId);
+    let sent = 0;
     try {
       await this.ensureRemote(nativeId);
-      for (const entry of waiting) await super.prompt(nativeId, entry.content, entry.clientMessageId);
+      for (const entry of waiting) {
+        await super.prompt(nativeId, entry.content, entry.clientMessageId, entry.context);
+        sent++;
+      }
     } catch (error) {
+      // Release unsent claims so retrying those clientMessageIds is not rejected as duplicate for 30 days.
+      for (const unsent of waiting.slice(sent)) {
+        this.host?.releaseClientMessage?.(this.id, nativeId, unsent.clientMessageId);
+      }
       this.emit(nativeId, {
         sessionUpdate: "ls_error",
         code: error instanceof RpcError ? (error.appCode ?? "send_failed") : "send_failed",
@@ -831,15 +838,28 @@ export class ClaudeDriver extends AcpDriver {
     await this.reconcileDesktopWriter(nativeId);
     if (this.modes.get(nativeId) === "remote") return super.cancel(nativeId);
     // Stopping stops what's waiting too; the apps put queued text back in the composer.
-    if (this.waiting.delete(nativeId)) this.reportWaiting(nativeId);
+    const dropped = this.waiting.get(nativeId);
+    if (dropped && this.waiting.delete(nativeId)) {
+      for (const entry of dropped) this.host?.releaseClientMessage?.(this.id, nativeId, entry.clientMessageId);
+      this.reportWaiting(nativeId);
+    }
     // The turn runs in a Claude on the computer. A `linkshell claude` terminal
     // steps aside (which ends its turn); any other Claude is interrupted.
     if (this.host?.desktop(this.id, nativeId)) await this.ensureRemote(nativeId);
     else await this.interruptElsewhere(nativeId);
   }
 
-  override async sendQueuedNow(nativeId: string): Promise<void> {
-    if (!this.waiting.get(nativeId)?.length) return super.sendQueuedNow(nativeId);
+  override async sendQueuedNow(nativeId: string, clientMessageId?: string): Promise<void> {
+    const waiting = this.waiting.get(nativeId);
+    if (!waiting?.length) return super.sendQueuedNow(nativeId, clientMessageId);
+    if (clientMessageId) {
+      const index = waiting.findIndex((entry) => entry.clientMessageId === clientMessageId);
+      if (index > 0) {
+        const [picked] = waiting.splice(index, 1);
+        waiting.unshift(picked!);
+        this.reportWaiting(nativeId);
+      }
+    }
     await this.interruptElsewhere(nativeId);
     await this.sendWaiting(nativeId);
   }
@@ -859,6 +879,10 @@ export class ClaudeDriver extends AcpDriver {
       return !!path && waitingAsk(path)?.toolCallId === ask.toolCallId;
     };
     if (!(await busy())) return;
+    // On Windows `process.kill(pid, "SIGINT")` invokes TerminateProcess and hard-kills the desktop app.
+    if (process.platform === "win32") {
+      throw RpcError.app("busy", "Windows 上无法从手机中断电脑端正在运行的 Claude 回合：请在电脑上按 Esc 停止它");
+    }
     const recorded = (await this.foreignHolders(nativeId)).map((holder) => holder.pid);
     const pids = recorded.length > 0 || this.hasHolderRecords() ? recorded : await this.commandLineHolders(nativeId);
     const stopped = async (ms: number) => {
@@ -903,7 +927,7 @@ export class ClaudeDriver extends AcpDriver {
   // ── side questions (/btw) ─────────────────────────────────────────
 
   /** Per side conversation: a Claude of its own on the session, kept open between questions. */
-  private readonly sideClaudes = new Map<string, { query: SideQuery; end: () => void; idle?: ReturnType<typeof setTimeout> }>();
+  private readonly sideClaudes = new Map<string, { query: SideQuery; end: () => void; child?: ChildProcess; idle?: ReturnType<typeof setTimeout> }>();
 
   protected override hasSide(): boolean {
     return true;
@@ -947,9 +971,10 @@ export class ClaudeDriver extends AcpDriver {
     for (const key of this.sideClaudes.keys()) if (key.endsWith(`\n${sideId}`)) this.closeSideClaude(key);
   }
 
-  private async openSideClaude(key: string, nativeId: string, cwd: string): Promise<{ query: SideQuery; end: () => void; idle?: ReturnType<typeof setTimeout> }> {
+  private async openSideClaude(key: string, nativeId: string, cwd: string): Promise<{ query: SideQuery; end: () => void; child?: ChildProcess; idle?: ReturnType<typeof setTimeout> }> {
     const { query } = await import("@anthropic-ai/claude-agent-sdk");
     let end!: () => void;
+    let spawnedChild: ChildProcess | undefined;
     const ended = new Promise<void>((resolve) => (end = resolve));
     // A prompt that never says anything: the session is only asked side questions.
     const prompt = (async function* () { await ended; yield* []; })();
@@ -976,6 +1001,9 @@ export class ClaudeDriver extends AcpDriver {
             detached: grouped,
             windowsHide: true,
           });
+          spawnedChild = child;
+          const existing = this.sideClaudes.get(key);
+          if (existing) existing.child = child;
           child.on("error", () => {});
           child.stderr.setEncoding("utf8");
           child.stderr.on("data", (data: string) => this.host?.log(`[claude] side: ${data.trim().slice(0, 300)}`));
@@ -987,11 +1015,12 @@ export class ClaudeDriver extends AcpDriver {
     if (typeof started.askSideQuestion !== "function") {
       end();
       started.close();
+      if (spawnedChild) killDetachedProcess(spawnedChild);
       throw RpcError.app("not_supported", "LinkShell 里的 Claude SDK 不支持 /btw：请更新 LinkShell");
     }
     // Its messages aren't read; the generator still has to be drained for the process to run.
     void (async () => { try { for await (const _ of started) { /* nothing to show */ } } catch { /* closed */ } })();
-    const side = { query: started, end };
+    const side = { query: started, end, child: spawnedChild };
     this.sideClaudes.set(key, side);
     return side;
   }
@@ -1003,6 +1032,7 @@ export class ClaudeDriver extends AcpDriver {
     clearTimeout(side.idle);
     side.end();
     side.query.close();
+    if (side.child) killDetachedProcess(side.child);
   }
 
   async reclaim(nativeId: string, _context: DesktopLaunchContext): Promise<LaunchSpec> {
@@ -1014,7 +1044,28 @@ export class ClaudeDriver extends AcpDriver {
 
   async desktopLaunch(args: string[], nativeId: string | undefined, context: DesktopLaunchContext): Promise<DesktopLaunch> {
     const parsed = this.parseSessionArgs(args);
-    let id = nativeId ?? parsed.sessionId;
+    // `-c`/`--continue` or bare `-r`/`--resume` pick a session inside Claude CLI itself;
+    // injecting `--session-id` would collide or tail the wrong UUID.
+    if ((parsed.continueLatest || parsed.resumePicker) && !nativeId && !parsed.resumeId && !parsed.sessionId) {
+      return { ...this.launchSpec(args), cwd: context.cwd };
+    }
+    const sourceId = nativeId ?? parsed.resumeId;
+    if (parsed.forkSession) {
+      // Forking writes to a new UUID rather than the source session; only bind a nativeId when
+      // the caller pinned `--session-id` explicitly.
+      const forkTarget = parsed.sessionId;
+      const launchArgs = [
+        ...(sourceId ? ["--resume", sourceId] : []),
+        ...(forkTarget ? ["--session-id", forkTarget] : []),
+        ...parsed.rest,
+      ];
+      if (!forkTarget) return { ...this.launchSpec(launchArgs), cwd: context.cwd };
+      this.unwrittenSessions.add(forkTarget);
+      this.modes.set(forkTarget, "desktop");
+      this.setWriter(forkTarget, "desktop");
+      return { ...this.launchSpec(launchArgs), nativeId: forkTarget, cwd: context.cwd };
+    }
+    let id = sourceId ?? parsed.sessionId;
     let rest = parsed.rest;
     if (id) {
       await this.leaveRemote(id);
@@ -1024,7 +1075,7 @@ export class ClaudeDriver extends AcpDriver {
       this.unwrittenSessions.add(id);
       rest = ["--session-id", id, ...rest];
     }
-    if (nativeId ?? parsed.sessionId) this.setMode(id, "desktop");
+    if (sourceId ?? parsed.sessionId) this.setMode(id, "desktop");
     else this.modes.set(id, "desktop"); // brand new: not registered yet, attach() reports it
     this.setWriter(id, "desktop");
     return { ...this.launchSpec(rest), nativeId: id, cwd: context.cwd };
@@ -1036,23 +1087,50 @@ export class ClaudeDriver extends AcpDriver {
     return { command: this.claudePath ?? this.claudeCommand, args };
   }
 
-  /** Pulls a session id out of `--resume <id>` / `-r <id>` / `--session-id <id>`. */
-  private parseSessionArgs(args: string[]): { sessionId?: string; rest: string[] } {
+  /** Pulls session flags out of `--resume`/`-r`, `--session-id`, `-c`/`--continue`, and `--fork-session`. */
+  private parseSessionArgs(args: string[]): {
+    resumeId?: string;
+    sessionId?: string;
+    continueLatest: boolean;
+    forkSession: boolean;
+    resumePicker: boolean;
+    rest: string[];
+  } {
     const rest: string[] = [];
+    let resumeId: string | undefined;
     let sessionId: string | undefined;
+    let continueLatest = false;
+    let forkSession = false;
+    let resumePicker = false;
     for (let i = 0; i < args.length; i += 1) {
       const arg = args[i]!;
       const next = args[i + 1];
-      if ((arg === "--resume" || arg === "-r" || arg === "--session-id") && next && !next.startsWith("-")) {
+      if (arg === "--resume" || arg === "-r") {
+        if (next && !next.startsWith("-")) {
+          resumeId = next;
+          i += 1;
+        } else {
+          resumePicker = true;
+          rest.push(arg);
+        }
+      } else if (arg.startsWith("--resume=")) {
+        resumeId = arg.slice(arg.indexOf("=") + 1);
+      } else if (arg === "--session-id" && next && !next.startsWith("-")) {
         sessionId = next;
         i += 1;
-      } else if (arg.startsWith("--resume=") || arg.startsWith("--session-id=")) {
+      } else if (arg.startsWith("--session-id=")) {
         sessionId = arg.slice(arg.indexOf("=") + 1);
+      } else if (arg === "-c" || arg === "--continue") {
+        continueLatest = true;
+        rest.push(arg);
+      } else if (arg === "--fork-session") {
+        forkSession = true;
+        rest.push(arg);
       } else {
         rest.push(arg);
       }
     }
-    return { sessionId, rest };
+    return { resumeId, sessionId, continueLatest, forkSession, resumePicker, rest };
   }
 
   private writer(nativeId: string): Writer | undefined {
@@ -1141,8 +1219,13 @@ export class ClaudeDriver extends AcpDriver {
     const target = this.stateFor(nativeId, cwd);
     if (!target.loaded) {
       this.restoreMessageAliases(nativeId, target);
-      // Leaves a little of the budget for the settings below.
-      const response = await this.rpc<Record<string, unknown>>("session/resume", { sessionId: nativeId, cwd, mcpServers: [], ...this.routedMeta(nativeId) }, Math.max(5000, deadline - Date.now() - 8000))
+      const baseParams = await this.sessionParameters(cwd, target.settings);
+      const routed = this.routedMeta(nativeId) as { _meta?: Record<string, unknown> };
+      const mergedMeta = baseParams._meta || routed._meta
+        ? { _meta: { ...(baseParams._meta as Record<string, unknown> | undefined), ...routed._meta } }
+        : {};
+      // Leaves a little of the budget for the settings below; omit replayFrom because the transcript owns history.
+      const response = await this.rpc<Record<string, unknown>>("session/resume", { ...baseParams, ...mergedMeta, sessionId: nativeId }, Math.max(5000, deadline - Date.now() - 8000))
         .catch((error: unknown) => {
           if (error instanceof RpcError && error.appCode === "timeout") {
             throw RpcError.app("timeout", "电脑上的 Claude 没能及时打开这个会话：它可能连不上网络或代理、或某个 MCP 服务启动卡住。详情见电脑上的 ~/.linkshell/host.log");
@@ -1215,6 +1298,19 @@ export class ClaudeDriver extends AcpDriver {
     this.remoteWatch.unref?.();
   }
 
+  private maybeStopWatch(): void {
+    if (this.tails.size > 0 || this.tasks.size > 0 || this.waiting.size > 0 || this.modes.size > 0) return;
+    if (this.remoteWatch) {
+      clearInterval(this.remoteWatch);
+      this.remoteWatch = undefined;
+    }
+  }
+
+  private holdersOf(nativeId: string): SessionHolder[] {
+    if (this.tickHolders) return this.tickHolders.get(nativeId) ?? [];
+    return sessionHolders(this.configDir, nativeId);
+  }
+
   /**
    * A session driven from a device that another Claude wrote to (the desktop
    * app, or a `claude` in a terminal, continued it): that process has the
@@ -1242,25 +1338,56 @@ export class ClaudeDriver extends AcpDriver {
   }
 
   private async watchRemoteSessions(): Promise<void> {
-    for (const nativeId of this.tails.keys()) {
-      if (this.modes.get(nativeId) === "remote") continue;
-      const state = await this.discoveredState(nativeId, this.sessions.get(nativeId)?.cwd ?? "");
-      if (this.modes.get(nativeId) !== "remote") {
-        this.reportState(nativeId, state);
-        await this.reportQuestions(nativeId);
-      }
+    if (this.tails.size === 0 && this.tasks.size === 0 && this.waiting.size === 0 && this.modes.size === 0) {
+      this.maybeStopWatch();
+      return;
     }
-    for (const [nativeId, tasks] of this.tasks) {
-      const activity = this.activity.get(nativeId);
-      if (![...tasks.records.values()].some((task) => task.state === "running") && !activity?.hasRunningTeammates()) continue;
-      if (this.modes.get(nativeId) === "remote" && this.sessions.get(nativeId)?.loaded) continue;
-      if (sessionHolders(this.configDir, nativeId).length === 0) {
-        tasks.lostHolder();
-        activity?.lostHolder();
+    // Snapshot holder files once per tick instead of rescanning sessions/*.json for every tracked session.
+    this.tickHolders = allSessionHolders(this.configDir);
+    this.tickPsLines = undefined;
+    const now = Date.now();
+    try {
+      for (const nativeId of this.tails.keys()) {
+        if (this.modes.get(nativeId) === "remote") continue;
+        const cwd = this.sessions.get(nativeId)?.cwd ?? "";
+        const holders = this.holdersOf(nativeId);
+        // Skip heavy disk + process checks for idle sessions whose transcript did not move since last tick.
+        if (holders.length === 0 && !this.host?.desktop(this.id, nativeId) && this.reportedStates.get(nativeId) === "idle") {
+          const path = findTranscript(this.configDir, nativeId, cwd);
+          if (path) {
+            try {
+              const st = statSync(path);
+              const cached = this.watchCache.get(nativeId);
+              if (cached && cached.mtimeMs === st.mtimeMs && cached.size === st.size && now - cached.checkedAt < 15_000) {
+                continue;
+              }
+              this.watchCache.set(nativeId, { mtimeMs: st.mtimeMs, size: st.size, checkedAt: now });
+            } catch {
+              // Transcript vanished; fall through to discoveredState.
+            }
+          }
+        }
+        const state = await this.discoveredState(nativeId, cwd);
+        if (this.modes.get(nativeId) !== "remote") {
+          this.reportState(nativeId, state);
+          await this.reportQuestions(nativeId);
+        }
       }
+      for (const [nativeId, tasks] of this.tasks) {
+        const activity = this.activity.get(nativeId);
+        if (![...tasks.records.values()].some((task) => task.state === "running") && !activity?.hasRunningTeammates()) continue;
+        if (this.modes.get(nativeId) === "remote" && this.sessions.get(nativeId)?.loaded) continue;
+        if (this.holdersOf(nativeId).length === 0) {
+          tasks.lostHolder();
+          activity?.lostHolder();
+        }
+      }
+      for (const nativeId of [...this.waiting.keys()]) await this.sendWaiting(nativeId).catch(() => {});
+      for (const nativeId of this.modes.keys()) await this.reconcileDesktopWriter(nativeId);
+    } finally {
+      this.tickHolders = undefined;
+      this.tickPsLines = undefined;
     }
-    for (const nativeId of [...this.waiting.keys()]) await this.sendWaiting(nativeId).catch(() => {});
-    for (const nativeId of this.modes.keys()) await this.reconcileDesktopWriter(nativeId);
   }
 
   /** Input can beat the watcher after a desktop resume; all callers await the same handoff. */
@@ -1321,7 +1448,7 @@ export class ClaudeDriver extends AcpDriver {
   /** Running Claude processes on this session that this host didn't start. */
   private async foreignHolders(nativeId: string): Promise<SessionHolder[]> {
     const foreign: SessionHolder[] = [];
-    for (const holder of sessionHolders(this.configDir, nativeId)) {
+    for (const holder of this.holdersOf(nativeId)) {
       // The adapter's own Claude process is a child of this host.
       if (!(await descendsFrom(holder.pid, process.pid))) foreign.push(holder);
     }
@@ -1475,10 +1602,15 @@ export class ClaudeDriver extends AcpDriver {
   /** Processes with the session on their command line (`claude --resume <id>`): how an older Claude shows it. */
   private async commandLineHolders(nativeId: string): Promise<number[]> {
     try {
-      // -ww: never truncate; the session id is at the end of long command lines.
-      const { stdout } = await execFileAsync("/bin/ps", ["-Aww", "-o", "pid=,command="], { timeout: 5000, maxBuffer: 16 * 1024 * 1024 });
+      let lines = this.tickPsLines;
+      if (!lines) {
+        // -ww: never truncate; the session id is at the end of long command lines.
+        const { stdout } = await execFileAsync("/bin/ps", ["-Aww", "-o", "pid=,command="], { timeout: 5000, maxBuffer: 16 * 1024 * 1024 });
+        lines = stdout.split("\n");
+        if (this.tickHolders) this.tickPsLines = lines;
+      }
       const pids: number[] = [];
-      for (const line of stdout.split("\n")) {
+      for (const line of lines) {
         if (!line.includes(nativeId) || line.includes("claude-agent-acp")) continue;
         const pid = Number(line.trim().split(/\s+/, 1)[0]);
         if (Number.isInteger(pid) && pid !== process.pid) pids.push(pid);
@@ -1554,4 +1686,77 @@ export function matchModel(option: SessionConfigOption, modelId: string): string
   const byDefault = option.values.find((value) => value.value === "default" && value.description === name);
   if (byDefault) return byDefault.value;
   return option.values.find((value) => value.name === name)?.value;
+}
+
+/** Terminates a detached side-chat process group cleanly so orphaned grandchildren cannot leak. */
+function killDetachedProcess(child: ChildProcess): void {
+  const pid = child.pid;
+  if (!pid || child.exitCode !== null || child.signalCode !== null) return;
+  if (process.platform === "win32") {
+    execFile("taskkill", ["/pid", String(pid), "/T", "/F"], { windowsHide: true }, () => {});
+    try {
+      child.kill();
+    } catch {
+      // Already exited.
+    }
+    return;
+  }
+  const signalGroup = (sig: NodeJS.Signals) => {
+    try {
+      process.kill(-pid, sig);
+    } catch {
+      try {
+        child.kill(sig);
+      } catch {
+        // Already exited.
+      }
+    }
+  };
+  signalGroup("SIGTERM");
+  const timer = setTimeout(() => {
+    if (child.exitCode === null && child.signalCode === null) signalGroup("SIGKILL");
+  }, 2_000);
+  timer.unref?.();
+  child.once("exit", () => clearTimeout(timer));
+}
+
+/** Per-process serialization queue for Claude SDK CLAUDE_CONFIG_DIR mutations (fork/rename). */
+let claudeSdkOpQueue: Promise<unknown> = Promise.resolve();
+
+/** Runs Claude SDK session mutations in a serialized child Node process with explicit CLAUDE_CONFIG_DIR env. */
+async function runClaudeSdkOp<T = Record<string, unknown>>(
+  configDir: string,
+  env: NodeJS.ProcessEnv,
+  op: "fork" | "rename",
+  payload: Record<string, unknown>,
+): Promise<T> {
+  const run = async (): Promise<T> => {
+    const sdkUrl = pathToFileURL(createRequire(import.meta.url).resolve("@anthropic-ai/claude-agent-sdk")).href;
+    const script = `
+      const { forkSession, renameSession } = await import(process.argv[1]);
+      const op = process.argv[2];
+      const arg = JSON.parse(process.argv[3]);
+      if (op === "fork") {
+        const res = await forkSession(arg.nativeId, { dir: arg.dir, upToMessageId: arg.upToMessageId });
+        process.stdout.write(JSON.stringify(res));
+      } else if (op === "rename") {
+        await renameSession(arg.nativeId, arg.title);
+        process.stdout.write("{}");
+      }
+    `;
+    const { stdout } = await execFileAsync(
+      process.execPath,
+      ["--input-type=module", "-e", script, sdkUrl, op, JSON.stringify(payload)],
+      {
+        env: { ...env, CLAUDE_CONFIG_DIR: configDir },
+        timeout: 30_000,
+        maxBuffer: 4 * 1024 * 1024,
+        windowsHide: true,
+      },
+    );
+    return JSON.parse(stdout || "{}") as T;
+  };
+  const next = claudeSdkOpQueue.then(run, run);
+  claudeSdkOpQueue = next.then(() => undefined, () => undefined);
+  return next;
 }

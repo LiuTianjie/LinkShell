@@ -83,6 +83,7 @@ export function ComposerBox({
   const listboxId = useId();
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const popupListRef = useRef<HTMLDivElement | null>(null);
 
   const [caretOffset, setCaretOffset] = useState(value.length);
   const [dragging, setDragging] = useState(false);
@@ -100,10 +101,13 @@ export function ComposerBox({
     () => (slashQuery === null ? detectAtFileMention(value, caretOffset) : null),
     [caretOffset, slashQuery, value],
   );
+  const atActive = atMatch !== null;
+  const atQuery = atMatch?.query;
 
-  // Debounced `fs.projectFiles` lookup (90ms) when `@` mention is active.
+  // Debounced `fs.projectFiles` lookup (90ms) keyed on primitive query string so unrelated
+  // caret/text updates never cancel or duplicate in-flight searches.
   useEffect(() => {
-    if (!atMatch || !connection || !cwd?.trim()) {
+    if (!atActive || !connection || !cwd?.trim()) {
       setFileCandidates([]);
       return;
     }
@@ -112,7 +116,7 @@ export function ComposerBox({
       void connection.link
         .call("fs.projectFiles", {
           cwd: cwd.trim(),
-          query: atMatch.query || undefined,
+          query: atQuery || undefined,
           limit: 20,
         })
         .then((res) => {
@@ -126,7 +130,7 @@ export function ComposerBox({
       alive = false;
       clearTimeout(timer);
     };
-  }, [atMatch, connection, cwd]);
+  }, [atActive, atQuery, connection, cwd]);
 
   const activePopupKey =
     slashQuery !== null
@@ -155,6 +159,18 @@ export function ComposerBox({
     : showAtPopup
       ? fileCandidates.length
       : 0;
+  const safeSelectedIndex =
+    popupCount === 0 ? 0 : Math.min(selectedIndex, popupCount - 1);
+  const activeOptionId =
+    popupCount > 0 ? `${listboxId}-opt-${safeSelectedIndex}` : undefined;
+
+  useEffect(() => {
+    if (popupCount === 0) return;
+    const option = popupListRef.current?.querySelector<HTMLElement>(
+      '[data-selected="true"]',
+    );
+    option?.scrollIntoView?.({ block: "nearest" });
+  }, [popupCount, safeSelectedIndex]);
 
   const applySlashCommand = (cmd: SlashCommandItem) => {
     const next = `/${cmd.name} `;
@@ -313,6 +329,7 @@ export function ComposerBox({
 
       {(showSlashPopup || showAtPopup) && (
         <div
+          ref={popupListRef}
           id={listboxId}
           role="listbox"
           className="ls-composer-popup"
@@ -322,11 +339,12 @@ export function ComposerBox({
             ? matchingCommands.map((cmd, idx) => (
                 <button
                   key={cmd.name}
+                  id={`${listboxId}-opt-${idx}`}
                   type="button"
                   role="option"
-                  aria-selected={idx === selectedIndex}
+                  aria-selected={idx === safeSelectedIndex}
                   className="ls-composer-popup-item"
-                  data-selected={idx === selectedIndex}
+                  data-selected={idx === safeSelectedIndex}
                   onMouseDown={(e) => {
                     e.preventDefault();
                     applySlashCommand(cmd);
@@ -345,11 +363,12 @@ export function ComposerBox({
             : fileCandidates.map((entry, idx) => (
                 <button
                   key={entry.path}
+                  id={`${listboxId}-opt-${idx}`}
                   type="button"
                   role="option"
-                  aria-selected={idx === selectedIndex}
+                  aria-selected={idx === safeSelectedIndex}
                   className="ls-composer-popup-item"
-                  data-selected={idx === selectedIndex}
+                  data-selected={idx === safeSelectedIndex}
                   onMouseDown={(e) => {
                     e.preventDefault();
                     applyFileMention(entry);
@@ -426,6 +445,7 @@ export function ComposerBox({
         aria-label={textareaAriaLabel}
         aria-controls={popupCount > 0 ? listboxId : undefined}
         aria-expanded={popupCount > 0 || undefined}
+        aria-activedescendant={activeOptionId}
         placeholder={dragging ? copy.dropFilesHint : placeholder}
         value={value}
         disabled={disabled}

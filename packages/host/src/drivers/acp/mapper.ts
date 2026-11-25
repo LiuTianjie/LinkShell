@@ -120,30 +120,46 @@ export function toConfigOptions(response: unknown): SourcedConfigOption[] {
   const options: SourcedConfigOption[] = [];
   for (const raw of arr(source.configOptions)) {
     const option = obj(raw);
-    if (!option || !["select", "boolean"].includes(String(option.type)) || !str(option.id)) continue;
+    const id = str(option?.configId) ?? str(option?.id);
+    if (!option || !["select", "boolean"].includes(String(option.type)) || !id) continue;
+    const rawCategory = str(option.category) ?? id;
+    const category: SessionConfigOption["category"] =
+      rawCategory === "model" || rawCategory === "mode" || rawCategory === "model_config"
+        ? rawCategory
+        : rawCategory.includes("thought") || rawCategory.includes("effort")
+          ? "effort"
+          : "other";
     if (option.type === "boolean") {
       if (typeof option.currentValue !== "boolean") continue;
-      options.push({ id: str(option.id)!, name: str(option.name) ?? str(option.id)!, description: str(option.description), type: "boolean", category: "other",
-        current: option.currentValue ? "on" : "off", values: [{ value: "on", name: "开" }, { value: "off", name: "关" }], source: "configOptions" });
+      options.push({
+        id,
+        name: str(option.name) ?? id,
+        description: str(option.description),
+        type: "boolean",
+        category,
+        current: option.currentValue ? "on" : "off",
+        values: [{ value: "on", name: "开" }, { value: "off", name: "关" }],
+        source: "configOptions",
+      });
       continue;
     }
     const values = arr(option.options).flatMap((entry) => {
       const value = obj(entry);
       if (!value) return [];
       if (Array.isArray(value.options)) {
+        const group = str(value.name) ?? str(value.groupId) ?? str(value.group);
         return value.options.flatMap((inner) => {
           const v = obj(inner);
-          return str(v?.value) ? [{ value: str(v?.value)!, name: str(v?.name) ?? str(v?.value)!, description: str(v?.description), group: str(value.name) ?? str(value.group) }] : [];
+          return str(v?.value) ? [{ value: str(v?.value)!, name: str(v?.name) ?? str(v?.value)!, description: str(v?.description), group }] : [];
         });
       }
       return str(value.value) ? [{ value: str(value.value)!, name: str(value.name) ?? str(value.value)!, description: str(value.description) }] : [];
     });
-    const category = str(option.category) ?? str(option.id);
     options.push({
-      id: str(option.id)!,
-      name: str(option.name) ?? str(option.id)!,
+      id,
+      name: str(option.name) ?? id,
       description: str(option.description),
-      category: category === "model" || category === "mode" || category === "model_config" ? category : category?.includes("thought") || category?.includes("effort") ? "effort" : "other",
+      category,
       current: str(option.currentValue) ?? values[0]?.value ?? "",
       values,
       source: "configOptions",
@@ -620,7 +636,7 @@ export function withContext(prompt: Json[], context: string | undefined): Json[]
 }
 
 /** What the user said, when an agent replays a prompt that carried context. */
-function withoutContext(content: ContentBlock): ContentBlock | undefined {
+export function withoutContext(content: ContentBlock): ContentBlock | undefined {
   if (content.type !== "text" || !content.text.startsWith(CONTEXT_OPEN)) return content;
   const end = content.text.indexOf(CONTEXT_CLOSE);
   const rest = end < 0 ? "" : content.text.slice(end + CONTEXT_CLOSE.length).trimStart();

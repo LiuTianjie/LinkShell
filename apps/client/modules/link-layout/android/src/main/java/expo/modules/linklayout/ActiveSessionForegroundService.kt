@@ -25,7 +25,8 @@ class ActiveSessionForegroundService : Service() {
     const val ATTENTION_CHANNEL_ID = "linkshell_attention"
     const val PROGRESS_CHANNEL_ID = "linkshell_progress"
     const val STATUS_NOTIFICATION_ID = 4210
-    private const val BRAND_RED = 0xFFE53935.toInt()
+    // Canonical LinkShell brand indigo (`accentFill` dark in apps/client/src/theme/brand-colors.json).
+    private const val BRAND_INDIGO = 0xFF5263E8.toInt()
 
     const val ACTION_SYNC = "expo.modules.linklayout.FGS_SYNC"
     const val ACTION_STOP = "expo.modules.linklayout.FGS_STOP"
@@ -38,10 +39,25 @@ class ActiveSessionForegroundService : Service() {
     const val EXTRA_DEEP_LINK = "deepLink"
     const val EXTRA_ACTIONS_JSON = "actionsJson"
     const val EXTRA_REMOVE_NOTIFICATION = "removeNotification"
+    private const val EXTRA_START_GENERATION = "startGeneration"
+
+    private val stateLock = Any()
 
     @Volatile
     var isRunning: Boolean = false
       private set
+
+    @Volatile
+    private var startPending: Boolean = false
+
+    @Volatile
+    private var stopPending: Boolean = false
+
+    @Volatile
+    private var stopPendingRemoveNotification: Boolean = true
+
+    @Volatile
+    private var startGeneration: Long = 0L
 
     fun ensureChannels(context: Context) {
       if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -54,7 +70,7 @@ class ActiveSessionForegroundService : Service() {
         ).apply {
           description = "Approvals, questions, and failed agent turns"
           enableLights(true)
-          lightColor = BRAND_RED
+          lightColor = BRAND_INDIGO
           enableVibration(true)
         }
         manager.createNotificationChannel(attention)
@@ -85,6 +101,13 @@ class ActiveSessionForegroundService : Service() {
       actionsJson: String?,
     ): Boolean {
       ensureChannels(context)
+      val gen: Long
+      synchronized(stateLock) {
+        startGeneration += 1L
+        gen = startGeneration
+        startPending = true
+        stopPending = false
+      }
       val intent = Intent(context, ActiveSessionForegroundService::class.java).apply {
         action = ACTION_SYNC
         putExtra(EXTRA_TITLE, title)
@@ -94,6 +117,7 @@ class ActiveSessionForegroundService : Service() {
         putExtra(EXTRA_ONGOING, ongoing)
         putExtra(EXTRA_DEEP_LINK, deepLink)
         if (!actionsJson.isNullOrEmpty()) putExtra(EXTRA_ACTIONS_JSON, actionsJson)
+        putExtra(EXTRA_START_GENERATION, gen)
       }
       return try {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -103,6 +127,11 @@ class ActiveSessionForegroundService : Service() {
         }
         true
       } catch (_: Throwable) {
+        synchronized(stateLock) {
+          if (startGeneration == gen) {
+            startPending = false
+          }
+        }
         // Android 12+ throws ForegroundServiceStartNotAllowedException when starting FGS from
         // the background; callers fall back to a regular NotificationManager notification.
         false
@@ -110,7 +139,21 @@ class ActiveSessionForegroundService : Service() {
     }
 
     fun stop(context: Context, removeNotification: Boolean = true) {
-      if (!isRunning) return
+      val wasRunning: Boolean
+      val wasPending: Boolean
+      synchronized(stateLock) {
+        wasRunning = isRunning
+        wasPending = startPending
+        if (!wasRunning && !wasPending) return
+        stopPending = true
+        stopPendingRemoveNotification = removeNotification
+      }
+      if (!wasRunning) {
+        // A startForegroundService() is already in flight: let onStartCommand() satisfy the
+        // startForeground() contract and immediately stop itself so Android never raises
+        // ForegroundServiceDidNotStartInTimeException and no orphan FGS remains.
+        return
+      }
       val stopIntent = Intent(context, ActiveSessionForegroundService::class.java).apply {
         action = ACTION_STOP
         putExtra(EXTRA_REMOVE_NOTIFICATION, removeNotification)
@@ -118,8 +161,12 @@ class ActiveSessionForegroundService : Service() {
       runCatching { context.startService(stopIntent) }
         .onFailure {
           runCatching { context.stopService(Intent(context, ActiveSessionForegroundService::class.java)) }
+          synchronized(stateLock) {
+            isRunning = false
+            startPending = false
+            stopPending = false
+          }
         }
-      isRunning = false
     }
 
     fun buildNotification(
@@ -146,16 +193,14 @@ class ActiveSessionForegroundService : Service() {
         optionId = null,
       )
 
-      val iconRes = context.resources.getIdentifier("notification_icon", "drawable", context.packageName)
-        .takeIf { it != 0 }
-        ?: context.applicationInfo.icon.takeIf { it != 0 }
-        ?: android.R.drawable.stat_notify_sync
+      // Use our dedicated monochrome vector icon so Android never renders a solid white square.
+      val iconRes = R.drawable.ic_linkshell_notification
 
       val builder = NotificationCompat.Builder(context, channelId)
         .setSmallIcon(iconRes)
         .setContentTitle(title)
         .setContentText(subtitle)
-        .setColor(BRAND_RED)
+        .setColor(BRAND_INDIGO)
         .setOngoing(ongoing)
         .setAutoCancel(!ongoing)
         .setOnlyAlertOnce(!urgent)
@@ -261,7 +306,9 @@ class ActiveSessionForegroundService : Service() {
         setPackage(context.packageName)
         addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
       }
-      if (!actionId.isNullOrEmpty() && !kind.isNullOrEmpty()) {
+      // "open" actions navigate solely via the ACTION_VIEW deep link; attaching EXTRA_FROM_NOTIFICATION
+      // as well would also enqueue an action and trigger a duplicate router.push().
+      if (!actionId.isNullOrEmpty() && !kind.isNullOrEmpty() && kind != "open") {
         launchIntent.putExtra(NotificationActionQueue.EXTRA_FROM_NOTIFICATION, true)
         launchIntent.putExtra(NotificationActionQueue.EXTRA_ACTION_ID, actionId)
         launchIntent.putExtra(NotificationActionQueue.EXTRA_KIND, kind)
@@ -315,9 +362,16 @@ class ActiveSessionForegroundService : Service() {
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     if (intent?.action == ACTION_STOP) {
       val remove = intent.getBooleanExtra(EXTRA_REMOVE_NOTIFICATION, true)
+      synchronized(stateLock) {
+        isRunning = false
+        startPending = false
+        stopPending = false
+      }
       stopForegroundCompat(remove)
-      isRunning = false
-      stopSelf()
+      if (remove) {
+        runCatching { getSystemService(NotificationManager::class.java)?.cancel(STATUS_NOTIFICATION_ID) }
+      }
+      stopSelf(startId)
       return START_NOT_STICKY
     }
 
@@ -328,6 +382,7 @@ class ActiveSessionForegroundService : Service() {
     val ongoing = intent?.getBooleanExtra(EXTRA_ONGOING, true) ?: true
     val deepLink = intent?.getStringExtra(EXTRA_DEEP_LINK)?.takeIf { it.startsWith("linkshell") } ?: "linkshell:///"
     val actionsJson = intent?.getStringExtra(EXTRA_ACTIONS_JSON)
+    val intentGen = intent?.getLongExtra(EXTRA_START_GENERATION, 0L) ?: 0L
 
     val notification = buildNotification(
       context = this,
@@ -340,7 +395,16 @@ class ActiveSessionForegroundService : Service() {
       actionsJson = actionsJson,
     )
 
-    try {
+    val shouldAbort: Boolean
+    val removeOnAbort: Boolean
+    synchronized(stateLock) {
+      shouldAbort = stopPending || (intentGen != 0L && intentGen < startGeneration)
+      removeOnAbort = stopPendingRemoveNotification
+    }
+
+    val promoted = try {
+      // Always fulfill startForeground() when launched via startForegroundService(), even if
+      // stop() raced before onStartCommand(), to prevent ForegroundServiceDidNotStartInTimeException.
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
         startForeground(
           STATUS_NOTIFICATION_ID,
@@ -350,20 +414,69 @@ class ActiveSessionForegroundService : Service() {
       } else {
         startForeground(STATUS_NOTIFICATION_ID, notification)
       }
-      isRunning = true
+      true
     } catch (_: Throwable) {
-      isRunning = false
+      false
+    }
+
+    if (shouldAbort) {
+      synchronized(stateLock) {
+        isRunning = false
+        if (intentGen == 0L || intentGen >= startGeneration) {
+          startPending = false
+          stopPending = false
+        }
+      }
+      if (promoted) {
+        stopForegroundCompat(removeOnAbort)
+      }
+      if (removeOnAbort) {
+        runCatching { getSystemService(NotificationManager::class.java)?.cancel(STATUS_NOTIFICATION_ID) }
+      }
+      stopSelf(startId)
+      return START_NOT_STICKY
+    }
+
+    if (promoted) {
+      synchronized(stateLock) {
+        isRunning = true
+        if (intentGen == 0L || intentGen >= startGeneration) {
+          startPending = false
+        }
+      }
+    } else {
+      synchronized(stateLock) {
+        isRunning = false
+        if (intentGen == 0L || intentGen >= startGeneration) {
+          startPending = false
+        }
+      }
       runCatching {
         val manager = getSystemService(NotificationManager::class.java)
         manager?.notify(STATUS_NOTIFICATION_ID, notification)
       }
-      stopSelf()
+      stopSelf(startId)
     }
     return START_NOT_STICKY
   }
 
+  // Required on Android 15+ (targetSdk 35/36) for dataSync foreground services to avoid RemoteServiceException.
+  override fun onTimeout(startId: Int, fgsType: Int) {
+    synchronized(stateLock) {
+      isRunning = false
+      startPending = false
+      stopPending = false
+    }
+    runCatching { stopForegroundCompat(removeNotification = false) }
+    stopSelf(startId)
+  }
+
   override fun onDestroy() {
-    isRunning = false
+    synchronized(stateLock) {
+      isRunning = false
+      startPending = false
+      stopPending = false
+    }
     super.onDestroy()
   }
 

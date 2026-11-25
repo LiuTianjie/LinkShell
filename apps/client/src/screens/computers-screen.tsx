@@ -26,7 +26,11 @@ export function ComputersScreen() {
       onAccessibilityEscape={() => router.back()}
       contentInsetAdjustmentBehavior="never"
       showsVerticalScrollIndicator={false}
-      contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: sheetBottom(insets.bottom) }}
+      contentContainerStyle={{
+        paddingLeft: Math.max(16, insets.left + 16),
+        paddingRight: Math.max(16, insets.right + 16),
+        paddingBottom: sheetBottom(insets.bottom, { floating: true }),
+      }}
     >
       <View collapsable={false}>
         <ComputerSheetHeading title={pick({ zh: "切换电脑", en: "Switch computer", ja: "コンピュータを切り替え" })} />

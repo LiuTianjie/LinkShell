@@ -46,6 +46,7 @@ export const liveActivitySubscriptionSchema = z.object({
   grant: z.string().regex(/^[a-f0-9]{64}$/),
   expiresAt: z.number().int().positive(),
   computerKey: z.string().min(1).max(512),
+  deviceId: z.string().min(1).max(256).optional(),
 });
 export type LiveActivitySubscription = z.infer<typeof liveActivitySubscriptionSchema>;
 

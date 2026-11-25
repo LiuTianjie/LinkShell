@@ -1,7 +1,8 @@
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, userInfo } from "node:os";
 import { posix, win32 } from "node:path";
+import { stdoutStyle } from "../utils/format.js";
 import { standaloneBundle } from "../utils/standalone.js";
 
 export type ServicePlatform = "darwin" | "linux" | "win32";
@@ -10,6 +11,9 @@ export const MACOS_SERVICE_LABEL = "com.bd.linkshell.cli-host";
 export const LINUX_SERVICE_UNIT = "linkshell-host.service";
 export const WINDOWS_TASK_NAME = "LinkShell Host";
 export const WINDOWS_WRAPPER_NAME = "host-service.cmd";
+
+export const MACOS_GATEWAY_SERVICE_LABEL = "com.bd.linkshell.cli-gateway";
+export const LINUX_GATEWAY_SERVICE_UNIT = "linkshell-gateway.service";
 
 export interface ServiceCommand {
   command: string;
@@ -23,6 +27,7 @@ export interface ServiceContextOptions {
   homeDir?: string;
   linkshellHome?: string;
   uid?: number;
+  user?: string;
   xdgConfigHome?: string;
   nodePath?: string;
   execArgv?: string[];
@@ -36,6 +41,7 @@ export interface ServiceContext {
   linkshellHome: string;
   isCustomLinkshellHome: boolean;
   uid?: number;
+  user?: string;
   xdgConfigHome?: string;
   nodePath: string;
   execArgv: string[];
@@ -74,6 +80,7 @@ export interface ServiceStatusResult {
   running: boolean;
   enabled?: boolean;
   pid?: number;
+  linger?: boolean;
   state: "running" | "stopped" | "not-installed" | "unknown";
   detail?: string;
 }
@@ -101,6 +108,9 @@ export interface ServiceDeps {
   stdout?: (text: string) => void;
   stderr?: (text: string) => void;
   stopExistingHost?: (linkshellHome: string) => Promise<boolean>;
+  waitForHostReady?: (linkshellHome: string, timeoutMs: number) => Promise<boolean>;
+  waitForGatewayReady?: (host: string | undefined, port: number, timeoutMs: number) => Promise<boolean>;
+  checkLinger?: (user: string | undefined) => Promise<boolean | undefined>;
 }
 
 const DEFAULT_FS: ServiceFs = {
@@ -127,6 +137,17 @@ function resolveHomeDir(platform: ServicePlatform, env: NodeJS.ProcessEnv, overr
   if (override?.trim()) return override.trim();
   if (platform === "win32") return env.USERPROFILE?.trim() || env.HOME?.trim() || homedir();
   return env.HOME?.trim() || homedir();
+}
+
+function resolveUserName(env: NodeJS.ProcessEnv, override?: string): string | undefined {
+  if (override?.trim()) return override.trim();
+  const fromEnv = env.USER?.trim() || env.LOGNAME?.trim();
+  if (fromEnv) return fromEnv;
+  try {
+    return userInfo().username || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function assertSupportedPlatform(platform: NodeJS.Platform = process.platform): ServicePlatform {
@@ -201,6 +222,7 @@ export function resolveServiceContext(options: ServiceContextOptions = {}): Serv
     linkshellHome,
     isCustomLinkshellHome,
     uid,
+    user: resolveUserName(env, options.user),
     xdgConfigHome: (options.xdgConfigHome ?? env.XDG_CONFIG_HOME)?.trim() || undefined,
     nodePath: options.nodePath ?? process.execPath,
     execArgv,
@@ -236,20 +258,50 @@ export function resolveServiceFilePath(
   }
 }
 
+export function resolveGatewayServiceFilePath(
+  ctx: Pick<ServiceContext, "platform" | "homeDir" | "xdgConfigHome">,
+): string {
+  if (ctx.platform === "darwin") {
+    return posix.join(ctx.homeDir, "Library", "LaunchAgents", `${MACOS_GATEWAY_SERVICE_LABEL}.plist`);
+  }
+  if (ctx.platform === "linux") {
+    const configBase = ctx.xdgConfigHome || posix.join(ctx.homeDir, ".config");
+    return posix.join(configBase, "systemd", "user", LINUX_GATEWAY_SERVICE_UNIT);
+  }
+  throw new Error(`Gateway user service is supported on Linux (systemd --user) and macOS (launchd), not "${ctx.platform}".`);
+}
+
 function hostForegroundArgs(ctx: Pick<ServiceContext, "execArgv" | "entryScript">): string[] {
   return [...ctx.execArgv, ctx.entryScript, "host", "--_foreground-host"];
 }
 
-function buildServiceEnvironment(ctx: ServiceContext): Record<string, string> {
+function gatewayForegroundArgs(
+  ctx: Pick<ServiceContext, "execArgv" | "entryScript">,
+  port: number,
+  host?: string,
+): string[] {
+  return [
+    ...ctx.execArgv,
+    ctx.entryScript,
+    "gateway",
+    "--_foreground-gw",
+    "--port",
+    String(port),
+    ...(host ? ["--host", host] : []),
+  ];
+}
+
+function buildServiceEnvironment(ctx: ServiceContext, includeGateway = true): Record<string, string> {
   const env: Record<string, string> = {};
-  // launchd starts with a minimal PATH unless preserved; resolveLoginShellEnv runs inside the host for agent tools.
-  if (ctx.platform === "darwin" && ctx.pathEnv) {
+  // launchd and systemd --user start with a minimal PATH unless preserved; preserving PATH
+  // ensures nvm/fnm/volta/mise/asdf/linuxbrew Node & agent CLIs resolve reliably.
+  if ((ctx.platform === "darwin" || ctx.platform === "linux") && ctx.pathEnv) {
     env.PATH = ctx.pathEnv;
   }
   if (ctx.isCustomLinkshellHome) {
     env.LINKSHELL_HOME = ctx.linkshellHome;
   }
-  if (ctx.gateway !== undefined) {
+  if (includeGateway && ctx.gateway !== undefined) {
     env.LINKSHELL_GATEWAY = ctx.gateway;
   }
   return env;
@@ -301,10 +353,11 @@ function formatBatchArg(arg: string): string {
   return arg === "" || /[\s"&^|<>()%!]/.test(arg) ? `"${escaped}"` : escaped;
 }
 
-export function buildLaunchdPlist(ctx: ServiceContext): string {
-  const programArgs = [ctx.nodePath, ...hostForegroundArgs(ctx)];
-  const logPath = posix.join(ctx.linkshellHome, "host.log");
-  const env = buildServiceEnvironment(ctx);
+export function buildLaunchdPlist(ctx: ServiceContext, options?: { label?: string; args?: string[]; logName?: string; includeGateway?: boolean }): string {
+  const label = options?.label ?? MACOS_SERVICE_LABEL;
+  const programArgs = [ctx.nodePath, ...(options?.args ?? hostForegroundArgs(ctx))];
+  const logPath = posix.join(ctx.linkshellHome, options?.logName ?? "host.log");
+  const env = buildServiceEnvironment(ctx, options?.includeGateway ?? true);
   const envEntries = Object.entries(env);
 
   const lines: string[] = [
@@ -313,7 +366,7 @@ export function buildLaunchdPlist(ctx: ServiceContext): string {
     '<plist version="1.0">',
     "<dict>",
     "  <key>Label</key>",
-    `  <string>${escapeXml(MACOS_SERVICE_LABEL)}</string>`,
+    `  <string>${escapeXml(label)}</string>`,
     "  <key>ProgramArguments</key>",
     "  <array>",
     ...programArgs.map((arg) => `    <string>${escapeXml(arg)}</string>`),
@@ -345,16 +398,21 @@ export function buildLaunchdPlist(ctx: ServiceContext): string {
   return lines.join("\n");
 }
 
-export function buildSystemdUnit(ctx: ServiceContext): string {
-  const execParts = [ctx.nodePath, ...hostForegroundArgs(ctx)].map(formatSystemdExecArg);
-  const logPath = posix.join(ctx.linkshellHome, "host.log");
-  const envEntries = Object.entries(buildServiceEnvironment(ctx));
+export function buildSystemdUnit(
+  ctx: ServiceContext,
+  options?: { description?: string; args?: string[]; logName?: string; includeGateway?: boolean },
+): string {
+  const execParts = [ctx.nodePath, ...(options?.args ?? hostForegroundArgs(ctx))].map(formatSystemdExecArg);
+  const logPath = posix.join(ctx.linkshellHome, options?.logName ?? "host.log");
+  const envEntries = Object.entries(buildServiceEnvironment(ctx, options?.includeGateway ?? true));
 
   const lines: string[] = [
     "[Unit]",
-    "Description=LinkShell Host",
+    `Description=${sanitizeControlChars(options?.description ?? "LinkShell Host")}`,
     "After=network-online.target",
     "Wants=network-online.target",
+    "StartLimitIntervalSec=60",
+    "StartLimitBurst=5",
     "",
     "[Service]",
     "Type=simple",
@@ -362,6 +420,8 @@ export function buildSystemdUnit(ctx: ServiceContext): string {
     `ExecStart=${execParts.join(" ")}`,
     "Restart=on-failure",
     "RestartSec=3",
+    "KillMode=mixed",
+    "TimeoutStopSec=15",
     `StandardOutput=append:${formatSystemdPathOrValue(logPath)}`,
     `StandardError=append:${formatSystemdPathOrValue(logPath)}`,
     ...envEntries.map(([key, value]) => formatSystemdEnvAssignment(key, value)),
@@ -388,6 +448,27 @@ export function buildWindowsWrapperCmd(ctx: ServiceContext): string {
   ];
 
   return lines.join("\r\n");
+}
+
+/** Extracts an existing LINKSHELL_GATEWAY value from a previously installed unit/plist/wrapper. */
+export function extractGatewayFromServiceFile(platform: ServicePlatform, content: string): string | undefined {
+  if (platform === "linux") {
+    const match = /^\s*Environment="LINKSHELL_GATEWAY=([^"]*)"$/m.exec(content);
+    if (!match?.[1]) return undefined;
+    return match[1].replace(/%%/g, "%").replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+  }
+  if (platform === "darwin") {
+    const match = /<key>LINKSHELL_GATEWAY<\/key>\s*<string>([^<]*)<\/string>/m.exec(content);
+    if (!match?.[1]) return undefined;
+    return match[1]
+      .replace(/&apos;/g, "'")
+      .replace(/&quot;/g, '"')
+      .replace(/&gt;/g, ">")
+      .replace(/&lt;/g, "<")
+      .replace(/&amp;/g, "&");
+  }
+  const match = /^set "LINKSHELL_GATEWAY=([^"]*)"$/m.exec(content);
+  return match?.[1]?.replace(/%%/g, "%");
 }
 
 export function planInstallService(options: ServiceContextOptions = {}): InstallServicePlan {
@@ -486,6 +567,82 @@ export function planUninstallService(options: ServiceContextOptions = {}): Unins
   };
 }
 
+export function planInstallGatewayService(
+  options: ServiceContextOptions & { port?: number; host?: string } = {},
+): InstallServicePlan {
+  const ctx = resolveServiceContext(options);
+  if (ctx.platform === "win32") {
+    throw new Error("Gateway user service installation is supported on Linux (systemd --user) and macOS (launchd).");
+  }
+  const port = options.port ?? 8787;
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`Invalid --port value "${port}". Expected 1-65535.`);
+  }
+  const host = options.host?.trim() || undefined;
+  const filePath = resolveGatewayServiceFilePath(ctx);
+  const logPath = posix.join(ctx.linkshellHome, "gateway.log");
+  const args = gatewayForegroundArgs(ctx, port, host);
+
+  if (ctx.platform === "darwin") {
+    const domain = `gui/${ctx.uid}`;
+    return {
+      platform: "darwin",
+      serviceName: MACOS_GATEWAY_SERVICE_LABEL,
+      filePath,
+      fileContent: buildLaunchdPlist(ctx, { label: MACOS_GATEWAY_SERVICE_LABEL, args, logName: "gateway.log", includeGateway: false }),
+      fileMode: 0o644,
+      logPath,
+      linkshellHome: ctx.linkshellHome,
+      commands: [
+        { command: "launchctl", args: ["bootout", `${domain}/${MACOS_GATEWAY_SERVICE_LABEL}`], ignoreFailure: true },
+        { command: "launchctl", args: ["bootstrap", domain, filePath] },
+      ],
+      fallbackCommands: [
+        { command: "launchctl", args: ["unload", "-w", filePath], ignoreFailure: true },
+        { command: "launchctl", args: ["load", "-w", filePath] },
+      ],
+    };
+  }
+
+  return {
+    platform: "linux",
+    serviceName: LINUX_GATEWAY_SERVICE_UNIT,
+    filePath,
+    fileContent: buildSystemdUnit(ctx, { description: "LinkShell Gateway", args, logName: "gateway.log", includeGateway: false }),
+    fileMode: 0o644,
+    logPath,
+    linkshellHome: ctx.linkshellHome,
+    commands: [
+      { command: "systemctl", args: ["--user", "daemon-reload"] },
+      { command: "systemctl", args: ["--user", "enable", "--now", LINUX_GATEWAY_SERVICE_UNIT] },
+    ],
+  };
+}
+
+export function planUninstallGatewayService(options: ServiceContextOptions = {}): UninstallServicePlan {
+  const ctx = resolveServiceContext(options);
+  if (ctx.platform === "win32") {
+    throw new Error("Gateway user service management is supported on Linux (systemd --user) and macOS (launchd).");
+  }
+  const filePath = resolveGatewayServiceFilePath(ctx);
+  if (ctx.platform === "darwin") {
+    return {
+      platform: "darwin",
+      serviceName: MACOS_GATEWAY_SERVICE_LABEL,
+      filePath,
+      commands: [{ command: "launchctl", args: ["bootout", `gui/${ctx.uid}/${MACOS_GATEWAY_SERVICE_LABEL}`], ignoreFailure: true }],
+      fallbackCommands: [{ command: "launchctl", args: ["unload", "-w", filePath], ignoreFailure: true }],
+    };
+  }
+  return {
+    platform: "linux",
+    serviceName: LINUX_GATEWAY_SERVICE_UNIT,
+    filePath,
+    commands: [{ command: "systemctl", args: ["--user", "disable", "--now", LINUX_GATEWAY_SERVICE_UNIT], ignoreFailure: true }],
+    postRemoveCommands: [{ command: "systemctl", args: ["--user", "daemon-reload"], ignoreFailure: true }],
+  };
+}
+
 function quoteDisplayArg(arg: string): string {
   return arg === "" || /[\s"'\\]/.test(arg) ? `"${arg.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"` : arg;
 }
@@ -533,7 +690,8 @@ export function formatUninstallDryRun(plan: UninstallServicePlan): string {
 
 const defaultRunner: CommandRunner = (command, args) =>
   new Promise((resolve) => {
-    execFile(command, args, { encoding: "utf8", timeout: 15_000, windowsHide: true }, (error, stdout, stderr) => {
+    const env = process.platform === "win32" ? process.env : { ...process.env, LC_ALL: "C" };
+    execFile(command, args, { encoding: "utf8", timeout: 15_000, windowsHide: true, env }, (error, stdout, stderr) => {
       if (!error) {
         resolve({ exitCode: 0, stdout: stdout ?? "", stderr: stderr ?? "" });
         return;
@@ -557,11 +715,19 @@ function isLegacyLaunchctlUnsupported(result: CommandResult): boolean {
   return /unrecognized subcommand|unknown subcommand|not supported|usage:\s*launchctl/i.test(combined);
 }
 
-function formatCommandFailure(cmd: ServiceCommand, result: CommandResult): string {
+export function formatCommandFailure(cmd: ServiceCommand, result: CommandResult): string {
   const detail = [result.stderr.trim(), result.stdout.trim()].filter(Boolean).join(" — ");
   const base = `${formatCommand(cmd)} failed (exit ${result.exitCode})${detail ? `: ${detail}` : ""}`;
   if (cmd.command === "launchctl" && /input\/output error/i.test(detail)) {
     return `${base} — ensure you are running inside an active macOS user GUI session`;
+  }
+  if (cmd.command === "systemctl") {
+    if (/not been booted with systemd|system has not been booted/i.test(detail)) {
+      return `${base} — this environment is not booted with systemd (Docker, WSL2 without systemd=true in /etc/wsl.conf, or Alpine/OpenRC). Use \`linkshell host --daemon\` instead.`;
+    }
+    if (/failed to connect to bus|no medium found|connection refused/i.test(detail)) {
+      return `${base} — systemd user bus is unavailable. If you switched users with \`su\`/\`sudo\`, log in directly via SSH or export XDG_RUNTIME_DIR="/run/user/$(id -u)" DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus".`;
+    }
   }
   return base;
 }
@@ -572,6 +738,63 @@ async function runServiceCommand(runner: CommandRunner, cmd: ServiceCommand): Pr
     throw new Error(formatCommandFailure(cmd, result));
   }
   return result;
+}
+
+/** Checks whether `systemd --user` is reachable in the current Linux session. */
+export async function isSystemdUserAvailable(runner: CommandRunner = defaultRunner): Promise<boolean> {
+  if (process.platform !== "linux" && runner === defaultRunner) return false;
+  const res = await runner("systemctl", ["--user", "show-environment"]);
+  return res.exitCode === 0;
+}
+
+/**
+ * Checks whether systemd user lingering is enabled so user services survive SSH logout and start at boot.
+ * Returns `true`, `false`, or `undefined` if it cannot be determined.
+ */
+export async function checkLinuxLinger(
+  options: { user?: string; runner?: CommandRunner; fs?: Pick<ServiceFs, "existsSync"> } = {},
+): Promise<boolean | undefined> {
+  const user = resolveUserName(process.env, options.user);
+  const runner = options.runner ?? defaultRunner;
+  const fsImpl = options.fs ?? DEFAULT_FS;
+  if (user) {
+    const res = await runner("loginctl", ["show-user", user, "-p", "Linger", "--value"]);
+    if (res.exitCode === 0) {
+      const value = res.stdout.trim().toLowerCase();
+      if (value === "yes") return true;
+      if (value === "no") return false;
+    }
+    try {
+      if (fsImpl.existsSync(`/var/lib/systemd/linger/${user}`)) return true;
+      if (fsImpl.existsSync("/var/lib/systemd/linger")) return false;
+    } catch {}
+  }
+  return undefined;
+}
+
+async function defaultWaitForHostReady(linkshellHome: string, timeoutMs: number): Promise<boolean> {
+  const host = await import("@linkshell/host");
+  const { hostSocket } = host.hostPaths(linkshellHome);
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await host.isHostRunning(hostSocket)) return true;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  return false;
+}
+
+async function defaultWaitForGatewayReady(host: string | undefined, port: number, timeoutMs: number): Promise<boolean> {
+  const probeHost = host && host !== "0.0.0.0" && host !== "::" ? host : "127.0.0.1";
+  const url = `http://${probeHost.includes(":") ? `[${probeHost}]` : probeHost}:${port}/healthz`;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(1000) });
+      if (res.ok) return true;
+    } catch {}
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  return false;
 }
 
 async function stopHostByPidFile(
@@ -618,10 +841,37 @@ async function stopHostByPidFile(
   throw new Error(`Existing LinkShell host (PID ${pid}) did not stop within 10s.`);
 }
 
+async function ensureLinuxLingerAndReport(
+  user: string | undefined,
+  runner: CommandRunner,
+  fsImpl: ServiceFs,
+  deps: ServiceDeps,
+): Promise<{ lingerEnabled?: boolean; banner?: string }> {
+  const linger = deps.checkLinger
+    ? await deps.checkLinger(user)
+    : await checkLinuxLinger({ user, runner, fs: fsImpl });
+  if (linger === true) return { lingerEnabled: true };
+  if (linger !== false || !user) return { lingerEnabled: linger };
+
+  const enableRes = await runner("loginctl", ["enable-linger", user]);
+  if (enableRes.exitCode === 0) {
+    return { lingerEnabled: true };
+  }
+  return {
+    lingerEnabled: false,
+    banner: [
+      "  ! User linger is disabled — systemd will stop this service when your SSH session ends.",
+      "    To keep LinkShell running after logout and across reboots, run:",
+      `      sudo loginctl enable-linger ${user}`,
+    ].join("\n"),
+  };
+}
+
 export async function runInstallService(
   options: ServiceContextOptions & { dryRun?: boolean } = {},
   deps: ServiceDeps = {},
 ): Promise<InstallServicePlan> {
+  const ctx = resolveServiceContext(options);
   const plan = planInstallService(options);
   const stdout = deps.stdout ?? ((text: string) => process.stdout.write(text));
   if (options.dryRun) {
@@ -632,7 +882,9 @@ export async function runInstallService(
   const fsImpl = deps.fs ?? DEFAULT_FS;
   const runner = deps.runner ?? defaultRunner;
   const stopExisting = deps.stopExistingHost ?? ((home: string) => stopHostByPidFile(home, plan.platform, fsImpl));
+  const waitReady = deps.waitForHostReady ?? (deps.runner ? undefined : defaultWaitForHostReady);
   const pathApi = platformPath(plan.platform);
+  const style = stdoutStyle();
 
   let wasSystemdActive = false;
   if (plan.platform === "darwin") {
@@ -648,7 +900,12 @@ export async function runInstallService(
 
   fsImpl.mkdirSync(pathApi.dirname(plan.filePath), { recursive: true });
   fsImpl.mkdirSync(plan.linkshellHome, { recursive: true, mode: 0o700 });
+  if (plan.platform !== "win32" && fsImpl === DEFAULT_FS) {
+    try { chmodSync(plan.linkshellHome, 0o700); } catch {}
+  }
   fsImpl.writeFileSync(plan.filePath, plan.fileContent, { mode: plan.fileMode });
+
+  let lingerNote: { lingerEnabled?: boolean; banner?: string } = {};
 
   if (plan.platform === "darwin") {
     const bootstrapCmd = plan.commands[1]!;
@@ -671,6 +928,16 @@ export async function runInstallService(
     if (wasSystemdActive) {
       await runServiceCommand(runner, { command: "systemctl", args: ["--user", "restart", LINUX_SERVICE_UNIT] });
     }
+    if (waitReady) {
+      const ready = await waitReady(plan.linkshellHome, 15_000);
+      if (!ready) {
+        throw new Error(
+          `Service ${LINUX_SERVICE_UNIT} was enabled, but LinkShell host did not become ready within 15s. ` +
+          `Inspect logs with: journalctl --user -u ${LINUX_SERVICE_UNIT} -n 50 (or ${plan.logPath})`,
+        );
+      }
+    }
+    lingerNote = await ensureLinuxLingerAndReport(ctx.user, runner, fsImpl, deps);
   } else {
     await stopExisting(plan.linkshellHome);
     for (const cmd of plan.commands) {
@@ -681,11 +948,13 @@ export async function runInstallService(
   stdout(
     [
       "",
-      `  \x1b[32m✓\x1b[0m Installed LinkShell host service (${plan.serviceName})`,
+      `  ${style.green("✓")} Installed LinkShell host service (${plan.serviceName})`,
       `    File:   ${plan.filePath}`,
       `    Log:    ${plan.logPath}`,
+      ...(lingerNote.lingerEnabled === true ? ["    Linger: enabled (persists across SSH logout and reboot)"] : []),
       `    Status: linkshell host service-status`,
       `    Remove: linkshell host uninstall-service`,
+      ...(lingerNote.banner ? ["", lingerNote.banner] : []),
       "",
     ].join("\n"),
   );
@@ -706,6 +975,7 @@ export async function runUninstallService(
   const fsImpl = deps.fs ?? DEFAULT_FS;
   const runner = deps.runner ?? defaultRunner;
   const hadFile = fsImpl.existsSync(plan.filePath);
+  const style = stdoutStyle();
 
   for (const cmd of plan.commands) {
     const res = await runServiceCommand(runner, cmd);
@@ -728,8 +998,134 @@ export async function runUninstallService(
 
   stdout(
     hadFile
-      ? `\n  \x1b[32m✓\x1b[0m Uninstalled LinkShell host service (${plan.serviceName})\n\n`
+      ? `\n  ${style.green("✓")} Uninstalled LinkShell host service (${plan.serviceName})\n\n`
       : `\n  LinkShell host service (${plan.serviceName}) is already uninstalled.\n\n`,
+  );
+  return plan;
+}
+
+export async function runInstallGatewayService(
+  options: ServiceContextOptions & { dryRun?: boolean; port?: number; host?: string } = {},
+  deps: ServiceDeps = {},
+): Promise<InstallServicePlan> {
+  const ctx = resolveServiceContext(options);
+  const port = options.port ?? 8787;
+  const plan = planInstallGatewayService(options);
+  const stdout = deps.stdout ?? ((text: string) => process.stdout.write(text));
+  if (options.dryRun) {
+    stdout(formatInstallDryRun(plan));
+    return plan;
+  }
+
+  const fsImpl = deps.fs ?? DEFAULT_FS;
+  const runner = deps.runner ?? defaultRunner;
+  const waitGateway = deps.waitForGatewayReady ?? (deps.runner ? undefined : defaultWaitForGatewayReady);
+  const pathApi = platformPath(plan.platform);
+  const style = stdoutStyle();
+
+  let wasSystemdActive = false;
+  if (plan.platform === "darwin") {
+    const bootout = await runner(plan.commands[0]!.command, plan.commands[0]!.args);
+    if (bootout.exitCode !== 0 && isLegacyLaunchctlUnsupported(bootout) && plan.fallbackCommands?.[0]) {
+      await runner(plan.fallbackCommands[0].command, plan.fallbackCommands[0].args);
+    }
+  } else if (plan.platform === "linux") {
+    const activeProbe = await runner("systemctl", ["--user", "is-active", LINUX_GATEWAY_SERVICE_UNIT]);
+    wasSystemdActive = activeProbe.exitCode === 0 && activeProbe.stdout.trim() === "active";
+  }
+
+  fsImpl.mkdirSync(pathApi.dirname(plan.filePath), { recursive: true });
+  fsImpl.mkdirSync(plan.linkshellHome, { recursive: true, mode: 0o700 });
+  if (fsImpl === DEFAULT_FS) {
+    try { chmodSync(plan.linkshellHome, 0o700); } catch {}
+  }
+  fsImpl.writeFileSync(plan.filePath, plan.fileContent, { mode: plan.fileMode });
+
+  let lingerNote: { lingerEnabled?: boolean; banner?: string } = {};
+
+  if (plan.platform === "darwin") {
+    const bootstrapCmd = plan.commands[1]!;
+    const bootstrapRes = await runner(bootstrapCmd.command, bootstrapCmd.args);
+    if (bootstrapRes.exitCode !== 0) {
+      if (isLegacyLaunchctlUnsupported(bootstrapRes) && plan.fallbackCommands) {
+        for (const cmd of plan.fallbackCommands) {
+          await runServiceCommand(runner, cmd);
+        }
+      } else {
+        throw new Error(formatCommandFailure(bootstrapCmd, bootstrapRes));
+      }
+    }
+  } else {
+    await runServiceCommand(runner, plan.commands[0]!);
+    await runServiceCommand(runner, plan.commands[1]!);
+    if (wasSystemdActive) {
+      await runServiceCommand(runner, { command: "systemctl", args: ["--user", "restart", LINUX_GATEWAY_SERVICE_UNIT] });
+    }
+    if (waitGateway) {
+      const ready = await waitGateway(options.host, port, 10_000);
+      if (!ready) {
+        throw new Error(
+          `Service ${LINUX_GATEWAY_SERVICE_UNIT} was enabled, but /healthz did not respond on port ${port} within 10s. ` +
+          `Inspect logs with: journalctl --user -u ${LINUX_GATEWAY_SERVICE_UNIT} -n 50 (or ${plan.logPath})`,
+        );
+      }
+    }
+    lingerNote = await ensureLinuxLingerAndReport(ctx.user, runner, fsImpl, deps);
+  }
+
+  stdout(
+    [
+      "",
+      `  ${style.green("✓")} Installed LinkShell gateway service (${plan.serviceName})`,
+      `    Listen: ${options.host ?? "0.0.0.0"}:${port}`,
+      `    File:   ${plan.filePath}`,
+      `    Log:    ${plan.logPath}`,
+      ...(lingerNote.lingerEnabled === true ? ["    Linger: enabled (persists across SSH logout and reboot)"] : []),
+      `    Status: linkshell gateway status`,
+      `    Remove: linkshell gateway uninstall-service`,
+      ...(lingerNote.banner ? ["", lingerNote.banner] : []),
+      "",
+    ].join("\n"),
+  );
+  return plan;
+}
+
+export async function runUninstallGatewayService(
+  options: ServiceContextOptions & { dryRun?: boolean } = {},
+  deps: ServiceDeps = {},
+): Promise<UninstallServicePlan> {
+  const plan = planUninstallGatewayService(options);
+  const stdout = deps.stdout ?? ((text: string) => process.stdout.write(text));
+  if (options.dryRun) {
+    stdout(formatUninstallDryRun(plan));
+    return plan;
+  }
+
+  const fsImpl = deps.fs ?? DEFAULT_FS;
+  const runner = deps.runner ?? defaultRunner;
+  const hadFile = fsImpl.existsSync(plan.filePath);
+  const style = stdoutStyle();
+
+  for (const cmd of plan.commands) {
+    const res = await runServiceCommand(runner, cmd);
+    if (
+      plan.platform === "darwin" &&
+      cmd.args[0] === "bootout" &&
+      res.exitCode !== 0 &&
+      isLegacyLaunchctlUnsupported(res) &&
+      plan.fallbackCommands?.[0]
+    ) {
+      await runServiceCommand(runner, plan.fallbackCommands[0]);
+    }
+  }
+  fsImpl.rmSync(plan.filePath, { force: true });
+  for (const cmd of plan.postRemoveCommands ?? []) {
+    await runServiceCommand(runner, cmd);
+  }
+  stdout(
+    hadFile
+      ? `\n  ${style.green("✓")} Uninstalled LinkShell gateway service (${plan.serviceName})\n\n`
+      : `\n  LinkShell gateway service (${plan.serviceName}) is already uninstalled.\n\n`,
   );
   return plan;
 }
@@ -739,6 +1135,7 @@ export function parseMacServiceStatus(
   result: CommandResult,
   filePath: string,
   isLegacyList = false,
+  serviceName = MACOS_SERVICE_LABEL,
 ): ServiceStatusResult {
   const combined = `${result.stdout}\n${result.stderr}`;
   if (result.exitCode === 0) {
@@ -748,7 +1145,7 @@ export function parseMacServiceStatus(
       const running = pid !== undefined;
       return {
         platform: "darwin",
-        serviceName: MACOS_SERVICE_LABEL,
+        serviceName,
         filePath,
         installed,
         loaded: true,
@@ -769,7 +1166,7 @@ export function parseMacServiceStatus(
 
     return {
       platform: "darwin",
-      serviceName: MACOS_SERVICE_LABEL,
+      serviceName,
       filePath,
       installed,
       loaded: true,
@@ -784,7 +1181,7 @@ export function parseMacServiceStatus(
   if (/could not find service|service not found/i.test(combined) || result.exitCode === 113) {
     return {
       platform: "darwin",
-      serviceName: MACOS_SERVICE_LABEL,
+      serviceName,
       filePath,
       installed,
       loaded: false,
@@ -796,7 +1193,7 @@ export function parseMacServiceStatus(
 
   return {
     platform: "darwin",
-    serviceName: MACOS_SERVICE_LABEL,
+    serviceName,
     filePath,
     installed,
     loaded: false,
@@ -806,12 +1203,103 @@ export function parseMacServiceStatus(
   };
 }
 
+/** Parses key=value output from `systemctl --user show`. */
+export function parseSystemdShowProperties(output: string): Record<string, string> {
+  const props: Record<string, string> = {};
+  for (const line of output.split(/\r?\n/)) {
+    const eq = line.indexOf("=");
+    if (eq <= 0) continue;
+    props[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
+  }
+  return props;
+}
+
+/** Locale-safe parser for `systemctl --user show --property=LoadState,ActiveState,SubState,UnitFileState,MainPID,ExecMainStatus`. */
+export function parseLinuxSystemdShowStatus(
+  installed: boolean,
+  showResult: CommandResult,
+  filePath: string,
+  linger?: boolean,
+  serviceName = LINUX_SERVICE_UNIT,
+): ServiceStatusResult {
+  const errText = `${showResult.stderr}\n${showResult.stdout}`.trim();
+  if (/failed to connect to bus|not been booted with systemd|system has not been booted/i.test(errText)) {
+    return {
+      platform: "linux",
+      serviceName,
+      filePath,
+      installed,
+      loaded: false,
+      running: false,
+      ...(linger !== undefined ? { linger } : {}),
+      state: installed ? "unknown" : "not-installed",
+      detail: showResult.stderr.trim() || "systemd user session unavailable",
+    };
+  }
+
+  const props = parseSystemdShowProperties(showResult.stdout);
+  const loadState = props.LoadState?.toLowerCase() ?? "";
+  const activeState = props.ActiveState?.toLowerCase() ?? "";
+  const subState = props.SubState?.toLowerCase() ?? "";
+  const unitFileState = props.UnitFileState?.toLowerCase() ?? "";
+  const mainPid = Number(props.MainPID);
+  const execStatus = props.ExecMainStatus;
+
+  const loaded = loadState === "loaded";
+  const running = activeState === "active" && (subState === "" || subState === "running" || subState === "exited");
+  const enabled =
+    unitFileState === "enabled" || unitFileState === "enabled-runtime"
+      ? true
+      : unitFileState === "disabled" || unitFileState === "masked"
+        ? false
+        : undefined;
+  const pid = Number.isSafeInteger(mainPid) && mainPid > 0 ? mainPid : undefined;
+
+  if (!installed && !loaded && !running) {
+    return {
+      platform: "linux",
+      serviceName,
+      filePath,
+      installed: false,
+      loaded: false,
+      running: false,
+      ...(linger !== undefined ? { linger } : {}),
+      state: "not-installed",
+    };
+  }
+
+  const detailParts: string[] = [];
+  if (!running && activeState) {
+    detailParts.push(subState ? `${activeState} (${subState})` : activeState);
+    if (execStatus && execStatus !== "0") detailParts.push(`exit ${execStatus}`);
+  }
+
+  return {
+    platform: "linux",
+    serviceName,
+    filePath,
+    installed,
+    loaded,
+    running,
+    ...(enabled !== undefined ? { enabled } : {}),
+    ...(pid !== undefined ? { pid } : {}),
+    ...(linger !== undefined ? { linger } : {}),
+    state: running ? "running" : "stopped",
+    ...(detailParts.length > 0 ? { detail: detailParts.join(", ") } : {}),
+  };
+}
+
 export function parseLinuxServiceStatus(
   installed: boolean,
   isActiveResult: CommandResult,
   statusResult: CommandResult,
   filePath: string,
+  linger?: boolean,
+  serviceName = LINUX_SERVICE_UNIT,
 ): ServiceStatusResult {
+  if (/^LoadState=/m.test(statusResult.stdout) || /^ActiveState=/m.test(statusResult.stdout)) {
+    return parseLinuxSystemdShowStatus(installed, statusResult, filePath, linger, serviceName);
+  }
   const activeText = isActiveResult.stdout.trim().toLowerCase();
   const statusText = statusResult.stdout;
   const statusErr = `${statusResult.stderr}\n${isActiveResult.stderr}`.trim();
@@ -819,11 +1307,12 @@ export function parseLinuxServiceStatus(
   if (/failed to connect to bus|not been booted with systemd/i.test(`${statusText}\n${statusErr}`)) {
     return {
       platform: "linux",
-      serviceName: LINUX_SERVICE_UNIT,
+      serviceName,
       filePath,
       installed,
       loaded: false,
       running: false,
+      ...(linger !== undefined ? { linger } : {}),
       state: installed ? "unknown" : "not-installed",
       detail: statusErr || "systemd user session unavailable",
     };
@@ -842,11 +1331,12 @@ export function parseLinuxServiceStatus(
   if (!installed && !loaded && !running) {
     return {
       platform: "linux",
-      serviceName: LINUX_SERVICE_UNIT,
+      serviceName,
       filePath,
       installed: false,
       loaded: false,
       running: false,
+      ...(linger !== undefined ? { linger } : {}),
       state: "not-installed",
     };
   }
@@ -854,13 +1344,14 @@ export function parseLinuxServiceStatus(
   const activeLine = /^\s*Active:\s*(.+)$/im.exec(statusText)?.[1]?.trim();
   return {
     platform: "linux",
-    serviceName: LINUX_SERVICE_UNIT,
+    serviceName,
     filePath,
     installed,
     loaded,
     running,
     ...(enabled !== undefined ? { enabled } : {}),
     ...(pid !== undefined ? { pid } : {}),
+    ...(linger !== undefined ? { linger } : {}),
     state: running ? "running" : "stopped",
     ...(!running && (activeText || activeLine) ? { detail: activeLine || activeText } : {}),
   };
@@ -923,7 +1414,8 @@ export function parseWindowsServiceStatus(
 }
 
 export function formatServiceStatus(status: ServiceStatusResult): string {
-  const dot = status.running ? "\x1b[32m●\x1b[0m" : "\x1b[2m○\x1b[0m";
+  const style = stdoutStyle();
+  const dot = status.running ? style.green("●") : style.dim("○");
   const stateLine = `${dot} ${status.state}${status.pid !== undefined ? ` (PID ${status.pid})` : ""}${status.detail ? ` — ${status.detail}` : ""}`;
   const lines = [
     "",
@@ -932,10 +1424,17 @@ export function formatServiceStatus(status: ServiceStatusResult): string {
     `  Installed: ${status.installed ? `yes (${status.filePath})` : `no (${status.filePath})`}`,
     `  Loaded:    ${status.loaded ? "yes" : "no"}`,
     ...(status.enabled !== undefined ? [`  Enabled:   ${status.enabled ? "yes" : "no"}`] : []),
+    ...(status.linger !== undefined
+      ? [
+          `  Linger:    ${status.linger ? "enabled" : "disabled (SSH logout will stop this service; run: sudo loginctl enable-linger $USER)"}`,
+        ]
+      : []),
     "",
   ];
   return lines.join("\n");
 }
+
+const SYSTEMD_SHOW_PROPS = "LoadState,ActiveState,SubState,UnitFileState,MainPID,ExecMainStatus";
 
 export async function getServiceStatus(
   options: ServiceContextOptions = {},
@@ -957,15 +1456,205 @@ export async function getServiceStatus(
   }
 
   if (ctx.platform === "linux") {
-    const [isActiveResult, statusResult] = await Promise.all([
-      runner("systemctl", ["--user", "is-active", LINUX_SERVICE_UNIT]),
-      runner("systemctl", ["--user", "status", LINUX_SERVICE_UNIT, "--no-pager"]),
-    ]);
-    return parseLinuxServiceStatus(installed, isActiveResult, statusResult, filePath);
+    const showResult = await runner("systemctl", ["--user", "show", `--property=${SYSTEMD_SHOW_PROPS}`, LINUX_SERVICE_UNIT]);
+    const linger = deps.checkLinger
+      ? await deps.checkLinger(ctx.user)
+      : await checkLinuxLinger({ user: ctx.user, runner, fs: fsImpl });
+    if (/^LoadState=/m.test(showResult.stdout) || /^ActiveState=/m.test(showResult.stdout) || /failed to connect to bus|not been booted with systemd/i.test(`${showResult.stdout}\n${showResult.stderr}`)) {
+      return parseLinuxSystemdShowStatus(installed, showResult, filePath, linger);
+    }
+    // Compatibility fallback if a runner/environment only supports status text.
+    const isActiveResult = await runner("systemctl", ["--user", "is-active", LINUX_SERVICE_UNIT]);
+    return parseLinuxServiceStatus(installed, isActiveResult, showResult, filePath, linger);
   }
 
   const queryResult = await runner("schtasks", ["/Query", "/TN", WINDOWS_TASK_NAME, "/V", "/FO", "LIST"]);
   return parseWindowsServiceStatus(installed, queryResult, filePath);
+}
+
+export async function getGatewayServiceStatus(
+  options: ServiceContextOptions = {},
+  deps: ServiceDeps = {},
+): Promise<ServiceStatusResult | undefined> {
+  const ctx = resolveServiceContext(options);
+  if (ctx.platform === "win32") return undefined;
+  const filePath = resolveGatewayServiceFilePath(ctx);
+  const fsImpl = deps.fs ?? DEFAULT_FS;
+  const runner = deps.runner ?? defaultRunner;
+  const installed = fsImpl.existsSync(filePath);
+
+  if (ctx.platform === "darwin") {
+    const result = await runner("launchctl", ["print", `gui/${ctx.uid}/${MACOS_GATEWAY_SERVICE_LABEL}`]);
+    if (result.exitCode !== 0 && isLegacyLaunchctlUnsupported(result)) {
+      const legacy = await runner("launchctl", ["list", MACOS_GATEWAY_SERVICE_LABEL]);
+      return parseMacServiceStatus(installed, legacy, filePath, true, MACOS_GATEWAY_SERVICE_LABEL);
+    }
+    return parseMacServiceStatus(installed, result, filePath, false, MACOS_GATEWAY_SERVICE_LABEL);
+  }
+
+  const showResult = await runner("systemctl", ["--user", "show", `--property=${SYSTEMD_SHOW_PROPS}`, LINUX_GATEWAY_SERVICE_UNIT]);
+  const linger = deps.checkLinger
+    ? await deps.checkLinger(ctx.user)
+    : await checkLinuxLinger({ user: ctx.user, runner, fs: fsImpl });
+  return parseLinuxSystemdShowStatus(installed, showResult, filePath, linger, LINUX_GATEWAY_SERVICE_UNIT);
+}
+
+function unitMatchesHome(platform: ServicePlatform, fileContent: string, ctx: ServiceContext): boolean {
+  if (!ctx.isCustomLinkshellHome) {
+    return !fileContent.includes("LINKSHELL_HOME=");
+  }
+  return fileContent.includes(ctx.linkshellHome);
+}
+
+/**
+ * Stops the LinkShell host via its OS service manager if the service is actively managing it.
+ * Prevents systemd `Restart=on-failure` or launchd `KeepAlive` from immediately respawning the host.
+ */
+export async function stopManagedHostService(
+  options: ServiceContextOptions = {},
+  deps: ServiceDeps = {},
+): Promise<"stopped" | "not-managed"> {
+  let ctx: ServiceContext;
+  try {
+    ctx = resolveServiceContext(options);
+  } catch {
+    return "not-managed";
+  }
+  const fsImpl = deps.fs ?? DEFAULT_FS;
+  const runner = deps.runner ?? defaultRunner;
+  const status = await getServiceStatus(options, deps).catch(() => undefined);
+  if (!status || !status.installed || (!status.running && !status.loaded)) return "not-managed";
+
+  try {
+    const content = fsImpl.readFileSync(status.filePath, "utf8");
+    if (!unitMatchesHome(ctx.platform, content, ctx)) return "not-managed";
+  } catch {}
+
+  if (ctx.platform === "linux") {
+    if (!status.running) return "not-managed";
+    await runServiceCommand(runner, { command: "systemctl", args: ["--user", "stop", LINUX_SERVICE_UNIT] });
+    return "stopped";
+  }
+
+  if (ctx.platform === "darwin") {
+    if (!status.running) return "not-managed";
+    const domain = `gui/${ctx.uid}`;
+    const res = await runner("launchctl", ["bootout", `${domain}/${MACOS_SERVICE_LABEL}`]);
+    if (res.exitCode !== 0 && isLegacyLaunchctlUnsupported(res)) {
+      await runServiceCommand(runner, { command: "launchctl", args: ["unload", status.filePath] });
+    } else if (res.exitCode !== 0 && !/could not find service|service not found/i.test(`${res.stdout}\n${res.stderr}`)) {
+      throw new Error(formatCommandFailure({ command: "launchctl", args: ["bootout", `${domain}/${MACOS_SERVICE_LABEL}`] }, res));
+    }
+    return "stopped";
+  }
+
+  if (!status.running) return "not-managed";
+  await runServiceCommand(runner, { command: "schtasks", args: ["/End", "/TN", WINDOWS_TASK_NAME] });
+  return "stopped";
+}
+
+/** Stops the gateway via its OS user service manager if active. */
+export async function stopManagedGatewayService(
+  options: ServiceContextOptions = {},
+  deps: ServiceDeps = {},
+): Promise<"stopped" | "not-managed"> {
+  let ctx: ServiceContext;
+  try {
+    ctx = resolveServiceContext(options);
+  } catch {
+    return "not-managed";
+  }
+  if (ctx.platform === "win32") return "not-managed";
+  const runner = deps.runner ?? defaultRunner;
+  const status = await getGatewayServiceStatus(options, deps).catch(() => undefined);
+  if (!status || !status.installed || !status.running) return "not-managed";
+
+  if (ctx.platform === "linux") {
+    await runServiceCommand(runner, { command: "systemctl", args: ["--user", "stop", LINUX_GATEWAY_SERVICE_UNIT] });
+    return "stopped";
+  }
+  const domain = `gui/${ctx.uid}`;
+  const res = await runner("launchctl", ["bootout", `${domain}/${MACOS_GATEWAY_SERVICE_LABEL}`]);
+  if (res.exitCode !== 0 && isLegacyLaunchctlUnsupported(res)) {
+    await runServiceCommand(runner, { command: "launchctl", args: ["unload", status.filePath] });
+  }
+  return "stopped";
+}
+
+/**
+ * Restarts a service-managed host while keeping supervision intact, refreshing the unit/plist if
+ * `nodePath` or `entryScript` changed (e.g. after `linkshell upgrade`).
+ */
+export async function restartManagedHostService(
+  options: ServiceContextOptions & { waitTimeoutMs?: number } = {},
+  deps: ServiceDeps = {},
+): Promise<"restarted" | "not-managed"> {
+  let ctx: ServiceContext;
+  try {
+    ctx = resolveServiceContext(options);
+  } catch {
+    return "not-managed";
+  }
+  const fsImpl = deps.fs ?? DEFAULT_FS;
+  const runner = deps.runner ?? defaultRunner;
+  const waitReady = deps.waitForHostReady ?? (deps.runner ? undefined : defaultWaitForHostReady);
+  const status = await getServiceStatus(options, deps).catch(() => undefined);
+  if (!status || !status.installed) return "not-managed";
+
+  let existingContent = "";
+  try {
+    existingContent = fsImpl.readFileSync(status.filePath, "utf8");
+    if (!unitMatchesHome(ctx.platform, existingContent, ctx)) return "not-managed";
+  } catch {}
+
+  if (!status.running && !status.loaded) return "not-managed";
+
+  const preservedGateway = options.gateway ?? extractGatewayFromServiceFile(ctx.platform, existingContent);
+  const updatedPlan = planInstallService({ ...options, gateway: preservedGateway });
+  const unitChanged = existingContent !== updatedPlan.fileContent;
+
+  if (ctx.platform === "linux") {
+    if (unitChanged) {
+      fsImpl.writeFileSync(updatedPlan.filePath, updatedPlan.fileContent, { mode: updatedPlan.fileMode });
+      await runServiceCommand(runner, { command: "systemctl", args: ["--user", "daemon-reload"] });
+    }
+    await runServiceCommand(runner, { command: "systemctl", args: ["--user", "restart", LINUX_SERVICE_UNIT] });
+  } else if (ctx.platform === "darwin") {
+    const domain = `gui/${ctx.uid}`;
+    if (unitChanged) {
+      fsImpl.writeFileSync(updatedPlan.filePath, updatedPlan.fileContent, { mode: updatedPlan.fileMode });
+      await runner("launchctl", ["bootout", `${domain}/${MACOS_SERVICE_LABEL}`]);
+      const bootRes = await runner("launchctl", ["bootstrap", domain, updatedPlan.filePath]);
+      if (bootRes.exitCode !== 0 && isLegacyLaunchctlUnsupported(bootRes)) {
+        await runner("launchctl", ["unload", "-w", updatedPlan.filePath]);
+        await runServiceCommand(runner, { command: "launchctl", args: ["load", "-w", updatedPlan.filePath] });
+      } else if (bootRes.exitCode !== 0) {
+        throw new Error(formatCommandFailure({ command: "launchctl", args: ["bootstrap", domain, updatedPlan.filePath] }, bootRes));
+      }
+    } else {
+      const kickRes = await runner("launchctl", ["kickstart", "-k", `${domain}/${MACOS_SERVICE_LABEL}`]);
+      if (kickRes.exitCode !== 0) {
+        await runner("launchctl", ["bootout", `${domain}/${MACOS_SERVICE_LABEL}`]);
+        await runServiceCommand(runner, { command: "launchctl", args: ["bootstrap", domain, updatedPlan.filePath] });
+      }
+    }
+  } else {
+    if (unitChanged) {
+      fsImpl.writeFileSync(updatedPlan.filePath, updatedPlan.fileContent, { mode: updatedPlan.fileMode });
+    }
+    await runner("schtasks", ["/End", "/TN", WINDOWS_TASK_NAME]);
+    await runServiceCommand(runner, { command: "schtasks", args: ["/Run", "/TN", WINDOWS_TASK_NAME] });
+  }
+
+  if (waitReady) {
+    const ready = await waitReady(ctx.linkshellHome, options.waitTimeoutMs ?? 15_000);
+    if (!ready) {
+      throw new Error(
+        `LinkShell host service (${updatedPlan.serviceName}) restarted, but host did not become ready within ${(options.waitTimeoutMs ?? 15_000) / 1000}s; see ${updatedPlan.logPath}`,
+      );
+    }
+  }
+  return "restarted";
 }
 
 export async function runServiceStatus(

@@ -10,6 +10,7 @@ import expo.modules.kotlin.views.ExpoView
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 
 class LinkTerminalView(context: Context, appContext: AppContext) : ExpoView(context, appContext) {
   private val onFontSize by EventDispatcher()
@@ -32,7 +33,10 @@ class LinkTerminalView(context: Context, appContext: AppContext) : ExpoView(cont
   private val activity get() = generateSequence(context) { (it as? android.content.ContextWrapper)?.baseContext }
     .filterIsInstance<android.app.Activity>().firstOrNull()
 
-  init { addView(terminal, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)) }
+  init {
+    addView(terminal, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+    pruneStaleImports()
+  }
   override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
     val inset = (8 * resources.displayMetrics.density).toInt()
     terminal.layout(inset, 0, (r-l-inset).coerceAtLeast(inset), b-t)
@@ -77,38 +81,60 @@ class LinkTerminalView(context: Context, appContext: AppContext) : ExpoView(cont
   fun endReplay() = terminal.endReplay()
   fun destroy() { disposed = true; terminal.destroy(); imports.shutdown() }
 
-  private fun importFile(uri: Uri, release: (() -> Unit)?) {
-    if (disposed) { release?.invoke(); return }
-    imports.execute {
-      var target: File? = null
-      try {
-        val resolver = context.contentResolver
-        var name = uri.lastPathSegment ?: "image.png"
-        resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { cursor ->
-          if (cursor.moveToFirst()) {
-            cursor.getString(0)?.let { name = it }
-            require(cursor.isNull(1) || cursor.getLong(1) <= MAX_FILE) { "文件超过 30 MB" }
-          }
+  private fun pruneStaleImports() {
+    if (disposed) return
+    try {
+      imports.execute {
+        val directory = File(context.cacheDir, "linkshell-imports")
+        val cutoff = System.currentTimeMillis() - STALE_IMPORT_AGE_MS
+        directory.listFiles()?.forEach { file ->
+          if (file.isFile && file.lastModified() < cutoff) file.delete()
         }
-        val directory = File(context.cacheDir, "linkshell-imports").apply { mkdirs() }
-        val file = File(directory, UUID.randomUUID().toString() + "-" + File(name).name)
-        target = file
-        var count = 0L
-        resolver.openInputStream(uri)?.use { input ->
-          file.outputStream().use { out ->
-            val buffer = ByteArray(64 * 1024)
-            while (true) {
-              val read = input.read(buffer); if (read < 0) break
-              count += read; require(count <= MAX_FILE) { "文件超过 30 MB" }; out.write(buffer, 0, read)
-            }
-          }
-        } ?: error("无法读取文件")
-        post { if (disposed) file.delete() else onFile(mapOf("uri" to Uri.fromFile(file).toString(), "name" to File(name).name, "size" to count)) }
-      } catch (e: Exception) {
-        target?.delete()
-        post { if (!disposed) onError(mapOf("message" to if (e is IllegalArgumentException) "文件超过 30 MB" else "无法读取粘贴或拖入的文件")) }
-      } finally { release?.invoke() }
+      }
+    } catch (_: RejectedExecutionException) {
+      // Executor was already torn down.
     }
   }
-  companion object { const val MAX_FILE = 30L * 1024 * 1024 }
+
+  private fun importFile(uri: Uri, release: (() -> Unit)?) {
+    if (disposed) { release?.invoke(); return }
+    try {
+      imports.execute {
+        var target: File? = null
+        try {
+          val resolver = context.contentResolver
+          var name = uri.lastPathSegment ?: "image.png"
+          resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+              cursor.getString(0)?.let { name = it }
+              require(cursor.isNull(1) || cursor.getLong(1) <= MAX_FILE) { "文件超过 30 MB" }
+            }
+          }
+          val directory = File(context.cacheDir, "linkshell-imports").apply { mkdirs() }
+          val file = File(directory, UUID.randomUUID().toString() + "-" + File(name).name)
+          target = file
+          var count = 0L
+          resolver.openInputStream(uri)?.use { input ->
+            file.outputStream().use { out ->
+              val buffer = ByteArray(64 * 1024)
+              while (true) {
+                val read = input.read(buffer); if (read < 0) break
+                count += read; require(count <= MAX_FILE) { "文件超过 30 MB" }; out.write(buffer, 0, read)
+              }
+            }
+          } ?: error("无法读取文件")
+          post { if (disposed) file.delete() else onFile(mapOf("uri" to Uri.fromFile(file).toString(), "name" to File(name).name, "size" to count)) }
+        } catch (e: Exception) {
+          target?.delete()
+          post { if (!disposed) onError(mapOf("message" to if (e is IllegalArgumentException) "文件超过 30 MB" else "无法读取粘贴或拖入的文件")) }
+        } finally { release?.invoke() }
+      }
+    } catch (_: RejectedExecutionException) {
+      release?.invoke()
+    }
+  }
+  companion object {
+    const val MAX_FILE = 30L * 1024 * 1024
+    private const val STALE_IMPORT_AGE_MS = 10L * 60L * 1000L
+  }
 }

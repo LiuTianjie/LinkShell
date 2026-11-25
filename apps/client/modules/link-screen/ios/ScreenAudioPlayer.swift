@@ -29,7 +29,11 @@ private enum ScreenAudioFormats {
 /// Decodes incoming `ScreenAudioPacket` frames (`Opus` or `PCM16`) and plays low-latency stereo
 /// 48kHz audio via `AVAudioEngine` + `AVAudioPlayerNode`.
 final class ScreenAudioPlayer {
-  private static let maxQueuedBuffers = 8
+  private static let maxQueuedBuffers = 6
+  private static let hardFlushBuffers = 12
+  private static let maxReorderWaitPackets = 3
+  private static let maxReorderBufferSize = 12
+  private static let reorderDrainDelay: TimeInterval = 0.030
 
   private let queue = DispatchQueue(label: "com.bd.linkshell.screen.audio.player", qos: .userInteractive)
   private let pendingLock = NSLock()
@@ -47,6 +51,9 @@ final class ScreenAudioPlayer {
   private var sessionActive = false
   private var muted: Bool
   private var stopped = false
+  private var nextExpectedSeq: UInt16?
+  private var reorderBuffer: [UInt16: ScreenAudioPacket] = [:]
+  private var reorderDrainWorkItem: DispatchWorkItem?
 
   var isMuted: Bool {
     pendingLock.lock()
@@ -99,6 +106,10 @@ final class ScreenAudioPlayer {
           packet.payload.count <= ScreenAudioConstants.maxPacketBytes else {
       return nil
     }
+    return decodePacketPayload(packet)
+  }
+
+  private func decodePacketPayload(_ packet: ScreenAudioPacket) -> AVAudioPCMBuffer? {
     switch packet.codec {
     case .pcm16:
       return decodePCM16(packet.payload)
@@ -107,18 +118,123 @@ final class ScreenAudioPlayer {
     }
   }
 
+  private static func seqDiff(_ a: UInt16, _ b: UInt16) -> Int32 {
+    Int32(Int16(bitPattern: a &- b))
+  }
+
   private func handlePacket(_ data: Data) {
     guard !stopped, !isMuted else { return }
-    guard let pcmBuffer = decodePacket(data), pcmBuffer.frameLength > 0 else { return }
+    guard let packet = ScreenAudioPacket.decode(data),
+          !packet.payload.isEmpty,
+          packet.payload.count <= ScreenAudioConstants.maxPacketBytes else {
+      return
+    }
     guard outputEnabled else { return }
+
+    // Order packets coming over the unordered audio DataChannel before decoding/scheduling.
+    guard let expected = nextExpectedSeq else {
+      nextExpectedSeq = packet.seq &+ 1
+      playOrderedPacket(packet)
+      return
+    }
+
+    let diff = Self.seqDiff(packet.seq, expected)
+    if diff == 0 {
+      nextExpectedSeq = expected &+ 1
+      playOrderedPacket(packet)
+      drainConsecutiveBuffered()
+      return
+    }
+
+    if diff < 0 {
+      // Large backwards jump indicates a fresh stream; otherwise drop late duplicates cleanly.
+      if diff < -300 {
+        resetJitterBuffer()
+        opusDecoder?.reset()
+        nextExpectedSeq = packet.seq &+ 1
+        playOrderedPacket(packet)
+      }
+      return
+    }
+
+    if diff > 300 {
+      resetJitterBuffer()
+      opusDecoder?.reset()
+      nextExpectedSeq = packet.seq &+ 1
+      playOrderedPacket(packet)
+      return
+    }
+
+    if reorderBuffer.count < Self.maxReorderBufferSize {
+      reorderBuffer[packet.seq] = packet
+    }
+    if diff > Self.maxReorderWaitPackets || reorderBuffer.count > Self.maxReorderWaitPackets {
+      advancePastGap()
+    } else {
+      scheduleReorderDrain()
+    }
+  }
+
+  private func drainConsecutiveBuffered() {
+    while let expected = nextExpectedSeq, let buffered = reorderBuffer.removeValue(forKey: expected) {
+      nextExpectedSeq = expected &+ 1
+      playOrderedPacket(buffered)
+    }
+    if reorderBuffer.isEmpty {
+      cancelReorderDrain()
+    } else {
+      scheduleReorderDrain()
+    }
+  }
+
+  private func advancePastGap() {
+    cancelReorderDrain()
+    guard let expected = nextExpectedSeq, !reorderBuffer.isEmpty else { return }
+    let sortedKeys = reorderBuffer.keys.sorted { Self.seqDiff($0, expected) < Self.seqDiff($1, expected) }
+    guard let earliest = sortedKeys.first else { return }
+    nextExpectedSeq = earliest
+    drainConsecutiveBuffered()
+  }
+
+  private func scheduleReorderDrain() {
+    guard reorderDrainWorkItem == nil, !reorderBuffer.isEmpty else { return }
+    let item = DispatchWorkItem { [weak self] in
+      guard let self, !self.stopped, !self.isMuted else { return }
+      self.reorderDrainWorkItem = nil
+      self.advancePastGap()
+    }
+    reorderDrainWorkItem = item
+    queue.asyncAfter(deadline: .now() + Self.reorderDrainDelay, execute: item)
+  }
+
+  private func cancelReorderDrain() {
+    reorderDrainWorkItem?.cancel()
+    reorderDrainWorkItem = nil
+  }
+
+  private func resetJitterBuffer() {
+    cancelReorderDrain()
+    nextExpectedSeq = nil
+    reorderBuffer.removeAll(keepingCapacity: true)
+  }
+
+  private func playOrderedPacket(_ packet: ScreenAudioPacket) {
+    guard !stopped, !isMuted, outputEnabled else { return }
     guard ensureStartedIfNeeded(), let playerNode else { return }
 
     pendingLock.lock()
     let queued = pendingBuffers
     pendingLock.unlock()
-    if queued >= Self.maxQueuedBuffers {
+
+    // Soft-drop a single packet on mild jitter instead of bulk-flushing 160ms of audio;
+    // only flush the entire playout queue if backlog truly runs away.
+    if queued >= Self.hardFlushBuffers {
       flushPlayback()
+    } else if queued >= Self.maxQueuedBuffers {
+      return
     }
+
+    guard let pcmBuffer = decodePacketPayload(packet), pcmBuffer.frameLength > 0 else { return }
 
     pendingLock.lock()
     pendingBuffers += 1
@@ -202,7 +318,7 @@ final class ScreenAudioPlayer {
   }
 
   private func activateSessionIfNeeded() {
-    guard outputEnabled else { return }
+    guard outputEnabled, !sessionActive else { return }
 #if os(iOS) || os(tvOS)
     let session = AVAudioSession.sharedInstance()
     do {
@@ -252,10 +368,27 @@ final class ScreenAudioPlayer {
       queue: nil
     ) { [weak self] _ in
       self?.queue.async {
-        guard let self, !self.stopped, !self.isMuted, let engine = self.engine else { return }
-        if !engine.isRunning {
-          try? engine.start()
-          self.playerNode?.play()
+        guard let self, !self.stopped, let engine = self.engine, let playerNode = self.playerNode else { return }
+        // Route/hardware changes discard scheduled buffers without firing completions and invalidate node connections.
+        self.resetJitterBuffer()
+        self.pendingLock.lock()
+        self.playbackGeneration &+= 1
+        self.pendingBuffers = 0
+        self.pendingLock.unlock()
+        playerNode.stop()
+        engine.stop()
+        engine.disconnectNodeOutput(playerNode)
+        engine.connect(playerNode, to: engine.mainMixerNode, format: self.canonicalFormat)
+        engine.prepare()
+        guard !self.isMuted else { return }
+        self.sessionActive = false
+        self.activateSessionIfNeeded()
+        do {
+          try engine.start()
+          playerNode.volume = 1
+          playerNode.play()
+        } catch {
+          // Next incoming packet will retry ensureStartedIfNeeded().
         }
       }
     }
@@ -271,6 +404,7 @@ final class ScreenAudioPlayer {
       self?.queue.async {
         guard let self, !self.stopped else { return }
         if type == .began {
+          self.sessionActive = false
           self.flushPlayback()
         } else if type == .ended, !self.isMuted {
           _ = self.ensureStartedIfNeeded()
@@ -300,6 +434,7 @@ final class ScreenAudioPlayer {
   }
 
   private func flushPlayback() {
+    resetJitterBuffer()
     pendingLock.lock()
     playbackGeneration &+= 1
     pendingBuffers = 0
@@ -311,6 +446,9 @@ final class ScreenAudioPlayer {
   }
 
   private func stopSync() {
+    cancelReorderDrain()
+    reorderBuffer.removeAll()
+    nextExpectedSeq = nil
     pendingLock.lock()
     let alreadyStopped = stopped
     stopped = true

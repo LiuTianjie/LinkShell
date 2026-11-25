@@ -428,6 +428,9 @@ export interface NativeScreenStatus {
   hardware?: boolean;
   codec?: string;
   decoder?: string;
+  path?: "direct" | "lan" | "relay" | "socket";
+  relayed?: boolean;
+  rttMs?: number;
   control?: boolean;
   controlRequested?: boolean;
   controlError?: string;
@@ -637,7 +640,12 @@ export function ScreenSessionSlot({
   const active = key === activeKey;
   return createElement(
     "div",
-    { key, hidden: !active, className: active ? "contents" : undefined },
+    {
+      key,
+      hidden: !active,
+      className: active ? "contents" : undefined,
+      style: active ? { display: "contents" } : undefined,
+    },
     children(key, active),
   );
 }

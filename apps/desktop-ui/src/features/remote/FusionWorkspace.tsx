@@ -404,7 +404,8 @@ export function FusionWorkspace({
 
   // Live state comes from the store's own watcher, which runs whether or not this page is open.
 
-  // Batch-load 160x160 badged squircle icons for discovered apps (at most once per bundle/slug).
+  // Batch-load 160x160 badged squircle icons for discovered apps without stalling on error
+  // or empty responses when more than one batch of apps is missing.
   useEffect(() => {
     if (!capability.supported || fusion.apps.length === 0 || !fusion.hostSlug) {
       return;
@@ -418,11 +419,24 @@ export function FusionWorkspace({
           !requestedIconsRef.current.has(bundle),
       );
     if (missing.length === 0) return;
-    const batch = missing.slice(0, 32);
-    for (const bundle of batch) {
+    let cancelled = false;
+    const hostSlug = fusion.hostSlug;
+    for (const bundle of missing) {
       requestedIconsRef.current.add(bundle);
     }
-    void loadFusionIcons(computerKey, fusion.hostSlug, batch);
+    void (async () => {
+      for (let offset = 0; offset < missing.length && !cancelled; offset += 32) {
+        const batch = missing.slice(offset, offset + 32);
+        try {
+          await loadFusionIcons(computerKey, hostSlug, batch);
+        } catch {
+          // One failing batch must never block icons for the remaining apps.
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [capability.supported, computerKey, fusion.apps, fusion.hostSlug, fusion.icons]);
 
   const runningSet = useMemo(() => {

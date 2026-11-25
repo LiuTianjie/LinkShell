@@ -21,8 +21,53 @@ struct Display {
     self.id = id
     bounds = CGDisplayBounds(id)
     let mode = CGDisplayCopyDisplayMode(id)
-    pixelWidth = mode?.pixelWidth ?? Int(bounds.width)
-    pixelHeight = mode?.pixelHeight ?? Int(bounds.height)
+    let pixels = Self.effectivePixelSize(
+      bounds: bounds,
+      modePixelWidth: mode?.pixelWidth,
+      modePixelHeight: mode?.pixelHeight,
+      rotation: CGDisplayRotation(id)
+    )
+    pixelWidth = pixels.width
+    pixelHeight = pixels.height
+  }
+
+  init(id: CGDirectDisplayID, bounds: CGRect, pixelWidth: Int, pixelHeight: Int) {
+    self.id = id
+    self.bounds = bounds
+    self.pixelWidth = max(pixelWidth, 1)
+    self.pixelHeight = max(pixelHeight, 1)
+  }
+
+  /// Resolves effective pixel dimensions matching the active desktop orientation.
+  /// `CGDisplayCopyDisplayMode` reports native unrotated panel dimensions on 90°/270° rotated
+  /// displays, while `CGDisplayBounds` and ScreenCaptureKit operate in rotated coordinates.
+  static func effectivePixelSize(
+    bounds: CGRect,
+    modePixelWidth: Int?,
+    modePixelHeight: Int?,
+    rotation: Double
+  ) -> (width: Int, height: Int) {
+    let fallbackWidth = max(1, Int(bounds.width.rounded()))
+    let fallbackHeight = max(1, Int(bounds.height.rounded()))
+    guard let rawWidth = modePixelWidth, let rawHeight = modePixelHeight, rawWidth > 0, rawHeight > 0 else {
+      return (fallbackWidth, fallbackHeight)
+    }
+    guard rawWidth != rawHeight, bounds.width > 0, bounds.height > 0 else {
+      return (rawWidth, rawHeight)
+    }
+    let normalizedRotation = ((Int(rotation.rounded()) % 360) + 360) % 360
+    let isQuarterTurn = normalizedRotation == 90 || normalizedRotation == 270
+    let boundsIsPortrait = bounds.height > bounds.width
+    let modeIsPortrait = rawHeight > rawWidth
+    guard boundsIsPortrait != modeIsPortrait else {
+      return (rawWidth, rawHeight)
+    }
+    if isQuarterTurn {
+      return (rawHeight, rawWidth)
+    }
+    let directSkew = abs((Double(rawWidth) / Double(bounds.width)) - (Double(rawHeight) / Double(bounds.height)))
+    let swappedSkew = abs((Double(rawHeight) / Double(bounds.width)) - (Double(rawWidth) / Double(bounds.height)))
+    return swappedSkew < directSkew ? (rawHeight, rawWidth) : (rawWidth, rawHeight)
   }
 
   static var main: Display { Display(id: CGMainDisplayID()) }
@@ -58,6 +103,7 @@ struct Display {
   /// The picture sent for it: no wider than asked, never larger than the display, the same
   /// shape, and even both ways (4:2:0).
   func pictureSize(maxWidth: Int) -> (width: Int, height: Int) {
+    guard pixelWidth > 0, pixelHeight > 0 else { return (2, 2) }
     let width = max(min(maxWidth, pixelWidth), 2) & ~1
     let height = Int((Double(width) * Double(pixelHeight) / Double(pixelWidth) / 2).rounded()) * 2
     return (width, max(height, 2))

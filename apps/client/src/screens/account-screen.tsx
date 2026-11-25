@@ -629,7 +629,7 @@ export function AccountScreen() {
         flexGrow: 1,
         justifyContent: showManagement ? "flex-start" : "center",
         paddingHorizontal: 16,
-        paddingTop: insets.top + 12,
+        paddingTop: (Platform.OS === "android" && account ? 0 : insets.top) + 12,
         paddingBottom: insets.bottom + 28,
       }}
     >

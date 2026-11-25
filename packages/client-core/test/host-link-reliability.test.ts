@@ -241,4 +241,78 @@ describe("HostLink reliability", () => {
       error: "连接被拒绝，请确认电脑上的 LinkShell 正在运行",
     });
   });
+
+  it("wakes RPC callers and onOnline immediately without blocking on slow session restore", async () => {
+    vi.useFakeTimers();
+    const sockets: MockSocket[] = [];
+    const link = new HostLink({
+      url: "ws://host-nonblocking",
+      heartbeatMs: 0,
+      createSocket: () => {
+        const socket = new MockSocket();
+        sockets.push(socket);
+        return socket;
+      },
+    });
+    links.push(link);
+
+    const onOnline = vi.fn();
+    link.onOnline(onOnline);
+    // Register an open session whose `sessions.subscribe` will intentionally never answer right away.
+    void link.subscribe("codex:slow", () => 0);
+    link.start();
+
+    const pendingCall = link.call("projects.list", { limit: 5 }, 5_000);
+    sockets[0]!.open();
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Online readiness fired immediately even though `sessions.subscribe` for `codex:slow` is still pending!
+    expect(link.status).toBe("online");
+    expect(onOnline).toHaveBeenCalledTimes(1);
+    const subReq = sockets[0]!.sent.find((f) => f.method === "sessions.subscribe");
+    const projectsReq = sockets[0]!.sent.find((f) => f.method === "projects.list");
+    expect(subReq).toBeDefined();
+    expect(projectsReq).toBeDefined();
+
+    sockets[0]!.resolve(projectsReq!.id, { projects: [] });
+    await expect(pendingCall).resolves.toEqual({ projects: [] });
+  });
+
+  it("sends lightweight { ping: true } heartbeats and force-terminates half-open sockets on timeout", async () => {
+    vi.useFakeTimers();
+    const sockets: (MockSocket & { terminatedCount: number })[] = [];
+    const link = new HostLink({
+      url: "ws://host-hb",
+      heartbeatMs: 10_000,
+      createSocket: () => {
+        const socket = Object.assign(new MockSocket(), {
+          terminatedCount: 0,
+          terminate() {
+            this.terminatedCount += 1;
+            this.readyState = 3;
+          },
+        });
+        sockets.push(socket);
+        return socket;
+      },
+    });
+    links.push(link);
+
+    link.start();
+    sockets[0]!.open();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(link.status).toBe("online");
+
+    // Socket becomes silently dead before the heartbeat fires.
+    sockets[0]!.autoMachineInfo = false;
+    await vi.advanceTimersByTimeAsync(10_000);
+    const pingFrame = sockets[0]!.sent.find((f) => f.method === "machine.info" && f.params.ping === true);
+    expect(pingFrame).toBeDefined();
+
+    // After the 10s heartbeat RPC timeout, HostLink terminates the dead socket immediately and dials a fresh one.
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(sockets[0]!.terminatedCount).toBe(1);
+    expect(sockets).toHaveLength(2);
+    expect(link.status).toBe("connecting");
+  });
 });

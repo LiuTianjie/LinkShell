@@ -7,6 +7,9 @@ import { useConnection } from "./client";
 import { readSecret, writeSecret } from "./secure";
 
 const KEY = "linkshell.live-activity.push.v1";
+const MAX_SAVED_RECORDS = 16;
+const MAX_ENDED_CACHE = 64;
+const ENDED_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 interface SavedRegistration {
   activityId: string;
@@ -33,7 +36,17 @@ interface SavedPushToStart {
 
 interface SavedRegistrations {
   records: SavedRegistration[];
+  deviceId?: string;
   pushToStart?: SavedPushToStart;
+}
+
+function pruneRecords(items: SavedRegistration[], now = Date.now()): SavedRegistration[] {
+  const active = items.filter((item) => !item.ended && (item.expiresAt === undefined || item.expiresAt > now));
+  if (active.length <= MAX_SAVED_RECORDS) return active;
+  return active
+    .slice()
+    .sort((a, b) => (b.registeredAt ?? 0) - (a.registeredAt ?? 0))
+    .slice(0, MAX_SAVED_RECORDS);
 }
 
 function readBundle(): SavedRegistrations {
@@ -43,25 +56,56 @@ function readBundle(): SavedRegistrations {
 }
 
 function records(): SavedRegistration[] {
-  return readBundle().records;
+  return pruneRecords(readBundle().records);
+}
+
+function writeBundle(bundle: SavedRegistrations) {
+  writeSecret(KEY, {
+    records: pruneRecords(bundle.records),
+    ...(bundle.deviceId ? { deviceId: bundle.deviceId } : {}),
+    ...(bundle.pushToStart ? { pushToStart: bundle.pushToStart } : {}),
+  });
 }
 
 function save(record: SavedRegistration) {
   // Merge against the latest Keychain value: an old connection can finish a
   // registration while the newly selected computer is registering its own.
   const current = readBundle();
-  writeSecret(KEY, {
+  writeBundle({
     ...current,
     records: [...current.records.filter((item) => item.activityId !== record.activityId), record],
   });
 }
 
+function removeRecords(predicate: (record: SavedRegistration) => boolean): SavedRegistration[] {
+  const current = readBundle();
+  const removed: SavedRegistration[] = [];
+  const kept: SavedRegistration[] = [];
+  for (const item of current.records) {
+    if (predicate(item)) removed.push(item);
+    else kept.push(item);
+  }
+  if (removed.length || kept.length !== pruneRecords(kept).length) {
+    writeBundle({ ...current, records: kept });
+  }
+  return removed;
+}
+
 function savePushToStart(pushToStart: SavedPushToStart | undefined) {
   const current = readBundle();
-  writeSecret(KEY, {
-    records: current.records,
-    ...(pushToStart ? { pushToStart } : {}),
+  writeBundle({
+    ...current,
+    ...(pushToStart ? { deviceId: pushToStart.deviceId, pushToStart } : { pushToStart: undefined }),
   });
+}
+
+function ensureDeviceId(): string {
+  const current = readBundle();
+  const existing = current.deviceId || current.pushToStart?.deviceId;
+  if (existing) return existing;
+  const generated = `ios-${randomHex(12)}`;
+  writeBundle({ ...current, deviceId: generated });
+  return generated;
 }
 
 function randomHex(bytes: number): string {
@@ -120,25 +164,53 @@ export function useLiveActivityPush() {
     let disposed = false;
     let busy = false;
     let pending = false;
-    let generation = 0;
+    let globalGeneration = 0;
+    const activityGenerations = new Map<string, number>();
+    const endedIds = new Map<string, number>();
     const handedOff = new Map<string, number>();
     let revalidate = false;
-    const obsolete = previous.filter((record) => record.owner !== owner || record.serviceUrl !== pushURL);
+
+    const markEnded = (activityId: string) => {
+      const now = Date.now();
+      for (const [id, at] of endedIds) {
+        if (now - at > ENDED_CACHE_TTL_MS) endedIds.delete(id);
+      }
+      endedIds.delete(activityId);
+      endedIds.set(activityId, now);
+      while (endedIds.size > MAX_ENDED_CACHE) {
+        const oldest = endedIds.keys().next().value;
+        if (oldest === undefined) break;
+        endedIds.delete(oldest);
+      }
+    };
+    const isEnded = (activityId: string) => {
+      const at = endedIds.get(activityId);
+      if (at === undefined) return false;
+      if (Date.now() - at > ENDED_CACHE_TTL_MS) {
+        endedIds.delete(activityId);
+        return false;
+      }
+      return true;
+    };
+
+    const prunedPrevious = pruneRecords(previous);
+    const obsolete = prunedPrevious.filter((record) => record.owner !== owner || record.serviceUrl !== pushURL);
     const obsoletePushToStart =
       previousPushToStart && (previousPushToStart.owner !== owner || previousPushToStart.serviceUrl !== pushURL)
         ? previousPushToStart
         : undefined;
-    if (obsolete.length || obsoletePushToStart) {
-      writeSecret(KEY, {
-        records: previous.filter((record) => !obsolete.includes(record)),
-        ...(previousPushToStart && !obsoletePushToStart ? { pushToStart: previousPushToStart } : {}),
+    if (obsolete.length || obsoletePushToStart || prunedPrevious.length !== previous.length) {
+      writeBundle({
+        ...bundle,
+        records: prunedPrevious.filter((record) => !obsolete.includes(record)),
+        ...(previousPushToStart && !obsoletePushToStart ? { pushToStart: previousPushToStart } : { pushToStart: undefined }),
       });
       for (const record of obsolete) void revoke(record);
       if (obsoletePushToStart) void revokePushToStart(obsoletePushToStart);
     }
     const reset = obsolete.length ? linkLayout.endNativeLiveActivity() : Promise.resolve();
 
-    const syncPushToStart = async (currentGeneration: number) => {
+    const syncPushToStart = async (startGlobal: number) => {
       let getPushToStart: (() => Promise<string | null>) | undefined;
       try {
         if ("getNativeLiveActivityPushToStartToken" in linkLayout) {
@@ -150,7 +222,7 @@ export function useLiveActivityPush() {
       if (!getPushToStart) return;
       if (!computer.key || link.status !== "online") return;
       const startToken = await getPushToStart();
-      if (!startToken || disposed || generation !== currentGeneration) return;
+      if (!startToken || disposed || globalGeneration !== startGlobal) return;
 
       const existing = readBundle().pushToStart;
       const matching =
@@ -170,7 +242,7 @@ export function useLiveActivityPush() {
             registeredAt: sameToken ? existing.registeredAt : undefined,
           }
         : {
-            deviceId: existing?.deviceId || `ios-${randomHex(12)}`,
+            deviceId: ensureDeviceId(),
             token: startToken,
             grant: existing?.grant || randomHex(32),
             owner,
@@ -190,7 +262,7 @@ export function useLiveActivityPush() {
         Date.now() - (record.registeredAt ?? 0) < 5 * 60_000;
       if (!registered) {
         const authToken = await useAccount.getState().token();
-        if (!authToken || disposed || generation !== currentGeneration || useAccount.getState().session?.userId !== owner) {
+        if (!authToken || disposed || globalGeneration !== startGlobal || useAccount.getState().session?.userId !== owner) {
           return;
         }
         try {
@@ -216,7 +288,7 @@ export function useLiveActivityPush() {
         }
         record.registeredAt = Date.now();
       }
-      if (useAccount.getState().session?.userId !== owner || generation !== currentGeneration) {
+      if (useAccount.getState().session?.userId !== owner || globalGeneration !== startGlobal) {
         void revokePushToStart(record);
         return;
       }
@@ -243,22 +315,28 @@ export function useLiveActivityPush() {
         return;
       }
       busy = true;
-      const currentGeneration = generation;
+      const startGlobal = globalGeneration;
+      const startActivityGens = new Map(activityGenerations);
       try {
         await reset;
         const nativeActivities = await linkLayout.getNativeLiveActivityRegistrations();
-        if (disposed || generation !== currentGeneration) return;
+        if (disposed || globalGeneration !== startGlobal) return;
         for (const native of nativeActivities) {
+          const startActivity = startActivityGens.get(native.activityId) ?? 0;
+          const invalidated = () =>
+            globalGeneration !== startGlobal
+            || (activityGenerations.get(native.activityId) ?? 0) !== startActivity
+            || isEnded(native.activityId);
           try {
+            if (invalidated()) continue;
             const saved = records().find((record) => record.activityId === native.activityId);
             const currentComputer = native.computerKey === computer.key;
             // A known background computer already has its grant. Token rotation only
             // needs the push service; it must not wait for this phone to reconnect to it.
             if ((!currentComputer || link.status !== "online") && !saved) continue;
-            if (saved?.ended) continue;
+            const deviceId = ensureDeviceId();
             const matching =
               saved?.activityId === native.activityId &&
-              !saved.ended &&
               saved.computerKey === native.computerKey &&
               saved.owner === owner &&
               saved.serviceUrl === pushURL;
@@ -291,22 +369,44 @@ export function useLiveActivityPush() {
               Date.now() - (record.registeredAt ?? 0) < 5 * 60_000;
             if (!registered) {
               const token = await useAccount.getState().token();
-              if (!token || disposed || generation !== currentGeneration || useAccount.getState().session?.userId !== owner) return;
-              const response = await fetch(`${pushURL}/v1/activities/${record.activityId}`, {
+              if (!token || disposed || globalGeneration !== startGlobal || useAccount.getState().session?.userId !== owner) return;
+              if (invalidated()) {
+                void revoke(record);
+                continue;
+              }
+              let response = await fetch(`${pushURL}/v1/activities/${record.activityId}`, {
                 method: "PUT",
                 headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
-                body: JSON.stringify({ token: record.token, grant: record.grant }),
+                body: JSON.stringify({
+                  token: record.token,
+                  grant: record.grant,
+                  computerKey: record.computerKey,
+                  deviceId,
+                }),
                 signal: AbortSignal.timeout(10_000),
               });
+              // Older push services enforce a strict { token, grant } schema; fall back once on 400.
+              if (response.status === 400) {
+                response = await fetch(`${pushURL}/v1/activities/${record.activityId}`, {
+                  method: "PUT",
+                  headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
+                  body: JSON.stringify({ token: record.token, grant: record.grant }),
+                  signal: AbortSignal.timeout(10_000),
+                });
+              }
               if (!response.ok) continue;
               const result = (await response.json()) as { activityId?: string; expiresAt?: number };
               if (result.activityId !== record.activityId || !Number.isSafeInteger(result.expiresAt) || result.expiresAt! <= Date.now()) continue;
               record.expiresAt = result.expiresAt;
               record.registeredAt = Date.now();
             }
-            if (useAccount.getState().session?.userId !== owner || generation !== currentGeneration) {
+            if (useAccount.getState().session?.userId !== owner || globalGeneration !== startGlobal) {
               void revoke(record);
               return;
+            }
+            if (invalidated()) {
+              void revoke(record);
+              continue;
             }
             if (disposed) return;
             save(record);
@@ -317,9 +417,11 @@ export function useLiveActivityPush() {
                 serviceUrl: pushURL,
                 grant: record.grant,
                 expiresAt: record.expiresAt!,
+                deviceId,
               });
             }
-            if (disposed || generation !== currentGeneration) return;
+            if (disposed || globalGeneration !== startGlobal) return;
+            if (invalidated()) continue;
             if (currentComputer && link.status === "online") await linkLayout.setNativeLiveActivityPushReady(record.activityId);
             handedOff.set(signature, Date.now());
           } catch {
@@ -327,7 +429,7 @@ export function useLiveActivityPush() {
           }
         }
         try {
-          await syncPushToStart(currentGeneration);
+          await syncPushToStart(startGlobal);
         } catch {
           /* Push-to-start failure never blocks active Live Activity updates. */
         }
@@ -343,19 +445,29 @@ export function useLiveActivityPush() {
       }
     };
     const off = linkLayout.subscribeNativeLiveActivityTokens((event) => {
-      handedOff.clear();
       if (event.ended) {
-        // Invalidate even a native lookup that has not saved its first record yet.
-        generation++;
-        for (const record of records().filter((item) => !event.activityId || item.activityId === event.activityId)) {
-          // Synchronous replacement cannot delete a new activity's grant in an async cleanup race.
-          save({ ...record, ended: true });
+        if (event.activityId) {
+          // Scope invalidation strictly to this activityId so ending activity #1
+          // never cancels or revokes an in-flight registration for activity #2.
+          activityGenerations.set(event.activityId, (activityGenerations.get(event.activityId) ?? 0) + 1);
+          markEnded(event.activityId);
+          for (const key of [...handedOff.keys()]) {
+            if (key.startsWith(`${event.activityId}:`)) handedOff.delete(key);
+          }
+        } else {
+          globalGeneration++;
+          handedOff.clear();
+        }
+        const removed = removeRecords((item) => !event.activityId || item.activityId === event.activityId);
+        for (const record of removed) {
+          markEnded(record.activityId);
           void revoke(record);
           if (record.computerKey === computer.key) {
             void link.call("liveActivities.unsubscribe", { activityId: record.activityId }).catch(() => {});
           }
         }
       } else {
+        handedOff.clear();
         void check();
       }
     });

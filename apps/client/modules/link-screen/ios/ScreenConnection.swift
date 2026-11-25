@@ -96,6 +96,11 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
           }
           self.flushConfiguration()
           self.receive()
+        case .waiting(let error):
+          // Fail fast if the local loopback forwarder closed instead of waiting 25s for patience timeout.
+          if case .posix(.ECONNREFUSED) = error {
+            self.fail("屏幕连接失败")
+          }
         case .failed: self.fail("屏幕连接失败")
         default: break
         }

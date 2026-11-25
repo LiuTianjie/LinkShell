@@ -13,13 +13,18 @@ final class LanDiscoveryIOS: NSObject, NetServiceDelegate {
   private var recordsByName: [String: HostRecord] = [:]
   private var resolversByName: [String: NetService] = [:]
 
-  private struct HostRecord {
+  private struct HostRecord: Equatable {
     let name: String
     var host: String?
     var port: Int?
     var machineId: String?
     var fingerprint: String?
     var displayName: String?
+
+    var isResolved: Bool {
+      guard let host, !host.isEmpty, let port, port > 0 else { return false }
+      return true
+    }
 
     func toDictionary() -> [String: Any]? {
       guard let host, !host.isEmpty, let port, port > 0 else { return nil }
@@ -49,7 +54,10 @@ final class LanDiscoveryIOS: NSObject, NetServiceDelegate {
       browser.stateUpdateHandler = { [weak self] state in
         guard let self else { return }
         if case .failed = state {
-          self.stop()
+          // Clear browser state synchronously on `queue` and emit an empty snapshot so JS clears
+          // stale LAN hosts and can restart discovery cleanly on the next network/foreground transition.
+          self.stopLocked()
+          self.emitSnapshotLocked()
         }
       }
       browser.browseResultsChangedHandler = { [weak self] results, changes in
@@ -132,18 +140,22 @@ final class LanDiscoveryIOS: NSObject, NetServiceDelegate {
       if case .bonjour(let txtRecord) = result.metadata {
         txt = extractTxt(txtRecord)
       }
-      var record = recordsByName[name] ?? HostRecord(name: name)
+      let previous = recordsByName[name]
+      var record = previous ?? HostRecord(name: name)
       if let mid = txt["mid"], !mid.isEmpty { record.machineId = mid }
       if let fp = txt["fp"], !fp.isEmpty { record.fingerprint = fp }
       if let display = txt["name"], !display.isEmpty { record.displayName = display }
       if (record.port ?? 0) <= 0, let hp = txt["hostport"].flatMap({ Int($0) }), hp > 0 {
         record.port = hp
       }
-      let hadResolved = record.toDictionary() != nil
       recordsByName[name] = record
-      if hadResolved { changed = true }
+      if record != previous && (record.isResolved || previous?.isResolved == true) {
+        changed = true
+      }
 
-      if resolversByName[name] == nil {
+      // Only resolve hosts that do not yet have a resolved IP and port; re-resolving every known
+      // host on each browse tick causes redundant mDNS traffic and churn.
+      if !record.isResolved && resolversByName[name] == nil {
         let resolver = NetService(domain: domain, type: type, name: name)
         resolver.delegate = self
         resolversByName[name] = resolver
@@ -174,7 +186,8 @@ final class LanDiscoveryIOS: NSObject, NetServiceDelegate {
 
       let ip = Self.selectBestAddress(addresses)
       let txt = txtData.map(Self.decodeTxtData) ?? [:]
-      var record = self.recordsByName[serviceName] ?? HostRecord(name: serviceName)
+      let previous = self.recordsByName[serviceName]
+      var record = previous ?? HostRecord(name: serviceName)
       if let ip { record.host = ip }
       if servicePort > 0 {
         record.port = servicePort
@@ -185,7 +198,9 @@ final class LanDiscoveryIOS: NSObject, NetServiceDelegate {
       if let fp = txt["fp"], !fp.isEmpty { record.fingerprint = fp }
       if let display = txt["name"], !display.isEmpty { record.displayName = display }
       self.recordsByName[serviceName] = record
-      self.emitSnapshotLocked()
+      if record != previous {
+        self.emitSnapshotLocked()
+      }
     }
   }
 

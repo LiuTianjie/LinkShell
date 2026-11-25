@@ -20,7 +20,7 @@ import { rememberComputerProfile, probeRelays, relayFor, reconnectRelays, select
 import { deviceIdentity } from "./identity";
 import { HybridLanGatewaySocket, LanE2eeSocket } from "./lan-socket";
 import { DEFAULT_HOST_URL } from "./settings";
-import { createSocket } from "./socket";
+import * as socketTransport from "./socket";
 import { directConnector } from "./direct";
 import { createSessionSubscriptions } from "./session-subscriptions";
 import { syncComputerName } from "./computer-names";
@@ -33,6 +33,8 @@ interface Connection {
   /** The selected computer's key. */
   key: string;
   computer: Computer;
+  /** Always holds the newest Computer metadata for this key (e.g. updated lanUrl/lanE2ee) without recreating the store. */
+  latestComputerRef: { current: Computer };
   /** What to show for where this connection goes. */
   url: string;
   link: HostLink;
@@ -59,8 +61,10 @@ function temporaryDisconnect(message: string): boolean {
   return /^(?:连接已断开|电脑不在线|电脑没有响应|连接电脑超时，请检查网络连接|连接网关超时|网络连接意外中断|网络请求失败，请检查网络连接|连接繁忙，正在重连|与网关的连接断开了|连不上网关|网关没有响应|没有连上网关|网关没有及时响应（[^）]*）|请求超时（[^）]*）|(?:连接已断开|正在重新连接)\s*\([^)]*\)|connection (?:closed|lost)|not connected to the gateway|no answer from the (?:gateway|computer)|(?:.* )?timed out)$/i.test(message);
 }
 
+const PENDING_COMPUTER: Computer = { key: NO_COMPUTER_KEY, kind: "direct", url: "", name: "电脑" };
+
 function fallbackComputer(): Computer {
-  if (!__DEV__) return { key: NO_COMPUTER_KEY, kind: "direct", url: "", name: "电脑" };
+  if (!__DEV__) return PENDING_COMPUTER;
   return { key: `direct:${DEFAULT_HOST_URL}`, kind: "direct", url: DEFAULT_HOST_URL, name: "本机开发" };
 }
 
@@ -76,47 +80,77 @@ export function accessToken(computer: Computer) {
   };
 }
 
-function connectionSignature(computer: Computer): string {
-  if (computer.kind === "relay") {
-    return `${computer.key}|${computer.lanUrl ?? ""}|${computer.lanE2ee ? "1" : "0"}`;
+/**
+ * Identity key for a Connection instance. Intentionally excludes volatile LAN hints
+ * (`lanUrl`, `lanE2ee`, mDNS discovery) so Wi-Fi/mDNS flapping never tears down
+ * `ClientStore`, `HostLink`, `HostStreams`, or active screens/chats.
+ */
+export function connectionSignature(computer: Computer): string {
+  return computer.key;
+}
+
+function readLatestComputer(ref: { current: Computer }): Computer {
+  const current = ref.current;
+  if (current.kind === "relay") {
+    const state = useComputers.getState?.() as
+      | { saved?: { lanUrls?: Record<string, { url: string; e2ee?: boolean } | string> } }
+      | undefined;
+    if (state?.saved) {
+      const entry = state.saved.lanUrls?.[current.key] ?? state.saved.lanUrls?.[current.machine.id];
+      const lanUrl = typeof entry === "string" ? entry : entry?.url;
+      const lanE2ee = typeof entry === "string" ? undefined : entry?.e2ee;
+      if (lanUrl !== current.lanUrl || Boolean(lanE2ee) !== Boolean(current.lanE2ee)) {
+        return {
+          ...current,
+          lanUrl,
+          lanE2ee: lanE2ee ? true : undefined,
+        };
+      }
+    }
   }
-  return `${computer.key}|${computer.fallbackGateway ?? ""}|${computer.machine?.id ?? ""}`;
+  return current;
 }
 
 function createConnection(computer: Computer): Connection {
+  const latestComputerRef = { current: computer };
+  const openRawSocket = (targetUrl: string) => socketTransport.createSocket(targetUrl);
   const link =
     computer.kind === "direct"
       ? new HostLink({
           url: computer.url,
           createSocket: (targetUrl) => {
-            if (computer.machine && computer.fallbackGateway) {
-              const machine = computer.machine;
-              const fallbackGateway = computer.fallbackGateway;
+            const latest = readLatestComputer(latestComputerRef);
+            if (latest.kind === "direct" && latest.machine && latest.fallbackGateway) {
+              const machine = latest.machine;
+              const fallbackGateway = latest.fallbackGateway;
               return new HybridLanGatewaySocket({
-                openLan: () => new LanE2eeSocket(targetUrl, createSocket, deviceIdentity(), machine),
+                openLan: () => new LanE2eeSocket(targetUrl, openRawSocket, deviceIdentity(), machine),
                 openGateway: () => new TunnelSocket(relayFor(fallbackGateway), deviceIdentity(), machine),
               });
             }
-            if (computer.machine) {
-              return new LanE2eeSocket(targetUrl, createSocket, deviceIdentity(), computer.machine);
+            if (latest.kind === "direct" && latest.machine) {
+              return new LanE2eeSocket(targetUrl, openRawSocket, deviceIdentity(), latest.machine);
             }
-            return createSocket(targetUrl);
+            return openRawSocket(targetUrl);
           },
           lazyImages: true,
           accessToken: accessToken(computer),
         })
-      : // Through a gateway, or LAN fast-path first with automatic Gateway E2EE tunnel fallback when away.
+      : // Through a gateway, or RFC 8305 Happy Eyeballs LAN + Gateway race when a LAN fast-path is configured.
         new HostLink({
           url: `${computer.gateway}#${computer.machine.id}`,
           createSocket: () => {
-            const openGateway = () => new TunnelSocket(relayFor(computer.gateway), deviceIdentity(), computer.machine);
-            if (!computer.lanUrl) return openGateway();
-            const lanUrl = computer.lanUrl;
+            const latest = readLatestComputer(latestComputerRef);
+            const active = latest.kind === "relay" ? latest : computer;
+            const openGateway = () => new TunnelSocket(relayFor(active.gateway), deviceIdentity(), active.machine);
+            if (!active.lanUrl) return openGateway();
+            const lanUrl = active.lanUrl;
+            const lanE2ee = Boolean(active.lanE2ee);
             return new HybridLanGatewaySocket({
               openLan: () =>
-                computer.lanE2ee
-                  ? new LanE2eeSocket(lanUrl, createSocket, deviceIdentity(), computer.machine)
-                  : createSocket(lanUrl),
+                lanE2ee
+                  ? new LanE2eeSocket(lanUrl, openRawSocket, deviceIdentity(), active.machine)
+                  : openRawSocket(lanUrl),
               openGateway,
             });
           },
@@ -135,19 +169,49 @@ function createConnection(computer: Computer): Connection {
   setHostHome(undefined);
   const streams = new HostStreams(link, { connector: directConnector, iceServers: () => store.getState().machine?.direct?.iceServers });
   const subscribeSession = createSessionSubscriptions((id) => store.getState().openSession(id), (id) => store.getState().closeSession(id));
-  return { key: computer.key, computer, url, link, store, streams, subscribeSession };
+  return { key: computer.key, computer, latestComputerRef, url, link, store, streams, subscribeSession };
 }
 
 const EMPTY_LAN_HOSTS: never[] = [];
+
+function isAwaitingAccountSelection(
+  saved: { selected?: string } | undefined,
+  discovery: Record<string, string> | undefined,
+  signedIn: boolean,
+): boolean {
+  const key = saved?.selected;
+  if (!key || !signedIn || !discovery || key.startsWith("direct:")) return false;
+  const hash = key.indexOf("#");
+  if (hash <= 0) return false;
+  const gateway = key.slice(0, hash).trim().replace(/\/+$/, "").replace(/^http/, "ws");
+  const status = discovery[gateway];
+  return status === undefined || status === "loading";
+}
 
 export function ClientProvider({ children }: { children: ReactNode }) {
   const saved = useComputers((state) => state.saved);
   const live = useComputers((state) => state.live);
   const lanHosts = useComputers((state) => state.lanHosts) ?? EMPTY_LAN_HOSTS;
-  const selected = useMemo(() => selectedComputer({ saved, live, lanHosts }) ?? fallbackComputer(), [saved, live, lanHosts]);
+  const discovery = useComputers((state) => state.discovery);
+  const signedIn = useSyncExternalStore(
+    useAccount.subscribe,
+    () => Boolean(useAccount.getState?.()?.session),
+    () => false,
+  );
+  const selected = useMemo(() => {
+    const resolved = selectedComputer({ saved, live, lanHosts, discovery }, { signedIn });
+    if (resolved) return resolved;
+    // Wait for account-only computer resolution instead of jumping to a fallback computer on cold start.
+    if (isAwaitingAccountSelection(saved, discovery, signedIn)) return PENDING_COMPUTER;
+    return fallbackComputer();
+  }, [saved, live, lanHosts, discovery, signedIn]);
   const [connection, setConnection] = useState(() => createConnection(selected));
   const [recovering, setRecovering] = useState(true);
   const initialRecovery = useRef(true);
+
+  if (selected.key === connection.key) {
+    connection.latestComputerRef.current = selected;
+  }
 
   useEffect(() => {
     startRelays();
@@ -157,8 +221,10 @@ export function ClientProvider({ children }: { children: ReactNode }) {
   useLayoutEffect(() => {
     if (connectionSignature(selected) !== connectionSignature(connection.computer)) {
       setConnection(createConnection(selected));
+    } else {
+      connection.latestComputerRef.current = selected;
     }
-  }, [selected, connection.computer]);
+  }, [selected, connection]);
 
   useEffect(() => {
     const { store, link } = connection;
@@ -166,14 +232,18 @@ export function ClientProvider({ children }: { children: ReactNode }) {
       if (state.machine === previous.machine) return;
       setHostHome(state.machine?.home);
       if (state.machine) {
-        rememberComputerProfile(connection.computer, state.machine);
-        syncComputerName(connection.computer, state.machine);
+        rememberComputerProfile(connection.latestComputerRef.current, state.machine);
+        syncComputerName(connection.latestComputerRef.current, state.machine);
       }
       // The computer just said whether it can go direct, and how.
       connection.streams.connect();
     });
     const hasComputer = connection.key !== NO_COMPUTER_KEY;
     let recoveryTimer: ReturnType<typeof setTimeout> | undefined;
+    const clearRecovering = () => {
+      clearTimeout(recoveryTimer);
+      setRecovering(false);
+    };
     const recoveringNow = () => {
       clearTimeout(recoveryTimer);
       setRecovering(true);
@@ -181,20 +251,21 @@ export function ClientProvider({ children }: { children: ReactNode }) {
       // outage visible without briefly calling the old, suspended socket a failure.
       recoveryTimer = setTimeout(() => setRecovering(false), 12_000);
     };
-    if (initialRecovery.current) {
+    // Never burn the cold-start recovery grace period while waiting for the first real computer.
+    if (hasComputer && initialRecovery.current) {
       initialRecovery.current = false;
       recoveringNow();
-    } else setRecovering(false);
+    } else {
+      clearRecovering();
+    }
     const unwatchStatus = link.onStatus((status, error) => {
       if (status === "online" || status === "locked" || status === "stopped" || (status === "reconnecting" && error && !temporaryDisconnect(error))) {
-        clearTimeout(recoveryTimer);
-        setRecovering(false);
+        clearRecovering();
       }
     });
     const unwatchAccount = useAccount.subscribe((state, previous) => {
       if (state.session?.userId === previous.session?.userId) return;
-      clearTimeout(recoveryTimer);
-      setRecovering(false);
+      clearRecovering();
     });
     if (hasComputer) {
       store.getState().connect();
@@ -226,26 +297,30 @@ export function ClientProvider({ children }: { children: ReactNode }) {
     const subscription = AppState.addEventListener("change", (state) => {
       setAppBackgrounded(state !== "active");
       if (state === "active") {
-        recoveringNow();
         // Back from the background, sessions show their latest turns at once; earlier ones load
         // on scroll. Only for this return: a reconnect later (a network blip while reading)
         // catches up in place.
         clearTimeout(latestTimer);
         latestTimer = setTimeout(() => link.resumeLatest(false), 45_000);
         if (!hasComputer) {
+          clearRecovering();
           reconnectRelays();
           probeRelays();
         } else if (link.status === "online") {
+          recoveringNow();
           // While suspended the sockets may have died without a word: probe with a 2.5s deadline
           // instead of waiting a heartbeat (up to 35 s) or tearing down a live socket.
           probeRelays();
           void Promise.resolve(link.probe(2500)).then((alive) => {
             if (alive === false) reconnectRelays();
+            else clearRecovering();
           });
           connection.streams.connect();
         } else if (link.status === "locked") {
+          clearRecovering();
           probeRelays();
         } else {
+          recoveringNow();
           reconnectRelays();
           link.reconnectNow(true);
           connection.streams.connect();
@@ -260,6 +335,40 @@ export function ClientProvider({ children }: { children: ReactNode }) {
         link.reconnectNow();
       }
     });
+    let lastNetworkInterface: string | undefined;
+    const subscribeNetwork = Object.prototype.hasOwnProperty.call(socketTransport, "subscribeNetworkPathChange")
+      ? socketTransport.subscribeNetworkPathChange
+      : undefined;
+    const restartLan = Object.prototype.hasOwnProperty.call(socketTransport, "restartLanDiscovery")
+      ? socketTransport.restartLanDiscovery
+      : undefined;
+    const unwatchNetwork =
+      typeof subscribeNetwork === "function"
+        ? subscribeNetwork((event) => {
+            const prevInterface = lastNetworkInterface;
+            lastNetworkInterface = event.interface;
+            if (event.status === "unsatisfied") return;
+            // Wi-Fi <-> 5G / interface transition: wake relays, restart mDNS discovery, and roam immediately.
+            reconnectRelays();
+            if (typeof restartLan === "function") restartLan();
+            if (!hasComputer) return;
+            const switchedInterface = prevInterface !== undefined && prevInterface !== event.interface;
+            if (link.status === "online" && !switchedInterface) {
+              void Promise.resolve(link.probe(2500)).then((alive) => {
+                if (alive === false) {
+                  reconnectRelays();
+                  link.reconnectNow(true);
+                } else {
+                  clearRecovering();
+                }
+              });
+            } else if (link.status !== "locked") {
+              recoveringNow();
+              link.reconnectNow(true);
+            }
+            connection.streams.connect();
+          })
+        : () => {};
     return () => {
       clearTimeout(latestTimer);
       clearTimeout(recoveryTimer);
@@ -267,6 +376,7 @@ export function ClientProvider({ children }: { children: ReactNode }) {
       unwatchMachine();
       unwatchStatus();
       unwatchAccount();
+      unwatchNetwork();
       subscription.remove();
       connection.streams.stop();
       store.getState().disconnect();
@@ -316,9 +426,20 @@ export function useConnection() {
   const { connection, setUrl } = useConnectionContext();
   const saved = useComputers((state) => state.saved);
   const live = useComputers((state) => state.live);
-  const selected = useMemo(() => selectedComputer({ saved, live }), [saved, live]);
-  const computer = selected?.key === connection.key ? selected : connection.computer;
-  return { url: connection.url, computer, link: connection.link, streams: connection.streams, setUrl };
+  const lanHosts = useComputers((state) => state.lanHosts) ?? EMPTY_LAN_HOSTS;
+  const discovery = useComputers((state) => state.discovery);
+  const signedIn = useSyncExternalStore(
+    useAccount.subscribe,
+    () => Boolean(useAccount.getState?.()?.session),
+    () => false,
+  );
+  const selected = useMemo(
+    () => selectedComputer({ saved, live, lanHosts, discovery }, { signedIn }),
+    [saved, live, lanHosts, discovery, signedIn],
+  );
+  const computer = selected?.key === connection.key ? selected : connection.latestComputerRef.current;
+  const url = computer.kind === "direct" ? computer.url : computer.lanUrl ?? computer.gateway;
+  return { url, computer, link: connection.link, streams: connection.streams, setUrl };
 }
 
 /** The path streams opened now would take: peer to peer, or through the gateway. */

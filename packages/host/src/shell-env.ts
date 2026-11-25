@@ -1,11 +1,94 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { homedir } from "node:os";
-import { delimiter, join } from "node:path";
+import { homedir, userInfo } from "node:os";
+import { basename, delimiter, join } from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
+
+const POSIX_SHELL_FALLBACKS = ["/bin/bash", "/usr/bin/bash", "/bin/zsh", "/bin/sh"] as const;
+
+/**
+ * Resolves the user's default shell without assuming macOS `/bin/zsh` exists on
+ * Linux distros or minimal containers (Debian, Ubuntu, Fedora, Alpine).
+ */
+export function resolveDefaultShell(
+  env: NodeJS.ProcessEnv = process.env,
+  options?: { platform?: NodeJS.Platform; fileExists?: (path: string) => boolean; userShell?: string | null },
+): string {
+  const targetPlatform = options?.platform ?? process.platform;
+  if (targetPlatform === "win32") return "powershell.exe";
+  const checkExists = options?.fileExists ?? existsSync;
+  const fromEnv = env.SHELL?.trim();
+  if (fromEnv && checkExists(fromEnv)) return fromEnv;
+  let fromUser = options?.userShell;
+  if (fromUser === undefined) {
+    try {
+      fromUser = userInfo().shell;
+    } catch {
+      fromUser = null;
+    }
+  }
+  const trimmedUser = fromUser?.trim();
+  if (trimmedUser && checkExists(trimmedUser)) return trimmedUser;
+  for (const candidate of POSIX_SHELL_FALLBACKS) {
+    if (checkExists(candidate)) return candidate;
+  }
+  return "/bin/sh";
+}
+
+export interface ShellEnvMarkers {
+  jsonStart: string;
+  jsonEnd: string;
+  nulStart: string;
+  lineStart: string;
+}
+
+/** Parses login-shell environment capture from Node JSON, `env -0`, or plain `env` output. */
+export function parseShellEnvOutput(stdout: string, markers: ShellEnvMarkers): NodeJS.ProcessEnv | undefined {
+  const jsonIdx = stdout.indexOf(markers.jsonStart);
+  if (jsonIdx >= 0) {
+    const bodyStart = jsonIdx + markers.jsonStart.length;
+    const jsonEndIdx = stdout.indexOf(markers.jsonEnd, bodyStart);
+    if (jsonEndIdx >= 0) {
+      try {
+        const parsed = JSON.parse(stdout.slice(bodyStart, jsonEndIdx)) as unknown;
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          const resolved: NodeJS.ProcessEnv = {};
+          for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+            if (typeof value === "string") resolved[key] = value;
+          }
+          delete resolved.LINKSHELL_RESOLVING_SHELL_ENV;
+          return resolved.PATH ? resolved : undefined;
+        }
+      } catch {
+        // Fall through to `env -0` / `env` markers if Node dump output was malformed.
+      }
+    }
+  }
+  const nulIdx = stdout.indexOf(markers.nulStart);
+  if (nulIdx >= 0) {
+    const resolved: NodeJS.ProcessEnv = {};
+    for (const entry of stdout.slice(nulIdx + markers.nulStart.length).split("\0")) {
+      const index = entry.indexOf("=");
+      if (index > 0) resolved[entry.slice(0, index)] = entry.slice(index + 1);
+    }
+    delete resolved.LINKSHELL_RESOLVING_SHELL_ENV;
+    return resolved.PATH ? resolved : undefined;
+  }
+  const lineIdx = stdout.indexOf(markers.lineStart);
+  if (lineIdx >= 0) {
+    const resolved: NodeJS.ProcessEnv = {};
+    for (const entry of stdout.slice(lineIdx + markers.lineStart.length).split(/\r?\n/)) {
+      const index = entry.indexOf("=");
+      if (index > 0) resolved[entry.slice(0, index)] = entry.slice(index + 1);
+    }
+    delete resolved.LINKSHELL_RESOLVING_SHELL_ENV;
+    return resolved.PATH ? resolved : undefined;
+  }
+  return undefined;
+}
 
 /**
  * The environment the user's agents see in their own terminal: runs the login
@@ -16,7 +99,7 @@ const execFileAsync = promisify(execFile);
  */
 export async function resolveLoginShellEnv(timeoutMs = 20_000, log?: (message: string) => void): Promise<NodeJS.ProcessEnv> {
   if (process.platform === "win32") return withRegistryPath(process.env);
-  const shell = process.env.SHELL || "/bin/zsh";
+  const shell = resolveDefaultShell(process.env);
   const problems: string[] = [];
   // Interactive first: most people set PATH and proxies in .zshrc. A profile that
   // breaks without a terminal still usually works as a plain login shell.
@@ -36,9 +119,26 @@ export async function resolveLoginShellEnv(timeoutMs = 20_000, log?: (message: s
   return withCommonPaths(process.env);
 }
 
+function shellSingleQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
 async function shellEnv(shell: string, flags: string, timeoutMs: number): Promise<NodeJS.ProcessEnv | undefined> {
-  const marker = `__LINKSHELL_ENV_${randomUUID()}__`;
-  const child = execFileAsync(shell, [flags, `printf '%s' '${marker}'; command env -0`], {
+  const token = randomUUID();
+  const markers: ShellEnvMarkers = {
+    jsonStart: `__LINKSHELL_ENV_JSON_${token}__`,
+    jsonEnd: `__LINKSHELL_ENV_END_${token}__`,
+    nulStart: `__LINKSHELL_ENV_NUL_${token}__`,
+    lineStart: `__LINKSHELL_ENV_LINE_${token}__`,
+  };
+  // Use Node's own JSON env dump first (portable across Alpine/BusyBox where `env -0` is unsupported
+  // and lossless for multiline env vars), falling back cleanly to `command env -0` then `command env`.
+  const nodeDump = `${shellSingleQuote(process.execPath)} -e 'process.stdout.write(JSON.stringify(process.env))'`;
+  const isFish = basename(shell).toLowerCase() === "fish";
+  const command = isFish
+    ? `printf '%s' '${markers.jsonStart}'; ${nodeDump}; and printf '%s' '${markers.jsonEnd}'; or begin; printf '%s' '${markers.nulStart}'; command env -0; or begin; printf '%s' '${markers.lineStart}'; command env; end; end`
+    : `printf '%s' '${markers.jsonStart}'; ${nodeDump} && printf '%s' '${markers.jsonEnd}' || { printf '%s' '${markers.nulStart}'; command env -0 || { printf '%s' '${markers.lineStart}'; command env; }; }`;
+  const child = execFileAsync(shell, [flags, command], {
     timeout: timeoutMs,
     maxBuffer: 16 * 1024 * 1024,
     env: { ...process.env, LINKSHELL_RESOLVING_SHELL_ENV: "1" },
@@ -47,15 +147,7 @@ async function shellEnv(shell: string, flags: string, timeoutMs: number): Promis
   // `read`) wait for an answer until the timeout; end-of-input answers it.
   child.child.stdin?.end();
   const { stdout } = await child;
-  const start = stdout.indexOf(marker);
-  if (start < 0) return undefined;
-  const resolved: NodeJS.ProcessEnv = {};
-  for (const entry of stdout.slice(start + marker.length).split("\0")) {
-    const index = entry.indexOf("=");
-    if (index > 0) resolved[entry.slice(0, index)] = entry.slice(index + 1);
-  }
-  delete resolved.LINKSHELL_RESOLVING_SHELL_ENV;
-  return resolved.PATH ? resolved : undefined;
+  return parseShellEnvOutput(stdout, markers);
 }
 
 /**
@@ -110,11 +202,14 @@ export function withCommonPaths(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const home = env.HOME || homedir();
   const present = (env.PATH ?? "").split(delimiter).filter(Boolean);
   const common = [
-    "/opt/homebrew/bin", "/usr/local/bin",
+    "/opt/homebrew/bin", "/home/linuxbrew/.linuxbrew/bin", "/usr/local/bin",
     join(home, ".local/bin"), join(home, ".npm-global/bin"), join(home, ".bun/bin"),
-    join(home, ".volta/bin"), join(home, "Library/pnpm"), join(home, ".cargo/bin"),
+    join(home, ".volta/bin"), join(home, "Library/pnpm"), join(home, ".local/share/pnpm"),
+    join(home, ".fnm/aliases/default/bin"), join(home, ".local/share/mise/shims"), join(home, ".asdf/shims"),
+    join(home, ".cargo/bin"),
     join(home, ".qoder/bin"), join(home, ".codebuddy/bin"), join(home, ".trae/bin"),
     join(home, ".kimi/bin"), join(home, ".opencode/bin"),
+    "/snap/bin",
     "/usr/bin", "/bin", "/usr/sbin", "/sbin",
   ].filter((dir) => !present.includes(dir) && existsSync(dir));
   return common.length ? { ...env, PATH: [...present, ...common].join(delimiter) } : env;

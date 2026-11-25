@@ -194,4 +194,70 @@ describe("SQLite durable outbox persistence (outbox-db)", () => {
     fallback.save("mac-mem", []);
     expect(fallback.load("mac-mem")).toEqual([]);
   });
+
+  it("recovers lazily after a transient SQLite open or write error instead of poisoning storage for the session", () => {
+    const rawDb = new DatabaseSync(":memory:");
+    try {
+      let openCalls = 0;
+      let failNextOpen = true;
+      let failNextTransaction = false;
+      const storage = createOutboxStorage(() => {
+        openCalls += 1;
+        if (failNextOpen) {
+          failNextOpen = false;
+          throw new Error("SQLITE_BUSY: database is locked");
+        }
+        const wrapped = wrapNodeSQLite(rawDb);
+        return {
+          ...wrapped,
+          withTransactionSync(task: () => void) {
+            if (failNextTransaction) {
+              failNextTransaction = false;
+              throw new Error("SQLITE_BUSY: write locked");
+            }
+            wrapped.withTransactionSync!(task);
+          },
+        };
+      });
+
+      const first: OutboxItem = {
+        clientMessageId: "t-1",
+        sessionId: "s-1",
+        content: [{ type: "text", text: "第一次遇到短暂锁表" }],
+        createdAt: 1000,
+      };
+      // Transient open failure falls back to memory without crashing.
+      storage.save("mac-transient", [first]);
+      expect(openCalls).toBe(1);
+
+      // Next operation lazily retries opening SQLite instead of staying permanently disabled.
+      const second: OutboxItem = {
+        clientMessageId: "t-2",
+        sessionId: "s-1",
+        content: [{ type: "text", text: "恢复后持久写入" }],
+        createdAt: 2000,
+      };
+      storage.save("mac-transient", [first, second]);
+      expect(openCalls).toBe(2);
+
+      // Verify durable write landed in SQLite using an independent storage instance.
+      const reader = createOutboxStorage(() => wrapNodeSQLite(rawDb));
+      expect(reader.load("mac-transient").map((item) => item.clientMessageId)).toEqual(["t-1", "t-2"]);
+
+      // A transient transaction failure also resets the handle and recovers on the following save.
+      failNextTransaction = true;
+      const third: OutboxItem = {
+        clientMessageId: "t-3",
+        sessionId: "s-1",
+        content: [{ type: "text", text: "写事务瞬断" }],
+        createdAt: 3000,
+      };
+      storage.save("mac-transient", [third]);
+      storage.save("mac-transient", [third]);
+      expect(openCalls).toBe(3);
+      expect(reader.load("mac-transient").map((item) => item.clientMessageId)).toEqual(["t-3"]);
+    } finally {
+      rawDb.close();
+    }
+  });
 });

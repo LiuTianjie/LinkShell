@@ -49,7 +49,7 @@ const grokSchema = z.object({
     options: z.array(z.object({ label: z.string().min(1), description: z.string().optional(), preview: z.string().nullish() })),
   })).min(1),
 });
-const formSchema = z.object({ mode: z.literal("form"), message: z.string().optional(), requestedSchema: z.unknown().optional(), toolCallId: z.string().optional(), serverName: z.string().optional() });
+const formSchema = z.object({ mode: z.literal("form"), message: z.string().nullish(), requestedSchema: z.unknown().optional(), toolCallId: z.string().nullish(), serverName: z.string().nullish() });
 const invalid = () => new RpcError(-32602, "Agent 的提问格式不受支持，未提交任何回答");
 function unique(values: string[]) { if (new Set(values).size !== values.length) throw invalid(); }
 
@@ -142,15 +142,23 @@ export function mapAcpQuestions(agent: string, method: string, params: unknown, 
     };
   }
   if (kind === "form" || kind === "grok-form") {
-    const url = z.object({ mode: z.literal("url"), message: z.string(), elicitationId: z.string(), url: z.url() }).safeParse(params);
+    const url = z.object({ mode: z.literal("url"), message: z.string(), elicitationId: z.string(), url: z.url(), toolCallId: z.string().nullish(), serverName: z.string().nullish() }).safeParse(params);
     if (url.success && kind === "form") {
       if (!["https:", "http:"].includes(new URL(url.data.url).protocol)) throw invalid();
       return {
-        update: { sessionUpdate: "ls_permission", requestId, title: url.data.message, url: { url: url.data.url, elicitationId: url.data.elicitationId }, options: [
-          { optionId: "accept", name: "打开授权页面", kind: "allow_once" },
-          { optionId: "decline", name: "拒绝", kind: "reject_once" },
-          { optionId: "cancel", name: "取消", kind: "reject_once" },
-        ] },
+        update: {
+          sessionUpdate: "ls_permission",
+          requestId,
+          title: url.data.message,
+          ...(url.data.toolCallId ? { toolCallId: url.data.toolCallId } : {}),
+          ...(url.data.serverName ? { detail: `来自 MCP 服务 ${url.data.serverName}` } : {}),
+          url: { url: url.data.url, elicitationId: url.data.elicitationId },
+          options: [
+            { optionId: "accept", name: "打开授权页面", kind: "allow_once" },
+            { optionId: "decline", name: "拒绝", kind: "reject_once" },
+            { optionId: "cancel", name: "取消", kind: "reject_once" },
+          ],
+        },
         answer: () => { throw invalid(); },
         respond: (optionId) => ({ action: optionId === "accept" ? "accept" : optionId === "cancel" ? "cancel" : "decline" }),
       };
@@ -158,11 +166,14 @@ export function mapAcpQuestions(agent: string, method: string, params: unknown, 
     const parsed = formSchema.safeParse(params);
     if (!parsed.success) throw invalid();
     const request = parsed.data;
-    const form = formQuestions(request.requestedSchema, request.message);
+    const message = request.message ?? undefined;
+    const toolCallId = request.toolCallId ?? undefined;
+    const serverName = request.serverName ?? undefined;
+    const form = formQuestions(request.requestedSchema, message);
     if (!form) throw invalid();
     const outcome = (action: string, content?: unknown) => ({ [kind === "grok-form" ? "outcome" : "action"]: action, ...(content === undefined ? {} : { content }) });
     return {
-      update: update(request.message ?? form.questions[0]!.text, form.questions, request.toolCallId, request.serverName ? `来自 MCP 服务 ${request.serverName}` : undefined),
+      update: update(message ?? form.questions[0]!.text, form.questions, toolCallId, serverName ? `来自 MCP 服务 ${serverName}` : undefined),
       answer: (answers) => outcome("accept", formContent(form, answers)),
       respond: (optionId) => outcome(optionId === "cancel" ? "cancel" : "decline"),
     };

@@ -31,6 +31,7 @@ final class HEVCDecoder: NSObject, RTCVideoDecoder {
   private var parameterSets: [Data] = []
   private var format: CMVideoFormatDescription?
   private var session: VTDecompressionSession?
+  private var needsKeyframe = true
 
   func setCallback(_ callback: @escaping RTCVideoDecoderCallback) { self.callback = callback }
   func startDecode(withNumberOfCores numberOfCores: Int32) -> Int { Code.ok }
@@ -38,39 +39,60 @@ final class HEVCDecoder: NSObject, RTCVideoDecoder {
 
   func release() -> Int {
     invalidate()
+    callback = nil
     format = nil
     parameterSets = []
+    needsKeyframe = true
     return Code.ok
   }
 
-  deinit { invalidate() }
+  deinit {
+    invalidate()
+    callback = nil
+  }
 
   func decode(_ image: RTCEncodedImage, missingFrames: Bool, codecSpecificInfo info: RTCCodecSpecificInfo?, renderTimeMs: Int64) -> Int {
     let data = image.buffer
     var sets: [Data] = []
     var body = Data()
     body.reserveCapacity(data.count + 16)
+    var hasKeyframeUnit = image.frameType == .videoFrameKey
     for unit in Self.units(of: data) {
-      switch (unit[unit.startIndex] >> 1) & 0x3f {
+      let nalType = (unit[unit.startIndex] >> 1) & 0x3f
+      switch nalType {
       case 32...34: sets.append(unit)
       // An access unit delimiter is of no use to VideoToolbox.
       case 35: break
       default:
+        // HEVC IRAP NAL units (BLA/IDR/CRA: 16...21) start an independent decodable picture.
+        if (16...21).contains(nalType) { hasKeyframeUnit = true }
         var length = UInt32(unit.count).bigEndian
         withUnsafeBytes(of: &length) { body.append(contentsOf: $0) }
         body.append(unit)
       }
     }
     if !sets.isEmpty, sets != parameterSets {
-      guard let made = Self.formatDescription(sets) else { return Code.error }
+      guard let made = Self.formatDescription(sets) else {
+        needsKeyframe = true
+        return Code.error
+      }
       invalidate()
       format = made
       parameterSets = sets
+      needsKeyframe = true
     }
+    // After startup or any decode error, wait for the next IDR/keyframe instead of feeding broken P-frames.
+    if needsKeyframe && !hasKeyframeUnit { return Code.error }
     // Nothing to decode with until the first key frame.
     guard let described = format, !body.isEmpty else { return Code.error }
-    if session == nil, !makeSession(described) { return Code.error }
-    guard let session, let sample = Self.sample(body, format: described) else { return Code.error }
+    if session == nil, !makeSession(described) {
+      needsKeyframe = true
+      return Code.error
+    }
+    guard let session, let sample = Self.sample(body, format: described) else {
+      needsKeyframe = true
+      return Code.error
+    }
 
     let callback = self.callback
     let timestamp = Int32(bitPattern: image.timeStamp)
@@ -86,14 +108,16 @@ final class HEVCDecoder: NSObject, RTCVideoDecoder {
       frame.timeStamp = timestamp
       callback?(frame)
     }
-    if status != noErr {
-      // The session can be lost (an iPhone app sent to the background): the next key frame
-      // begins a new one.
+    if status != noErr || !decoded {
+      // The session can be lost (e.g. backgrounding or corrupted bitstream): invalidate and
+      // require the next IDR keyframe so libwebrtc sends a PLI instead of decoding broken P-frames.
+      // Keep the last valid format/parameterSets so a subsequent IDR recovers even if parameter sets match.
       invalidate()
-      if image.frameType != .videoFrameKey { format = nil; parameterSets = [] }
+      needsKeyframe = true
       return Code.error
     }
-    return decoded ? Code.ok : Code.error
+    needsKeyframe = false
+    return Code.ok
   }
 
   private func makeSession(_ format: CMVideoFormatDescription) -> Bool {

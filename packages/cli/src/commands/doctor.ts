@@ -1,10 +1,10 @@
-import { execSync } from "node:child_process";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { accessSync, closeSync, constants, existsSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
-import { join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { loadAuth } from "../auth.js";
 import * as daemon from "../utils/daemon.js";
-import { hostRuntimeOk, resolveGateway, withRunningHost } from "./host.js";
+import { stdoutStyle } from "../utils/format.js";
+import { hostRuntimeOk, resolveGateway, silenceSqliteWarning, withRunningHost } from "./host.js";
 
 const requireFromCli = createRequire(import.meta.url);
 
@@ -15,6 +15,7 @@ export interface CheckResult {
 }
 
 const WAL_BLOAT_WARN_BYTES = 64 * 1024 * 1024;
+const LOG_SIZE_WARN_BYTES = 20 * 1024 * 1024;
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -39,6 +40,167 @@ function isPidAlive(pid: number): boolean {
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === "EPERM";
   }
+}
+
+/**
+ * Pure-Node PATH executable lookup (`accessSync(..., X_OK)`), replacing `which` so minimal Linux
+ * containers (Alpine, Arch, distroless) work without external shell utilities.
+ */
+export function findExecutableInPath(
+  bin: string,
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): string | undefined {
+  if (!bin) return undefined;
+  const pathEnv = env.PATH ?? env.Path ?? "";
+  const dirs = pathEnv.split(platform === "win32" ? ";" : delimiter).filter(Boolean);
+  const extensions =
+    platform === "win32"
+      ? (env.PATHEXT ?? ".EXE;.CMD;.BAT;.COM")
+          .split(";")
+          .filter(Boolean)
+          .map((ext) => (ext.startsWith(".") ? ext : `.${ext}`))
+      : [""];
+
+  for (const dir of dirs) {
+    for (const ext of extensions) {
+      const candidate = join(dir, platform === "win32" && !bin.toLowerCase().endsWith(ext.toLowerCase()) ? `${bin}${ext}` : bin);
+      try {
+        const st = statSync(candidate);
+        if (!st.isFile()) continue;
+        if (platform !== "win32") {
+          accessSync(candidate, constants.X_OK);
+        }
+        return candidate;
+      } catch {
+        // Try next candidate.
+      }
+    }
+  }
+  return undefined;
+}
+
+/** Audits `~/.linkshell` (`0700`) and sensitive files (`0600`) on multi-user POSIX systems. */
+export function auditPermissions(home: string, platform: NodeJS.Platform = process.platform): CheckResult {
+  if (platform === "win32") {
+    return { name: "Permissions", ok: true, detail: "managed by Windows NTFS ACLs" };
+  }
+  if (!existsSync(home)) {
+    return { name: "Permissions", ok: true, detail: "state directory not created yet" };
+  }
+
+  const issues: string[] = [];
+  try {
+    const dirMode = statSync(home).mode & 0o777;
+    if ((dirMode & 0o077) !== 0) {
+      issues.push(`${home} is 0${dirMode.toString(8)} (expected 0700: chmod 700 "${home}")`);
+    }
+  } catch {}
+
+  const privateFiles = ["auth.json", "identity.json", "paired-devices.json", "state.db", "config.json", "host.log", "gateway.log"];
+  for (const file of privateFiles) {
+    const full = join(home, file);
+    if (!existsSync(full)) continue;
+    try {
+      const mode = statSync(full).mode & 0o777;
+      if ((mode & 0o077) !== 0) {
+        issues.push(`${file} is 0${mode.toString(8)} (expected 0600: chmod 600 "${full}")`);
+      }
+    } catch {}
+  }
+
+  if (issues.length > 0) {
+    return {
+      name: "Permissions",
+      ok: false,
+      detail: `overly broad permissions on multi-user host: ${issues.join("; ")}`,
+    };
+  }
+  return { name: "Permissions", ok: true, detail: `${home} (0700) and private files (0600) ok` };
+}
+
+/** Checks `host.log` size and scans the tail for recent critical error lines. */
+export function inspectHostLog(logPath: string, warnBytes = LOG_SIZE_WARN_BYTES): CheckResult | undefined {
+  const size = fileSize(logPath);
+  if (size === undefined) return undefined;
+
+  let recentError: string | undefined;
+  try {
+    const tailBytes = Math.min(size, 8192);
+    if (tailBytes > 0) {
+      const fd = openSync(logPath, "r");
+      try {
+        const buf = Buffer.alloc(tailBytes);
+        readSync(fd, buf, 0, tailBytes, size - tailBytes);
+        const lines = buf.toString("utf8").split(/\r?\n/).filter(Boolean);
+        for (let i = lines.length - 1; i >= 0; i -= 1) {
+          const line = lines[i]!;
+          if (/\b(uncaught|unhandled rejection|EADDRINUSE|EACCES|SQLITE_CORRUPT|FATAL)\b/i.test(line)) {
+            recentError = line.length > 140 ? `${line.slice(0, 137)}...` : line;
+            break;
+          }
+        }
+      } finally {
+        closeSync(fd);
+      }
+    }
+  } catch {}
+
+  if (size > warnBytes) {
+    return {
+      name: "Host log",
+      ok: false,
+      detail: `${formatBytes(size)} exceeds ${formatBytes(warnBytes)} (${logPath})${recentError ? `; recent error: ${recentError}` : ""}`,
+    };
+  }
+
+  return {
+    name: "Host log",
+    ok: true,
+    detail: recentError
+      ? `${formatBytes(size)} — recent error: ${recentError}`
+      : `${formatBytes(size)} (${logPath})`,
+  };
+}
+
+/** Detects proxy environment variables that may affect WebSocket gateway connectivity. */
+export function detectProxyEnv(env: NodeJS.ProcessEnv = process.env): string[] {
+  const keys = ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"];
+  return keys.filter((key) => Boolean(env[key]?.trim()));
+}
+
+/** Reads `/etc/systemd/logind.conf` (and drop-ins) to check whether `KillUserProcesses=yes` is configured. */
+export function inspectLogindKillUserProcesses(
+  files: string[] = (() => {
+    const list = ["/etc/systemd/logind.conf"];
+    try {
+      const dropInDir = "/etc/systemd/logind.conf.d";
+      if (existsSync(dropInDir)) {
+        for (const entry of readdirSync(dropInDir).sort()) {
+          if (entry.endsWith(".conf")) list.push(join(dropInDir, entry));
+        }
+      }
+    } catch {}
+    return list;
+  })(),
+): boolean | undefined {
+  let result: boolean | undefined;
+  for (const file of files) {
+    try {
+      if (!existsSync(file)) continue;
+      const content = readFileSync(file, "utf8");
+      for (const line of content.split(/\r?\n/)) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith("#") || trimmed.startsWith(";")) continue;
+        const match = /^KillUserProcesses\s*=\s*(yes|no|true|false|1|0)$/i.exec(trimmed);
+        if (match?.[1]) {
+          const val = match[1].toLowerCase();
+          result = val === "yes" || val === "true" || val === "1";
+        }
+      }
+    } catch {}
+  }
+  return result;
 }
 
 export function inspectLocalState(options: {
@@ -136,11 +298,91 @@ function check(name: string, fn: () => string): CheckResult {
   }
 }
 
-function which(bin: string): string | undefined {
+async function checkNodePty(): Promise<CheckResult> {
+  let pty: {
+    spawn: (
+      file: string,
+      args: string[],
+      options: { name?: string; cols?: number; rows?: number },
+    ) => { onExit: (cb: (e: { exitCode: number }) => void) => void; kill: () => void };
+  };
   try {
-    return execSync(`which ${bin}`, { encoding: "utf8", timeout: 5000 }).trim() || undefined;
-  } catch {
-    return undefined;
+    // Resolve against this installation, not the user's current project.
+    pty = requireFromCli("node-pty") as typeof pty;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return {
+      name: "node-pty",
+      ok: false,
+      detail:
+        `could not load node-pty from this LinkShell installation: ${reason}. ` +
+        "Reinstall linkshell-cli with the package manager you used to install it. " +
+        "For a pnpm source checkout, approve node-pty build scripts and reinstall.",
+    };
+  }
+
+  if (process.platform !== "win32") {
+    try {
+      const ptyDir = dirname(requireFromCli.resolve("node-pty/package.json"));
+      const helper = join(ptyDir, "prebuilds", `${process.platform}-${process.arch}`, "spawn-helper");
+      if (existsSync(helper)) {
+        const mode = statSync(helper).mode & 0o777;
+        if ((mode & 0o111) === 0) {
+          return {
+            name: "node-pty",
+            ok: false,
+            detail: `spawn-helper is not executable (${helper}, mode 0${mode.toString(8)}) — fix with: chmod +x "${helper}"`,
+          };
+        }
+      }
+    } catch {}
+
+    if (existsSync("/bin/sh")) {
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const proc = pty.spawn("/bin/sh", ["-c", "true"], { name: "xterm-color", cols: 80, rows: 24 });
+          const timer = setTimeout(() => {
+            try { proc.kill(); } catch {}
+            reject(new Error("PTY smoke test timed out after 3s"));
+          }, 3_000);
+          timer.unref();
+          proc.onExit(({ exitCode }) => {
+            clearTimeout(timer);
+            if (exitCode === 0) resolve();
+            else reject(new Error(`/bin/sh exited with code ${exitCode}`));
+          });
+        });
+        return { name: "node-pty", ok: true, detail: "loaded (PTY smoke test ok)" };
+      } catch (error) {
+        return {
+          name: "node-pty",
+          ok: false,
+          detail: `loaded, but PTY smoke test failed: ${error instanceof Error ? error.message : String(error)} (check /dev/pts or spawn-helper permissions)`,
+        };
+      }
+    }
+  }
+
+  return { name: "node-pty", ok: true, detail: "loaded" };
+}
+
+async function checkSqlite(): Promise<CheckResult> {
+  if (!hostRuntimeOk()) {
+    return { name: "node:sqlite", ok: false, detail: `requires Node.js 22.13+ (this is ${process.version})` };
+  }
+  try {
+    silenceSqliteWarning();
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(":memory:");
+    try {
+      const row = db.prepare("SELECT 1 AS ok").get() as { ok?: number } | undefined;
+      if (row?.ok !== 1) throw new Error("unexpected query result");
+    } finally {
+      db.close();
+    }
+    return { name: "node:sqlite", ok: true, detail: "in-memory probe ok" };
+  } catch (error) {
+    return { name: "node:sqlite", ok: false, detail: `probe failed: ${error instanceof Error ? error.message : String(error)}` };
   }
 }
 
@@ -162,8 +404,13 @@ const AGENT_INSTALL: Record<string, string> = {
   codex: "npm i -g @openai/codex",
 };
 
-export async function runDoctor(version: string, gatewayUrl?: string): Promise<void> {
-  process.stdout.write("\n  LinkShell Doctor\n\n");
+export async function runDoctor(
+  version: string,
+  gatewayUrl?: string,
+  options: { json?: boolean } = {},
+): Promise<CheckResult[]> {
+  const style = stdoutStyle();
+  if (!options.json) process.stdout.write("\n  LinkShell Doctor\n\n");
 
   const results: CheckResult[] = [];
 
@@ -172,21 +419,8 @@ export async function runDoctor(version: string, gatewayUrl?: string): Promise<v
     return `v${process.versions.node}`;
   }));
 
-  results.push(check("node-pty", () => {
-    try {
-      // Resolve against this installation, not the user's current project.
-      requireFromCli("node-pty");
-      return "loaded";
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      throw new Error(
-        `could not load node-pty from this LinkShell installation: ${reason}. ` +
-        "Reinstall linkshell-cli with the package manager you used to install it. " +
-        "For a pnpm source checkout, approve node-pty build scripts and reinstall.",
-        { cause: error },
-      );
-    }
-  }));
+  results.push(await checkSqlite());
+  results.push(await checkNodePty());
 
   const host = await withRunningHost(async (client) => ({
     info: await client.call("machine.info", {}),
@@ -195,10 +429,10 @@ export async function runDoctor(version: string, gatewayUrl?: string): Promise<v
 
   if (!host) {
     results.push({ name: "Host", ok: false, detail: "not running — start it with: linkshell host --daemon" });
-    // Without the host, at least say whether the two main agents are on the PATH.
+    // Without the host, at least say whether the two main agents are on PATH.
     for (const [bin, hint] of Object.entries(AGENT_INSTALL)) {
-      const path = which(bin);
-      results.push({ name: `${bin} (optional)`, ok: true, detail: path ? `found (${path})` : `not installed — ${hint}` });
+      const found = findExecutableInPath(bin);
+      results.push({ name: `${bin} (optional)`, ok: true, detail: found ? `found (${found})` : `not installed — ${hint}` });
     }
   } else {
     results.push(
@@ -207,7 +441,7 @@ export async function runDoctor(version: string, gatewayUrl?: string): Promise<v
         : {
             name: "Host",
             ok: false,
-            detail: `running ${host.info.hostVersion}, but this CLI is ${version} — update it with: linkshell host stop && linkshell host --daemon`,
+            detail: `running ${host.info.hostVersion}, but this CLI is ${version} — update it with: linkshell host restart`,
           },
     );
     // Agents as the host sees them: what the phone can actually start.
@@ -238,6 +472,48 @@ export async function runDoctor(version: string, gatewayUrl?: string): Promise<v
       }
     }
     results.push(...inspectLocalState({ home, runDir, hostSocket, hostRunning: Boolean(host) }));
+    results.push(auditPermissions(home));
+    const logCheck = inspectHostLog(daemon.getLogFile("host"));
+    if (logCheck) results.push(logCheck);
+  }
+
+  if (process.platform === "linux") {
+    try {
+      const { getServiceStatus, isSystemdUserAvailable } = await import("./service.js");
+      const systemdAvailable = await isSystemdUserAvailable();
+      if (!systemdAvailable) {
+        results.push({
+          name: "systemd --user (optional)",
+          ok: true,
+          detail: "unavailable (container/WSL2/non-systemd) — use `linkshell host --daemon`",
+        });
+      } else {
+        const svc = await getServiceStatus({ platform: "linux", linkshellHome: daemon.linkshellDir() });
+        const killUserProcs = inspectLogindKillUserProcesses();
+        const lingerText =
+          svc.linger === true
+            ? "linger enabled"
+            : svc.linger === false
+              ? `linger disabled${killUserProcs !== false ? " (SSH logout will kill user processes — run: sudo loginctl enable-linger $USER)" : " (run: sudo loginctl enable-linger $USER)"}`
+              : "linger unknown";
+        results.push({
+          name: "systemd --user",
+          ok: true,
+          detail: svc.installed
+            ? `${svc.state}${svc.pid ? ` (PID ${svc.pid})` : ""}, ${lingerText}`
+            : `available (not installed — run: linkshell host install-service), ${lingerText}`,
+        });
+      }
+    } catch {}
+  }
+
+  const proxyVars = detectProxyEnv();
+  if (proxyVars.length > 0) {
+    results.push({
+      name: "Network proxy (info)",
+      ok: true,
+      detail: `${proxyVars.join(", ")} set — WebSocket gateway connections may bypass HTTP proxies; ensure gateway host is reachable or configure NO_PROXY for LAN/loopback`,
+    });
   }
 
   const auth = loadAuth();
@@ -281,18 +557,45 @@ export async function runDoctor(version: string, gatewayUrl?: string): Promise<v
     const { checkWifi } = await import("./wifi.js");
     const wifi = await checkWifi();
     if (wifi) results.push({ name: "Wi-Fi", ...wifi });
-  }
-
-  for (const r of results) {
-    const icon = r.ok ? "\x1b[32m✓\x1b[0m" : "\x1b[31m✗\x1b[0m";
-    process.stdout.write(`  ${icon} ${r.name}: ${r.detail}\n`);
+  } else if (process.platform === "linux" && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) {
+    results.push({
+      name: "Screen (optional)",
+      ok: true,
+      detail: "headless Linux (no DISPLAY/WAYLAND_DISPLAY) — screen sharing not applicable",
+    });
   }
 
   const failed = results.filter((r) => !r.ok);
+  if (failed.length > 0) {
+    process.exitCode = 1;
+  }
+
+  if (options.json) {
+    process.stdout.write(
+      `${JSON.stringify(
+        {
+          ok: failed.length === 0,
+          version,
+          platform: process.platform,
+          checks: results,
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    return results;
+  }
+
+  for (const r of results) {
+    const icon = r.ok ? style.green("✓") : style.red("✗");
+    process.stdout.write(`  ${icon} ${r.name}: ${r.detail}\n`);
+  }
+
   process.stdout.write("\n");
   if (failed.length === 0) {
-    process.stdout.write("  \x1b[32mAll checks passed.\x1b[0m\n\n");
+    process.stdout.write(`  ${style.green("All checks passed.")}\n\n`);
   } else {
-    process.stdout.write(`  \x1b[33m${failed.length} issue(s) found.\x1b[0m\n\n`);
+    process.stdout.write(`  ${style.yellow(`${failed.length} issue(s) found.`)}\n\n`);
   }
+  return results;
 }

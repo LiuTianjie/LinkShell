@@ -668,8 +668,10 @@ export function createAttentionSyncScheduler(
   let lastShortcutKey: string | undefined;
   let lastActivityKey: string | undefined;
   let lastSyncSucceeded: boolean | undefined;
+  let lastSyncPromise: Promise<boolean> | undefined;
   let needsForegroundRetry = false;
   let reconcileSeq = 0;
+  let sweptStartupDelivered = false;
   const activeLocalApprovals = new Map<string, string>();
 
   const cancelPending = () => {
@@ -699,6 +701,7 @@ export function createAttentionSyncScheduler(
       });
 
     if (useFallback) {
+      sweptStartupDelivered = true;
       const expectedIds = new Set(expected.map((item) => item.id));
       for (const id of [...activeLocalApprovals.keys()]) {
         if (!expectedIds.has(id)) {
@@ -719,9 +722,15 @@ export function createAttentionSyncScheduler(
     // Cancel local fallback approvals once resolved/cancelled online, or when Live Activity took over.
     const liveTookOver = available && syncOk;
     if (liveTookOver || (online && expected.length === 0)) {
-      for (const id of [...activeLocalApprovals.keys()]) {
-        activeLocalApprovals.delete(id);
-        void cancelLocalApproval(id).catch(() => {});
+      if (activeLocalApprovals.size > 0) {
+        for (const id of [...activeLocalApprovals.keys()]) {
+          activeLocalApprovals.delete(id);
+          void cancelLocalApproval(id).catch(() => {});
+        }
+      } else if (!sweptStartupDelivered && !options.cancelLocalApproval) {
+        // Clear any leftover delivered notifications from a previous app session once online/resolved.
+        sweptStartupDelivered = true;
+        void cancelLocalApproval("*").catch(() => {});
       }
     } else if (online) {
       const expectedIds = new Set(expected.map((item) => item.id));
@@ -743,6 +752,7 @@ export function createAttentionSyncScheduler(
     if (flushOptions?.foregroundReturn && needsForegroundRetry) {
       needsForegroundRetry = false;
       lastActivityKey = undefined;
+      lastSyncPromise = undefined;
     }
 
     const merged = mergeLiveViewsIntoSessions(current.sessions, current.views, current.promptProgress);
@@ -776,10 +786,10 @@ export function createAttentionSyncScheduler(
     if (activityKey !== lastActivityKey) {
       lastActivityKey = activityKey;
       const sentInBackground = AppState.currentState !== "active";
-      syncPromise = Promise.resolve(syncActivity(payload)).then(
+      const inFlight = Promise.resolve(syncActivity(payload)).then(
         (ok) => {
           const accepted = ok !== false;
-          lastSyncSucceeded = accepted;
+          if (lastSyncPromise === inFlight) lastSyncSucceeded = accepted;
           // Activity.request cannot start while backgrounded (or if disabled in Settings): retry on foreground return.
           if (ok === false && payload.active && (sentInBackground || Boolean(syncLocalApproval))) {
             needsForegroundRetry = true;
@@ -787,13 +797,20 @@ export function createAttentionSyncScheduler(
           return accepted;
         },
         () => {
-          lastSyncSucceeded = false;
+          if (lastSyncPromise === inFlight) {
+            lastSyncSucceeded = false;
+            lastSyncPromise = undefined;
+          }
           if (lastActivityKey === activityKey) lastActivityKey = undefined;
           return false;
         },
       );
+      lastSyncPromise = inFlight;
+      syncPromise = inFlight;
     } else {
-      syncPromise = Promise.resolve(lastSyncSucceeded ?? false);
+      // Await the in-flight Live Activity request for this exact payload instead of reading an
+      // unset/stale `lastSyncSucceeded`, preventing simultaneous Live Activity + local fallback delivery.
+      syncPromise = lastSyncPromise ?? Promise.resolve(lastSyncSucceeded ?? false);
     }
 
     if (syncLocalApproval && cancelLocalApproval) {

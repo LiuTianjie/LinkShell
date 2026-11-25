@@ -1,10 +1,116 @@
 import * as http from "node:http";
-import { execFileSync } from "node:child_process";
-import { completeLogin, type LoginResult } from "./sign-in.js";
+import * as readline from "node:readline";
+import { spawn } from "node:child_process";
+import {
+  createStyle,
+  formatSshTunnelHint,
+  isHeadlessSession,
+  isSshSession,
+  readHidden,
+  readPromptLine,
+  type TtyReadable,
+} from "../utils/format.js";
+import { completeLogin, loginWithPassword, type LoginResult } from "./sign-in.js";
 
 export type { LoginResult } from "./sign-in.js";
 
 const ITOOL_AUTH_URL = "https://itool.tech/en/auth/linkshell";
+
+export interface RunLoginOptions {
+  signal?: AbortSignal;
+  /** Sign in with email and password instead of a browser. Pass `true` to prompt interactively. */
+  email?: string | boolean;
+  /** Read password from stdin without prompting (for scripts/SSH). */
+  passwordStdin?: boolean;
+  /** Print the sign-in URL without attempting to launch a local browser. */
+  noBrowser?: boolean;
+  /** Injectable runtime hooks for testing. */
+  env?: NodeJS.ProcessEnv;
+  platform?: NodeJS.Platform;
+  stdin?: TtyReadable;
+  stderr?: NodeJS.WritableStream & { isTTY?: boolean };
+  readLine?: (prompt: string) => Promise<string | null>;
+  readPassword?: (prompt: string) => Promise<string | null>;
+}
+
+export type ParsedCallbackInput =
+  | { kind: "tokens"; accessToken: string; refreshToken: string; expiresIn: number }
+  | { kind: "code"; code: string }
+  | { kind: "error"; message: string };
+
+/**
+ * Parses a pasted callback URL (fragment or query string) from an SSH/headless browser login.
+ * Supports full URLs (`http://127.0.0.1:<port>/callback#access_token=...`) and raw param strings.
+ */
+export function parseCallbackInput(raw: string): ParsedCallbackInput | null {
+  let trimmed = raw.trim();
+  if (!trimmed) return null;
+  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+    trimmed = trimmed.slice(1, -1).trim();
+  }
+  if (!trimmed) return null;
+
+  const paramSources: URLSearchParams[] = [];
+  if (/^https?:\/\//i.test(trimmed)) {
+    try {
+      const parsed = new URL(trimmed);
+      if (parsed.hash.length > 1) paramSources.push(new URLSearchParams(parsed.hash.slice(1)));
+      if (parsed.search.length > 1) paramSources.push(new URLSearchParams(parsed.search.slice(1)));
+    } catch {
+      return null;
+    }
+  } else {
+    const hashIdx = trimmed.indexOf("#");
+    const queryIdx = trimmed.indexOf("?");
+    if (hashIdx >= 0) paramSources.push(new URLSearchParams(trimmed.slice(hashIdx + 1)));
+    if (queryIdx >= 0) {
+      const end = hashIdx > queryIdx ? hashIdx : trimmed.length;
+      paramSources.push(new URLSearchParams(trimmed.slice(queryIdx + 1, end)));
+    }
+    if (paramSources.length === 0 && trimmed.includes("=")) {
+      paramSources.push(new URLSearchParams(trimmed));
+    }
+  }
+
+  for (const params of paramSources) {
+    const error = params.get("error_description") || params.get("error");
+    if (error) return { kind: "error", message: error };
+    const accessToken = params.get("access_token")?.trim();
+    const refreshToken = params.get("refresh_token")?.trim();
+    if (accessToken && refreshToken) {
+      const parsedExp = Number(params.get("expires_in") ?? "3600");
+      return {
+        kind: "tokens",
+        accessToken,
+        refreshToken,
+        expiresIn: Number.isFinite(parsedExp) && parsedExp > 0 ? parsedExp : 3600,
+      };
+    }
+    const code = params.get("code")?.trim();
+    if (code) return { kind: "code", code };
+  }
+
+  return null;
+}
+
+/** Launches the system browser without blocking the CLI event loop (never uses execFileSync). */
+export function openBrowserNonBlocking(url: string, platform: NodeJS.Platform = process.platform): void {
+  const [command, args] =
+    platform === "win32"
+      ? ["rundll32.exe", ["url.dll,FileProtocolHandler", url]]
+      : [platform === "darwin" ? "open" : "xdg-open", [url]];
+  try {
+    const child = spawn(command, args, {
+      detached: true,
+      windowsHide: true,
+      stdio: "ignore",
+    });
+    child.on?.("error", () => {});
+    child.unref?.();
+  } catch {
+    // URL is already printed so the user can open it manually.
+  }
+}
 
 // Served from the CLI's loopback server, so it has to carry its own styles and
 // copy: it can't load anything from itool.tech.
@@ -95,24 +201,110 @@ const CALLBACK_PAGE = `<!DOCTYPE html>
 </body>
 </html>`;
 
+async function runPasswordLogin(options: RunLoginOptions): Promise<LoginResult | null> {
+  const env = options.env ?? process.env;
+  const stdin = options.stdin ?? (process.stdin as TtyReadable);
+  const stderr = options.stderr ?? process.stderr;
+  const style = createStyle(stderr, env);
+
+  const askLine =
+    options.readLine ??
+    ((prompt: string) => readPromptLine(prompt, { stdin, output: stderr }));
+  const askPassword =
+    options.readPassword ??
+    (async (prompt: string) => {
+      try {
+        return await readHidden(prompt, { stdin, output: stderr });
+      } catch {
+        return null;
+      }
+    });
+
+  let email = typeof options.email === "string" ? options.email.trim() : "";
+  if (!email) {
+    if (options.passwordStdin && !stdin.isTTY && !options.readLine) {
+      stderr.write(`  ${style.red("✗")} --password-stdin requires --email <address> when stdin is not interactive.\n\n`);
+      return null;
+    }
+    const entered = await askLine("  Email: ");
+    if (!entered) {
+      stderr.write("  Login cancelled.\n\n");
+      return null;
+    }
+    email = entered.trim();
+  }
+
+  let password: string | null;
+  if (options.passwordStdin) {
+    password = await readHidden("", { stdin, output: stderr });
+  } else {
+    password = await askPassword("  Password: ");
+  }
+  if (!password) {
+    stderr.write("  Login cancelled.\n\n");
+    return null;
+  }
+
+  try {
+    const result = await loginWithPassword({ email, password, signal: options.signal });
+    const planLabel = result.plan === "pro" ? style.green("LinkShell member") : "Free";
+    stderr.write(`  ${style.green("✓")} Logged in as ${result.email || result.userId} (${planLabel})\n\n`);
+    return result;
+  } catch (error) {
+    stderr.write(`  ${style.red("✗")} ${error instanceof Error ? error.message : String(error)}\n\n`);
+    return null;
+  }
+}
+
 /**
- * CLI login via iTool OAuth flow.
+ * CLI login via email/password (ideal for headless Linux & SSH) or iTool OAuth flow.
  *
- * 1. Start a temporary local HTTP server to receive the callback
- * 2. Open browser to iTool's LinkShell auth page
- * 3. User logs in/registers on iTool
- * 4. iTool redirects back to localhost with Supabase tokens
- * 5. Save tokens to ~/.linkshell/auth.json
+ * 1. When `--email` / `--password-stdin` is passed (or chosen interactively in a headless/SSH session),
+ *    signs in directly with `loginWithPassword()` without needing any browser.
+ * 2. Otherwise starts a temporary `127.0.0.1` loopback HTTP server, launches a non-blocking browser
+ *    when local GUI is available, and on SSH/headless sessions prints an SSH port-forward command
+ *    while concurrently accepting a pasted callback URL in the terminal.
  */
-export async function runLogin(options: { signal?: AbortSignal } = {}): Promise<LoginResult | null> {
+export async function runLogin(options: RunLoginOptions = {}): Promise<LoginResult | null> {
   if (options.signal?.aborted) return null;
-  process.stderr.write("\n  LinkShell Login\n");
-  process.stderr.write("  \x1b[2mSign in with your iTool account to use the official gateway.\x1b[0m\n\n");
+  const env = options.env ?? process.env;
+  const platform = options.platform ?? process.platform;
+  const stdin = options.stdin ?? (process.stdin as TtyReadable);
+  const stderr = options.stderr ?? process.stderr;
+  const style = createStyle(stderr, env);
+
+  stderr.write("\n  LinkShell Login\n");
+  stderr.write(`  ${style.dim("Sign in with your iTool account to use the official gateway.")}\n\n`);
+
+  if (options.email !== undefined || options.passwordStdin) {
+    return runPasswordLogin(options);
+  }
+
+  const headless = isHeadlessSession(env, platform);
+  if (headless && !options.noBrowser && stdin.isTTY === true) {
+    const askLine =
+      options.readLine ??
+      ((prompt: string) => readPromptLine(prompt, { stdin, output: stderr }));
+    stderr.write("  Headless/SSH session detected (no local browser available).\n");
+    stderr.write("    1) Email & password (works directly over SSH)\n");
+    stderr.write("    2) Browser link (SSH port forward or paste callback URL)\n");
+    const choice = await askLine("  Choose sign-in method [1/2] (default 1): ");
+    if (choice === null) {
+      stderr.write("  Login cancelled.\n\n");
+      return null;
+    }
+    if (choice === "" || choice === "1" || choice.toLowerCase().startsWith("e")) {
+      return runPasswordLogin(options);
+    }
+    stderr.write("\n");
+  }
 
   return new Promise<LoginResult | null>((resolve) => {
     let timeout: ReturnType<typeof setTimeout> | undefined;
     let completion: ReturnType<typeof setTimeout> | undefined;
+    let rl: readline.Interface | undefined;
     let finished = false;
+    let completing = false;
     // Ends an account check still in flight, so a login that timed out or was cancelled never saves.
     const stopped = new AbortController();
     const finish = (result: LoginResult | null) => {
@@ -122,14 +314,22 @@ export async function runLogin(options: { signal?: AbortSignal } = {}): Promise<
       clearTimeout(timeout);
       clearTimeout(completion);
       options.signal?.removeEventListener("abort", abort);
+      try { rl?.close(); } catch {}
+      rl = undefined;
       server.closeAllConnections();
       server.close();
       resolve(result);
     };
     const abort = () => finish(null);
+
+    const announceSuccess = (result: LoginResult) => {
+      const planLabel = result.plan === "pro" ? style.green("LinkShell member") : "Free";
+      stderr.write(`  ${style.green("✓")} Logged in as ${result.email || result.userId} (${planLabel})\n\n`);
+    };
+
     const server = http.createServer(async (req, res) => {
       if (finished) { res.destroy(); return; }
-      const url = new URL(req.url ?? "/", "http://localhost");
+      const url = new URL(req.url ?? "/", "http://127.0.0.1");
 
       if (url.pathname === "/callback") {
         // Serve a page that extracts the hash fragment and sends it back
@@ -148,11 +348,18 @@ export async function runLogin(options: { signal?: AbortSignal } = {}): Promise<
           res.end("Missing tokens");
           return;
         }
+        if (completing) {
+          res.writeHead(409);
+          res.end("Login already in progress");
+          return;
+        }
+        completing = true;
 
         let result: LoginResult;
         try {
           result = await completeLogin({ accessToken, refreshToken, expiresIn }, { signal: stopped.signal });
         } catch {
+          completing = false;
           if (finished || options.signal?.aborted) { res.destroy(); return; }
           res.writeHead(401);
           res.end("无法验证账号，请重新登录。");
@@ -161,11 +368,7 @@ export async function runLogin(options: { signal?: AbortSignal } = {}): Promise<
 
         res.writeHead(200);
         res.end("ok");
-
-        const planLabel = result.plan === "pro" ? "\x1b[32mLinkShell member\x1b[0m" : "Free";
-        process.stderr.write(
-          `  \x1b[32m✓\x1b[0m Logged in as ${result.email || result.userId} (${planLabel})\n\n`,
-        );
+        announceSuccess(result);
 
         // Left pending, the five-minute limit would keep the command alive long after the login.
         clearTimeout(timeout);
@@ -184,29 +387,79 @@ export async function runLogin(options: { signal?: AbortSignal } = {}): Promise<
       if (finished) return;
       const addr = server.address();
       if (!addr || typeof addr === "string") {
-        process.stderr.write(
-          "  \x1b[31m✗\x1b[0m Failed to start local server\n\n",
-        );
+        stderr.write(`  ${style.red("✗")} Failed to start local server\n\n`);
         finish(null);
         return;
       }
 
       const port = addr.port;
-      const callbackUrl = `http://localhost:${port}/callback`;
+      // RFC 8252 §7.3: use IPv4 literal 127.0.0.1 so Linux IPv6 localhost (::1) never mismatches.
+      const callbackUrl = `http://127.0.0.1:${port}/callback`;
       const authUrl = `${ITOOL_AUTH_URL}?callback=${encodeURIComponent(callbackUrl)}`;
 
-      process.stderr.write("  Opening browser for login...\n");
-      process.stderr.write("  If the browser doesn't open, visit:\n");
-      process.stderr.write(`  ${authUrl}\n\n`);
+      if (!options.noBrowser && !headless) {
+        stderr.write("  Opening browser for login...\n");
+        stderr.write("  If the browser doesn't open, visit:\n");
+        stderr.write(`  ${authUrl}\n\n`);
+        openBrowserNonBlocking(authUrl, platform);
+      } else {
+        stderr.write("  Open this URL in any browser to sign in:\n");
+        stderr.write(`  ${authUrl}\n\n`);
+        if (isSshSession(env)) {
+          stderr.write("  Over SSH, forward the callback port from your local machine:\n");
+          stderr.write(`    ${formatSshTunnelHint(port, env)}\n\n`);
+        }
+        stderr.write(`  ${style.dim("Tip: you can also sign in directly without a browser using `linkshell login --email`.")}\n\n`);
+      }
 
-      try {
-        if (process.platform === "win32") execFileSync("rundll32.exe", ["url.dll,FileProtocolHandler", authUrl], { windowsHide: true, stdio: "ignore" });
-        else execFileSync(process.platform === "darwin" ? "open" : "xdg-open", [authUrl], { stdio: "ignore" });
-      } catch {}
+      // When interactive, also let the user paste the redirected callback URL directly into the terminal.
+      if (stdin.isTTY === true || options.stdin !== undefined) {
+        stderr.write(`  ${style.dim("Or paste the redirected callback URL here (Ctrl-C to cancel):")}\n`);
+        rl = readline.createInterface({ input: stdin, output: stderr, terminal: stdin.isTTY === true });
+        rl.on("SIGINT", () => {
+          stderr.write("\n  Login cancelled.\n\n");
+          finish(null);
+        });
+        rl.on("line", (line) => {
+          if (finished || completing) return;
+          const trimmed = line.trim();
+          if (!trimmed) return;
+          const parsed = parseCallbackInput(trimmed);
+          if (!parsed) {
+            stderr.write(`  ${style.yellow("!")} Could not find sign-in tokens in that input. Paste the full redirected callback URL, or press Ctrl-C to cancel.\n`);
+            return;
+          }
+          if (parsed.kind === "error") {
+            stderr.write(`  ${style.red("✗")} Sign-in error: ${parsed.message}\n`);
+            return;
+          }
+          if (parsed.kind === "code") {
+            stderr.write(
+              `  ${style.yellow("!")} Received an authorization code without tokens. Complete the redirect through an SSH tunnel, or sign in with \`linkshell login --email\`.\n`,
+            );
+            return;
+          }
+          completing = true;
+          void completeLogin(
+            { accessToken: parsed.accessToken, refreshToken: parsed.refreshToken, expiresIn: parsed.expiresIn },
+            { signal: stopped.signal },
+          ).then(
+            (result) => {
+              announceSuccess(result);
+              finish(result);
+            },
+            (error: unknown) => {
+              completing = false;
+              if (finished) return;
+              stderr.write(`  ${style.red("✗")} Could not verify pasted credentials: ${error instanceof Error ? error.message : String(error)}\n`);
+            },
+          );
+        });
+      }
 
       // Timeout after 5 minutes
       timeout = setTimeout(() => {
-        process.stderr.write("  Login timed out.\n\n");
+        stderr.write("  Login timed out.\n\n");
         finish(null);
       }, 5 * 60 * 1000);
     });

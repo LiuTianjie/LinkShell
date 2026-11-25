@@ -52,6 +52,11 @@ final class WatchDirectClient: ObservableObject {
   /// When each session's state was last confirmed by the host (a pushed summary or a full list).
   private var lastSummaryAt: [String: Date] = [:]
   private var refreshNumber = 0
+  private var inactive = false
+  private var lastRefreshAt = Date.distantPast
+
+  private static let activePollIntervalNs: UInt64 = 30_000_000_000
+  private static let inactivePollIntervalNs: UInt64 = 90_000_000_000
 
   init() {
     do { account = try WatchAccount(); email = account?.session?.email }
@@ -59,6 +64,15 @@ final class WatchDirectClient: ObservableObject {
   }
   var selectedKey: String { guard let gateway, let machine else { return "" }; return WatchSnapshotBuilder.computerKey(gateway: gateway, machine: machine) }
   var signedIn: Bool { account?.session != nil }
+
+  func setInactive(_ value: Bool) {
+    let wasInactive = inactive
+    inactive = value
+    // Returning from wrist-down dim: catch up once if we skipped polling for > 30s.
+    if wasInactive && !value && online && Date().timeIntervalSince(lastRefreshAt) >= 30 {
+      Task { [weak self] in try? await self?.refresh() }
+    }
+  }
 
   func start() {
     guard !active || relay == nil else { return }
@@ -159,7 +173,9 @@ final class WatchDirectClient: ObservableObject {
           if name == "presence" || name == "machines.changed" {
             Task { try? await self.reloadMachines(epoch: epoch) }
           } else if name == "undeliverable", data["to"] as? String == self.machine?.id {
-            self.closeTunnel(); self.status = "电脑暂时离线"; self.publish()
+            // Schedule recovery via tunnelFailed instead of permanently wedging in offline state
+            // if a transient blip or missed presence event dropped a frame.
+            self.tunnelFailed("电脑暂时离线，正在重试", notifyHost: false)
           }
         }
         next.onClosed = { [weak self] error in
@@ -319,11 +335,16 @@ final class WatchDirectClient: ObservableObject {
             self.projects = projectList?["projects"] as? [[String: Any]] ?? []
             var restored = false
             while !Task.isCancelled && self.opening?.channel == expected && self.online {
-              try await self.refresh()
-              // A refresh answered end to end: the relay and the tunnel both work.
-              self.attempt = 0; self.tunnelFailures = 0
-              if !restored { restored = true; await self.restore(expected) }
-              try await Task.sleep(nanoseconds: 5_000_000_000)
+              if !restored || !self.inactive || Date().timeIntervalSince(self.lastRefreshAt) >= 90 {
+                try await self.refresh()
+                // A refresh answered end to end: the relay and the tunnel both work.
+                self.attempt = 0; self.tunnelFailures = 0
+                if !restored { restored = true; await self.restore(expected) }
+              }
+              // Host pushes real-time summaries over the tunnel; list RPCs only reconcile drift
+              // every 30s while active and throttle to 90s while wrist-down (.inactive).
+              let interval = self.inactive ? Self.inactivePollIntervalNs : Self.activePollIntervalNs
+              try await Task.sleep(nanoseconds: interval)
             }
           } catch {
             if !Task.isCancelled && self.opening?.channel == expected { self.tunnelFailed(error.localizedDescription, notifyHost: true) }
@@ -418,6 +439,7 @@ final class WatchDirectClient: ObservableObject {
     for (id, revision) in sessionRevisions where previousSessions[id] != revision { nextSessions[id] = sessions[id] }
     for (id, revision) in terminalRevisions where previousTerminals[id] != revision { nextTerminals[id] = terminals[id] }
     let listed = Date()
+    lastRefreshAt = listed
     for id in nextSessions.keys where previousSessions[id] == sessionRevisions[id] { lastSummaryAt[id] = listed }
     sessions = nextSessions; terminals = nextTerminals
     publish()

@@ -168,7 +168,7 @@ export function WebRtcScreenStage({
       audio: initial.audioEnabled,
       hevc: codecChoice === "auto",
       match: matchResolution ? viewerScreenMatch() : undefined,
-      relayed: false,
+      relayed: streams.path !== "direct",
       videoTrack: transportMode !== "compat",
       video,
       canvas,
@@ -222,6 +222,22 @@ export function WebRtcScreenStage({
   useEffect(() => {
     receiverRef.current?.setAudio(audioEnabled);
   }, [audioEnabled]);
+
+  // Release any held keys/mouse buttons when the window loses focus or hides so modifiers never stick.
+  useEffect(() => {
+    const onBlur = () => {
+      receiverRef.current?.releaseAll();
+    };
+    const onVisibility = () => {
+      if (document.hidden) receiverRef.current?.releaseAll();
+    };
+    window.addEventListener("blur", onBlur);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("blur", onBlur);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
 
   // Report structured status upward to unified RemoteScreenWorkspace chrome.
   useEffect(() => {
@@ -428,6 +444,24 @@ export function WebRtcScreenStage({
       ref={viewportRef}
       data-stage-engine="webrtc"
       className="ls-screen-stage-viewport"
+      onPointerMoveCapture={() => {
+        if (active) receiverRef.current?.used();
+      }}
+      onPointerDownCapture={() => {
+        if (active) {
+          receiverRef.current?.used();
+          receiverRef.current?.unlockAudio();
+        }
+      }}
+      onWheelCapture={() => {
+        if (active) receiverRef.current?.used();
+      }}
+      onKeyDownCapture={() => {
+        if (active) {
+          receiverRef.current?.used();
+          receiverRef.current?.unlockAudio();
+        }
+      }}
     >
       <div
         ref={frameRef}
@@ -486,7 +520,7 @@ export function WebRtcScreenStage({
         }}
         onCompositionEnd={(event) => {
           composingRef.current = false;
-          const committed = event.data;
+          const committed = event.data || event.currentTarget.value;
           if (committed && canInput) {
             receiverRef.current?.input(textInput(committed));
           }

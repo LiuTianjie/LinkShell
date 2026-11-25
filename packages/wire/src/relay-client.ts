@@ -17,8 +17,10 @@ import {
 
 export interface RelaySocket {
   readonly readyState: number;
+  readonly bufferedAmount?: number;
   send(data: string): void;
   close(code?: number, reason?: string): void;
+  terminate?: () => void;
   onopen: ((event: unknown) => void) | null;
   onmessage: ((event: { data: unknown }) => void) | null;
   onclose: ((event: { code?: number; reason?: string }) => void) | null;
@@ -44,9 +46,9 @@ export interface RelayClientOptions {
   maxBackoffMs?: number;
   requestTimeoutMs?: number;
   /**
-   * How often to ping the gateway while online (default 15 s; 0 disables). A connection that
-   * hears nothing for five of these is taken for dead: after a network change or a sleep the
-   * socket can look open for minutes while the gateway has long dropped it.
+   * How often to ping the gateway while online (default 10 s; 0 disables). A connection that
+   * hears nothing for 2.5× this interval (~25–30 s) is taken for dead: after a network change
+   * or a sleep the socket can look open for minutes while the gateway has long dropped it.
    */
   pingMs?: number;
 }
@@ -56,6 +58,7 @@ const LASTING_ERRORS = new Set(["bad_identity", "accounts_disabled", "not_admitt
 const LASTING_RETRY_MS = 2 * 60_000;
 const HANDSHAKE_TIMEOUT_MS = 15_000;
 const STABLE_ONLINE_MS = 15_000;
+const CONNECT_STUCK_MS = 5_000;
 
 export class RelayRequestError extends Error {
   constructor(
@@ -73,6 +76,7 @@ export class RelayClient {
   private statusValue: RelayStatus = "offline";
   private attempt = 0;
   private replacedCount = 0;
+  private openedAt = 0;
   private onlineAt = 0;
   private timer?: ReturnType<typeof setTimeout>;
   private handshakeTimer?: ReturnType<typeof setTimeout>;
@@ -81,6 +85,7 @@ export class RelayClient {
   private probeTimer?: ReturnType<typeof setTimeout>;
   /** When the current socket last received anything. */
   private heardAt = 0;
+  private heardSeq = 0;
   private nextId = 1;
   private readonly pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
   private readonly statusListeners = new Set<(status: RelayStatus, error?: { code: string; message: string }) => void>();
@@ -100,6 +105,11 @@ export class RelayClient {
 
   get identity(): PublicIdentity {
     return publicIdentity(this.options.identity);
+  }
+
+  /** Unflushed bytes queued on the underlying WebSocket, for upstream backpressure. */
+  get bufferedAmount(): number {
+    return this.socket?.bufferedAmount ?? 0;
   }
 
   onStatus(listener: (status: RelayStatus, error?: { code: string; message: string }) => void): () => void {
@@ -145,9 +155,28 @@ export class RelayClient {
     for (const wake of this.waiters) wake();
   }
 
-  /** Reconnect now instead of waiting out the backoff (app foregrounded, network back). */
-  reconnectNow(): void {
-    if (this.statusValue === "stopped" || this.statusValue === "online" || this.statusValue === "connecting") return;
+  /**
+   * Reconnect now instead of waiting out the backoff (app foregrounded, network back).
+   * With `{ force: true }`, drops an active or half-open socket and redials immediately;
+   * without `force`, probes an online socket and replaces a hung connecting socket.
+   */
+  reconnectNow(options?: { force?: boolean }): void {
+    if (this.statusValue === "stopped") return;
+    if (options?.force) {
+      this.replaceAndOpen("reconnecting");
+      return;
+    }
+    if (this.statusValue === "online") {
+      // A half-open socket still reports "online"; probe immediately so it drops fast if dead.
+      this.probe();
+      return;
+    }
+    if (this.statusValue === "connecting") {
+      if (!this.socket || Date.now() - this.openedAt >= CONNECT_STUCK_MS) {
+        this.replaceAndOpen("connect stalled");
+      }
+      return;
+    }
     clearTimeout(this.timer);
     this.attempt = 0;
     this.replacedCount = 0;
@@ -161,11 +190,14 @@ export class RelayClient {
   probe(timeoutMs = 8000): void {
     if (this.statusValue !== "online" || !this.socket || this.probeTimer) return;
     const socket = this.socket;
-    const since = Date.now();
-    this.sendFrame({ t: "ping" });
+    const seen = this.heardSeq;
+    if (!this.sendFrame({ t: "ping" })) {
+      this.drop(socket, "网关没有响应");
+      return;
+    }
     this.probeTimer = setTimeout(() => {
       this.probeTimer = undefined;
-      if (this.socket === socket && this.heardAt < since) this.drop(socket, "网关没有响应");
+      if (this.socket === socket && this.heardSeq === seen) this.drop(socket, "网关没有响应");
     }, timeoutMs);
   }
 
@@ -211,7 +243,11 @@ export class RelayClient {
         reject(new RelayRequestError("timeout", `网关没有及时响应（${method}）`));
       }, limit);
       this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject, timer });
-      this.sendFrame({ t: "req", id, method, params });
+      if (!this.sendFrame({ t: "req", id, method, params })) {
+        clearTimeout(timer);
+        this.pending.delete(id);
+        reject(new RelayRequestError("offline", "与网关的连接断开了"));
+      }
     });
   }
 
@@ -225,8 +261,36 @@ export class RelayClient {
 
   private sendFrame(frame: ClientFrame): boolean {
     if (!this.socket || this.socket.readyState !== OPEN) return false;
-    this.socket.send(JSON.stringify(frame));
-    return true;
+    try {
+      this.socket.send(JSON.stringify(frame));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private replaceAndOpen(reason: string): void {
+    clearTimeout(this.timer);
+    this.clearHandshakeTimer();
+    this.clearStableTimer();
+    this.onlineAt = 0;
+    this.stopPinging();
+    const socket = this.socket;
+    this.socket = undefined;
+    if (socket) {
+      socket.onclose = null;
+      socket.onmessage = null;
+      try {
+        if (typeof socket.terminate === "function") socket.terminate();
+        else socket.close(4002, reason);
+      } catch {
+        // Already closed.
+      }
+    }
+    this.failPending("与网关的连接断开了");
+    this.attempt = 0;
+    this.replacedCount = 0;
+    this.open();
   }
 
   private setStatus(status: RelayStatus, error?: { code: string; message: string }): void {
@@ -256,7 +320,9 @@ export class RelayClient {
       return;
     }
     this.socket = socket;
-    this.heardAt = Date.now();
+    const now = Date.now();
+    this.openedAt = now;
+    this.heardAt = now;
     this.clearHandshakeTimer();
     this.handshakeTimer = setTimeout(() => {
       this.handshakeTimer = undefined;
@@ -268,7 +334,8 @@ export class RelayClient {
       socket.onclose = null;
       socket.onmessage = null;
       try {
-        socket.close(4002, "handshake timeout");
+        if (typeof socket.terminate === "function") socket.terminate();
+        else socket.close(4002, "handshake timeout");
       } catch {
         // Already closed.
       }
@@ -279,6 +346,7 @@ export class RelayClient {
     socket.onmessage = (event) => {
       if (this.socket !== socket) return;
       this.heardAt = Date.now();
+      this.heardSeq += 1;
       let frame;
       try {
         const parsed = serverFrameSchema.safeParse(JSON.parse(String(event.data)));
@@ -380,7 +448,7 @@ export class RelayClient {
 
   private startPinging(socket: RelaySocket): void {
     this.stopPinging();
-    const every = this.options.pingMs ?? 15_000;
+    const every = this.options.pingMs ?? 10_000;
     if (every <= 0) return;
     let tickAt = Date.now();
     this.pinger = setInterval(() => {
@@ -390,14 +458,13 @@ export class RelayClient {
       // socket says, ask the gateway before trusting it.
       const slept = now - tickAt > every * 2;
       tickAt = now;
-      // Generous: while a gateway holds this connection back (a slow receiver) it reads none of
-      // it, pings included, for up to a minute. Sleeps and suspensions are caught sooner, above.
-      if (now - this.heardAt > every * 5) {
+      // Detect silent half-open TCP drops within ~25–30s (at default 10s ping cadence).
+      if (now - this.heardAt > every * 2.5) {
         this.drop(socket, "网关没有响应");
         return;
       }
       if (slept) this.probe();
-      else this.sendFrame({ t: "ping" });
+      else if (!this.sendFrame({ t: "ping" })) this.drop(socket, "网关没有响应");
     }, every);
   }
 

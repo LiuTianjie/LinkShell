@@ -43,6 +43,7 @@ import {
   EmptyState,
   LoadState,
   baseName,
+  dirName,
   messageOf,
   useConnection,
   useJob,
@@ -941,7 +942,7 @@ export function Files({
         {file && (
           <TimelineNavigation.Provider
             value={{
-              cwd: file.slice(0, file.lastIndexOf("/")) || "/",
+              cwd: dirName(file),
               open: (next, line) => void selectFile(next, line),
             }}
           >

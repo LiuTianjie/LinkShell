@@ -236,4 +236,119 @@ describe("Gateway HoL avoidance, machine replacement presence, and cleanup", () 
     });
     expect(() => store.checkpoint()).not.toThrow();
   });
+
+  it("runs PASSIVE WAL checkpoint during sweep even while peers are online, and terminates unresponsive backpressured sockets", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "lsh-hardening-"));
+    cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+
+    const gateway = new Gateway({
+      port: 0,
+      databasePath: join(dir, "relay.db"),
+      verifyToken: async () => ({ userId: "alice" }),
+      log: () => {},
+      maxBufferedBytes: 512,
+      backpressureTerminateMs: 25,
+    });
+    cleanups.push(() => gateway.stop());
+
+    const checkpointSpy = vi.spyOn(gateway.store, "checkpoint");
+    const machineId = createIdentity();
+    const deadDeviceId = createIdentity();
+    const machineSocket = await connectPeer(gateway, machineId, "machine", { token: "tok" });
+    const deadSocket = await connectPeer(gateway, deadDeviceId, "device", { token: "tok" });
+
+    // Sweep while peers are active must still run PASSIVE checkpoint once the interval elapses.
+    (gateway as unknown as { sweep: () => void }).sweep();
+    expect(checkpointSpy).toHaveBeenCalledWith("PASSIVE");
+
+    // Simulate a TCP-dead receiver whose close() never completes the closing handshake.
+    deadSocket.close = (code?: number, reason?: string) => {
+      deadSocket.closed.push({ code, reason });
+      // ReadyState stays CLOSING (2) and "close" is never emitted until terminate().
+      deadSocket.readyState = 2;
+    };
+    deadSocket.bufferedAmount = 1024;
+    machineSocket.receive({ t: "to", to: deadDeviceId.id, d: "payload" });
+
+    expect(deadSocket.closed).toEqual([{ code: 1013, reason: "backpressure" }]);
+    await vi.waitFor(() => {
+      expect(deadSocket.terminate).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("immediately rejects pending pair.claim when the target host drops instead of hanging 30s", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "lsh-claim-drop-"));
+    cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+
+    const gateway = new Gateway({
+      port: 0,
+      databasePath: join(dir, "relay.db"),
+      log: () => {},
+    });
+    cleanups.push(() => gateway.stop());
+
+    const machineId = createIdentity();
+    const deviceId = createIdentity();
+    const machineSocket = await connectPeer(gateway, machineId, "machine");
+    const deviceSocket = await connectPeer(gateway, deviceId, "device");
+
+    machineSocket.receive({ t: "req", id: 1, method: "pair.offer", params: {} });
+    let code = "";
+    await vi.waitFor(() => {
+      const res = machineSocket.frames<{ t: string; id?: number; result?: { code: string } }>().find((f) => f.t === "res" && f.id === 1);
+      expect(res?.result?.code).toBeTruthy();
+      code = res!.result!.code;
+    });
+
+    // Start claim; machine receives pair.request then drops before deciding.
+    deviceSocket.receive({ t: "req", id: 2, method: "pair.claim", params: { code, proof: "p" } });
+    await vi.waitFor(() => {
+      expect(machineSocket.frames<{ t: string; name?: string }>().some((f) => f.t === "event" && f.name === "pair.request")).toBe(true);
+    });
+    machineSocket.close(1006, "dropped");
+
+    await vi.waitFor(() => {
+      const res = deviceSocket.frames<{ t: string; id?: number; error?: { code: string } }>().find((f) => f.t === "res" && f.id === 2);
+      expect(res?.error?.code).toBe("machine_offline");
+    });
+  });
+
+  it("selectively invalidates route cache on upsertPeer without wiping unaffected routes", () => {
+    const dir = mkdtempSync(join(tmpdir(), "lsh-routes-"));
+    cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+
+    const store = new GatewayStore(join(dir, "relay.db"));
+    cleanups.push(() => store.close());
+
+    const peer = (id: string, role: PeerRole, userId?: string) => ({
+      id,
+      role,
+      signKey: `s-${id}`,
+      boxKey: `b-${id}`,
+      name: id,
+      userId,
+      lastSeen: Date.now(),
+    });
+    store.upsertPeer(peer("m1", "machine", "u1"));
+    store.upsertPeer(peer("d1", "device", "u1"));
+    store.upsertPeer(peer("m2", "machine", "u2"));
+    store.upsertPeer(peer("d2", "device", "u2"));
+
+    expect(store.route("m1", "d1")).toBe("account");
+    expect(store.route("m2", "d2")).toBe("account");
+
+    const routes = (store as unknown as { routes: Map<string, unknown> }).routes;
+    expect(routes.size).toBe(2);
+
+    // Reconnecting m1 with the same userId (only name/lastSeen changed) must preserve all cached routes.
+    store.upsertPeer({ ...peer("m1", "machine", "u1"), name: "Mac Renamed" });
+    expect(routes.size).toBe(2);
+
+    // Changing m1's userId invalidates only m1's routes and leaves m2->d2 cached.
+    store.upsertPeer(peer("m1", "machine", "u3"));
+    expect(routes.has("m1\nd1")).toBe(false);
+    expect(routes.has("m2\nd2")).toBe(true);
+    expect(store.route("m1", "d1")).toBeUndefined();
+    expect(store.route("m2", "d2")).toBe("account");
+  });
 });

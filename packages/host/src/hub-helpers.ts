@@ -19,6 +19,8 @@ export interface Subscriber {
   notice?(notice: SessionNotice): void;
   /** The backlog that follows starts after `startSeq`, not where the subscriber left off. */
   window?(startSeq: number): void;
+  /** Underlying transport write buffer bytes, used to pace large backlog replays. */
+  bufferedAmount?: () => number;
 }
 
 /**
@@ -117,6 +119,8 @@ export type PermissionUpdate = Extract<SessionUpdate, { sessionUpdate: "ls_permi
 
 export interface LiveSession {
   attached: boolean;
+  /** True whenever `driver.attach()` succeeded, even for archived sessions where `attached` stays false. */
+  driverAttached?: boolean;
   attaching?: Promise<void>;
   /** Being detached because nobody had it open (see `detachWhenIdle`); attaching waits for it. */
   detaching?: Promise<void>;
@@ -127,6 +131,10 @@ export interface LiveSession {
   messageText: Map<string, string>;
   permissions: Map<string, PermissionUpdate>;
   turnActive: boolean;
+  /** Incremented whenever an `ls_turn` event commits for the root session. */
+  turnSeq?: number;
+  /** Incremented whenever an `ls_notice` event commits for the root session. */
+  noticeSeq?: number;
   /** What the running turn is doing, for list rows (never persisted). */
   activity?: SessionActivity;
   /** Messages the driver holds until the turn ends (never persisted). */
@@ -214,7 +222,8 @@ export function collectTaskOutput(
   for (const event of task.toolCallId ? store.toolEvents(sessionId, task.toolCallId) : []) {
     const update = event.update;
     if (update.sessionUpdate !== "tool_call" && update.sessionUpdate !== "tool_call_update") continue;
-    if (update.sessionUpdate === "tool_call_update" && update.appendOutput) text += update.appendOutput;
+    if (update.sessionUpdate === "tool_call_update" && update.replaceOutput !== undefined) text = update.replaceOutput;
+    else if (update.sessionUpdate === "tool_call_update" && update.appendOutput) text += update.appendOutput;
     const whole = update.content?.flatMap((block) => block.type === "content" && block.content.type === "text" ? [block.content.text] : []).join("\n");
     if (whole) text = whole;
     const aggregate = update.sessionUpdate === "tool_call_update" ? (update.rawOutput as { aggregatedOutput?: unknown } | undefined)?.aggregatedOutput : undefined;

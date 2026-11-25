@@ -8,7 +8,8 @@ import {
   type WatchSnapshot,
 } from "@linkshell/wire";
 import { requireNativeView, requireOptionalNativeModule } from "expo";
-import { Platform, type NativeSyntheticEvent, type ViewProps } from "react-native";
+import { useEffect, useRef } from "react";
+import { Platform, View, type LayoutChangeEvent, type NativeSyntheticEvent, type ViewProps } from "react-native";
 
 export interface DivisionRegion {
   x: number;
@@ -106,16 +107,28 @@ export interface NativeWatchStatus {
   paired: boolean;
   installed: boolean;
   reachable: boolean;
+  /** True when the Apple Watch is running in standalone independent mode (no companion streaming needed). */
+  independent?: boolean;
+}
+
+export interface NativeNetworkPathEvent {
+  status: "satisfied" | "unsatisfied" | "requiresConnection" | string;
+  interface: "wifi" | "cellular" | "wired" | "other" | "none" | string;
+  isExpensive?: boolean;
+  isConstrained?: boolean;
 }
 
 interface NativeLayoutModuleType {
   requestLandscape?: () => Promise<void>;
   clearOrientationRequest?: () => Promise<void>;
+  requestAndroidLayoutMetrics?: () => Promise<LayoutMetrics | null>;
   startSpeech?: (localeId?: string | null) => Promise<{ ok: boolean; reason?: string }>;
   stopSpeech?: () => Promise<{ text: string } | void>;
   cancelSpeech?: () => Promise<void>;
   speakText?: (text: string, localeId?: string | null) => Promise<void>;
   stopSpeaking?: () => Promise<void>;
+  areNotificationsEnabled?: () => Promise<boolean>;
+  ensureNotificationPermission?: () => Promise<boolean>;
   syncStatusNotification?: (payload: AndroidStatusNotificationPayload) => Promise<boolean>;
   cancelStatusNotification?: () => Promise<void>;
   pendingNotificationActionId?: () => Promise<string | null>;
@@ -187,6 +200,16 @@ export function stopNativeSpeaking(): Promise<void> {
   return nativeLayout?.stopSpeaking?.() ?? Promise.resolve();
 }
 
+export function areNativeNotificationsEnabled(): Promise<boolean> {
+  if (Platform.OS !== "android") return Promise.resolve(true);
+  return nativeLayout?.areNotificationsEnabled?.() ?? Promise.resolve(true);
+}
+
+export function ensureNativeNotificationPermission(): Promise<boolean> {
+  if (Platform.OS !== "android") return Promise.resolve(true);
+  return nativeLayout?.ensureNotificationPermission?.() ?? Promise.resolve(true);
+}
+
 export function syncNativeAndroidStatusNotification(payload: AndroidStatusNotificationPayload): Promise<boolean> {
   if (Platform.OS !== "android") return Promise.resolve(false);
   return nativeLayout?.syncStatusNotification?.(payload) ?? Promise.resolve(false);
@@ -195,6 +218,16 @@ export function syncNativeAndroidStatusNotification(payload: AndroidStatusNotifi
 export function cancelNativeAndroidStatusNotification(): Promise<void> {
   if (Platform.OS !== "android") return Promise.resolve();
   return nativeLayout?.cancelStatusNotification?.() ?? Promise.resolve();
+}
+
+export function subscribeNativeNetworkPathChange(listener: (event: NativeNetworkPathEvent) => void): () => void {
+  if (Platform.OS !== "android" || !nativeLayout?.addListener) return () => {};
+  try {
+    const sub = nativeLayout.addListener("onNetworkPathChange", listener);
+    return () => sub.remove();
+  } catch {
+    return () => {};
+  }
 }
 
 export function pendingNativeNotificationActionId(): Promise<string | null> {
@@ -223,16 +256,32 @@ export function cancelNativeLocalApprovalNotification(id: string): Promise<void>
   return nativeLayout?.cancelLocalApprovalNotification?.(id) ?? Promise.resolve();
 }
 
+let lanDiscoveryDesired = false;
+
 export function hasNativeLanDiscovery(): boolean {
   return typeof nativeLayout?.startLanDiscovery === "function";
 }
 
 export function startNativeLanDiscovery(): Promise<boolean> {
+  lanDiscoveryDesired = true;
   return nativeLayout?.startLanDiscovery?.() ?? Promise.resolve(false);
 }
 
 export function stopNativeLanDiscovery(): Promise<void> {
+  lanDiscoveryDesired = false;
   return nativeLayout?.stopLanDiscovery?.() ?? Promise.resolve();
+}
+
+/** Restarts active mDNS browsing cleanly after Wi-Fi / 5G network path transitions. */
+export async function restartNativeLanDiscovery(): Promise<boolean> {
+  if (!lanDiscoveryDesired || !nativeLayout?.startLanDiscovery) return false;
+  try {
+    await nativeLayout.stopLanDiscovery?.();
+  } catch {
+    // Continue restart even if stopping an already-failed browser threw.
+  }
+  if (!lanDiscoveryDesired) return false;
+  return nativeLayout.startLanDiscovery().catch(() => false);
 }
 
 export function getNativeLanHosts(): Promise<DiscoveredLanHost[]> {
@@ -518,6 +567,146 @@ export function subscribeNativeWatchStatus(listener: (status: NativeWatchStatus)
   }
 }
 
+function adaptAndroidWindowMetrics(
+  windowMetrics: LayoutMetrics,
+  bounds: { x: number; y: number; width: number; height: number } | null,
+  revision: string,
+): LayoutMetrics {
+  if (!bounds || bounds.width <= 0 || bounds.height <= 0) {
+    return { ...windowMetrics, revision };
+  }
+  const winW = windowMetrics.width > 0 ? windowMetrics.width : bounds.width;
+  const winH = windowMetrics.height > 0 ? windowMetrics.height : bounds.height;
+  const { x, y, width, height } = bounds;
+  const insets = {
+    top: Math.max(0, windowMetrics.insets.top - Math.max(0, y)),
+    left: Math.max(0, windowMetrics.insets.left - Math.max(0, x)),
+    right: Math.max(0, windowMetrics.insets.right - Math.max(0, winW - (x + width))),
+    bottom: Math.max(0, windowMetrics.insets.bottom - Math.max(0, winH - (y + height))),
+  };
+  const divisions: DivisionRegion[] = [];
+  for (const region of windowMetrics.divisions ?? []) {
+    const left = Math.max(0, region.x - x);
+    const top = Math.max(0, region.y - y);
+    const right = Math.min(width, region.x + region.width - x);
+    const bottom = Math.min(height, region.y + region.height - y);
+    if (right > left || bottom > top) {
+      divisions.push({
+        x: left,
+        y: top,
+        width: Math.max(0, right - left),
+        height: Math.max(0, bottom - top),
+        active: region.active,
+      });
+    }
+  }
+  return {
+    revision,
+    width,
+    height,
+    insets,
+    divisions,
+    occlusions: windowMetrics.occlusions ?? [],
+  };
+}
+
+function AndroidLayoutProbe({ onMetrics, revision }: { onMetrics: (metrics: LayoutMetrics) => void; revision: string }) {
+  const viewRef = useRef<View>(null);
+  const onMetricsRef = useRef(onMetrics);
+  onMetricsRef.current = onMetrics;
+  const revisionRef = useRef(revision);
+  revisionRef.current = revision;
+  const lastWindowMetricsRef = useRef<LayoutMetrics | null>(null);
+  const lastLayoutRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
+
+  const emitAdapted = (windowMetrics: LayoutMetrics | null) => {
+    if (!windowMetrics) return;
+    lastWindowMetricsRef.current = windowMetrics;
+    const node = viewRef.current;
+    if (node && typeof node.measureInWindow === "function") {
+      node.measureInWindow((wx, wy, width, height) => {
+        if (width > 0 && height > 0) {
+          lastLayoutRef.current = { x: wx, y: wy, width, height };
+        }
+        onMetricsRef.current(adaptAndroidWindowMetrics(windowMetrics, lastLayoutRef.current, revisionRef.current));
+      });
+      return;
+    }
+    onMetricsRef.current(adaptAndroidWindowMetrics(windowMetrics, lastLayoutRef.current, revisionRef.current));
+  };
+
+  useEffect(() => {
+    if (!nativeLayout?.addListener) return;
+    let disposed = false;
+    let sub: { remove: () => void } | undefined;
+    try {
+      sub = nativeLayout.addListener("onAndroidLayoutMetrics", (metrics: LayoutMetrics) => {
+        if (!disposed) emitAdapted(metrics);
+      });
+    } catch {
+      // Older Android binary without WindowInfoTracker events.
+    }
+    void nativeLayout.requestAndroidLayoutMetrics?.()
+      .then((metrics) => {
+        if (!disposed && metrics) emitAdapted(metrics);
+      })
+      .catch(() => {});
+    return () => {
+      disposed = true;
+      sub?.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (lastWindowMetricsRef.current) {
+      emitAdapted(lastWindowMetricsRef.current);
+    } else {
+      void nativeLayout?.requestAndroidLayoutMetrics?.()
+        .then((metrics) => {
+          if (metrics) emitAdapted(metrics);
+        })
+        .catch(() => {});
+    }
+  }, [revision]);
+
+  const handleLayout = (event: LayoutChangeEvent) => {
+    const { width, height } = event.nativeEvent.layout;
+    if (width <= 0 || height <= 0) return;
+    lastLayoutRef.current = {
+      x: lastLayoutRef.current?.x ?? 0,
+      y: lastLayoutRef.current?.y ?? 0,
+      width,
+      height,
+    };
+    if (lastWindowMetricsRef.current) {
+      emitAdapted(lastWindowMetricsRef.current);
+    }
+  };
+
+  return (
+    <View
+      ref={viewRef}
+      collapsable={false}
+      pointerEvents="none"
+      style={{ position: "absolute", inset: 0 }}
+      onLayout={handleLayout}
+    />
+  );
+}
+
 export function LayoutProbe({ onMetrics, revision = "" }: { onMetrics: (metrics: LayoutMetrics) => void; revision?: string }) {
-  return NativeProbe ? <NativeProbe revision={revision} pointerEvents="none" style={{ position: "absolute", inset: 0 }} onMetrics={(event) => onMetrics(event.nativeEvent)} /> : null;
+  if (NativeProbe) {
+    return (
+      <NativeProbe
+        revision={revision}
+        pointerEvents="none"
+        style={{ position: "absolute", inset: 0 }}
+        onMetrics={(event) => onMetrics(event.nativeEvent)}
+      />
+    );
+  }
+  if (Platform.OS === "android" && nativeLayout) {
+    return <AndroidLayoutProbe onMetrics={onMetrics} revision={revision} />;
+  }
+  return null;
 }

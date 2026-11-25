@@ -85,4 +85,16 @@ describe("switching to the installed host", () => {
     change(after);
     await expect(upgradeRunningHost("2.0.0")).rejects.toThrow(error);
   });
+
+  it("uses systemd/OS service restart instead of destroying supervision when managed by a user service", async () => {
+    const restartManagedService = vi.fn(async () => {
+      started = true;
+      return "restarted" as const;
+    });
+    vi.mocked(readPid).mockReturnValue(null);
+    await upgradeRunningHost("2.0.0", { restartManagedService });
+    expect(restartManagedService).toHaveBeenCalledWith("/isolated/home");
+    expect(stopDaemonAndWait).not.toHaveBeenCalled();
+    expect(ensureHostRunning).not.toHaveBeenCalled();
+  });
 });

@@ -33,23 +33,25 @@ function alive(pid: number): boolean {
   }
 }
 
-/** Running Claude processes that have `sessionId` open. */
-export function sessionHolders(configDir: string, sessionId: string): SessionHolder[] {
+/** Running Claude processes grouped by session id (single directory scan per watch tick). */
+export function allSessionHolders(configDir: string): Map<string, SessionHolder[]> {
   const dir = join(configDir, "sessions");
+  const bySession = new Map<string, SessionHolder[]>();
   let names: string[];
   try {
     names = readdirSync(dir);
   } catch {
-    return [];
+    return bySession;
   }
-  const holders: SessionHolder[] = [];
   for (const name of names) {
     if (!/^\d+\.json$/.test(name)) continue;
     try {
       const entry = JSON.parse(readFileSync(join(dir, name), "utf8")) as { pid?: unknown; sessionId?: unknown; entrypoint?: unknown; status?: unknown };
       const pid = typeof entry.pid === "number" ? entry.pid : Number(name.slice(0, -5));
-      if (entry.sessionId !== sessionId || !alive(pid)) continue;
-      holders.push({
+      if (typeof entry.sessionId !== "string" || !entry.sessionId || !alive(pid)) continue;
+      let list = bySession.get(entry.sessionId);
+      if (!list) bySession.set(entry.sessionId, (list = []));
+      list.push({
         pid,
         entrypoint: typeof entry.entrypoint === "string" ? entry.entrypoint : undefined,
         status: typeof entry.status === "string" ? entry.status : undefined,
@@ -58,7 +60,12 @@ export function sessionHolders(configDir: string, sessionId: string): SessionHol
       // Being written, or left behind by a crash: not a holder.
     }
   }
-  return holders;
+  return bySession;
+}
+
+/** Running Claude processes that have `sessionId` open. */
+export function sessionHolders(configDir: string, sessionId: string): SessionHolder[] {
+  return allSessionHolders(configDir).get(sessionId) ?? [];
 }
 
 /** True when `pid` was started (directly or not) by `ancestor`. */

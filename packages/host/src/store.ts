@@ -1,5 +1,6 @@
+import { chmodSync, existsSync } from "node:fs";
 import { DatabaseSync, type StatementSync } from "node:sqlite";
-import { basename } from "node:path";
+import { basename, dirname, join } from "node:path";
 import type {
   ProjectSummary,
   SessionDriver,
@@ -8,8 +9,11 @@ import type {
   SessionSummary,
   SessionUpdate,
 } from "@linkshell/wire";
+import { attachBlobStore, BlobStore } from "./blob-store.js";
+import { capStoredUpdate } from "./slim.js";
 
 const SCHEMA = `
+PRAGMA auto_vacuum = INCREMENTAL;
 PRAGMA journal_mode = WAL;
 PRAGMA synchronous = NORMAL;
 PRAGMA busy_timeout = 5000;
@@ -31,6 +35,8 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 CREATE INDEX IF NOT EXISTS sessions_by_updated ON sessions (updated_at DESC);
 CREATE INDEX IF NOT EXISTS sessions_by_updated_id ON sessions (updated_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS sessions_by_archived_state ON sessions (archived, state);
+CREATE INDEX IF NOT EXISTS sessions_by_agent ON sessions (agent);
 CREATE TABLE IF NOT EXISTS events (
   session_id TEXT NOT NULL,
   seq INTEGER NOT NULL,
@@ -50,6 +56,8 @@ CREATE TABLE IF NOT EXISTS event_meta (
   PRIMARY KEY (session_id, seq)
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS event_meta_by_kind ON event_meta (session_id, kind, seq);
+CREATE INDEX IF NOT EXISTS event_meta_by_kind_global ON event_meta (kind, session_id, seq)
+  WHERE kind IN ('usage_update', 'ls_permission', 'ls_permission_resolved', 'ls_goal');
 CREATE TABLE IF NOT EXISTS logged_items (
   session_id TEXT NOT NULL,
   item_id TEXT NOT NULL,
@@ -61,6 +69,7 @@ CREATE TABLE IF NOT EXISTS driver_state (
   value TEXT NOT NULL,
   PRIMARY KEY (session_id, key)
 ) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS driver_state_by_key_value ON driver_state (key, value);
 CREATE TABLE IF NOT EXISTS agent_state (
   agent TEXT NOT NULL,
   key TEXT NOT NULL,
@@ -73,6 +82,7 @@ CREATE TABLE IF NOT EXISTS client_messages (
   ts INTEGER NOT NULL,
   PRIMARY KEY (session_id, client_message_id)
 ) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS client_messages_by_ts ON client_messages (ts);
 CREATE TABLE IF NOT EXISTS removed_sessions (
   id TEXT PRIMARY KEY,
   ts INTEGER NOT NULL
@@ -317,25 +327,56 @@ interface PreparedStatements {
   hasBusySession: StatementSync;
 }
 
+function enforcePrivateDbPermissions(path: string): void {
+  if (process.platform === "win32" || !path || path === ":memory:") return;
+  for (const candidate of [path, `${path}-wal`, `${path}-shm`]) {
+    try {
+      if (existsSync(candidate)) chmodSync(candidate, 0o600);
+    } catch {
+      // Best-effort on restricted or virtual filesystems.
+    }
+  }
+}
+
 /**
  * Durable host state: session summaries plus one append-only event log per
  * session. Every update a client sees gets a per-session `seq`, so a client
  * that reconnects asks for "everything after seq N" and gets exactly that.
  */
 export class HostStore {
+  readonly blobs: BlobStore;
+  private readonly path: string;
   private readonly db: DatabaseSync;
   private readonly stmts: PreparedStatements;
   private closed = false;
 
-  constructor(path: string) {
+  constructor(path: string, options?: { blobsDir?: string; maxBlobBytes?: number }) {
+    this.path = path;
+    const blobsDir = options?.blobsDir ?? (path && path !== ":memory:" ? join(dirname(path), "blobs") : undefined);
+    this.blobs = new BlobStore(blobsDir, options?.maxBlobBytes !== undefined ? { maxBytes: options.maxBlobBytes } : undefined);
     this.db = new DatabaseSync(path);
     this.db.exec(SCHEMA);
     this.migrate();
+    enforcePrivateDbPermissions(path);
     this.stmts = this.prepareStatements();
   }
 
   get isClosed(): boolean {
     return this.closed;
+  }
+
+  /** Runs `fn` inside a single SQLite write transaction (no-op wrapper if already inside one). */
+  transaction<T>(fn: () => T): T {
+    if (this.closed || this.db.isTransaction) return fn();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const result = fn();
+      this.db.exec("COMMIT");
+      return result;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   /** Columns added after the first release. */
@@ -352,9 +393,15 @@ export class HostStore {
     }
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS sessions_by_updated_id ON sessions (updated_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS sessions_by_archived_state ON sessions (archived, state);
+      CREATE INDEX IF NOT EXISTS sessions_by_agent ON sessions (agent);
+      CREATE INDEX IF NOT EXISTS driver_state_by_key_value ON driver_state (key, value);
+      CREATE INDEX IF NOT EXISTS client_messages_by_ts ON client_messages (ts);
       CREATE INDEX IF NOT EXISTS event_meta_by_tool ON event_meta (session_id, tool, seq) WHERE tool IS NOT NULL;
       CREATE INDEX IF NOT EXISTS event_meta_by_parent ON event_meta (session_id, parent, seq) WHERE parent IS NOT NULL;
       CREATE INDEX IF NOT EXISTS event_meta_spawns ON event_meta (session_id, seq) WHERE spawns = 1;
+      CREATE INDEX IF NOT EXISTS event_meta_by_kind_global ON event_meta (kind, session_id, seq)
+        WHERE kind IN ('usage_update', 'ls_permission', 'ls_permission_resolved', 'ls_goal');
     `);
     const { user_version: version } = this.db.prepare("PRAGMA user_version").get() as { user_version: number };
     if (version < 2) {
@@ -421,7 +468,7 @@ export class HostStore {
       ),
       sizeAfter: this.db.prepare(
         `SELECT COALESCE(SUM(NOT (kind IN (${STREAMED_SQL}) AND kind IS before_kind AND parent IS before_parent)), 0) AS events,
-                COALESCE(SUM(bytes), 0) + COUNT(*) * ? AS bytes
+                COALESCE(SUM(MIN(bytes, ?)), 0) + COUNT(*) * ? AS bytes
          FROM (SELECT kind, parent, bytes, LAG(kind) OVER (ORDER BY seq) AS before_kind, LAG(parent) OVER (ORDER BY seq) AS before_parent
                FROM event_meta WHERE session_id = ? AND seq > ?)`,
       ),
@@ -615,6 +662,7 @@ export class HostStore {
     if (this.closed) return;
     this.closed = true;
     this.db.close();
+    enforcePrivateDbPermissions(this.path);
   }
 
   // ── terminals ─────────────────────────────────────────────────────
@@ -937,6 +985,7 @@ export class HostStore {
    */
   appendEvent(sessionId: string, update: SessionUpdate, ts = Date.now(), activity = true): SessionEvent {
     if (this.closed) return { sessionId, seq: 1, ts, update };
+    const stored = attachBlobStore(capStoredUpdate(this.blobs.externalizeUpdate(update)), this.blobs);
     const inOuterTx = this.db.isTransaction;
     if (!inOuterTx) this.db.exec("BEGIN IMMEDIATE");
     try {
@@ -945,19 +994,19 @@ export class HostStore {
         | undefined;
       if (!row) throw new Error(`unknown session ${sessionId}`);
       const seq = row.last_seq + 1;
-      const body = JSON.stringify(update);
+      const body = JSON.stringify(stored);
       this.stmts.insertEvent.run(sessionId, seq, ts, body);
-      const fields = update as { toolCallId?: string; parentToolCallId?: string };
-      const userMessage = update.sessionUpdate === "user_message_chunk" || update.sessionUpdate === "ls_message" && update.role === "user" && !update.parentToolCallId;
-      const messageKey = userMessage && update.messageId ? `ls:user-present:${update.messageId}` : undefined;
-      const newUser = userMessage && (update.sessionUpdate === "user_message_chunk" || !messageKey || !this.isItemLogged(sessionId, messageKey));
-      const opensTurn = newUser || (update.sessionUpdate === "ls_turn" && update.state === "started" && !fields.parentToolCallId);
+      const fields = stored as { toolCallId?: string; parentToolCallId?: string };
+      const userMessage = stored.sessionUpdate === "user_message_chunk" || stored.sessionUpdate === "ls_message" && stored.role === "user" && !stored.parentToolCallId;
+      const messageKey = userMessage && stored.messageId ? `ls:user-present:${stored.messageId}` : undefined;
+      const newUser = userMessage && (stored.sessionUpdate === "user_message_chunk" || !messageKey || !this.isItemLogged(sessionId, messageKey));
+      const opensTurn = newUser || (stored.sessionUpdate === "ls_turn" && stored.state === "started" && !fields.parentToolCallId);
       if (messageKey) this.markItemLogged(sessionId, messageKey);
-      const spawns = update.sessionUpdate === "tool_call" && update.detail?.type === "subagent" && (update.detail.action ?? "spawn") === "spawn";
+      const spawns = stored.sessionUpdate === "tool_call" && stored.detail?.type === "subagent" && (stored.detail.action ?? "spawn") === "spawn";
       this.stmts.insertEventMeta.run(
         sessionId,
         seq,
-        update.sessionUpdate,
+        stored.sessionUpdate,
         Buffer.byteLength(body),
         opensTurn ? 1 : 0,
         fields.toolCallId ?? null,
@@ -966,7 +1015,7 @@ export class HostStore {
       );
       this.stmts.updateSessionSeq.run(seq, activity ? ts : 0, sessionId);
       if (!inOuterTx) this.db.exec("COMMIT");
-      return { sessionId, seq, ts, update };
+      return { sessionId, seq, ts, update: stored };
     } catch (error) {
       if (!inOuterTx) this.db.exec("ROLLBACK");
       throw error;
@@ -977,7 +1026,12 @@ export class HostStore {
   readEvents(sessionId: string, afterSeq: number, limit = 5000, upToSeq = Number.MAX_SAFE_INTEGER): SessionEvent[] {
     if (this.closed) return [];
     const rows = this.stmts.readEvents.all(sessionId, afterSeq, upToSeq, limit) as { seq: number; ts: number; body: string }[];
-    return rows.map((row) => ({ sessionId, seq: row.seq, ts: row.ts, update: JSON.parse(row.body) as SessionUpdate }));
+    return rows.map((row) => ({
+      sessionId,
+      seq: row.seq,
+      ts: row.ts,
+      update: attachBlobStore(JSON.parse(row.body) as SessionUpdate, this.blobs),
+    }));
   }
 
   readEvent(sessionId: string, seq: number): SessionEvent | undefined {
@@ -987,7 +1041,7 @@ export class HostStore {
   /** How much was logged after `afterSeq`, counted as a page is (see `PageBudget`). */
   sizeAfter(sessionId: string, afterSeq: number, page: PageBudget = PAGE): { events: number; bytes: number } {
     if (this.closed) return { events: 0, bytes: 0 };
-    return this.stmts.sizeAfter.get(page.eventOverhead, sessionId, afterSeq) as { events: number; bytes: number };
+    return this.stmts.sizeAfter.get(page.eventBytes, page.eventOverhead, sessionId, afterSeq) as { events: number; bytes: number };
   }
 
   /**
@@ -1093,7 +1147,12 @@ export class HostStore {
       .prepare(`SELECT e.seq, e.ts, e.body FROM event_meta m JOIN events e ON e.session_id = m.session_id AND e.seq = m.seq WHERE ${where}`)
       .all(...values) as { seq: number; ts: number; body: string }[];
     const sessionId = String(values[0]);
-    return rows.map((row) => ({ sessionId, seq: row.seq, ts: row.ts, update: JSON.parse(row.body) as SessionUpdate }));
+    return rows.map((row) => ({
+      sessionId,
+      seq: row.seq,
+      ts: row.ts,
+      update: attachBlobStore(JSON.parse(row.body) as SessionUpdate, this.blobs),
+    }));
   }
 
   /** Read numeric usage only; include earlier counters to establish cumulative baselines. */
@@ -1121,7 +1180,12 @@ export class HostStore {
          WHERE m.session_id = ? AND m.kind = ? AND m.seq <= ? ORDER BY m.seq DESC LIMIT ?`,
       )
       .all(sessionId, kind, seq, limit) as { seq: number; ts: number; body: string }[];
-    return rows.map((row) => ({ sessionId, seq: row.seq, ts: row.ts, update: JSON.parse(row.body) as SessionUpdate }));
+    return rows.map((row) => ({
+      sessionId,
+      seq: row.seq,
+      ts: row.ts,
+      update: attachBlobStore(JSON.parse(row.body) as SessionUpdate, this.blobs),
+    }));
   }
 
   /** Marks a native item (message, tool call) as present in the log. Returns false if it already was. */
@@ -1188,10 +1252,26 @@ export class HostStore {
    */
   compactTurnChunks(
     sessionId: string,
-    options: { maxScanRows?: number } = {},
+    options: { maxScanRows?: number; maxBatches?: number } = {},
   ): { coalescedRuns: number; removedRows: number } {
     if (this.closed) return { coalescedRuns: 0, removedRows: 0 };
     const maxScanRows = Math.max(2, Math.trunc(options.maxScanRows ?? 5_000));
+    const maxBatches = Math.max(1, Math.trunc(options.maxBatches ?? (options.maxScanRows !== undefined ? 1 : 4)));
+    let totalCoalesced = 0;
+    let totalRemoved = 0;
+    for (let batch = 0; batch < maxBatches; batch++) {
+      const step = this.compactTurnChunksBatch(sessionId, maxScanRows);
+      totalCoalesced += step.coalescedRuns;
+      totalRemoved += step.removedRows;
+      if (!step.more) break;
+    }
+    return { coalescedRuns: totalCoalesced, removedRows: totalRemoved };
+  }
+
+  private compactTurnChunksBatch(
+    sessionId: string,
+    maxScanRows: number,
+  ): { coalescedRuns: number; removedRows: number; more: boolean } {
     const ended = this.db
       .prepare(
         `SELECT MAX(m.seq) AS seq FROM event_meta m
@@ -1203,7 +1283,7 @@ export class HostStore {
     const savedCursor = Number(this.getDriverState(sessionId, "compacted-seq") ?? 0);
     const afterSeq = Number.isSafeInteger(savedCursor) && savedCursor >= 0 ? savedCursor : 0;
     if (!maxEndedSeq || maxEndedSeq <= afterSeq) {
-      return { coalescedRuns: 0, removedRows: 0 };
+      return { coalescedRuns: 0, removedRows: 0, more: false };
     }
 
     const rows = this.db
@@ -1218,7 +1298,7 @@ export class HostStore {
       .all(sessionId, afterSeq, maxEndedSeq, maxScanRows) as { seq: number; kind: string; parent: string | null; body: string }[];
     if (rows.length === 0) {
       this.setDriverState(sessionId, "compacted-seq", String(maxEndedSeq));
-      return { coalescedRuns: 0, removedRows: 0 };
+      return { coalescedRuns: 0, removedRows: 0, more: false };
     }
 
     type ChunkUpdate = Extract<SessionUpdate, { sessionUpdate: "agent_message_chunk" | "agent_thought_chunk" }>;
@@ -1357,16 +1437,126 @@ export class HostStore {
       throw error;
     }
 
-    return { coalescedRuns: plans.length, removedRows };
+    const more = hitLimit && nextCursor < maxEndedSeq && (nextCursor > afterSeq || removedRows > 0);
+    return { coalescedRuns: plans.length, removedRows, more };
+  }
+
+  /**
+   * Compacts completed turns across cold and archived sessions that still have uncompacted chunks,
+   * bounded per call so maintenance never stalls the event loop.
+   */
+  compactPendingSessions(options: {
+    maxSessions?: number;
+    maxScanRows?: number;
+    maxBatchesPerSession?: number;
+    excludeIds?: ReadonlySet<string>;
+  } = {}): { sessionsCompacted: number; removedRows: number } {
+    if (this.closed) return { sessionsCompacted: 0, removedRows: 0 };
+    const maxSessions = Math.max(1, Math.trunc(options.maxSessions ?? 25));
+    const maxScanRows = Math.max(2, Math.trunc(options.maxScanRows ?? 5_000));
+    const maxBatches = Math.max(1, Math.trunc(options.maxBatchesPerSession ?? 4));
+    const candidates = this.db
+      .prepare(
+        `SELECT s.id
+         FROM sessions s
+         LEFT JOIN driver_state d ON d.session_id = s.id AND d.key = 'compacted-seq'
+         WHERE s.last_seq > COALESCE(CAST(d.value AS INTEGER), 0)
+           AND (s.archived = 1 OR s.state NOT IN ('running', 'waiting'))
+         ORDER BY s.archived DESC, s.updated_at ASC
+         LIMIT ?`,
+      )
+      .all(maxSessions * 2) as { id: string }[];
+    let sessionsCompacted = 0;
+    let removedRows = 0;
+    for (const { id } of candidates) {
+      if (sessionsCompacted >= maxSessions) break;
+      if (options.excludeIds?.has(id)) continue;
+      const result = this.compactTurnChunks(id, { maxScanRows, maxBatches });
+      sessionsCompacted++;
+      removedRows += result.removedRows;
+    }
+    return { sessionsCompacted, removedRows };
+  }
+
+  /**
+   * Slims heavy inline media and large `rawOutput`/`rawInput` payloads in archived sessions older
+   * than `maxAgeMs` (default `LINKSHELL_ARCHIVED_SLIM_DAYS` or 30 days) so legacy DBs shrink over time.
+   */
+  slimArchivedSessions(
+    now = Date.now(),
+    options: { maxAgeMs?: number; maxSessions?: number } = {},
+  ): { slimmedSessions: number; slimmedRows: number } {
+    if (this.closed) return { slimmedSessions: 0, slimmedRows: 0 };
+    const envDays = Number(process.env.LINKSHELL_ARCHIVED_SLIM_DAYS);
+    const defaultDays = Number.isFinite(envDays) && envDays > 0 ? envDays : 30;
+    const cutoff = now - (options.maxAgeMs ?? defaultDays * 24 * 60 * 60 * 1000);
+    const maxSessions = Math.max(1, Math.trunc(options.maxSessions ?? 10));
+    const sessions = this.db
+      .prepare(
+        `SELECT s.id FROM sessions s
+         WHERE s.archived = 1 AND s.updated_at < ?
+           AND NOT EXISTS (SELECT 1 FROM driver_state d WHERE d.session_id = s.id AND d.key = 'archived-slimmed' AND d.value = '1')
+         ORDER BY s.updated_at ASC
+         LIMIT ?`,
+      )
+      .all(cutoff, maxSessions) as { id: string }[];
+    if (sessions.length === 0) return { slimmedSessions: 0, slimmedRows: 0 };
+
+    const heavyRowsStmt = this.db.prepare(
+      `SELECT e.seq, e.body FROM event_meta m
+       JOIN events e ON e.session_id = m.session_id AND e.seq = m.seq
+       WHERE m.session_id = ? AND m.bytes > 16384
+       ORDER BY m.seq ASC`,
+    );
+    const updEvent = this.db.prepare("UPDATE events SET body = ? WHERE session_id = ? AND seq = ?");
+    const updMeta = this.db.prepare("UPDATE event_meta SET bytes = ? WHERE session_id = ? AND seq = ?");
+    let slimmedSessions = 0;
+    let slimmedRows = 0;
+
+    for (const { id } of sessions) {
+      const heavy = heavyRowsStmt.all(id) as { seq: number; body: string }[];
+      this.transaction(() => {
+        for (const row of heavy) {
+          let parsed: SessionUpdate;
+          try {
+            parsed = JSON.parse(row.body) as SessionUpdate;
+          } catch {
+            continue;
+          }
+          // Externalize any legacy inline images/blobs and drop heavy rawOutput/rawInput fields on old archived turns.
+          const externalized = this.blobs.externalizeUpdate(parsed);
+          let slimmed: SessionUpdate = capStoredUpdate(externalized);
+          if (slimmed.sessionUpdate === "tool_call" || slimmed.sessionUpdate === "tool_call_update") {
+            const rec = slimmed as Record<string, unknown>;
+            if (rec.rawOutput !== undefined || rec.rawInput !== undefined) {
+              const { rawOutput: _ro, rawInput: _ri, ...rest } = rec;
+              slimmed = rest as SessionUpdate;
+            }
+          }
+          const nextBody = JSON.stringify(slimmed);
+          if (nextBody.length < row.body.length) {
+            updEvent.run(nextBody, id, row.seq);
+            updMeta.run(Buffer.byteLength(nextBody, "utf8"), id, row.seq);
+            slimmedRows++;
+          }
+        }
+        this.setDriverState(id, "archived-slimmed", "1");
+      });
+      slimmedSessions++;
+    }
+    return { slimmedSessions, slimmedRows };
   }
 
   /**
    * Periodic database lifecycle pruning and WAL checkpoint:
    * - Prunes `terminal_frames` for exited terminals older than 7 days while keeping `terminal_snapshots`,
-   *   and trims any terminal's `terminal_frames` (even while `ended = 0`) to a sliding window of 8,192 frames.
+   *   and trims any terminal's `terminal_frames` (even while `ended = 0`) to a sliding window of 8,192 frames
+   *   without ever pruning past `terminal_snapshots.frame`.
    * - Prunes `client_messages` older than 30 days.
    * - Retains `removed_sessions` tombstones by count cap (default latest 50,000) so deleted sessions never resurrect.
-   * - Runs `PRAGMA wal_checkpoint(TRUNCATE)` when idle, or `PASSIVE` while sessions are busy.
+   * - Prunes external media blobs over budget (LRU).
+   * - When idle, compacts cold/archived sessions, slims aged archived sessions, runs `PRAGMA incremental_vacuum(512)`
+   *   and `PRAGMA wal_checkpoint(TRUNCATE)`; when active, runs non-blocking `PRAGMA wal_checkpoint(PASSIVE)`.
    */
   runMaintenance(
     now = Date.now(),
@@ -1375,11 +1565,28 @@ export class HostStore {
       ephemeralMaxAgeMs?: number;
       maxTerminalFrames?: number;
       maxRemovedSessions?: number;
+      archivedSlimAgeMs?: number;
+      compactCold?: boolean;
+      slimArchived?: boolean;
       idle?: boolean;
     } = {},
-  ): { prunedTerminalFrames: number; prunedClientMessages: number; prunedRemovedSessions: number } {
+  ): {
+    prunedTerminalFrames: number;
+    prunedClientMessages: number;
+    prunedRemovedSessions: number;
+    prunedBlobs: number;
+    compactedRows: number;
+    slimmedArchivedRows: number;
+  } {
     if (this.closed) {
-      return { prunedTerminalFrames: 0, prunedClientMessages: 0, prunedRemovedSessions: 0 };
+      return {
+        prunedTerminalFrames: 0,
+        prunedClientMessages: 0,
+        prunedRemovedSessions: 0,
+        prunedBlobs: 0,
+        compactedRows: 0,
+        slimmedArchivedRows: 0,
+      };
     }
     const terminalCutoff = now - (options.terminalFramesMaxAgeMs ?? 7 * 24 * 60 * 60 * 1000);
     const ephemeralCutoff = now - (options.ephemeralMaxAgeMs ?? 30 * 24 * 60 * 60 * 1000);
@@ -1422,7 +1629,12 @@ export class HostStore {
         for (const { terminal_id: terminalId } of oversizedTerminals) {
           const row = windowCutoffStmt.get(terminalId, maxTerminalFrames - 1) as { frame: number } | undefined;
           if (row !== undefined) {
-            prunedTerminalFrames += Number(pruneWindowStmt.run(terminalId, row.frame).changes);
+            // Never prune past `terminal_snapshots.frame` or replay from the snapshot would have a gap.
+            const snap = this.stmts.terminalSnapshot.get(terminalId) as { frame: number } | undefined;
+            const cutoff = snap ? Math.min(row.frame, snap.frame + 1) : row.frame;
+            if (cutoff > 1) {
+              prunedTerminalFrames += Number(pruneWindowStmt.run(terminalId, cutoff).changes);
+            }
           }
         }
       }
@@ -1455,14 +1667,40 @@ export class HostStore {
       throw error;
     }
 
+    const prunedBlobs = this.blobs.prune().removedFiles;
     const isIdle = options.idle ?? !this.hasBusySession();
+    let compactedRows = 0;
+    let slimmedArchivedRows = 0;
+
+    if (isIdle) {
+      if (options.compactCold !== false) {
+        compactedRows = this.compactPendingSessions().removedRows;
+      }
+      if (options.slimArchived !== false) {
+        slimmedArchivedRows = this.slimArchivedSessions(now, { maxAgeMs: options.archivedSlimAgeMs }).slimmedRows;
+      }
+      try {
+        this.db.exec("PRAGMA incremental_vacuum(512)");
+      } catch {
+        // Best-effort freelist reclamation.
+      }
+    }
+
     try {
       this.db.exec(`PRAGMA wal_checkpoint(${isIdle ? "TRUNCATE" : "PASSIVE"})`);
     } catch {
       // Checkpoint is best-effort and never fails maintenance if another handle holds the WAL.
     }
+    enforcePrivateDbPermissions(this.path);
 
-    return { prunedTerminalFrames, prunedClientMessages, prunedRemovedSessions };
+    return {
+      prunedTerminalFrames,
+      prunedClientMessages,
+      prunedRemovedSessions,
+      prunedBlobs,
+      compactedRows,
+      slimmedArchivedRows,
+    };
   }
 
   /** Fast check for any non-archived stored session in `running` or `waiting` state. */

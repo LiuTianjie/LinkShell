@@ -44,6 +44,16 @@ export interface GatewayOptions {
    * that slow receiver with 1013/backpressure and returns `undeliverable` (default 4 MB).
    */
   maxBufferedBytes?: number;
+  /**
+   * Grace period after sending 1013/backpressure before hard-terminating a receiver that does
+   * not finish the close handshake (default 1500 ms; 0 terminates immediately).
+   */
+  backpressureTerminateMs?: number;
+  /**
+   * Grace period after sending 1001 ("going away") on `stop()` before hard-terminating peers
+   * that do not complete the WebSocket close handshake (default 500 ms).
+   */
+  shutdownGraceMs?: number;
   /** @deprecated No longer used since slow receivers are closed rather than pausing senders. */
   stalledPeerMs?: number;
   /** @deprecated No longer used since slow receivers are closed rather than pausing senders. */
@@ -96,6 +106,7 @@ const AUTH_TIMEOUT_MS = 10_000;
 const PAIR_DECISION_MS = 30_000;
 const MAX_CLAIM_ATTEMPTS = 8;
 const MAX_BUFFERED_BYTES = 4 * 1024 * 1024;
+const BACKPRESSURE_TERMINATE_MS = 1_500;
 const IDLE_CHECKPOINT_MS = 5 * 60_000;
 
 /**
@@ -107,12 +118,15 @@ export class Gateway {
   readonly store: GatewayStore;
   private server?: Server;
   private readonly peers = new Map<string, Peer>();
+  private readonly sockets = new Set<GatewaySocket>();
+  private readonly authTimers = new Map<GatewaySocket, ReturnType<typeof setTimeout>>();
   /** Machines that said they have an access password, as of their last sign-in (memory only: the schema stays as it is). */
   private readonly locked = new Set<string>();
   /** Hosts persist this marker; retaining it while offline keeps legacy aliases from returning. */
   private readonly namingConfigured = new Set<string>();
   private readonly offers = new Map<string, Offer>();
-  private readonly decisions = new Map<string, { machineId: string; resolve: (accept: boolean) => void }>();
+  private readonly decisions = new Map<string, { machineId: string; resolve: (accept: boolean) => void; reject: (error: Error) => void }>();
+  private readonly pendingTerminations = new Map<GatewaySocket, ReturnType<typeof setTimeout>>();
   private readonly claimTimes = new Map<string, number[]>();
   private readonly turnTimes = new Map<string, number[]>();
   private heartbeat?: ReturnType<typeof setInterval>;
@@ -196,23 +210,91 @@ export class Gateway {
       this.alive.delete(peer.socket);
       peer.socket.ping();
     }
-    if (this.peers.size === 0 && now - this.lastCheckpointAt >= IDLE_CHECKPOINT_MS) {
+    if (now - this.lastCheckpointAt >= IDLE_CHECKPOINT_MS) {
       this.lastCheckpointAt = now;
-      this.store.checkpoint();
+      // PASSIVE keeps WAL bounded while peers stay connected; TRUNCATE reclaims space once idle.
+      this.store.checkpoint(this.peers.size === 0 ? "TRUNCATE" : "PASSIVE");
     }
   }
 
   async stop(): Promise<void> {
     this.stopped = true;
     clearInterval(this.heartbeat);
-    for (const peer of this.peers.values()) peer.socket.terminate();
-    await new Promise<void>((resolve) => (this.server ? this.server.close(() => resolve()) : resolve()));
+    this.heartbeat = undefined;
+    for (const timer of this.pendingTerminations.values()) clearTimeout(timer);
+    this.pendingTerminations.clear();
+    for (const timer of this.authTimers.values()) clearTimeout(timer);
+    this.authTimers.clear();
+    for (const pending of [...this.decisions.values()]) {
+      pending.reject(new RelayError("machine_offline", "网关正在关闭"));
+    }
+    this.decisions.clear();
+    // Send clean 1001 ("going away") to every connected socket before closing the HTTP server so
+    // connected Hosts and Phones trigger instant auto-reconnect instead of hanging on half-open TCP.
+    const openSockets = new Set<GatewaySocket>(this.sockets);
+    for (const peer of this.peers.values()) openSockets.add(peer.socket);
+    const graceMs = this.options.shutdownGraceMs ?? 500;
+    const closing: Promise<void>[] = [];
+    for (const socket of openSockets) {
+      if (socket.readyState === WebSocket.CLOSED) continue;
+      closing.push(
+        new Promise<void>((resolveClose) => {
+          let settled = false;
+          const finish = () => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            resolveClose();
+          };
+          const timer = setTimeout(() => {
+            if (socket.readyState !== WebSocket.CLOSED) {
+              try {
+                socket.terminate();
+              } catch {
+                // Socket already gone.
+              }
+            }
+            finish();
+          }, graceMs);
+          timer.unref();
+          socket.on("close", finish);
+          try {
+            socket.close(1001, "going away");
+          } catch {
+            try {
+              socket.terminate();
+            } catch {
+              // Socket already gone.
+            }
+            finish();
+          }
+          if (socket.readyState === WebSocket.CLOSED) finish();
+        }),
+      );
+    }
+    if (closing.length > 0) await Promise.all(closing);
+    this.peers.clear();
+    this.sockets.clear();
+    await new Promise<void>((resolveClose) => {
+      if (!this.server) return resolveClose();
+      this.server.close(() => resolveClose());
+      this.server.closeIdleConnections?.();
+    });
     this.store.close();
   }
 
   // ── connection ────────────────────────────────────────────────────
 
   acceptTransport(socket: GatewaySocket): void {
+    if (this.stopped) {
+      try {
+        socket.close(1001, "going away");
+      } catch {
+        // Ignore already-closed socket.
+      }
+      return;
+    }
+    this.sockets.add(socket);
     this.alive.add(socket);
     socket.on("pong", () => this.alive.add(socket));
     const nonce = randomBytes(32).toString("base64url");
@@ -222,8 +304,10 @@ export class Gateway {
       if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(frame));
     };
     const timer = setTimeout(() => {
+      this.authTimers.delete(socket);
       if (!peer) socket.close(4001, "auth timeout");
     }, AUTH_TIMEOUT_MS);
+    this.authTimers.set(socket, timer);
     send({ t: "challenge", nonce });
 
     socket.on("message", async (data) => {
@@ -253,6 +337,7 @@ export class Gateway {
           return;
         }
         clearTimeout(timer);
+        this.authTimers.delete(socket);
         socket.authenticated?.();
         send({ t: "ready", userId: peer.record.userId, email: peer.email });
         this.announce(peer.record, true);
@@ -285,6 +370,13 @@ export class Gateway {
 
     socket.on("close", () => {
       clearTimeout(timer);
+      this.authTimers.delete(socket);
+      this.sockets.delete(socket);
+      const terminateTimer = this.pendingTerminations.get(socket);
+      if (terminateTimer) {
+        clearTimeout(terminateTimer);
+        this.pendingTerminations.delete(socket);
+      }
       if (this.stopped || !peer || this.peers.get(peer.record.id)?.socket !== socket) return;
       this.dropPeer(peer);
     });
@@ -397,9 +489,24 @@ export class Gateway {
     if (target.socket.bufferedAmount > limit) {
       // Never pause the sender's multiplexed socket: closing only the slow receiver avoids
       // freezing other devices and heartbeats sharing the machine's WebSocket.
+      // Send 1013 so live clients know why they were disconnected, then force-terminate if
+      // the peer is TCP-dead and never completes the closing handshake.
       this.log(`${target.record.role} ${target.record.id.slice(0, 8)} can't keep up; closing it`);
       this.dropPeer(target);
       target.socket.close(1013, "backpressure");
+      const graceMs = this.options.backpressureTerminateMs ?? BACKPRESSURE_TERMINATE_MS;
+      if (graceMs <= 0) {
+        target.socket.terminate();
+      } else {
+        const previous = this.pendingTerminations.get(target.socket);
+        if (previous) clearTimeout(previous);
+        const terminateTimer = setTimeout(() => {
+          this.pendingTerminations.delete(target.socket);
+          if (target.socket.readyState !== WebSocket.CLOSED) target.socket.terminate();
+        }, graceMs);
+        terminateTimer.unref();
+        this.pendingTerminations.set(target.socket, terminateTimer);
+      }
       return undeliverable("backpressure");
     }
     const frame = JSON.stringify({
@@ -418,6 +525,11 @@ export class Gateway {
     this.locked.delete(peer.record.id);
     this.namingConfigured.delete(peer.record.id);
     this.pruneTurnTimes(Date.now(), peer.record.id);
+    for (const pending of [...this.decisions.values()]) {
+      if (pending.machineId === peer.record.id) {
+        pending.reject(new RelayError("machine_offline", "电脑已离线"));
+      }
+    }
     this.store.touch(peer.record.id);
     this.announce(peer.record, false);
   }
@@ -608,7 +720,7 @@ export class Gateway {
 
     // The machine checks the proof (it holds the QR secret) and decides.
     const requestId = randomUUID();
-    const accepted = await new Promise<boolean>((resolve) => {
+    const accepted = await new Promise<boolean>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.decisions.delete(requestId);
         resolve(false);
@@ -619,6 +731,11 @@ export class Gateway {
           clearTimeout(timer);
           this.decisions.delete(requestId);
           resolve(accept);
+        },
+        reject: (error) => {
+          clearTimeout(timer);
+          this.decisions.delete(requestId);
+          reject(error);
         },
       });
       this.event(machine.record.id, "pair.request", {

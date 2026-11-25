@@ -1,6 +1,7 @@
 import type { TerminalKeyModifiers } from "../../../modules/link-terminal/src";
 import { useState } from "react";
 import { Alert, Modal, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { Text, TextInput } from "@/components/fixed-text";
 import { haptics } from "@/lib/haptics";
 import {
@@ -164,9 +165,17 @@ export function SnippetBar({ onSendInput, onPaste, onCaptureOutput }: SnippetBar
         </Pressable>
       </ScrollView>
 
-      <Modal visible={adding} transparent animationType="fade" onRequestClose={() => setAdding(false)}>
-        <Pressable
-          onPress={() => setAdding(false)}
+      <Modal
+        visible={adding}
+        transparent
+        statusBarTranslucent
+        navigationBarTranslucent
+        supportedOrientations={["portrait", "portrait-upside-down", "landscape", "landscape-left", "landscape-right"]}
+        animationType="fade"
+        onRequestClose={() => setAdding(false)}
+      >
+        <KeyboardAvoidingView
+          behavior="padding"
           style={{
             flex: 1,
             backgroundColor: "rgba(0,0,0,0.45)",
@@ -175,6 +184,7 @@ export function SnippetBar({ onSendInput, onPaste, onCaptureOutput }: SnippetBar
             padding: 20,
           }}
         >
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setAdding(false)} />
           <Pressable
             onPress={(e) => e.stopPropagation()}
             style={{
@@ -249,7 +259,7 @@ export function SnippetBar({ onSendInput, onPaste, onCaptureOutput }: SnippetBar
               <Button title="保存" variant="primary" size="small" disabled={!draftCommand.trim()} onPress={confirmAddSnippet} />
             </View>
           </Pressable>
-        </Pressable>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );

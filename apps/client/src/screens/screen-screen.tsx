@@ -78,6 +78,8 @@ export function ScreenScreen() {
     });
   }, []);
   const [fullscreen, setFullscreen] = useState(false);
+  const fullscreenRef = useRef(fullscreen);
+  fullscreenRef.current = fullscreen;
   const clipInsets = useMemo(() => ({
     top: fullscreen ? 0 : Math.max(insets.top, headerHeight),
     left: fullscreen ? 0 : insets.left,
@@ -92,6 +94,18 @@ export function ScreenScreen() {
     if (full) void requestLandscape().catch((error: unknown) => console.warn("[screen] landscape request failed", error));
     else void clearOrientationRequest().catch(() => {});
   }, [inject, owner]);
+
+  // Keep fullscreen UI and orientation lock synchronized when the screen blurs/focuses.
+  useEffect(() => {
+    if (!focused) {
+      if (fullscreenRef.current) setFullscreen(false);
+      void clearOrientationRequest().catch(() => {});
+    } else if (fullscreenRef.current) {
+      void requestLandscape().catch(() => {});
+    } else {
+      void clearOrientationRequest().catch(() => {});
+    }
+  }, [focused]);
 
   // A screen that failed has only the header to leave by.
   useEffect(() => {
@@ -184,6 +198,7 @@ export function ScreenScreen() {
         attach(owner);
         publishPresentation(owner, routePresentation.current);
       }
+      inject(owner, `window.linkshellPresent && window.linkshellPresent(${fullscreenRef.current}); true;`);
       measureAnchor();
     };
     const leave = () => {
@@ -208,7 +223,7 @@ export function ScreenScreen() {
       leave();
       void clearOrientationRequest().catch(() => {});
     };
-  }, [focused, navigation, attach, detach, owner, measureAnchor, publishPresentation]);
+  }, [focused, navigation, attach, detach, inject, owner, measureAnchor, publishPresentation]);
   useLayoutEffect(() => {
     if (!focused || !routeActive.current) return;
     measureAnchor();

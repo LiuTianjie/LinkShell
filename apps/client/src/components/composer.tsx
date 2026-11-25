@@ -7,9 +7,9 @@ import { File, Paths } from "expo-file-system";
 import { Buffer } from "buffer";
 import type { DraftAttachment } from "@/lib/composer-drafts";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, View, type LayoutChangeEvent } from "react-native";
+import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, View, type LayoutChangeEvent } from "react-native";
 import { Text, TextInput } from "@/components/fixed-text";
-import { KeyboardAwareScrollView, useKeyboardState, type KeyboardAwareScrollViewRef } from "react-native-keyboard-controller";
+import { KeyboardAvoidingView, KeyboardAwareScrollView, useKeyboardState, type KeyboardAwareScrollViewRef } from "react-native-keyboard-controller";
 import { useContentHeight } from "@/lib/content-height";
 import { composerCardsHeight, composerCardsKeyboardOffset, composerViewport } from "@/lib/composer-layout";
 import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
@@ -954,11 +954,20 @@ export function Composer(props: ComposerProps) {
         )}
       </View>
 
-      <Modal visible={customModalOpen} transparent animationType="fade" onRequestClose={() => setCustomModalOpen(false)}>
-        <Pressable
-          onPress={() => setCustomModalOpen(false)}
+      <Modal
+        visible={customModalOpen}
+        transparent
+        statusBarTranslucent
+        navigationBarTranslucent
+        supportedOrientations={["portrait", "portrait-upside-down", "landscape", "landscape-left", "landscape-right"]}
+        animationType="fade"
+        onRequestClose={() => setCustomModalOpen(false)}
+      >
+        <KeyboardAvoidingView
+          behavior="padding"
           style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.45)", alignItems: "center", justifyContent: "center", padding: 20 }}
         >
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setCustomModalOpen(false)} />
           <Pressable
             onPress={() => {}}
             style={{ width: "100%", maxWidth: 380, backgroundColor: colors.card, borderRadius: radius.panel, padding: 18, gap: 12 }}
@@ -984,7 +993,7 @@ export function Composer(props: ComposerProps) {
               <Button title={t("common.save")} variant="primary" size="small" onPress={addCustomQuickPrompt} />
             </View>
           </Pressable>
-        </Pressable>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );

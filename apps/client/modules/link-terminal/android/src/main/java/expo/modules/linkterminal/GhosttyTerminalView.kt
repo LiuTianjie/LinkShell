@@ -4,6 +4,7 @@ import android.app.AlertDialog
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.res.Configuration
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
@@ -79,7 +80,8 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     textPaint.fontMetrics.descent - textPaint.fontMetrics.ascent
   ).toInt()
   private var baseline = -textPaint.fontMetrics.ascent
-  private val underlineThickness = max(1f, resources.displayMetrics.density)
+  private var lastDensity = resources.displayMetrics.density
+  private var underlineThickness = max(1f, lastDensity)
 
   // ── Grid state ──
   private var cols = INITIAL_COLS
@@ -113,7 +115,7 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
   private var lastPressCol = 0
   private var lastPressRow = 0
   private val handlePaint = Paint(Paint.ANTI_ALIAS_FLAG)
-  private val handleRadius = HANDLE_RADIUS_DP * resources.displayMetrics.density
+  private var handleRadius = HANDLE_RADIUS_DP * lastDensity
   private val magnifier =
     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
       android.widget.Magnifier(this)
@@ -163,8 +165,8 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
   // ── Scrollback state ──
   private val scroller = OverScroller(context)
   private var flingLastY = 0
-  internal fun scrollByPixels(delta: Float) {
-    if (handle == 0L) return
+  internal fun scrollByPixels(delta: Float): Boolean {
+    if (handle == 0L) return false
     val captured = GhosttyVt.nativeMouseCaptured(handle)
     if (captured != scrollingProgram) {
       scrollAccum = 0f
@@ -180,31 +182,47 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
       if (whole != 0 && !restoring) {
         GhosttyVt.nativeMouseScroll(handle, whole, scrollX, scrollY)?.let { onInputBytes?.invoke(it) }
       }
-      return
+      return true
     }
-    val before = GhosttyVt.nativeScrollbar(handle) ?: return
+    val before = GhosttyVt.nativeScrollbar(handle) ?: return false
+    if (before[0] <= before[2]) {
+      scrollAccum = 0f
+      return false
+    }
     scrollAccum += delta
     val whole = (scrollAccum / cellHeight).toInt()
     if (whole != 0) GhosttyVt.nativeScroll(handle, whole)
-    val after = GhosttyVt.nativeScrollbar(handle) ?: return
-    scrollAccum -= (after[1] - before[1]) * cellHeight
-    if ((after[1] == 0L && scrollAccum < 0) || (after[1] + after[2] >= after[0] && scrollAccum > 0)) scrollAccum = 0f
+    val after = GhosttyVt.nativeScrollbar(handle) ?: return false
+    val movedRows = after[1] - before[1]
+    scrollAccum -= movedRows * cellHeight
+    val hitTop = after[1] == 0L && scrollAccum < 0f
+    val hitBottom = after[1] + after[2] >= after[0] && scrollAccum > 0f
+    if (hitTop || hitBottom) scrollAccum = 0f
     markScrollActivity()
     if (whole != 0) scheduleFrame() else invalidate()
+    return !(hitTop || hitBottom) || movedRows != 0L
   }
   private var scrollbarTotal = 0L
   private var scrollbarOffset = 0L
   private var scrollbarLen = 0L
   private var lastScrollActivityAt = 0L
+  private val scrollbarFadeRunnable = Runnable { invalidate() }
   private val scrollbarPaint = Paint(Paint.ANTI_ALIAS_FLAG)
   private val jumpChipPaint = Paint(Paint.ANTI_ALIAS_FLAG)
   private val jumpChipArrow = Path()
   private val flingRunnable = object : Runnable {
     override fun run() {
-      if (handle == 0L || !scroller.computeScrollOffset()) return
+      if (handle == 0L || GhosttyVt.nativeMouseCaptured(handle) || !scroller.computeScrollOffset()) {
+        scroller.abortAnimation()
+        return
+      }
       val y = scroller.currY
-      scrollByPixels((y - flingLastY).toFloat())
+      val dy = (y - flingLastY).toFloat()
       flingLastY = y
+      if (dy != 0f && !scrollByPixels(dy)) {
+        scroller.abortAnimation()
+        return
+      }
       postOnAnimation(this)
     }
   }
@@ -273,7 +291,10 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
         velocityX: Float,
         velocityY: Float
       ): Boolean {
-        if (handle == 0L || scaleDetector.isInProgress) return false
+        if (handle == 0L || scaleDetector.isInProgress || GhosttyVt.nativeMouseCaptured(handle)) return false
+        // Cancel any prior fling runnable before posting a new one so two loops never stack.
+        scroller.abortAnimation()
+        removeCallbacks(flingRunnable)
         // Finger up (negative velocity) scrolls content down: invert.
         flingLastY = 0
         scroller.fling(0, 0, 0, -velocityY.toInt(), 0, 0, Int.MIN_VALUE, Int.MAX_VALUE)
@@ -323,6 +344,20 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     textSize = fontSizeDp * resources.displayMetrics.density
   }
 
+  private fun updateFontMetrics() {
+    val density = resources.displayMetrics.density
+    lastDensity = density
+    val px = fontSizeDp * density
+    for (paint in arrayOf(textPaint, boldPaint, italicPaint, boldItalicPaint, symbolsPaint)) {
+      paint?.textSize = px
+    }
+    cellWidth = textPaint.measureText("M")
+    cellHeight = ceil(textPaint.fontMetrics.descent - textPaint.fontMetrics.ascent).toInt()
+    baseline = -textPaint.fontMetrics.ascent
+    underlineThickness = max(1f, density)
+    handleRadius = HANDLE_RADIUS_DP * density
+  }
+
   /**
    * Base font size in dp (default 9, clamped to 6–32 like iOS); pinch-to-zoom
    * steps from the current value. Content reflows in place — libghostty-vt
@@ -333,16 +368,20 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     if (clamped == fontSizeDp) return
     fontSizeDp = clamped
     onFontSizeChanged?.invoke(clamped)
-    val px = clamped * resources.displayMetrics.density
-    for (paint in arrayOf(textPaint, boldPaint, italicPaint, boldItalicPaint, symbolsPaint)) {
-      paint?.textSize = px
-    }
-    cellWidth = textPaint.measureText("M")
-    cellHeight = ceil(textPaint.fontMetrics.descent - textPaint.fontMetrics.ascent).toInt()
-    baseline = -textPaint.fontMetrics.ascent
+    updateFontMetrics()
     // Cell geometry moved under any active selection handles.
     if (selectionMode || actionMode != null) clearSelection()
     updateGridGeometry(force = true)
+  }
+
+  override fun onConfigurationChanged(newConfig: Configuration) {
+    super.onConfigurationChanged(newConfig)
+    val density = resources.displayMetrics.density
+    if (density != lastDensity) {
+      updateFontMetrics()
+      if (selectionMode || actionMode != null) clearSelection()
+      updateGridGeometry(force = true)
+    }
   }
 
   /**
@@ -410,6 +449,7 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     }
     blinkScheduled = false
     removeCallbacks(blinkRunnable)
+    removeCallbacks(scrollbarFadeRunnable)
     scroller.abortAnimation()
     removeCallbacks(flingRunnable)
     actionMode?.finish()
@@ -435,6 +475,8 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
 
   private fun markScrollActivity() {
     lastScrollActivityAt = android.os.SystemClock.uptimeMillis()
+    removeCallbacks(scrollbarFadeRunnable)
+    postDelayed(scrollbarFadeRunnable, SCROLLBAR_FADE_START_MS + 16L)
   }
 
   private fun sendText(text: CharSequence) {
@@ -502,7 +544,12 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
 
   override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
     super.onSizeChanged(w, h, oldw, oldh)
-    updateGridGeometry(force = false)
+    val densityChanged = resources.displayMetrics.density != lastDensity
+    if (densityChanged) {
+      updateFontMetrics()
+      if (selectionMode || actionMode != null) clearSelection()
+    }
+    updateGridGeometry(force = densityChanged)
   }
 
   private fun updateGridGeometry(force: Boolean) {
@@ -559,6 +606,13 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
       scrollbarTotal = scrollbar[0]
       scrollbarOffset = scrollbar[1]
       scrollbarLen = scrollbar[2]
+      // Clear stale sub-row offset when switching into alt-screen (no scrollback) or hitting bounds.
+      if (scrollbarTotal <= scrollbarLen ||
+        (scrollbarOffset == 0L && scrollAccum < 0f) ||
+        (scrollbarOffset + scrollbarLen >= scrollbarTotal && scrollAccum > 0f)
+      ) {
+        scrollAccum = 0f
+      }
     }
 
     buf.position(0)
@@ -723,22 +777,23 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
   }
 
   private fun selectionContentRect(): Rect {
+    val dy = scrollAccum.roundToInt()
     val bounds = selectionBounds()
     return if (bounds != null) {
       val (top, topCol, bottom, bottomCol) = bounds
       val singleRow = top == bottom
       Rect(
         if (singleRow) (topCol * cellWidth).toInt() else 0,
-        top * cellHeight,
+        (top * cellHeight - dy).coerceIn(0, height),
         if (singleRow) ((bottomCol + 1 + selEndExtraCols(bottom)) * cellWidth).toInt() else width,
-        (bottom + 1) * cellHeight
+        ((bottom + 1) * cellHeight - dy).coerceIn(0, height)
       )
     } else {
       Rect(
         (lastPressCol * cellWidth).toInt(),
-        lastPressRow * cellHeight,
+        (lastPressRow * cellHeight - dy).coerceIn(0, height),
         ((lastPressCol + 1) * cellWidth).toInt(),
-        (lastPressRow + 1) * cellHeight
+        ((lastPressRow + 1) * cellHeight - dy).coerceIn(0, height)
       )
     }
   }
@@ -845,6 +900,7 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
 
   override fun onDetachedFromWindow() {
     if (framePending) { Choreographer.getInstance().removeFrameCallback(frameCallback); framePending = false }
+    removeCallbacks(scrollbarFadeRunnable)
     scroller.abortAnimation(); removeCallbacks(flingRunnable)
     super.onDetachedFromWindow()
     syncBlinkTimer()
@@ -856,18 +912,25 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     if (visibility == VISIBLE) scheduleFrame()
     else {
       if (framePending) { Choreographer.getInstance().removeFrameCallback(frameCallback); framePending = false }
+      removeCallbacks(scrollbarFadeRunnable)
       scroller.abortAnimation(); removeCallbacks(flingRunnable)
     }
   }
 
   private fun drawComposition(canvas: Canvas) {
-    if (composition.isEmpty() || cursorX < 0 || cursorY < 0) return
-    val x = cursorX * cellWidth; val y = cursorY * cellHeight.toFloat()
-    val w = textPaint.measureText(composition).coerceAtMost(width - x)
-    fillPaint.color = defaultBg; canvas.drawRect(x, y, x + w, y + cellHeight, fillPaint)
+    if (composition.isEmpty() || cursorX < 0 || cursorY < 0 || width <= 0 || height <= 0) return
+    val rawW = textPaint.measureText(composition)
+    val w = rawW.coerceAtMost(width.toFloat())
+    val x = (cursorX * cellWidth).coerceIn(0f, max(0f, width - w))
+    val y = (cursorY * cellHeight.toFloat()).coerceIn(0f, max(0f, height - cellHeight.toFloat()))
+    canvas.save()
+    canvas.clipRect(x, y, (x + w).coerceAtMost(width.toFloat()), (y + cellHeight).coerceAtMost(height.toFloat()))
+    fillPaint.color = defaultBg
+    canvas.drawRect(x, y, x + w, y + cellHeight, fillPaint)
     textPaint.color = defaultFg
     canvas.drawText(composition, x, y + baseline, textPaint)
     canvas.drawRect(x, y + cellHeight - underlineThickness, x + w, y + cellHeight, textPaint)
+    canvas.restore()
   }
 
   private fun drawRowRecord(buf: ByteBuffer, canvas: Canvas, snapCols: Int, background: Boolean) {
@@ -1006,7 +1069,7 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
       right - barWidth, top, right, (top + thumbHeight).coerceAtMost(trackHeight),
       barWidth / 2, barWidth / 2, scrollbarPaint
     )
-    if (elapsed > SCROLLBAR_FADE_START_MS) invalidate()
+    if (elapsed > SCROLLBAR_FADE_START_MS) postInvalidateOnAnimation()
   }
 
   private fun jumpChipCenter(): Pair<Float, Float> {
@@ -1155,7 +1218,11 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
 
   internal fun handleKeyEvent(event: KeyEvent): Boolean {
     if (handle == 0L || finished) return false
-    if (event.keyCode == KeyEvent.KEYCODE_V && (event.isCtrlPressed || event.isMetaPressed)) {
+    // Preserve plain Ctrl+V for Vim visual-block, readline quoted-insert, and tmux;
+    // only Ctrl+Shift+V and Meta+V trigger clipboard paste.
+    if (event.keyCode == KeyEvent.KEYCODE_V &&
+      ((event.isCtrlPressed && event.isShiftPressed) || event.isMetaPressed)
+    ) {
       if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) requestPaste()
       return true
     }
@@ -1205,17 +1272,31 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
       return super.setComposingText(text, newCursorPosition)
     }
     override fun finishComposingText(): Boolean {
-      // Full editors retain IME composition locally; commit it once when an
-      // IME finishes dictation/composition without a separate commitText call.
-      if (composition.isNotEmpty()) sendText(composition)
-      composition = ""; invalidate()
-      super.commitText("", 1)
+      // Do not blindly inject unconfirmed CJK pinyin/kana into the remote PTY on focus loss or cancel;
+      // confirmed candidates always arrive via commitText().
+      if (composition.isNotEmpty()) {
+        composition = ""
+        invalidate()
+      }
+      editable?.clear()
       return super.finishComposingText()
     }
     override fun commitText(text: CharSequence, newCursorPosition: Int): Boolean {
       composition = ""; invalidate()
       sendText(text)
+      editable?.clear()
       return super.commitText("", newCursorPosition)
+    }
+
+    private fun forwardDeletes(beforeCount: Int, afterCount: Int) {
+      repeat(beforeCount) {
+        sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL))
+        sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL))
+      }
+      repeat(afterCount) {
+        sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_FORWARD_DEL))
+        sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_FORWARD_DEL))
+      }
     }
 
     // IMEs can use either deletion API; BaseInputConnection only edits its
@@ -1223,28 +1304,33 @@ internal class GhosttyTerminalView(context: Context) : View(context) {
     override fun deleteSurroundingTextInCodePoints(beforeLength: Int, afterLength: Int): Boolean {
       if (beforeLength < 0 || afterLength < 0) return false
       if (composition.isEmpty()) return deleteSurroundingText(beforeLength, afterLength)
+      val prevText = editable?.toString().orEmpty()
+      val prevCodePoints = Character.codePointCount(prevText, 0, prevText.length)
       val result = super.deleteSurroundingTextInCodePoints(beforeLength, afterLength)
       composition = editable?.toString().orEmpty()
+      val nextCodePoints = Character.codePointCount(composition, 0, composition.length)
+      val deleted = (prevCodePoints - nextCodePoints).coerceAtLeast(0)
+      val excessBefore = (beforeLength - deleted).coerceAtLeast(0)
+      val excessAfter = if (composition.isEmpty()) afterLength else 0
       invalidate()
+      if (excessBefore > 0 || excessAfter > 0) forwardDeletes(excessBefore, excessAfter)
       return result
     }
 
     override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
       if (beforeLength < 0 || afterLength < 0) return false
       if (composition.isNotEmpty()) {
+        val prevLen = editable?.length ?: composition.length
         val result = super.deleteSurroundingText(beforeLength, afterLength)
         composition = editable?.toString().orEmpty()
+        val deleted = (prevLen - composition.length).coerceAtLeast(0)
+        val excessBefore = (beforeLength - deleted).coerceAtLeast(0)
+        val excessAfter = if (composition.isEmpty()) afterLength else 0
         invalidate()
+        if (excessBefore > 0 || excessAfter > 0) forwardDeletes(excessBefore, excessAfter)
         return result
       }
-      repeat(beforeLength) {
-        sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL))
-        sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL))
-      }
-      repeat(afterLength) {
-        sendKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_FORWARD_DEL))
-        sendKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_FORWARD_DEL))
-      }
+      forwardDeletes(beforeLength, afterLength)
       return true
     }
 

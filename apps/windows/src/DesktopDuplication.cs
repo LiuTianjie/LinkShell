@@ -11,10 +11,11 @@ namespace LinkShell.Windows {
         IntPtr device, context, duplication, staging, sourceTexture, sourceView, renderTexture, renderView, vertexShader, pixelShader, sampler, rasterizer;
         uint width, height, scaledWidth, scaledHeight;
         const int WaitTimeout = unchecked((int)0x887a0027);
-        static readonly Guid DxgiDevice = new Guid("54ec77fa-1377-44e6-8c32-88fd5f44c84c");
+        static readonly Guid DxgiFactory1 = new Guid("770aae78-f26f-4dba-a829-253c83d1b387");
         static readonly Guid Output1 = new Guid("00cddea8-939b-4b83-a340-a685226666cc");
         static readonly Guid Texture2D = new Guid("6f15aaf2-d208-4e89-9ab4-489535d34f9c");
 
+        [DllImport("dxgi.dll")] static extern int CreateDXGIFactory1(ref Guid riid, out IntPtr factory);
         [DllImport("d3d11.dll")] static extern int D3D11CreateDevice(IntPtr adapter, uint driverType, IntPtr software, uint flags, IntPtr levels, uint levelCount, uint sdk, out IntPtr device, out uint level, out IntPtr context);
         [DllImport("d3dcompiler_47.dll", CharSet = CharSet.Ansi)] static extern int D3DCompile(string source, UIntPtr size, string name, IntPtr defines, IntPtr include, string entry, string profile, uint flags, uint effectFlags, out IntPtr code, out IntPtr errors);
         [StructLayout(LayoutKind.Sequential)] struct Rect { public int Left, Top, Right, Bottom; }
@@ -50,7 +51,7 @@ namespace LinkShell.Windows {
             public int Coalesced, Protected, PointerX, PointerY, PointerVisible;
             public uint MetadataBytes, PointerBytes;
         }
-        [UnmanagedFunctionPointer(CallingConvention.StdCall)] delegate int GetAdapter(IntPtr self, out IntPtr adapter);
+        [UnmanagedFunctionPointer(CallingConvention.StdCall)] delegate int EnumAdapters1(IntPtr self, uint index, out IntPtr adapter);
         [UnmanagedFunctionPointer(CallingConvention.StdCall)] delegate int EnumOutputs(IntPtr self, uint index, out IntPtr output);
         [UnmanagedFunctionPointer(CallingConvention.StdCall)] delegate int GetOutputDesc(IntPtr self, out OutputDesc desc);
         [UnmanagedFunctionPointer(CallingConvention.StdCall)] delegate int DuplicateOutput(IntPtr self, IntPtr device, out IntPtr duplication);
@@ -82,26 +83,42 @@ namespace LinkShell.Windows {
         static IntPtr Query(IntPtr value, Guid id) { IntPtr result; Check(Marshal.QueryInterface(value, ref id, out result)); return result; }
         static void Release(ref IntPtr value) { if (value != IntPtr.Zero) { Marshal.Release(value); value = IntPtr.Zero; } }
 
-        // Screen.AllScreens ordering is not DXGI output ordering. Match physical bounds first.
+        // Display enumeration order is not DXGI output order, and hybrid/multi-GPU systems attach
+        // external monitors to secondary adapters. Enumerate all DXGI adapters and match bounds.
         public static int VideoOutput(Rectangle bounds, out uint vendor) {
-            IntPtr device = IntPtr.Zero, context = IntPtr.Zero, dxgi = IntPtr.Zero, adapter = IntPtr.Zero;
+            int ignoredAdapter;
+            return VideoOutput(bounds, out vendor, out ignoredAdapter);
+        }
+
+        public static int VideoOutput(Rectangle bounds, out uint vendor, out int adapterIndex) {
+            IntPtr factory = IntPtr.Zero;
             vendor = 0;
+            adapterIndex = 0;
             try {
-                uint level;
-                Check(D3D11CreateDevice(IntPtr.Zero, 1, IntPtr.Zero, 0x20, IntPtr.Zero, 0, 7, out device, out level, out context));
-                dxgi = Query(device, DxgiDevice); Check(Method<GetAdapter>(dxgi, 7)(dxgi, out adapter));
-                AdapterDesc adapterInfo; Check(Method<GetAdapterDesc>(adapter, 8)(adapter, out adapterInfo)); vendor = adapterInfo.Vendor;
-                for (uint i = 0; ; i++) {
-                    IntPtr output;
-                    if (Method<EnumOutputs>(adapter, 7)(adapter, i, out output) < 0) break;
+                Guid factoryId = DxgiFactory1;
+                Check(CreateDXGIFactory1(ref factoryId, out factory));
+                for (uint a = 0; ; a++) {
+                    IntPtr adapter = IntPtr.Zero;
+                    if (Method<EnumAdapters1>(factory, 12)(factory, a, out adapter) < 0) break;
                     try {
-                        OutputDesc info; Check(Method<GetOutputDesc>(output, 7)(output, out info));
-                        var rect = info.DesktopCoordinates;
-                        if (rect.Left == bounds.Left && rect.Top == bounds.Top && rect.Right == bounds.Right && rect.Bottom == bounds.Bottom && info.Rotation == 1) return (int)i;
-                    } finally { Release(ref output); }
+                        for (uint i = 0; ; i++) {
+                            IntPtr output = IntPtr.Zero;
+                            if (Method<EnumOutputs>(adapter, 7)(adapter, i, out output) < 0) break;
+                            try {
+                                OutputDesc info; Check(Method<GetOutputDesc>(output, 7)(output, out info));
+                                var rect = info.DesktopCoordinates;
+                                if (rect.Left == bounds.Left && rect.Top == bounds.Top && rect.Right == bounds.Right && rect.Bottom == bounds.Bottom && info.Rotation == 1) {
+                                    AdapterDesc adapterInfo; Check(Method<GetAdapterDesc>(adapter, 8)(adapter, out adapterInfo));
+                                    vendor = adapterInfo.Vendor;
+                                    adapterIndex = (int)a;
+                                    return (int)i;
+                                }
+                            } finally { Release(ref output); }
+                        }
+                    } finally { Release(ref adapter); }
                 }
                 throw new NotSupportedException("此显示器暂时使用兼容采集");
-            } finally { Release(ref adapter); Release(ref dxgi); Release(ref context); Release(ref device); }
+            } finally { Release(ref factory); }
         }
 
         public static DesktopDuplication TryCreate(Rectangle bounds, out string reason) {
@@ -111,29 +128,36 @@ namespace LinkShell.Windows {
             catch (Exception error) { reason = error.Message; result.Dispose(); return null; }
         }
         void Initialize(Rectangle bounds) {
-            uint level;
-            Check(D3D11CreateDevice(IntPtr.Zero, 1, IntPtr.Zero, 0x20, IntPtr.Zero, 0, 7, out device, out level, out context));
-            IntPtr dxgi = IntPtr.Zero, adapter = IntPtr.Zero;
+            IntPtr factory = IntPtr.Zero;
             try {
-                dxgi = Query(device, DxgiDevice);
-                Check(Method<GetAdapter>(dxgi, 7)(dxgi, out adapter));
-                for (uint i = 0; ; i++) {
-                    IntPtr output = IntPtr.Zero, output1 = IntPtr.Zero;
-                    if (Method<EnumOutputs>(adapter, 7)(adapter, i, out output) < 0) break;
+                Guid factoryId = DxgiFactory1;
+                Check(CreateDXGIFactory1(ref factoryId, out factory));
+                for (uint a = 0; ; a++) {
+                    IntPtr adapter = IntPtr.Zero;
+                    if (Method<EnumAdapters1>(factory, 12)(factory, a, out adapter) < 0) break;
                     try {
-                        OutputDesc desc; Check(Method<GetOutputDesc>(output, 7)(output, out desc));
-                        var area = desc.DesktopCoordinates;
-                        if (area.Left != bounds.Left || area.Top != bounds.Top || area.Right != bounds.Right || area.Bottom != bounds.Bottom) continue;
-                        // Rotated outputs need texture rotation. Keep the correct GDI path for those.
-                        if (desc.Rotation != 1) throw new NotSupportedException("旋转屏幕使用兼容采集");
-                        output1 = Query(output, Output1);
-                        Check(Method<DuplicateOutput>(output1, 22)(output1, device, out duplication));
-                        InitializeScaler();
-                        return;
-                    } finally { Release(ref output1); Release(ref output); }
+                        for (uint i = 0; ; i++) {
+                            IntPtr output = IntPtr.Zero, output1 = IntPtr.Zero;
+                            if (Method<EnumOutputs>(adapter, 7)(adapter, i, out output) < 0) break;
+                            try {
+                                OutputDesc desc; Check(Method<GetOutputDesc>(output, 7)(output, out desc));
+                                var area = desc.DesktopCoordinates;
+                                if (area.Left != bounds.Left || area.Top != bounds.Top || area.Right != bounds.Right || area.Bottom != bounds.Bottom) continue;
+                                // Rotated outputs need texture rotation. Keep the correct GDI path for those.
+                                if (desc.Rotation != 1) throw new NotSupportedException("旋转屏幕使用兼容采集");
+                                // D3D_DRIVER_TYPE_UNKNOWN (0) is required when creating a device on an explicit DXGI adapter.
+                                uint level;
+                                Check(D3D11CreateDevice(adapter, 0, IntPtr.Zero, 0x20, IntPtr.Zero, 0, 7, out device, out level, out context));
+                                output1 = Query(output, Output1);
+                                Check(Method<DuplicateOutput>(output1, 22)(output1, device, out duplication));
+                                InitializeScaler();
+                                return;
+                            } finally { Release(ref output1); Release(ref output); }
+                        }
+                    } finally { Release(ref adapter); }
                 }
                 throw new NotSupportedException("此显示器使用兼容采集");
-            } finally { Release(ref adapter); Release(ref dxgi); }
+            } finally { Release(ref factory); }
         }
         void InitializeScaler() {
             const string shader = "struct V { float4 position : SV_Position; float2 uv : TEXCOORD0; }; V Vertex(uint id : SV_VertexID) { V o; float2 p = float2(id == 2 ? 3 : -1, id == 1 ? 3 : -1); o.position = float4(p, 0, 1); o.uv = p * float2(0.5, -0.5) + 0.5; return o; } Texture2D image : register(t0); SamplerState sampling : register(s0); float4 Pixel(V i) : SV_Target { return image.SampleLevel(sampling, i.uv, 0); }";

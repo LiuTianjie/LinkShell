@@ -47,6 +47,14 @@ export interface RpcPeerOptions {
   onNotification?: NotificationHandler;
   /** Default timeout for outgoing requests; 0 disables it. */
   requestTimeoutMs?: number;
+  /**
+   * Wire notification used to cancel an in-flight request.
+   * Defaults to `{ method: "$/cancelRequest", idField: "id", inbound: "abort" }`.
+   * ACP uses `{ method: "$/cancel_request", idField: "requestId" }`; setting
+   * `inbound: "notify"` forwards incoming cancel notifications to `onNotification`
+   * so protocol-specific handlers can send explicit cancellation outcomes.
+   */
+  cancelMethod?: { method: string; idField: string; inbound?: "abort" | "notify" };
 }
 
 interface Pending {
@@ -77,7 +85,8 @@ export class RpcPeer {
       if (limit > 0) {
         entry.timer = setTimeout(() => {
           this.pending.delete(id);
-          this.notify("$/cancelRequest", { id });
+          const cancel = this.options.cancelMethod ?? { method: "$/cancelRequest", idField: "id" };
+          this.notify(cancel.method, { [cancel.idField]: id });
           reject(new RpcError(RPC_APP_ERROR, `请求超时（${method}，${limit} ms）`, { code: "timeout" }));
         }, limit);
       }
@@ -162,8 +171,9 @@ export class RpcPeer {
     }
 
     if (id === undefined) {
-      if (method === "$/cancelRequest") {
-        const cancelId = (message.params as { id?: unknown } | null | undefined)?.id;
+      const cancel = this.options.cancelMethod ?? { method: "$/cancelRequest", idField: "id" };
+      if (method === cancel.method && cancel.inbound !== "notify") {
+        const cancelId = (message.params as Record<string, unknown> | null | undefined)?.[cancel.idField];
         if (typeof cancelId === "string" || typeof cancelId === "number") {
           const controller = this.inbound.get(cancelId);
           if (controller) {

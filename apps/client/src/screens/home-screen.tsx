@@ -5,7 +5,7 @@ import type { SessionSummary, TerminalInfo } from "@linkshell/wire";
 import { router, Stack } from "expo-router";
 import { useHeaderHeight, useIsFocused } from "expo-router/react-navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Platform, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { BackHandler, Platform, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import ReanimatedSwipeable, { type SwipeableMethods } from "react-native-gesture-handler/ReanimatedSwipeable";
 import Animated from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -42,7 +42,7 @@ import {
 import { useNow } from "@/lib/use-now";
 import { colors } from "@/theme/colors";
 import { radius, type } from "@/theme/type";
-import { IOS_TAB_BAR_HEIGHT, useFloatingTabInset } from "@/components/floating-tabs";
+import { IOS_TAB_BAR_HEIGHT, useFloatingTabInset, useHideFloatingTabs } from "@/components/floating-tabs";
 import { NEW_SESSION } from "@/components/new-session-action";
 import { PageSearch } from "@/components/page-header";
 import { SessionContent } from "./session-screen";
@@ -54,7 +54,7 @@ import { SessionFoldLayoutContext } from "@/lib/session-fold-layout";
 import { baseName } from "@/lib/format";
 import { Glass } from "@/components/glass";
 import { LayoutProbe } from "../../modules/link-layout";
-import { AdaptivePage, usePageInsets } from "@/components/adaptive-page";
+import { AdaptivePage, ConsumedTopInset, usePageInsets } from "@/components/adaptive-page";
 import { HeaderActions, type HeaderAction } from "@/components/header-actions";
 import { SessionTools, type Panel } from "@/components/session-workspace";
 
@@ -332,6 +332,8 @@ function HomeWorkspace() {
   const insets = usePageInsets();
   const systemInsets = useSafeAreaInsets();
   const headerHeight = useHeaderHeight();
+  const homeFocused = useIsFocused();
+  const tabInset = useFloatingTabInset();
   const window = useWindowDimensions();
   const geometry = useLayoutGeometry();
   const { t } = useLocale();
@@ -347,8 +349,9 @@ function HomeWorkspace() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [laptopListOpen, setLaptopListOpen] = useState(false);
   useEffect(() => {
-    if (!laptop) setLaptopListOpen(false);
-  }, [laptop]);
+    // Wait until transient same-orientation metrics settle before clearing tabletop overlay state.
+    if (!laptop && !geometry.pending) setLaptopListOpen(false);
+  }, [laptop, geometry.pending]);
   const [motionAction, setMotionAction] = useState(0);
   const [detailVisited, setDetailVisited] = useState(false);
   const [tool, setTool] = useState<Panel | null>(null);
@@ -377,9 +380,14 @@ function HomeWorkspace() {
     if (split && selected) {
       setSelectedId(selected.id);
       setDetailOpened(true);
+    } else if (!selected && !split) {
+      setDetailOpened(false);
+      setTool(null);
     }
   }, [split, selected]);
   const showDetail = !!selected && (split || detailOpened);
+  // Hide Android floating tabs when a mid-session fold leaves the detail pane covering the whole tab.
+  useHideFloatingTabs(Platform.OS !== "ios" && homeFocused && !split && showDetail);
   const inlineControls = homeUsesInlineControls(systemInsets, showDetail);
   const navigationLayout = homeNavigationLayout(insets, systemInsets, headerHeight, !inlineControls);
   useEffect(() => {
@@ -391,7 +399,16 @@ function HomeWorkspace() {
   const gap = split ? (folded ? layout.gap : 12) : 0;
   const navigationTop = Platform.OS === "ios" ? navigationLayout.contentTop : 0;
   const paneTop = split ? Math.max(8, navigationTop, insets.top) : navigationTop;
-  const bottom = laptop ? Math.max(12, insets.bottom) : split ? 12 : 0;
+  const bottom =
+    Platform.OS !== "ios"
+      ? split
+        ? Math.max(12, tabInset)
+        : 0
+      : laptop
+        ? Math.max(12, insets.bottom)
+        : split
+          ? 12
+          : 0;
   const foldLayout = useMemo(() => (laptop ? { bottomReserved: bottom } : null), [laptop, bottom]);
   const motionGeometry = [
     geometry.revision,
@@ -406,6 +423,7 @@ function HomeWorkspace() {
     insets.top,
     insets.bottom,
     navigationTop,
+    bottom,
     window.fontScale,
   ].join(":");
   const sidebarTop = Platform.OS === "ios" ? navigationTop : split ? insets.top : 0;
@@ -423,8 +441,11 @@ function HomeWorkspace() {
         ? sidebarWidth + gap
         : 0;
   const toolWidth = Math.max(0, split ? layout.after - 12 : width);
+  // In tabletop/laptop mode, keep the detail pane cleanly below the horizontal hinge
+  // so chat messages and the composer never straddle the crease or sit under top overlays.
+  const laptopDetailTop = Math.max(paneTop, layout.before + layout.gap);
   const detail: PaneFrame = laptop
-    ? { left: 0, top: paneTop, width, height: Math.max(0, height - paneTop - bottom) }
+    ? { left: 0, top: laptopDetailTop, width, height: Math.max(0, height - laptopDetailTop - bottom) }
     : {
         left: detailLeft,
         top: paneTop,
@@ -440,7 +461,7 @@ function HomeWorkspace() {
           width: showTools ? toolWidth : 0,
           height: Math.max(0, height - (split ? paneTop : Math.max(navigationTop, insets.top)) - bottom),
         };
-  const toggleSidebar = () => {
+  const toggleSidebar = useCallback(() => {
     setMotionAction((value) => value + 1);
     if (laptop) {
       setLaptopListOpen((value) => !value);
@@ -452,21 +473,51 @@ function HomeWorkspace() {
       setTool(null);
       setSidebarCollapsed(false);
     } else setSidebarCollapsed((value) => !value);
-  };
-  const openTool = (panel: Panel) => {
+  }, [laptop, split, showTools]);
+  const openTool = useCallback((panel: Panel) => {
     setMotionAction((value) => value + 1);
     setLaptopListOpen(false);
     setTool(panel);
-  };
-  const toggleTool = (panel: Panel) => {
+  }, []);
+  const toggleTool = useCallback((panel: Panel) => {
     setMotionAction((value) => value + 1);
     setLaptopListOpen(false);
     setTool((current) => (current === panel ? null : panel));
-  };
-  const closeTool = () => {
+  }, []);
+  const closeTool = useCallback(() => {
     setMotionAction((value) => value + 1);
     setTool(null);
-  };
+  }, []);
+  const dismissDetail = useCallback(() => {
+    setMotionAction((value) => value + 1);
+    setTool(null);
+    setSelectedId(null);
+    if (!split) setDetailOpened(false);
+  }, [split]);
+  useEffect(() => {
+    if (Platform.OS !== "android" || !homeFocused) return;
+    if (!showTools && !(!split && showDetail) && !(laptop && laptopListOpen)) return;
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (showTools) {
+        closeTool();
+        return true;
+      }
+      if (laptop && laptopListOpen) {
+        setMotionAction((value) => value + 1);
+        setLaptopListOpen(false);
+        return true;
+      }
+      if (!split && showDetail) {
+        setMotionAction((value) => value + 1);
+        setDetailOpened(false);
+        setTool(null);
+        return true;
+      }
+      return false;
+    });
+    return () => subscription.remove();
+  }, [homeFocused, showTools, split, showDetail, laptop, laptopListOpen, closeTool]);
+  const detailTopInset = Math.max(0, insets.top - detail.top);
   const sessionTools: HeaderAction[] = [
     { ...NEW_SESSION, kind: "button" },
     ...(["changes", "preview"] as const).map(
@@ -514,7 +565,9 @@ function HomeWorkspace() {
           fixedWidth={split && axis === "row" ? activeSidebarWidth : width}
           style={{ zIndex: laptop ? 1 : 0 }}
         >
-          <HomeList onSelect={select} selectedId={showDetail ? selected?.id : undefined} compact={split} inlineControls={inlineControls} />
+          <ConsumedTopInset height={sidebar.top}>
+            <HomeList onSelect={select} selectedId={showDetail ? selected?.id : undefined} compact={split} inlineControls={inlineControls} />
+          </ConsumedTopInset>
         </MountedMotionPane>
         <MountedMotionPane
           frame={detail}
@@ -523,13 +576,14 @@ function HomeWorkspace() {
           geometry={motionGeometry}
           style={{ borderRadius: split ? radius.panel : 0, borderCurve: "continuous", backgroundColor: colors.plain }}
         >
+          <ConsumedTopInset height={detail.top}>
           <SessionFoldLayoutContext value={foldLayout}>
             {selected && (showDetail || detailVisited) ? (
               <>
                 {Platform.OS !== "ios" ? (
                   <View
                     style={{
-                      paddingTop: split ? Math.max(18, insets.top + 4) : insets.top + 12,
+                      paddingTop: split ? Math.max(14, detailTopInset + 4) : detailTopInset + 12,
                       paddingBottom: 14,
                       paddingHorizontal: 18,
                       flexDirection: "row",
@@ -598,11 +652,13 @@ function HomeWorkspace() {
                   navigationTitle={split ? "" : undefined}
                   toolbarActions={split ? sessionTools : []}
                   onOpenPanel={openTool}
+                  onDismiss={dismissDetail}
                   panelsBeside={split}
                 />
               </>
             ) : null}
           </SessionFoldLayoutContext>
+          </ConsumedTopInset>
         </MountedMotionPane>
         <MountedMotionPane
           frame={tools}
@@ -612,18 +668,20 @@ function HomeWorkspace() {
           fixedWidth={split && axis === "column" ? width : toolWidth}
           style={{ zIndex: laptop ? 2 : 0, borderRadius: split ? radius.panel : 0, borderCurve: "continuous", backgroundColor: colors.plain }}
         >
-          {selected ? (
-            <SessionTools
-              key={selected.id}
-              sessionId={selected.id}
-              panel={tool ?? "changes"}
-              onPanel={openTool}
-              onClose={closeTool}
-              active={showTools}
-              motionAction={motionAction}
-              motionGeometry={motionGeometry}
-            />
-          ) : null}
+          <ConsumedTopInset height={tools.top}>
+            {selected ? (
+              <SessionTools
+                key={selected.id}
+                sessionId={selected.id}
+                panel={tool ?? "changes"}
+                onPanel={openTool}
+                onClose={closeTool}
+                active={showTools}
+                motionAction={motionAction}
+                motionGeometry={motionGeometry}
+              />
+            ) : null}
+          </ConsumedTopInset>
         </MountedMotionPane>
       </View>
     </View>

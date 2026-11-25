@@ -4,6 +4,7 @@ import { Terminal as Xterm } from "@xterm/xterm";
 import { toBase64, type TerminalInfo } from "@linkshell/wire";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import type { Connection } from "../../core/connections";
+import { engine } from "../../core/engine";
 import { STORAGE_KEYS, readLocal, saveLocal } from "../../core/storage";
 import {
   MAX_WARM_TERMINALS,
@@ -1054,7 +1055,10 @@ export class TerminalStageController {
     }
     this.connectionUnsub?.();
     this.connectionUnsub = undefined;
+    this.connection = undefined;
+    this.linkHandler = undefined;
     this.resizeObserver?.disconnect();
+    this.resizeObserver = undefined;
     for (const id of [...this.warmSessions.keys()]) {
       this.evictWarmSession(id, false);
     }
@@ -1063,11 +1067,42 @@ export class TerminalStageController {
 }
 
 const stageControllers = new Map<string, TerminalStageController>();
+let lifecycleCleanupBound = false;
+let engineCleanupUnsub: (() => void) | undefined;
+let beforeUnloadHandler: (() => void) | undefined;
+
+function ensureStageLifecycleCleanup(): void {
+  if (lifecycleCleanupBound) return;
+  lifecycleCleanupBound = true;
+  let knownComputers = new Set<string>();
+  const syncKnown = () => {
+    const snap = engine.state.getState();
+    const current = new Set<string>();
+    for (const comp of snap.computers) current.add(comp.key);
+    if (snap.localComputer) current.add(snap.localComputer.key);
+    if (snap.connection) current.add(snap.connection.computer.key);
+    for (const prevKey of knownComputers) {
+      if (!current.has(prevKey)) {
+        disposeTerminalStagesForComputer(prevKey);
+      }
+    }
+    knownComputers = current;
+  };
+  syncKnown();
+  engineCleanupUnsub = engine.state.subscribe(syncKnown);
+  if (typeof window !== "undefined") {
+    beforeUnloadHandler = () => {
+      disposeAllTerminalStages();
+    };
+    window.addEventListener("beforeunload", beforeUnloadHandler);
+  }
+}
 
 export function getTerminalStageController(
   stageKey: string,
   computerKey = stageKey,
 ): TerminalStageController {
+  ensureStageLifecycleCleanup();
   let controller = stageControllers.get(stageKey);
   if (!controller) {
     controller = new TerminalStageController(stageKey, computerKey);
@@ -1076,7 +1111,23 @@ export function getTerminalStageController(
   return controller;
 }
 
-export function resetTerminalStagesForTests(): void {
+export function disposeTerminalStageController(stageKey: string): void {
+  const controller = stageControllers.get(stageKey);
+  if (!controller) return;
+  stageControllers.delete(stageKey);
+  controller.disposeAll();
+}
+
+export function disposeTerminalStagesForComputer(computerKey: string): void {
+  for (const [key, controller] of [...stageControllers.entries()]) {
+    if (controller.computerKey === computerKey || key === computerKey) {
+      stageControllers.delete(key);
+      controller.disposeAll();
+    }
+  }
+}
+
+export function disposeAllTerminalStages(): void {
   for (const controller of stageControllers.values()) {
     controller.disposeAll();
   }
@@ -1085,4 +1136,15 @@ export function resetTerminalStagesForTests(): void {
     stageParkingEl.remove();
     stageParkingEl = null;
   }
+}
+
+export function resetTerminalStagesForTests(): void {
+  disposeAllTerminalStages();
+  engineCleanupUnsub?.();
+  engineCleanupUnsub = undefined;
+  if (beforeUnloadHandler && typeof window !== "undefined") {
+    window.removeEventListener("beforeunload", beforeUnloadHandler);
+    beforeUnloadHandler = undefined;
+  }
+  lifecycleCleanupBound = false;
 }

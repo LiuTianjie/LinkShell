@@ -1,7 +1,13 @@
 import { execFileSync } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { runUpgrade } from "../src/commands/upgrade.js";
+import {
+  DEFAULT_NPM_REGISTRY,
+  detectPackageManager,
+  resolveNpmRegistry,
+  runUpgrade,
+  upgradeCommandForManager,
+} from "../src/commands/upgrade.js";
 import { runUpgradeWorker } from "../src/commands/upgrade-worker.js";
 
 vi.mock("node:child_process", () => ({ execFileSync: vi.fn() }));
@@ -39,7 +45,7 @@ const hostCalls = () => vi.mocked(runUpgradeWorker).mock.calls;
 describe("linkshell upgrade", () => {
   it("installs with npm, then verifies and runs the newly installed CLI", async () => {
     await runUpgrade("1.0.0");
-    expect(exec.mock.calls[0]?.slice(0, 2)).toEqual(["npm", ["install", "-g", "linkshell-cli@latest"]]);
+    expect(exec).toHaveBeenCalledWith("npm", ["install", "-g", "linkshell-cli@latest"], expect.anything());
     const entry = "/npm prefix with spaces/lib/node_modules/linkshell-cli/dist/cli/src/index.js";
     expect(exec).toHaveBeenCalledWith(process.execPath, [entry, "--version"], expect.anything());
     expect(hostCalls()[0]?.[0]).toEqual({ command: process.execPath, args: [entry] });
@@ -50,19 +56,22 @@ describe("linkshell upgrade", () => {
   it("uses Homebrew's new opt path after the old Cellar path has been removed", async () => {
     vi.mocked(realpathSync).mockReturnValue("/opt/homebrew/Cellar/linkshell/1.0.0/libexec/lib/node_modules/linkshell-cli/dist/cli/src/index.js");
     await runUpgrade("1.0.0");
-    expect(exec.mock.calls[0]?.slice(0, 2)).toEqual(["brew", ["upgrade", "linkshell"]]);
+    expect(exec).toHaveBeenCalledWith("brew", ["upgrade", "linkshell"], expect.anything());
     expect(hostCalls()[0]?.[0]).toEqual({ command: "/opt/homebrew/opt/linkshell/bin/linkshell", args: [] });
   });
 
   it("still updates an older host when the CLI is already current", async () => {
     await runUpgrade("2.0.0");
-    expect(exec.mock.calls.some(([command]) => command === "npm" || command === "brew")).toBe(false);
+    expect(exec.mock.calls.some(([command, args]) => (command === "npm" && args?.[0] === "install") || command === "brew")).toBe(false);
     expect(hostCalls()).toHaveLength(1);
     expect(output).toContain("Checking the host");
   });
 
   it("leaves the host alone when installation fails", async () => {
-    exec.mockImplementationOnce(() => { throw new Error("installation failed"); });
+    exec.mockImplementation((_command, args) => {
+      if (args?.[0] === "install") throw new Error("installation failed");
+      return "";
+    });
     await runUpgrade("1.0.0");
     expect(hostCalls()).toEqual([]);
     expect(process.exitCode).toBe(1);
@@ -87,7 +96,61 @@ describe("linkshell upgrade", () => {
   it("makes no installation or host changes when the registry is unavailable", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("offline"); }));
     await runUpgrade("1.0.0");
-    expect(exec).not.toHaveBeenCalled();
+    expect(exec.mock.calls.some(([, args]) => Array.isArray(args) && (args.includes("install") || args.includes("upgrade")))).toBe(false);
     expect(process.exitCode).toBe(1);
+  });
+
+  it("detects brew, pnpm, yarn, volta, bun, and npm package managers from resolved paths", () => {
+    expect(detectPackageManager("/opt/homebrew/Cellar/linkshell/0.10.0/libexec/index.js")).toBe("brew");
+    expect(detectPackageManager("/home/linuxbrew/.linuxbrew/Cellar/linkshell/0.10.0/index.js")).toBe("brew");
+    expect(detectPackageManager("/home/alice/.local/share/pnpm/global/5/node_modules/linkshell-cli/dist/index.js")).toBe("pnpm");
+    expect(detectPackageManager("/home/alice/.config/yarn/global/node_modules/linkshell-cli/dist/index.js")).toBe("yarn");
+    expect(detectPackageManager("/home/alice/.volta/tools/image/packages/linkshell-cli/dist/index.js")).toBe("volta");
+    expect(detectPackageManager("/home/alice/.bun/install/global/node_modules/linkshell-cli/dist/index.js")).toBe("bun");
+    expect(detectPackageManager("/usr/local/lib/node_modules/linkshell-cli/dist/index.js")).toBe("npm");
+
+    expect(upgradeCommandForManager("pnpm")).toMatchObject({ command: "pnpm", args: ["add", "-g", "linkshell-cli@latest"] });
+    expect(upgradeCommandForManager("volta")).toMatchObject({ command: "volta", args: ["install", "linkshell-cli@latest"] });
+  });
+
+  it("resolves custom npm registries from env or npm config get registry (e.g. China mirrors)", () => {
+    expect(resolveNpmRegistry({ env: { npm_config_registry: "https://registry.npmmirror.com/" } })).toBe("https://registry.npmmirror.com");
+    expect(
+      resolveNpmRegistry({
+        env: {},
+        npmrcPath: "/nonexistent/.npmrc",
+        exec: () => "https://npm.internal.corp/\n",
+      }),
+    ).toBe("https://npm.internal.corp");
+    expect(
+      resolveNpmRegistry({
+        env: {},
+        npmrcPath: "/nonexistent/.npmrc",
+        exec: () => { throw new Error("no npm"); },
+      }),
+    ).toBe(DEFAULT_NPM_REGISTRY);
+  });
+
+  it("prints actionable non-sudo recovery on EACCES failure and supports --check without mutating", async () => {
+    exec.mockImplementation((_command, args) => {
+      if (args?.[0] === "config") return "https://registry.npmjs.org/\n";
+      if (args?.[0] === "install") throw new Error("EACCES: permission denied, mkdir '/usr/lib/node_modules/linkshell-cli'");
+      return "";
+    });
+    await runUpgrade("1.0.0");
+    expect(process.exitCode).toBe(1);
+    expect(output).toContain("~/.npm-global");
+    expect(hostCalls()).toEqual([]);
+
+    // --check never invokes install or upgrade worker
+    process.exitCode = undefined;
+    output = "";
+    exec.mockClear();
+    await runUpgrade("1.0.0", { check: true });
+    expect(process.exitCode).toBeUndefined();
+    expect(output).toContain("1.0.0");
+    expect(output).toContain("2.0.0");
+    expect(exec.mock.calls.some(([, args]) => Array.isArray(args) && args.includes("install"))).toBe(false);
+    expect(hostCalls()).toEqual([]);
   });
 });

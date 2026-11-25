@@ -1,6 +1,7 @@
 import type { TimelineItem } from "@linkshell/client-core";
 import { useMemo, useState } from "react";
-import { FlatList, Modal, Pressable, StyleSheet, View } from "react-native";
+import { FlatList, Modal, Platform, Pressable, StyleSheet, View } from "react-native";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { extractSessionOutline, type OutlineCategory, type SessionOutlineEntry } from "@/lib/coding-ux";
 import { haptics } from "@/lib/haptics";
@@ -47,8 +48,23 @@ export function SessionOutlineSheet({ visible, items, onClose, onSelectIndex }: 
   };
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
-      <View style={{ flex: 1, backgroundColor: colors.sheet, paddingTop: 14 }}>
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      supportedOrientations={["portrait", "portrait-upside-down", "landscape", "landscape-left", "landscape-right"]}
+      onRequestClose={onClose}
+    >
+      <KeyboardAvoidingView
+        behavior="padding"
+        style={{
+          flex: 1,
+          backgroundColor: colors.sheet,
+          paddingTop: (Platform.OS === "android" ? insets.top : 0) + 14,
+          paddingLeft: insets.left,
+          paddingRight: insets.right,
+        }}
+      >
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 18, paddingBottom: 12 }}>
           <Text style={[type.title3, { color: colors.label }]}>{t("session.outline")}</Text>
           <Pressable
@@ -169,7 +185,7 @@ export function SessionOutlineSheet({ visible, items, onClose, onSelectIndex }: 
             );
           }}
         />
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

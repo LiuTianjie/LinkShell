@@ -874,6 +874,7 @@ struct WatchSessionDetailView: View {
   @State private var didInitialScroll = false
   @State private var autoLoadReady = false
   @State private var lastAutoLoadCount = -1
+  @State private var lastAutoLoadAt: Date = .distantPast
   @State private var anchorItemIdBeforeLoad: String? = nil
 
   private var session: WatchSession? {
@@ -900,7 +901,7 @@ struct WatchSessionDetailView: View {
 
         ScrollViewReader { scrollProxy in
           ScrollView {
-            VStack(alignment: .leading, spacing: 6) {
+            LazyVStack(alignment: .leading, spacing: 6) {
               GeometryReader { geo in
                 Color.clear.preference(
                   key: WatchScrollTopOffsetKey.self,
@@ -938,6 +939,19 @@ struct WatchSessionDetailView: View {
                   .controlSize(.mini)
                   .frame(maxWidth: .infinity)
                   .frame(height: 14)
+              } else if session.hasEarlier == true {
+                Button {
+                  lastAutoLoadCount = timelineItems.count
+                  lastAutoLoadAt = Date()
+                  anchorItemIdBeforeLoad = timelineItems.first?.id
+                  store.loadEarlierMessages(sessionId: session.id)
+                } label: {
+                  Label("加载更早消息", systemImage: "arrow.up.circle")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 32)
+                }
+                .buttonStyle(.plain)
               }
 
               if !timelineItems.isEmpty {
@@ -1029,11 +1043,19 @@ struct WatchSessionDetailView: View {
           .coordinateSpace(name: "watchSessionScroll")
           .onPreferenceChange(WatchScrollTopOffsetKey.self) { minY in
             guard autoLoadReady else { return }
+            if minY < -60 {
+              // Scrolling back down clears the count guard so returning to the top can retry cleanly.
+              lastAutoLoadCount = -1
+              return
+            }
+            let now = Date()
+            let canRetrySameCount = now.timeIntervalSince(lastAutoLoadAt) >= 4.0
             if minY >= -24,
                session.hasEarlier == true,
                store.loadingEarlierSessionId != session.id,
-               timelineItems.count != lastAutoLoadCount {
+               (timelineItems.count != lastAutoLoadCount || canRetrySameCount) {
               lastAutoLoadCount = timelineItems.count
+              lastAutoLoadAt = now
               anchorItemIdBeforeLoad = timelineItems.first?.id
               store.loadEarlierMessages(sessionId: session.id)
             }
@@ -1650,9 +1672,10 @@ public struct LinkShellWatchRootView: View {
         onOpenComputers: { showingComputers = true },
         onOpenQuickAdd: { showingQuickAdd = true }
       )
-      // Inactive (wrist down, Always On, a notification) keeps the connection; only background pauses it.
-      .onAppear { store.setForeground(scenePhase != .background) }
-      .onChange(of: scenePhase) { _, phase in store.setForeground(phase != .background) }
+      // Inactive (wrist down, Always On, a notification) throttles polling without dropping;
+      // background pauses independent mode, and active refreshes companion mode on return.
+      .onAppear { store.setScenePhase(scenePhase) }
+      .onChange(of: scenePhase) { _, phase in store.setScenePhase(phase) }
       .navigationBarTitleDisplayMode(.inline)
       .navigationDestination(item: $detailSessionId) { sessionId in
         WatchSessionDetailView(sessionId: sessionId, store: store)

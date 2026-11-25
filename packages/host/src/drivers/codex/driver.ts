@@ -15,6 +15,7 @@ import {
   APPROVAL_METHODS,
   QUESTION_METHODS,
   mapApprovalRequest,
+  mapGlobalNotice,
   mapQuestionRequest,
   mapNotification,
   threadStateOf,
@@ -99,6 +100,24 @@ interface Joined {
 /** Codex's refusal to load a thread that another process has loaded. */
 function heldElsewhere(error: unknown): boolean {
   return error instanceof Error && /already has an active writer/i.test(error.message);
+}
+
+/** True only when `turn/steer` failed because the expected turn is no longer active. */
+function isStaleTurnSteerError(error: unknown): boolean {
+  if (
+    error instanceof RpcError &&
+    (error.appCode === "timeout" ||
+      error.appCode === "closed" ||
+      error.appCode === "unauthorized" ||
+      error.appCode === "agent_unavailable" ||
+      error.code === -32602)
+  ) {
+    return false;
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return /\bno (?:matching )?active turn\b|\bturn\b.*\b(?:not active|already (?:completed|ended|finished|interrupted)|not found|mismatch|does not match)\b|\bexpectedTurnId\b|\bexpected_turn_id\b|\bstale turn\b/i.test(
+    message,
+  );
 }
 
 /**
@@ -502,6 +521,7 @@ export class CodexDriver implements AgentDriver {
       joined = await this.subscribe(nativeId);
     } catch (error) {
       this.attached.delete(nativeId);
+      this.abandonThreadApprovals(nativeId);
       if (error instanceof Error && /session .+ is archived\b/i.test(error.message)) {
         // Archives remain readable; opening history must not unarchive or resume the agent.
         const { thread } = await this.rpc<{ thread: CodexThread }>("thread/read", { threadId: nativeId, includeTurns: true });
@@ -618,12 +638,19 @@ export class CodexDriver implements AgentDriver {
     const held = this.joining.get(threadId) ?? [];
     this.joining.delete(threadId);
     for (const { method, params, from } of held) {
-      const record = params as { itemId?: unknown; item?: { id?: unknown }; turn?: { id?: unknown } } | undefined;
+      const record = params as { threadId?: unknown; itemId?: unknown; item?: { id?: unknown }; turn?: { id?: unknown } } | undefined;
+      if (typeof record?.threadId === "string" && record.threadId !== threadId) {
+        // Sub-agent notification buffered while its parent thread was joining: replay intact.
+        this.onNotification(method, params, from);
+        continue;
+      }
       const itemId = record?.itemId ?? record?.item?.id;
       // Already in what was read: the item, or the start and end of turns it shows.
       if (typeof itemId === "string" && read.has(itemId)) continue;
       if (method === "turn/started" && record?.turn?.id === active?.id) continue;
-      if (method === "turn/completed" && record?.turn?.id !== active?.id) continue;
+      // Compare against live `state.activeTurnId` (not stale `active?.id`) so a turn that
+      // started and completed while buffered during attach is not dropped.
+      if (method === "turn/completed" && record?.turn?.id !== state.activeTurnId) continue;
       this.onNotification(method, params, from);
     }
   }
@@ -1173,6 +1200,14 @@ export class CodexDriver implements AgentDriver {
     });
   }
 
+  private abandonThreadApprovals(nativeId: string): void {
+    for (const [requestId, pending] of this.approvals) {
+      if (pending.threadId !== nativeId) continue;
+      this.approvals.delete(requestId);
+      pending.abandon();
+    }
+  }
+
   private clearThreadCaches(nativeId: string): void {
     const toolIds = this.threadTools.get(nativeId);
     if (toolIds) {
@@ -1184,8 +1219,28 @@ export class CodexDriver implements AgentDriver {
     }
     this.threads.delete(nativeId);
     this.joining.delete(nativeId);
-    for (const [childId, parent] of this.children) {
-      if (parent.threadId === nativeId) this.threads.delete(childId);
+    this.attention.delete(nativeId);
+    this.cwds.delete(nativeId);
+    this.settings.delete(nativeId);
+    this.overrides.delete(nativeId);
+    this.goalAvailable.delete(nativeId);
+    this.goalRevision.delete(nativeId);
+    this.taskRevisions.delete(nativeId);
+    this.waiting.delete(nativeId);
+    const suffix = `:${nativeId}`;
+    for (const key of this.announced.keys()) {
+      if (key.endsWith(suffix)) this.announced.delete(key);
+    }
+    for (const [childId, parent] of [...this.children.entries()]) {
+      if (parent.threadId === nativeId) {
+        this.threads.delete(childId);
+        this.children.delete(childId);
+        this.subThreads.delete(childId);
+      }
+    }
+    if (![...this.attention.values()].some((entry) => (entry.value?.questions.length ?? 0) > 0) && this.attentionTimer) {
+      clearInterval(this.attentionTimer);
+      this.attentionTimer = undefined;
     }
   }
 
@@ -1195,6 +1250,7 @@ export class CodexDriver implements AgentDriver {
     this.taskProcesses.delete(nativeId);
     this.cancelRelease(nativeId);
     this.stopObserving(nativeId);
+    this.abandonThreadApprovals(nativeId);
     this.clearThreadCaches(nativeId);
     if (!this.attached.delete(nativeId)) return;
     await this.rpcFor(nativeId, "thread/unsubscribe", { threadId: nativeId }).catch(() => {});
@@ -1336,7 +1392,9 @@ export class CodexDriver implements AgentDriver {
         });
         return "steered";
       } catch (error) {
-        // The turn may have just ended; fall through to a fresh turn.
+        const turnMoved = this.stateOf(nativeId).activeTurnId !== activeTurnId;
+        if (!turnMoved && !isStaleTurnSteerError(error)) throw error;
+        // The turn just ended or expectedTurnId became stale; fall through to a fresh turn.
         this.host?.log(`[codex] steer failed, starting a new turn: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
@@ -1821,7 +1879,9 @@ export class CodexDriver implements AgentDriver {
   }
 
   async delete(nativeId: string): Promise<void> {
+    this.abandonThreadApprovals(nativeId);
     this.clearThreadCaches(nativeId);
+    this.attached.delete(nativeId);
     await this.rpcFor(nativeId, "thread/delete", { threadId: nativeId });
   }
 
@@ -2018,6 +2078,58 @@ export class CodexDriver implements AgentDriver {
         if (method === "turn/completed") resume?.finishedTurns.set(event.turn.id, event.turn.status ?? "unknown");
       }
     }
+    if (method === "account/updated") {
+      this.host?.authChanged?.(this.id);
+      return;
+    }
+    if (method === "thread/settings/updated") {
+      const event = params as { threadId?: unknown; threadSettings?: Record<string, unknown> } | undefined;
+      if (typeof event?.threadId === "string" && event.threadSettings && typeof event.threadSettings === "object") {
+        const ts = event.threadSettings;
+        const prev = this.settings.get(event.threadId) ?? {};
+        const next: CodexSettings = {
+          ...prev,
+          ...(typeof ts.model === "string" ? { model: ts.model } : {}),
+          ...(ts.effort !== undefined
+            ? { effort: typeof ts.effort === "string" ? ts.effort : null }
+            : ts.reasoningEffort !== undefined
+              ? { effort: typeof ts.reasoningEffort === "string" ? ts.reasoningEffort : null }
+              : {}),
+          ...(ts.approvalPolicy !== undefined ? { approvalPolicy: ts.approvalPolicy } : {}),
+          ...(ts.sandboxPolicy && typeof ts.sandboxPolicy === "object"
+            ? { sandbox: ts.sandboxPolicy as CodexSettings["sandbox"] }
+            : ts.sandbox && typeof ts.sandbox === "object"
+              ? { sandbox: ts.sandbox as CodexSettings["sandbox"] }
+              : {}),
+        };
+        this.settings.set(event.threadId, next);
+        const overrides = { ...this.overridesOf(event.threadId) };
+        let changed = false;
+        if (typeof ts.model === "string" && overrides.model !== undefined) { delete overrides.model; changed = true; }
+        if ((ts.effort !== undefined || ts.reasoningEffort !== undefined) && overrides.effort !== undefined) { delete overrides.effort; changed = true; }
+        if ((ts.approvalPolicy !== undefined || ts.sandboxPolicy !== undefined || ts.sandbox !== undefined) && overrides.permissions !== undefined) {
+          delete overrides.permissions;
+          changed = true;
+        }
+        const collab = ts.collaborationMode && typeof ts.collaborationMode === "object" ? (ts.collaborationMode as { mode?: unknown }) : undefined;
+        if (collab?.mode === "plan" || collab?.mode === "default") {
+          const plan = collab.mode === "plan";
+          if (overrides.plan !== plan) { overrides.plan = plan; changed = true; }
+        }
+        if (changed) this.setOverrides(event.threadId, overrides);
+        if (this.attached.has(event.threadId) || this.observed.has(event.threadId)) void this.announceConfig(event.threadId);
+      }
+      return;
+    }
+    if ((method === "warning" || method === "deprecationNotice" || method === "configWarning") && typeof (params as { threadId?: unknown } | undefined)?.threadId !== "string") {
+      const notice = mapGlobalNotice(method, params);
+      if (notice) {
+        const targets = this.watching.size > 0 ? [...this.watching].filter((id) => this.attached.has(id) || this.observed.has(id)) : [...this.attached];
+        for (const id of targets) this.host?.update(this.id, id, notice);
+        if (targets.length === 0) this.host?.log(`[codex] ${method}: ${notice.title}${notice.detail ? ` — ${notice.detail}` : ""}`);
+      }
+      return;
+    }
     if (method === "skills/changed") {
       this.skillsRevision++;
       this.skills.clear();
@@ -2037,7 +2149,12 @@ export class CodexDriver implements AgentDriver {
     if (method === "thread/deleted") {
       // Deleted in the TUI or another client.
       const threadId = (params as { threadId?: string } | undefined)?.threadId;
-      if (threadId && !this.subThreads.has(threadId)) this.host?.removed(this.id, threadId);
+      if (threadId && !this.subThreads.has(threadId)) {
+        this.abandonThreadApprovals(threadId);
+        this.clearThreadCaches(threadId);
+        this.attached.delete(threadId);
+        this.host?.removed(this.id, threadId);
+      }
       return;
     }
     if (method === "thread/started") {
@@ -2072,7 +2189,13 @@ export class CodexDriver implements AgentDriver {
       for (const mapped of mapNotification(method, params, (id) => this.stateOf(id))) this.sideUpdate(side, mapped.update);
       return;
     }
-    const held = typeof threadId === "string" ? this.joining.get(threadId) : undefined;
+    const joiningKey =
+      typeof threadId === "string"
+        ? this.joining.has(threadId)
+          ? threadId
+          : this.children.get(threadId)?.threadId
+        : undefined;
+    const held = joiningKey ? this.joining.get(joiningKey) : undefined;
     if (held) {
       held.push({ method, params, from });
       return;
@@ -2206,6 +2329,22 @@ export class CodexDriver implements AgentDriver {
     if (!APPROVAL_METHODS.has(method) && !QUESTION_METHODS.has(method)) return ABANDON;
     const requestId = from === "shared" ? sharedRequestId(String(id)) : String(id);
     const mapped = QUESTION_METHODS.has(method) ? mapQuestionRequest(method, params, requestId) : mapApprovalRequest(method, params, requestId);
+    if (!mapped && method === "mcpServer/elicitation/request" && from === "own") {
+      const record = params as { threadId?: unknown; serverName?: unknown } | undefined;
+      const rawThreadId = typeof record?.threadId === "string" ? record.threadId : undefined;
+      const targetThreadId = rawThreadId ? (this.children.get(rawThreadId)?.threadId ?? rawThreadId) : undefined;
+      if (targetThreadId && this.attached.has(targetThreadId)) {
+        const serverName = typeof record?.serverName === "string" ? record.serverName : undefined;
+        this.host?.log(`[codex] declining unsupported mcpServer/elicitation/request in ${targetThreadId}`);
+        this.host?.update(this.id, targetThreadId, {
+          sessionUpdate: "ls_notice",
+          level: "warning",
+          title: "无法显示这个 MCP 表单请求，已自动拒绝",
+          detail: serverName ? `来自 MCP 服务 ${serverName} 的请求格式暂不支持。` : "该 MCP 表单请求的格式暂不支持。",
+        });
+        return { action: "decline", content: null, _meta: null };
+      }
+    }
     const side = mapped && this.sideThreads.get(mapped.threadId);
     if (side && mapped) {
       // A side conversation changes nothing (it runs read-only and is told so): what it would need asking for is declined.

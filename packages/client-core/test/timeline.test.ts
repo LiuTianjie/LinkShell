@@ -532,5 +532,159 @@ describe("Codex automation & heartbeat message formatting", () => {
     expect(joined.items[0]).toMatchObject({ kind: "thought", id: "thought:m1", text: "final thought", ts: 1000 });
     expect(joined.items[1]).toMatchObject({ kind: "agent", id: "m1", text: "clean answer!", attachments: [image], ts: 1005 });
   });
+
+  it("honors tool replaceOutput across history page joins without duplicating superseded output", () => {
+    seq = 0;
+    const e1 = ev({ sessionUpdate: "tool_call", toolCallId: "cmd-1", title: "Run build", kind: "execute", status: "in_progress" }, 1000);
+    const e2 = ev({ sessionUpdate: "tool_call_update", toolCallId: "cmd-1", appendOutput: "partial stream\n" }, 1010);
+    const e3 = ev({ sessionUpdate: "tool_call_update", toolCallId: "cmd-1", replaceOutput: "authoritative final\n", status: "completed" }, 1020);
+    const e4 = ev({ sessionUpdate: "tool_call_update", toolCallId: "cmd-1", appendOutput: "tail\n" }, 1030);
+
+    const later = applyEvents(startWindow(emptyView("s"), 2), [e3, e4]);
+    const joined = prependEvents(later, [e1, e2], 0);
+    expect(findTool(joined, "cmd-1")).toMatchObject({
+      title: "Run build",
+      toolKind: "execute",
+      output: "authoritative final\ntail\n",
+      ts: 1000,
+    });
+  });
+
+  it("anchors hydrated failed outbox and pending drafts at the bottom across history replay and startWindow", () => {
+    seq = 0;
+    // Hydrated failed outbox messages arrive before any server history.
+    let view = markMessageFailed(addOptimisticMessage(emptyView("s"), "draft-1", [text("first failed")], 500), "draft-1");
+    view = markMessageFailed(addOptimisticMessage(view, "draft-2", [text("second failed")], 600), "draft-2");
+
+    const history = [
+      ev({ sessionUpdate: "user_message_chunk", messageId: "u1", content: text("older question") }, 100),
+      ev({ sessionUpdate: "ls_turn", state: "started" }, 101),
+      ev({ sessionUpdate: "agent_message_chunk", messageId: "a1", content: text("older answer") }, 102),
+      ev({ sessionUpdate: "ls_turn", state: "ended", stopReason: "end_turn" }, 103),
+    ];
+    view = applyEvents(view, history);
+
+    // Server items MUST precede both failed outbox drafts; drafts stay anchored at the bottom.
+    expect(view.items.map((item) => item.id)).toEqual(["u1", "a1", "local-draft-1", "local-draft-2"]);
+    expect(view.turnBreaks).toEqual(["a1"]);
+
+    // Confirming the second draft moves it ahead of the still-failed first draft.
+    view = applyEvent(view, ev({ sessionUpdate: "user_message_chunk", messageId: "local-draft-2", content: text("second failed") }, 700));
+    expect(view.items.map((item) => item.id)).toEqual(["u1", "a1", "local-draft-2", "local-draft-1"]);
+    expect(view.index).toEqual({ u1: 0, a1: 1, "local-draft-2": 2, "local-draft-1": 3 });
+
+    // Replacement window keeps unsent draft and anchors new server items above it too.
+    const windowed = startWindow(view, 50);
+    const replayed = applyEvents(windowed, [
+      { sessionId: "s", seq: 51, ts: 800, update: { sessionUpdate: "agent_message_chunk", messageId: "a2", content: text("newer turn") } },
+    ]);
+    expect(replayed.items.map((item) => item.id)).toEqual(["a2", "local-draft-1"]);
+  });
+
+  it("replays large event batches in linear time while keeping the input view immutable", () => {
+    seq = 0;
+    const events: SessionEvent[] = [];
+    for (let turn = 0; turn < 200; turn += 1) {
+      events.push(ev({ sessionUpdate: "user_message_chunk", messageId: `u-${turn}`, content: text(`prompt ${turn}`) }));
+      events.push(ev({ sessionUpdate: "ls_turn", state: "started", turnId: `t-${turn}` }));
+      for (let c = 0; c < 10; c += 1) {
+        events.push(ev({ sessionUpdate: "agent_message_chunk", messageId: `a-${turn}`, content: text(`chunk-${c} `) }));
+      }
+      events.push(ev({ sessionUpdate: "tool_call", toolCallId: `tool-${turn}`, title: "Run", kind: "execute", status: "in_progress" }));
+      events.push(ev({ sessionUpdate: "tool_call_update", toolCallId: `tool-${turn}`, appendOutput: "ok\n", status: "completed" }));
+      events.push(ev({ sessionUpdate: "ls_turn", state: "ended", turnId: `t-${turn}`, stopReason: "end_turn" }));
+    }
+    const base = applyEvents(emptyView("s"), events.slice(0, 15));
+    const baseSnapshot = base.items.slice();
+    const baseLastSeq = base.lastSeq;
+
+    const started = performance.now();
+    const batched = applyEvents(base, events.slice(15));
+    const elapsed = performance.now() - started;
+
+    expect(elapsed).toBeLessThan(500);
+    expect(base.items).toEqual(baseSnapshot);
+    expect(base.lastSeq).toBe(baseLastSeq);
+    expect(batched.lastSeq).toBe(events.at(-1)!.seq);
+    expect(batched.items).toHaveLength(600);
+    expect(batched.items[0]).toBe(base.items[0]);
+    expect(batched.turnBreaks).toHaveLength(200);
+  });
+
+  it("isolates subagent plan, ls_error, and ls_notice under parent.sub without overwriting root planId", () => {
+    seq = 0;
+    const view = applyEvents(emptyView("s"), [
+      ev({ sessionUpdate: "ls_turn", state: "started", turnId: "t1" }, 1000),
+      ev({
+        sessionUpdate: "plan",
+        explanation: "Root plan",
+        entries: [{ content: "Root step", priority: "high", status: "in_progress" }],
+      }, 1001),
+      ev({ sessionUpdate: "tool_call", toolCallId: "sub-1", title: "Subagent", kind: "other", status: "in_progress" }, 1002),
+      ev({
+        sessionUpdate: "plan",
+        parentToolCallId: "sub-1",
+        explanation: "Sub plan",
+        entries: [{ content: "Sub step", priority: "medium", status: "pending" }],
+      }, 1003),
+      ev({
+        sessionUpdate: "ls_notice",
+        parentToolCallId: "sub-1",
+        level: "warning",
+        title: "Subagent warning",
+      }, 1004),
+      ev({
+        sessionUpdate: "ls_error",
+        parentToolCallId: "sub-1",
+        code: "turn_failed",
+        message: "Subagent error",
+        retryable: true,
+      }, 1005),
+      ev({
+        sessionUpdate: "plan",
+        explanation: "Root plan updated",
+        entries: [{ content: "Root step", priority: "high", status: "completed" }],
+      }, 1006),
+    ]);
+
+    expect(kinds(view.items)).toEqual(["plan", "tool"]);
+    expect(view.items[0]).toMatchObject({
+      kind: "plan",
+      explanation: "Root plan updated",
+      entries: [{ content: "Root step", status: "completed" }],
+    });
+    const parent = findTool(view, "sub-1");
+    expect(parent?.sub?.items.map((item) => item.kind)).toEqual(["plan", "notice", "error"]);
+    expect(parent?.sub?.items[0]).toMatchObject({
+      kind: "plan",
+      explanation: "Sub plan",
+      entries: [{ content: "Sub step", status: "pending" }],
+    });
+    expect(parent?.sub?.items[1]).toMatchObject({ kind: "notice", level: "warning", title: "Subagent warning" });
+    expect(parent?.sub?.items[2]).toMatchObject({ kind: "error", code: "turn_failed", message: "Subagent error", retryable: true });
+  });
+
+  it("appends tool_call_update content when appendContent is true, including across prependEvents page boundaries", () => {
+    seq = 0;
+    const c1 = { type: "content" as const, content: text("part 1") };
+    const c2 = { type: "content" as const, content: text("part 2") };
+    const c3 = { type: "content" as const, content: text("part 3") };
+
+    const live = applyEvents(emptyView("s"), [
+      ev({ sessionUpdate: "tool_call", toolCallId: "t1", title: "Stream", kind: "other", status: "in_progress", content: [c1] }),
+      ev({ sessionUpdate: "tool_call_update", toolCallId: "t1", content: [c2], appendContent: true }),
+      ev({ sessionUpdate: "tool_call_update", toolCallId: "t1", content: [c3], appendContent: true }),
+    ]);
+    expect(findTool(live, "t1")?.content).toEqual([c1, c2, c3]);
+
+    // Paging boundary: e1+e2 in older page, e3 (appendContent) in newer page.
+    seq = 0;
+    const e1 = ev({ sessionUpdate: "tool_call", toolCallId: "t2", title: "Paged", kind: "other", status: "in_progress", content: [c1] }, 1000);
+    const e2 = ev({ sessionUpdate: "tool_call_update", toolCallId: "t2", content: [c2], appendContent: true }, 1010);
+    const e3 = ev({ sessionUpdate: "tool_call_update", toolCallId: "t2", content: [c3], appendContent: true, status: "completed" }, 1020);
+    const later = applyEvents(startWindow(emptyView("s"), 2), [e3]);
+    const joined = prependEvents(later, [e1, e2], 0);
+    expect(findTool(joined, "t2")?.content).toEqual([c1, c2, c3]);
+  });
 });
 

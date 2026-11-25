@@ -348,6 +348,45 @@ describe("AgyDriver registration & protocol parity", () => {
     }
   });
 
+  it("discovers a running Desktop hub from daemon/hub_*.json and reports lsVersion even when language_server.log is missing (Windows layout)", async () => {
+    const home = makeTempDir("ls-desktop-win-hub-");
+    const data = join(home, ".gemini", "antigravity");
+    mkdirSync(join(data, "brain", "existing"), { recursive: true });
+    mkdirSync(join(data, "daemon"), { recursive: true });
+    // Deliberately omit language_server.log (simulates Windows or custom log path).
+    writeFileSync(
+      join(data, "daemon", "hub_55301.json"),
+      JSON.stringify({ pid: process.pid, httpPort: 55301, csrfToken: "win-token-55301", lsVersion: "2.35.1" }),
+      { mode: 0o600 },
+    );
+    writeFileSync(
+      join(data, "daemon", "hub_55302.json"),
+      JSON.stringify({ pid: 99999999, httpPort: 55302, csrfToken: "dead-token" }),
+      { mode: 0o600 },
+    );
+    writeFileSync(join(data, "antigravity_state.pbtxt"), "last_selected_agent_model: MODEL_TEST\n");
+    const driver = new AntigravityDriver({
+      hostVersion: "test",
+      env: { PATH: "", HOME: home, LINKSHELL_HOME: home, ANTIGRAVITY_APP_DATA_DIR: data },
+    });
+    const { host } = makeMockHost();
+    const request = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+      expect(new URL(String(url)).port).toBe("55301");
+      expect(new Headers(init?.headers).get("x-codeium-csrf-token")).toBe("win-token-55301");
+      if (String(url).endsWith("/StartCascade")) return Response.json({ cascadeId: "new-win-session" });
+      return Response.json({});
+    });
+    try {
+      const started = await driver.start(host);
+      expect(started).toEqual({ installed: true, version: "2.35.1" });
+      const created = await driver.createSession({ cwd: home });
+      expect(created.nativeId).toBe("new-win-session");
+    } finally {
+      await driver.stop();
+      request.mockRestore();
+    }
+  });
+
   it("registers agy separately from antigravity desktop with no login gate", () => {
     const byId = new Map(ACP_AGENTS.map((spec) => [spec.id, spec]));
     expect(byId.has("antigravity")).toBe(true);

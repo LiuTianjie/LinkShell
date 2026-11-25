@@ -472,8 +472,18 @@
     scrollbar-gutter: stable;
     padding-inline: 24px;
     padding-block: 20px 16px;
-    /* Lines leave under the composer instead of being cut in half at its edge. */
-    mask-image: linear-gradient(to bottom, #000 calc(100% - 20px), transparent);
+  }
+
+  /* Bottom fade sits below `.ls-jump-bottom-anchor` so the jump pill is never clipped by a mask. */
+  .ls-timeline-bottom-fade {
+    position: sticky;
+    inset-block-end: 0;
+    block-size: 20px;
+    margin-block-start: -20px;
+    margin-inline: -24px;
+    background: linear-gradient(to bottom, transparent, var(--ls-plain));
+    pointer-events: none;
+    z-index: 4;
   }
 
   .ls-timeline-track {
@@ -492,9 +502,8 @@
   }
 
   /*
-   * Jump-to-bottom pill: sticky at the end of the scroller, so it always sits just above the
-   * composer whatever the composer's height. JS decides when the reader has scrolled away; the
-   * scroll-state query hides it when there is nothing below to jump to (content shrank).
+   * Jump-to-bottom pill: sticky at the end of the scroller above `.ls-timeline-bottom-fade`
+   * (no parent mask-image), so it stays crisp and unclipped while honoring scroll-state queries.
    */
   .ls-jump-bottom-anchor {
     position: sticky;
@@ -815,7 +824,7 @@
 
   .ls-code-pre:focus-visible {
     outline: none;
-    box-shadow: inset 0 0 0 2px var(--ls-accent-soft);
+    box-shadow: inset 0 0 0 2px var(--ls-accent);
   }
 
   /* Markdown GFM Table */
@@ -1259,23 +1268,44 @@
     opacity: 1;
   }
 
-  .ls-diff-split {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  .ls-diff-split-hunks {
+    display: flex;
+    flex-direction: column;
   }
 
-  .ls-diff-split-pane {
-    min-inline-size: 0;
-    overflow-x: auto;
+  .ls-diff-split-table {
+    table-layout: fixed;
+    min-inline-size: 560px;
+  }
+
+  .ls-diff-col-ln {
+    inline-size: 42px;
+  }
+
+  .ls-diff-col-code {
+    inline-size: calc(50% - 42px);
+  }
+
+  .ls-diff-split-cell[data-kind="add"] {
+    background: var(--ls-diff-add);
+  }
+
+  .ls-diff-split-cell[data-kind="del"] {
+    background: var(--ls-diff-del);
+  }
+
+  .ls-diff-split-cell[data-kind="empty"] {
+    background: var(--ls-inset);
+  }
+
+  .ls-diff-split-divider {
     border-inline-end: 1px solid var(--ls-border-subtle);
   }
 
-  .ls-diff-split-pane:nth-child(even) {
-    border-inline-end: 0;
-  }
-
-  .ls-diff-split-pane[data-kind="empty"] {
-    background: var(--ls-inset);
+  .ls-diff-split-table .ls-diff-code {
+    overflow-x: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
   }
 
   .ls-diff-saved-comment {
@@ -1523,6 +1553,12 @@
     display: flex;
     flex-direction: column;
     outline: none;
+  }
+
+  .ls-approval-card:focus-visible,
+  .ls-async-question-card:focus-visible {
+    outline: 2px solid var(--ls-accent);
+    outline-offset: 2px;
   }
 
   .ls-approval-header,

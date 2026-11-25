@@ -66,6 +66,7 @@ final class WatchAccount: ObservableObject {
   private var refreshTask: Task<WatchAccountSession, Error>?
   private var generation = 0
   private let http: URLSession
+  private let ownsSession: Bool
   private let authURL: URL
   private let membershipURL: URL?
   private let anonKey: String
@@ -76,6 +77,7 @@ final class WatchAccount: ObservableObject {
        membershipURL: URL? = nil,
        readSecret: @escaping (String) throws -> Data? = WatchKeychain.read,
        writeSecret: @escaping (String, Data?) throws -> Void = { try WatchKeychain.write($0, data: $1) }) throws {
+    self.ownsSession = http == nil
     self.http = http ?? URLSession(configuration: .ephemeral, delegate: WatchHTTPDelegate(), delegateQueue: nil)
     self.readSecret = readSecret; self.writeSecret = writeSecret
     guard let url = authURL ?? URL(string: Bundle.main.object(forInfoDictionaryKey: "LinkShellAuthURL") as? String ?? ""),
@@ -84,6 +86,11 @@ final class WatchAccount: ObservableObject {
     self.membershipURL = membershipURL
     self.anonKey = anonKey ?? Bundle.main.object(forInfoDictionaryKey: "LinkShellAuthAnonKey") as? String ?? ""
     if let data = try readSecret("account") { session = try JSONDecoder().decode(WatchAccountSession.self, from: data) }
+  }
+
+  deinit {
+    // URLSession retains its delegate until invalidated; release it cleanly on deallocation.
+    if ownsSession { http.invalidateAndCancel() }
   }
 
   func identity() throws -> WatchIdentity {

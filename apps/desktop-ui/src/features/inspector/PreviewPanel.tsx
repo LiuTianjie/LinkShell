@@ -44,8 +44,10 @@ import { parsePortOrUrlInput } from "./InspectorNewTabView";
 import type { InspectorSessionActions } from "./use-inspector-connection";
 
 const REMOTE_PORT_REQ_EVENT = "linkshell-desktop-remote-port-req";
+const REMOTE_PORT_CANCEL_EVENT = "linkshell-desktop-remote-port-cancel";
 const REMOTE_PROXY_RENDERER_TIMEOUT_MS = 55_000;
 const livePreviewConnections = new Map<string, Connection>();
+const activeRemoteProxyAborts = new Map<string, AbortController>();
 let responderWindow: Window | null = null;
 
 interface RemotePortProxyRequestDetail {
@@ -146,6 +148,16 @@ export function ensureRemotePortProxyResponder(): void {
   if (responderWindow === window) return;
   responderWindow = window;
 
+  window.addEventListener(REMOTE_PORT_CANCEL_EVENT, (event: Event) => {
+    const reqId = (event as CustomEvent<{ reqId?: string }>).detail?.reqId;
+    if (!reqId) return;
+    const ctrl = activeRemoteProxyAborts.get(reqId);
+    if (ctrl) {
+      activeRemoteProxyAborts.delete(reqId);
+      ctrl.abort();
+    }
+  });
+
   window.addEventListener(REMOTE_PORT_REQ_EVENT, (event: Event) => {
     const detail = (event as CustomEvent<RemotePortProxyRequestDetail>).detail;
     const reqId = detail?.reqId;
@@ -167,9 +179,8 @@ export function ensureRemotePortProxyResponder(): void {
       const errMsg = inspectorText("previewHostUnavailable");
       void desktopInvoke("remotePortReply", {
         reqId,
+        phase: "error",
         status: 502,
-        headers: [["content-type", "text/plain; charset=utf-8"]],
-        bodyBase64: bytesToBase64(new TextEncoder().encode(errMsg)),
         error: errMsg,
       });
       return;
@@ -186,6 +197,11 @@ export function ensureRemotePortProxyResponder(): void {
     const safeHeaders = normalizeProxyRequestHeaders(detail.headers);
     const bodyBytes = base64ToBytes(detail.bodyBase64);
 
+    const abort = new AbortController();
+    activeRemoteProxyAborts.set(reqId, abort);
+    // Timeout if headers never arrive; once streaming begins, inactivity is guarded by the main proxy.
+    const headTimer = setTimeout(() => abort.abort(), REMOTE_PROXY_RENDERER_TIMEOUT_MS);
+
     void (async () => {
       try {
         const response = await httpStreamRequest(
@@ -195,46 +211,75 @@ export function ensureRemotePortProxyResponder(): void {
           method,
           safeHeaders,
           bodyBytes,
-          // Answer before the main-process proxy gives up on the request (60 s).
-          AbortSignal.timeout(REMOTE_PROXY_RENDERER_TIMEOUT_MS),
+          abort.signal,
         );
-        const chunks: Uint8Array[] = [];
-        let total = 0;
+        clearTimeout(headTimer);
+        if (abort.signal.aborted) return;
+
+        const headAck = (await desktopInvoke("remotePortReply", {
+          reqId,
+          phase: "head",
+          status: response.status,
+          headers: response.headers,
+        })) as { ok?: boolean } | undefined;
+
+        const bodylessStatus =
+          response.status === 204 ||
+          response.status === 304 ||
+          (response.status >= 100 && response.status < 200);
+        if (bodylessStatus || method === "HEAD") {
+          await response.body.cancel().catch(() => undefined);
+          return;
+        }
+        if (headAck && headAck.ok === false) {
+          abort.abort();
+          await response.body.cancel().catch(() => undefined);
+          return;
+        }
+
         const reader = response.body.getReader();
         try {
           for (;;) {
+            if (abort.signal.aborted) {
+              await reader.cancel().catch(() => undefined);
+              return;
+            }
             const part = await reader.read();
             if (part.done) break;
             if (part.value && part.value.byteLength > 0) {
-              chunks.push(part.value);
-              total += part.value.byteLength;
+              const chunkAck = (await desktopInvoke("remotePortReply", {
+                reqId,
+                phase: "chunk",
+                bodyBase64: bytesToBase64(part.value),
+              })) as { ok?: boolean } | undefined;
+              if (chunkAck && chunkAck.ok === false) {
+                abort.abort();
+                await reader.cancel().catch(() => undefined);
+                return;
+              }
             }
           }
         } finally {
           reader.releaseLock();
         }
-        const merged = new Uint8Array(total);
-        let offset = 0;
-        for (const chunk of chunks) {
-          merged.set(chunk, offset);
-          offset += chunk.byteLength;
+        if (!abort.signal.aborted) {
+          await desktopInvoke("remotePortReply", { reqId, phase: "end" });
         }
-        await desktopInvoke("remotePortReply", {
-          reqId,
-          status: response.status,
-          headers: response.headers,
-          bodyBase64: bytesToBase64(merged),
-        });
       } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        await desktopInvoke("remotePortReply", {
-          reqId,
-          status: 502,
-          headers: [["content-type", "text/plain; charset=utf-8"]],
-          bodyBase64: bytesToBase64(new TextEncoder().encode(errMsg)),
-          error: errMsg,
-        });
+        if (!abort.signal.aborted) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          await desktopInvoke("remotePortReply", {
+            reqId,
+            phase: "error",
+            status: 502,
+            error: errMsg,
+          }).catch(() => undefined);
+        }
       } finally {
+        clearTimeout(headTimer);
+        if (activeRemoteProxyAborts.get(reqId) === abort) {
+          activeRemoteProxyAborts.delete(reqId);
+        }
         release?.();
       }
     })();
@@ -671,6 +716,7 @@ function SandboxedPortFrame({
             },
           );
         } catch (err) {
+          pendingSockets.delete(wsId);
           postToBridge({
             type: "ws-close",
             id: wsId,
@@ -686,6 +732,7 @@ function SandboxedPortFrame({
       }
 
       if (msg.type === "ws-close" && msg.id) {
+        pendingSockets.delete(msg.id);
         sockets.get(msg.id)?.close();
         sockets.delete(msg.id);
       }
@@ -697,6 +744,7 @@ function SandboxedPortFrame({
       window.removeEventListener("message", onMessage);
       for (const ctrl of httpAborts.values()) ctrl.abort();
       httpAborts.clear();
+      pendingSockets.clear();
       for (const sock of sockets.values()) sock.close();
       sockets.clear();
     };

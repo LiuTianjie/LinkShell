@@ -1,15 +1,17 @@
+import { PassThrough } from "node:stream";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
 // Nothing here may open a browser.
-vi.mock("node:child_process", () => ({ execSync: vi.fn() }));
+const spawnMock = vi.fn(() => ({ on: vi.fn(), unref: vi.fn() }));
+vi.mock("node:child_process", () => ({ execSync: vi.fn(), spawn: spawnMock }));
 
 // The account module reads LINKSHELL_HOME once, as it loads.
 const home = mkdtempSync(join(tmpdir(), "lsh-login-"));
 process.env.LINKSHELL_HOME = home;
-const { runLogin } = await import("../src/commands/login.js");
+const { openBrowserNonBlocking, parseCallbackInput, runLogin } = await import("../src/commands/login.js");
 const auth = await import("../src/auth.js");
 afterAll(() => rmSync(home, { recursive: true, force: true }));
 
@@ -159,5 +161,112 @@ describe("linkshell login", () => {
     });
     expect(login.said()).toContain("LinkShell member");
     expect(login.said()).not.toMatch(/7-day|trial/i);
+  });
+
+  it("uses literal 127.0.0.1 callback URL and non-blocking detached spawn (never execFileSync)", async () => {
+    spawnMock.mockClear();
+    const controller = new AbortController();
+    const login = startLogin(controller.signal);
+    const base = await login.callback;
+    expect(base).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+    controller.abort();
+    expect(await login.result).toBeNull();
+
+    spawnMock.mockClear();
+    openBrowserNonBlocking("https://itool.tech/test", "linux");
+    expect(spawnMock).toHaveBeenCalledWith("xdg-open", ["https://itool.tech/test"], {
+      detached: true,
+      windowsHide: true,
+      stdio: "ignore",
+    });
+  });
+
+  it("skips browser launch on headless/SSH sessions, prints SSH port-forward hint, and accepts a pasted callback URL", async () => {
+    spawnMock.mockClear();
+    accountService({ plan: "pro", plan_expires_at: new Date(Date.now() + 86_400_000).toISOString() });
+    const fakeStdin = new PassThrough();
+    let said = "";
+    const fakeStderr = new PassThrough();
+    fakeStderr.on("data", (chunk) => { said += String(chunk); });
+
+    const promise = runLogin({
+      noBrowser: true,
+      env: { SSH_CONNECTION: "10.0.0.5 52000 10.0.0.99 22", USER: "ubuntu" },
+      platform: "linux",
+      stdin: fakeStdin,
+      stderr: fakeStderr,
+    });
+
+    await vi.waitFor(() => expect(said).toContain("ssh -L "));
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(said).toContain("ubuntu@10.0.0.99");
+
+    fakeStdin.write("http://127.0.0.1:45678/callback#access_token=pasted-at&refresh_token=pasted-rt&expires_in=3600\n");
+    const result = await promise;
+    expect(result).toMatchObject({ success: true, plan: "pro", accessToken: "pasted-at" });
+    expect(auth.loadAuth()).toMatchObject({ accessToken: "pasted-at", refreshToken: "pasted-rt" });
+  });
+
+  it("authenticates directly over SSH with --email and --password-stdin without launching a browser", async () => {
+    spawnMock.mockClear();
+    vi.stubGlobal("fetch", (input: string | URL) => {
+      const url = String(input);
+      if (url.includes("/auth/v1/token?grant_type=password")) {
+        return Promise.resolve(
+          Response.json({
+            access_token: "pw-at",
+            refresh_token: "pw-rt",
+            expires_in: 3600,
+            user: { id: "u-ssh", email: "ssh@example.com" },
+          }),
+        );
+      }
+      if (url.includes("/rest/v1/rpc/itool_entitlement")) {
+        return Promise.resolve(
+          Response.json({ ok: true, product: "linkshell", active: true, tier: "monthly", valid_until: new Date(Date.now() + 86_400_000).toISOString() }),
+        );
+      }
+      return Promise.reject(new Error(`unexpected ${url}`));
+    });
+
+    const fakeStdin = new PassThrough();
+    fakeStdin.end("super-secret-pw\n");
+    let said = "";
+    const fakeStderr = new PassThrough();
+    fakeStderr.on("data", (chunk) => { said += String(chunk); });
+
+    const result = await runLogin({
+      email: "ssh@example.com",
+      passwordStdin: true,
+      stdin: fakeStdin,
+      stderr: fakeStderr,
+    });
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ success: true, plan: "pro", email: "ssh@example.com", accessToken: "pw-at" });
+    expect(said).toContain("Logged in as ssh@example.com");
+  });
+
+  it("parses pasted callback URLs in fragment, query, code, error, and quoted formats", () => {
+    expect(parseCallbackInput("http://127.0.0.1:8123/callback#access_token=a1&refresh_token=r1&expires_in=1800")).toEqual({
+      kind: "tokens",
+      accessToken: "a1",
+      refreshToken: "r1",
+      expiresIn: 1800,
+    });
+    expect(parseCallbackInput("'http://127.0.0.1:8123/callback?access_token=a2&refresh_token=r2'")).toEqual({
+      kind: "tokens",
+      accessToken: "a2",
+      refreshToken: "r2",
+      expiresIn: 3600,
+    });
+    expect(parseCallbackInput("http://127.0.0.1:8123/linkshell/callback?code=pkce-code")).toEqual({
+      kind: "code",
+      code: "pkce-code",
+    });
+    expect(parseCallbackInput("http://127.0.0.1:8123/callback#error=access_denied&error_description=Cancelled")).toEqual({
+      kind: "error",
+      message: "Cancelled",
+    });
+    expect(parseCallbackInput("not-a-callback")).toBeNull();
   });
 });

@@ -217,6 +217,11 @@ export function Conversation({
     // measured at — so a correction can tell its own writes from the reader's and from a resize.
     let anchor: { node: Element; offset: number; fromBottom: number; scrollTop: number; height: number } | undefined;
     const note = () => {
+      // Skip layout reads while pinned to the bottom; use-stick-to-bottom owns scroll placement there.
+      if (state.isAtBottom) {
+        anchor = undefined;
+        return;
+      }
       const viewTop = scroller.getBoundingClientRect().top;
       const node = topRow(rows, viewTop);
       anchor = node
@@ -236,7 +241,10 @@ export function Conversation({
       if (initialResize && state.isAtBottom) state.scrollTop = state.calculatedTargetScrollTop;
       initialResize = false;
       // At the bottom the newest message stays in view; use-stick-to-bottom owns that.
-      if (state.isAtBottom) return note();
+      if (state.isAtBottom) {
+        anchor = undefined;
+        return;
+      }
       if (!anchor) return note();
       // The reader may have scrolled since the anchor was taken (events can lag a resize). Their
       // scroll is counted out rather than the anchor taken again: taken again now, it would be
@@ -258,6 +266,10 @@ export function Conversation({
     // reader's scroll that lands while the content has grown and isn't corrected yet only moves
     // the anchor by what they scrolled; the correction that follows takes it afresh.
     const scrolled = () => {
+      if (state.isAtBottom) {
+        anchor = undefined;
+        return;
+      }
       if (!anchor) return note();
       const byReader = scroller.scrollTop - anchor.scrollTop;
       if (Math.abs(byReader) <= 1) return;
@@ -326,8 +338,9 @@ export function Conversation({
     if (settled && topVisible && view.startSeq > 0 && failedAt !== view.startSeq) void load();
   }, [settled, topVisible, view.startSeq, failedAt, load, finished]);
 
+  const consumedFocusNonce = useRef<number | undefined>(undefined);
   useEffect(() => {
-    if (!focusTarget) return;
+    if (!focusTarget || consumedFocusNonce.current === focusTarget.nonce) return;
     const folded = rows.find(
       (row) => row.type === "steps" && row.steps.some((step) => step.id === focusTarget.itemId),
     );
@@ -337,6 +350,7 @@ export function Conversation({
         next.add(folded.key);
         return next;
       });
+      return;
     }
     const frame = requestAnimationFrame(() => {
       const container = list.current;
@@ -344,6 +358,8 @@ export function Conversation({
       const nodes = container.querySelectorAll<HTMLElement>("[data-item-id]");
       for (const node of nodes) {
         if (node.getAttribute("data-item-id") === focusTarget.itemId) {
+          // Consume each focus nonce once so subsequent streaming row updates never hijack scroll.
+          consumedFocusNonce.current = focusTarget.nonce;
           node.scrollIntoView({ behavior: "smooth", block: "center" });
           break;
         }

@@ -52,6 +52,7 @@ import {
   useRouter,
   type Computer,
 } from "../../core";
+import { ScreenSessionSlot } from "../../core/screen-client";
 import { AgentMark, DesktopIcon } from "../../icons";
 import {
   Button,
@@ -630,6 +631,10 @@ export function DesktopAppShell({
     const run: Record<DesktopShortcutId, () => void> = {
       palette: () => {
         const r = routerStore.getState();
+        if (!r.commandCenterOpen) {
+          if (r.systemModal.open) r.closeSystemModal();
+          if (r.shortcutSheetOpen) r.setShortcutSheetOpen(false);
+        }
         r.setCommandCenterOpen(!r.commandCenterOpen);
       },
       newSession: () => {
@@ -643,7 +648,12 @@ export function DesktopAppShell({
         }
         handleRequestNewSession();
       },
-      settings: () => openSystemModal("settings"),
+      settings: () => {
+        const r = routerStore.getState();
+        if (r.commandCenterOpen) r.setCommandCenterOpen(false);
+        if (r.shortcutSheetOpen) r.setShortcutSheetOpen(false);
+        openSystemModal("settings");
+      },
       back: () => back(),
       forward: () => forward(),
       previousSession: () => stepSession(-1),
@@ -665,12 +675,13 @@ export function DesktopAppShell({
       findInSession: () => {
         // The session workspace owns its find bar; route the key there however focus wandered.
         const workspace = document.querySelector<HTMLElement>(".ls-session-workspace");
+        const isMac = getActiveDesktopPlatform() === "macos";
         workspace?.dispatchEvent(
           new KeyboardEvent("keydown", {
             key: "f",
             code: "KeyF",
-            metaKey: getActiveDesktopPlatform() !== "windows",
-            ctrlKey: getActiveDesktopPlatform() === "windows",
+            metaKey: isMac,
+            ctrlKey: !isMac,
             bubbles: true,
             cancelable: true,
           }),
@@ -691,17 +702,23 @@ export function DesktopAppShell({
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || isImeComposing(event)) return;
       if (keysBelongToRemoteOrPreview()) return;
-      const modalOpen = Boolean(document.querySelector("dialog[open]"));
+      const openDialogs = Array.from(document.querySelectorAll<HTMLDialogElement>("dialog[open]"));
+      const modalOpen = openDialogs.length > 0;
+      const hasBlockingModal = openDialogs.some((dialog) => {
+        const closedBy = dialog.getAttribute("closedby");
+        return closedBy === "none" || closedBy === "closerequest";
+      });
       const inSession = routerStore.getState().activeRoute.kind === "session";
       const editable = isEditableTarget(event.target);
       const inCtrlTerminal =
-        getActiveDesktopPlatform() === "windows" &&
+        getActiveDesktopPlatform() !== "macos" &&
         event.target instanceof Element &&
         Boolean(event.target.closest(".xterm"));
 
       for (const id of Object.keys(DESKTOP_SHORTCUTS) as DesktopShortcutId[]) {
         const binding: ShortcutBinding = DESKTOP_SHORTCUTS[id];
         if (!matchesShortcut(event, binding)) continue;
+        if (hasBlockingModal) return;
         if (modalOpen && !modalAllowedKeys.has(id)) return;
         if (inCtrlTerminal && !shellSafeKeys.has(id) && !binding.shift && !binding.alt) return;
         if (editable && editingKeys.has(id)) return;
@@ -718,9 +735,9 @@ export function DesktopAppShell({
 
       if (modalOpen) return;
 
-      // ⌘1…⌘9 jump to the sidebar's Nth visible session.
+      // ⌘1…⌘9 jump to the sidebar's Nth visible session (never hijacking Ctrl+1..9 inside xterm).
       const digit = /^Digit([1-9])$/.exec(event.code)?.[1];
-      if (digit && matchesShortcut(event, { key: digit })) {
+      if (!inCtrlTerminal && digit && matchesShortcut(event, { key: digit })) {
         event.preventDefault();
         stepSession({ index: Number(digit) - 1 });
         return;
@@ -761,6 +778,14 @@ export function DesktopAppShell({
     if (!peekOpen) return undefined;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || event.defaultPrevented || isImeComposing(event)) return;
+      // Modals and open popovers/menus dismiss before the background hover drawer.
+      if (
+        document.querySelector(
+          'dialog[open], [data-state="open"][role="menu"], [data-popover-open="true"]',
+        )
+      ) {
+        return;
+      }
       suppressPeekUntilRef.current = Date.now() + 450;
       setPeekOpen(false);
     };
@@ -989,12 +1014,16 @@ export function DesktopAppShell({
       ) : null}
 
       <div className="desktop-workbench" style={workbenchStyle}>
-        {/* Column 1: L1 Deep Carbon Left Sidebar Rail */}
-        <Sidebar
-          onToggleSidebar={handleToggleSidebar}
-          onRequestNewSession={handleRequestNewSession}
-          renderFusionStatusBadge={renderFusionStatusBadge}
-        />
+        {/* Column 1: L1 Deep Carbon Left Sidebar Rail (unmounted while collapsed so hover-peek never mounts a duplicate Sidebar) */}
+        {!sidebarHidden ? (
+          <Sidebar
+            onToggleSidebar={handleToggleSidebar}
+            onRequestNewSession={handleRequestNewSession}
+            renderFusionStatusBadge={renderFusionStatusBadge}
+          />
+        ) : (
+          <div className="desktop-sidebar" aria-hidden="true" />
+        )}
 
         {!sidebarHidden && !isScreenFullscreen ? (
           <div className="desktop-col-sash desktop-col-sash--sidebar">
@@ -1035,18 +1064,44 @@ export function DesktopAppShell({
           ) : null}
 
           <div className="desktop-main-body">
-            <ErrorBoundary
-              fallbackTitle={t("desktop.shell.workspaceCrashed")}
-              resetKeys={[activeRoute.kind, activeComputerKey, currentSessionId]}
-            >
-              <div
-                key={stageMotionKey}
-                data-stage-kind={activeRoute.kind}
-                className="desktop-stage-enter"
+            {renderRemoteScreenWorkspace ? (
+              <ScreenSessionSlot
+                activeKey={activeRoute.kind === "screen" ? activeRoute.computerKey : undefined}
+                selectedKey={activeComputerKey}
               >
-                <RenderSlot render={renderMainContent} />
-              </div>
-            </ErrorBoundary>
+                {(screenKey) => (
+                  <ErrorBoundary
+                    fallbackTitle={t("desktop.shell.workspaceCrashed")}
+                    resetKeys={["screen", screenKey]}
+                  >
+                    <div
+                      data-stage-kind="screen"
+                      className="desktop-stage-enter"
+                    >
+                      <RenderSlot
+                        render={() =>
+                          renderRemoteScreenWorkspace({ computerKey: screenKey })
+                        }
+                      />
+                    </div>
+                  </ErrorBoundary>
+                )}
+              </ScreenSessionSlot>
+            ) : null}
+            {activeRoute.kind !== "screen" || !renderRemoteScreenWorkspace ? (
+              <ErrorBoundary
+                fallbackTitle={t("desktop.shell.workspaceCrashed")}
+                resetKeys={[activeRoute.kind, activeComputerKey, currentSessionId]}
+              >
+                <div
+                  key={stageMotionKey}
+                  data-stage-kind={activeRoute.kind}
+                  className="desktop-stage-enter"
+                >
+                  <RenderSlot render={renderMainContent} />
+                </div>
+              </ErrorBoundary>
+            ) : null}
           </div>
 
           {/* BottomTerminalDock owns its own horizontal <SplitResizer> + .desktop-bottom-dock (#31 §3, session-only per #73 C.2) */}

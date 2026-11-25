@@ -26,6 +26,10 @@ final class DesktopScreenReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataC
   private var publishedControl: Bool?
   private var publishedControlRequested: Bool?
   private var publishedAudioAvailable: Bool?
+  private var publishedPath: String?
+  private var publishedRelayed: Bool?
+  private var publishedRttMs: Int?
+  private var lastStatsPoll: Double = 0
   private var negotiating = false
   private var closed = false
   private var receivedPicture = false
@@ -80,7 +84,12 @@ final class DesktopScreenReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataC
     queue.async {
       guard !self.closed, self.presentationVisible, !self.receivedPicture else { return }
       self.receivedPicture = true
-      self.status(["live": true, "transport": "native-webrtc", "renderer": "Metal"])
+      var payload: [String: Any] = ["live": true, "transport": "native-webrtc", "renderer": "Metal"]
+      if let path = self.publishedPath { payload["path"] = path }
+      if let relayed = self.publishedRelayed { payload["relayed"] = relayed }
+      if let rttMs = self.publishedRttMs { payload["rttMs"] = rttMs }
+      self.status(payload)
+      self.pollTransportStats(force: true)
       self.updateControl()
     }
   }
@@ -341,6 +350,75 @@ final class DesktopScreenReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataC
     if now - startedAt >= 10, inputState.finishCapabilitiesWait() { requestControlIfReady(); updateControl() }
     if presentationVisible, !receivedPicture, now - startedAt > 25 { return fail("原生视频直连超时，请检查网络后重新连接") }
     if let disconnectedAt, now - disconnectedAt > 4 { fail("原生视频直连已中断，请重新连接") }
+    if now - lastStatsPoll >= 2 { pollTransportStats(force: false) }
+  }
+
+  /// Classifies the selected ICE candidate pair into `relay`, `lan`, or `direct`.
+  static func candidatePath(localType: String?, remoteType: String?, localAddress: String?, remoteAddress: String?) -> String? {
+    let types = [localType, remoteType].compactMap { $0?.lowercased() }
+    guard !types.isEmpty else { return nil }
+    if types.contains("relay") { return "relay" }
+    if let localAddress, let remoteAddress, isPrivateAddress(localAddress), isPrivateAddress(remoteAddress) {
+      return "lan"
+    }
+    return "direct"
+  }
+
+  private static func isPrivateAddress(_ address: String) -> Bool {
+    let lower = address.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    if lower.isEmpty { return false }
+    if lower == "::1" || lower.hasPrefix("fc") || lower.hasPrefix("fd") || lower.hasPrefix("fe80:") { return true }
+    if lower.hasPrefix("10.") || lower.hasPrefix("127.") || lower.hasPrefix("192.168.") || lower.hasPrefix("169.254.") { return true }
+    if lower.hasPrefix("172.") {
+      let parts = lower.split(separator: ".")
+      if parts.count >= 2, let second = Int(parts[1]), (16...31).contains(second) { return true }
+    }
+    return false
+  }
+
+  private func pollTransportStats(force: Bool) {
+    guard !closed, let peer, peer.iceConnectionState == .connected || peer.iceConnectionState == .completed else { return }
+    let now = CACurrentMediaTime()
+    if !force && now - lastStatsPoll < 2 { return }
+    lastStatsPoll = now
+    peer.statistics { [weak self, weak peer] report in
+      self?.queue.async { [weak self, weak peer] in
+        guard let self, let peer, !self.closed, self.peer === peer else { return }
+        let reader = StatsReader(report: report)
+        let pair = reader.pair ?? report.statistics.values.first {
+          $0.type == "candidate-pair"
+            && (($0.values["nominated"] as? Bool) == true || ($0.values["nominated"] as? NSNumber)?.boolValue == true)
+            && ($0.values["state"] as? String == "succeeded")
+        }
+        guard let pair else { return }
+        let local = reader.linked(pair, "localCandidateId")
+        let remote = reader.linked(pair, "remoteCandidateId")
+        let localType = StatsReader.text(local, "candidateType")
+        let remoteType = StatsReader.text(remote, "candidateType")
+        let localAddress = StatsReader.text(local, "address") ?? StatsReader.text(local, "ip")
+        let remoteAddress = StatsReader.text(remote, "address") ?? StatsReader.text(remote, "ip")
+        var update: [String: Any] = [:]
+        if let path = Self.candidatePath(localType: localType, remoteType: remoteType, localAddress: localAddress, remoteAddress: remoteAddress) {
+          let relayed = path == "relay"
+          if self.publishedPath != path || self.publishedRelayed != relayed {
+            self.publishedPath = path
+            self.publishedRelayed = relayed
+            update["path"] = path
+            update["relayed"] = relayed
+          }
+        }
+        if let rttSeconds = StatsReader.number(pair, "currentRoundTripTime"), rttSeconds.isFinite, rttSeconds >= 0 {
+          let rttMs = Int((rttSeconds * 1000).rounded())
+          if self.publishedRttMs != rttMs {
+            self.publishedRttMs = rttMs
+            update["rttMs"] = rttMs
+          }
+        }
+        if !update.isEmpty {
+          self.status(update)
+        }
+      }
+    }
   }
 
   private func signal(_ message: [String: Any]) {
@@ -385,6 +463,7 @@ final class DesktopScreenReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataC
       case .connected, .completed:
         self.disconnectedAt = nil; self.attachTrack(peerConnection)
         self.status(["connected": true])
+        self.pollTransportStats(force: true)
       case .disconnected: if self.disconnectedAt == nil { self.disconnectedAt = CACurrentMediaTime() }
       case .failed, .closed: self.fail("当前网络无法保持原生视频直连，请重新连接")
       default: break

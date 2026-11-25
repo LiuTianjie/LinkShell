@@ -14,7 +14,11 @@ final class LinkTerminalView: ExpoView {
   private let controller = TerminalController()
   private var session: InMemoryTerminalSession!
   private let replayLock = NSLock()
+  private let replayQueue = DispatchQueue(label: "com.bd.linkshell.terminal.replay", qos: .userInitiated)
   private var restoring = false
+  private var applyingReplayGrid = false
+  private var pendingResize: (UInt32, UInt32)?
+  private var importedURLs: [URL] = []
   private var fontSize: Float = 9
   private var theme: [String: String] = [:]
   private var liveSize: (UInt32, UInt32)?
@@ -22,6 +26,7 @@ final class LinkTerminalView: ExpoView {
   required init(appContext: AppContext? = nil) {
     super.init(appContext: appContext)
     clipsToBounds = true
+    Self.pruneStaleImports()
     if ProcessInfo.processInfo.environment["LINKSHELL_TERMINAL_DEBUG"] == "1" { TerminalDebugLog.enable([.metrics, .actions]) }
     session = InMemoryTerminalSession(write: { [weak self] data in
       guard let self else { return }
@@ -31,11 +36,24 @@ final class LinkTerminalView: ExpoView {
       if !muted { self.onInput(["data": String(decoding: data, as: UTF8.self)]) }
     }, resize: { [weak self] size in
       guard let self else { return }
-      self.replayLock.lock(); let muted = self.restoring; self.replayLock.unlock()
-      guard !muted else { return }
+      let nextSize = (UInt32(size.columns), UInt32(size.rows))
+      self.replayLock.lock()
+      let isSynthetic = self.applyingReplayGrid
+      let muted = self.restoring
+      if !isSynthetic && muted {
+        // Record real viewport resizes requested during replay so endReplay applies them immediately.
+        self.pendingResize = nextSize
+      }
+      self.replayLock.unlock()
+      guard !isSynthetic, !muted else { return }
       DispatchQueue.main.async { [weak self] in
-        guard let self, !self.restoring else { return }
-        self.liveSize = (UInt32(size.columns), UInt32(size.rows))
+        guard let self else { return }
+        self.replayLock.lock()
+        let stillRestoring = self.restoring
+        if stillRestoring { self.pendingResize = nextSize }
+        self.replayLock.unlock()
+        guard !stillRestoring else { return }
+        self.liveSize = nextSize
         self.onResize(["cols": size.columns, "rows": size.rows])
       }
     }, suppressesPixelOnlyResizes: true)
@@ -110,22 +128,92 @@ final class LinkTerminalView: ExpoView {
     _ = controller.setTheme(TerminalTheme(light: config, dark: config))
   }
 
+  deinit {
+    replayLock.lock()
+    let urls = importedURLs
+    importedURLs.removeAll()
+    replayLock.unlock()
+    if !urls.isEmpty {
+      DispatchQueue.global(qos: .utility).async {
+        let fm = FileManager.default
+        for url in urls { try? fm.removeItem(at: url) }
+      }
+    }
+  }
+
   func beginReplay(_ reset: Bool) {
     controller.suppressesExternalEffects = true
-    replayLock.lock(); restoring = true; replayLock.unlock()
+    replayLock.lock()
+    restoring = true
+    replayLock.unlock()
     if reset { session.receive("\u{1b}c\u{1b}[3J") }
   }
-  func replay(_ data: String, _ cols: Int, _ rows: Int) {
-    session.resizeGrid(columns: UInt32(cols), rows: UInt32(rows))
-    session.receive(data)
-    session.waitForPendingOutput()
+
+  func replay(_ data: String, _ cols: Int, _ rows: Int, promise: Promise) {
+    let session = self.session!
+    replayQueue.async { [weak self] in
+      // Drain prior writes off the main thread so UI responsiveness and Ghostty's main-thread tick never stall.
+      session.waitForPendingOutput()
+      DispatchQueue.main.async {
+        guard let self else { promise.resolve(nil); return }
+        self.replayLock.lock(); self.applyingReplayGrid = true; self.replayLock.unlock()
+        session.applyGridSize(columns: UInt32(cols), rows: UInt32(rows))
+        self.replayLock.lock(); self.applyingReplayGrid = false; self.replayLock.unlock()
+        session.receive(data)
+        self.replayQueue.async {
+          session.waitForPendingOutput()
+          DispatchQueue.main.async { promise.resolve(nil) }
+        }
+      }
+    }
   }
-  func endReplay() {
-    session.waitForPendingOutput()
-    if let (cols, rows) = liveSize { session.resizeGrid(columns: cols, rows: rows) }
-    session.waitForPendingOutput()
-    controller.suppressesExternalEffects = false
-    replayLock.lock(); restoring = false; replayLock.unlock()
+
+  func endReplay(promise: Promise) {
+    let session = self.session!
+    replayQueue.async { [weak self] in
+      session.waitForPendingOutput()
+      DispatchQueue.main.async {
+        guard let self else { promise.resolve(nil); return }
+        self.replayLock.lock()
+        let target = self.pendingResize ?? self.liveSize
+        self.applyingReplayGrid = true
+        self.replayLock.unlock()
+        if let (cols, rows) = target {
+          session.applyGridSize(columns: cols, rows: rows)
+        }
+        self.replayLock.lock(); self.applyingReplayGrid = false; self.replayLock.unlock()
+        self.replayQueue.async { [weak self] in
+          session.waitForPendingOutput()
+          DispatchQueue.main.async {
+            guard let self else { promise.resolve(nil); return }
+            self.controller.suppressesExternalEffects = false
+            self.replayLock.lock()
+            self.restoring = false
+            let deferred = self.pendingResize
+            self.pendingResize = nil
+            self.replayLock.unlock()
+            if let (cols, rows) = deferred {
+              self.liveSize = (cols, rows)
+              self.onResize(["cols": Int(cols), "rows": Int(rows)])
+            }
+            promise.resolve(nil)
+          }
+        }
+      }
+    }
+  }
+
+  private static func pruneStaleImports() {
+    DispatchQueue.global(qos: .utility).async {
+      let fm = FileManager.default
+      let dir = fm.temporaryDirectory.appendingPathComponent("linkshell-imports", isDirectory: true)
+      guard let entries = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey], options: [.skipsHiddenFiles]) else { return }
+      let cutoff = Date().addingTimeInterval(-600)
+      for entry in entries {
+        let modified = (try? entry.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+        if modified < cutoff { try? fm.removeItem(at: entry) }
+      }
+    }
   }
 
   private func importFiles(_ providers: [NSItemProvider]) {
@@ -133,20 +221,29 @@ final class LinkTerminalView: ExpoView {
       guard let type = provider.registeredTypeIdentifiers.first(where: { UTType($0)?.conforms(to: .image) == true })
         ?? provider.registeredTypeIdentifiers.first(where: { UTType($0)?.conforms(to: .data) == true }) else { continue }
       provider.loadFileRepresentation(forTypeIdentifier: type) { [weak self] source, error in
+        guard let self else { return }
         guard let source else {
-          self?.onError(["message": "无法读取粘贴或拖入的文件"])
+          self.onError(["message": "无法读取粘贴或拖入的文件"])
           return
         }
+        var createdTarget: URL?
         do {
           let dir = FileManager.default.temporaryDirectory.appendingPathComponent("linkshell-imports", isDirectory: true)
           try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
           let name = provider.suggestedName ?? source.lastPathComponent
           let target = dir.appendingPathComponent(UUID().uuidString + "-" + source.lastPathComponent)
           let size = try source.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-          guard size <= 30 * 1024 * 1024 else { self?.onError(["message": "文件超过 30 MB"]); return }
+          guard size <= 30 * 1024 * 1024 else { self.onError(["message": "文件超过 30 MB"]); return }
           try FileManager.default.copyItem(at: source, to: target)
-          self?.onFile(["uri": target.absoluteString, "name": name, "size": size])
-        } catch { self?.onError(["message": "无法暂存文件，请重试"] ) }
+          createdTarget = target
+          self.replayLock.lock()
+          self.importedURLs.append(target)
+          self.replayLock.unlock()
+          self.onFile(["uri": target.absoluteString, "name": name, "size": size])
+        } catch {
+          if let createdTarget { try? FileManager.default.removeItem(at: createdTarget) }
+          self.onError(["message": "无法暂存文件，请重试"])
+        }
       }
     }
   }

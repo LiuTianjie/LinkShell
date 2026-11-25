@@ -1,6 +1,7 @@
 import { clearAuth, loadAuth } from "../auth.js";
 import { GatewayAccountLeaveError, leaveGatewayAccount } from "../gateway-account.js";
 import { linkshellDir } from "../utils/daemon.js";
+import { stderrStyle } from "../utils/format.js";
 import { OFFICIAL_GATEWAY, refreshGateway, sameGateway, withRunningHost } from "./host.js";
 
 export async function runLogout(): Promise<void> {
@@ -46,7 +47,8 @@ export async function runLogout(): Promise<void> {
       disconnected = false;
     }
   }
-  process.stderr.write(`\n  \x1b[32m✓\x1b[0m Logged out locally${auth.email ? ` (${auth.email})` : ""}.\n`);
+  const style = stderrStyle();
+  process.stderr.write(`\n  ${style.green("✓")} Logged out locally${auth.email ? ` (${auth.email})` : ""}.\n`);
   if (!unbound) process.stderr.write("  The gateway could not confirm removing this computer's account binding. When it is reachable, remove this offline computer from your account's device list.\n");
   if (!disconnected) process.stderr.write("  The running Host could not confirm disconnecting. Stop the Host to end its existing remote connections; it will stay signed out when restarted.\n");
   if (before && before.status !== "off" && after?.status === "off") {

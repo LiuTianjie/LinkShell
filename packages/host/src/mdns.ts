@@ -1,9 +1,9 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createSocket, type RemoteInfo, type Socket } from "node:dgram";
-import { readFileSync } from "node:fs";
-import { networkInterfaces } from "node:os";
-import { join } from "node:path";
+import { accessSync, constants as fsConstants, readFileSync } from "node:fs";
+import { networkInterfaces, type NetworkInterfaceInfo } from "node:os";
+import { delimiter, join } from "node:path";
 import { trackChild } from "./children.js";
 
 export const MDNS_MULTICAST_ADDR = "224.0.0.251";
@@ -47,6 +47,7 @@ export interface MdnsAdvertiseOptions {
   ipv4Addresses?: string[];
   socketFactory?: () => MdnsSocketLike;
   spawnProcess?: (command: string, args: string[]) => ChildProcess;
+  hasCommand?: (command: string) => boolean;
   log?: (message: string) => void;
 }
 
@@ -429,16 +430,61 @@ export function parseMdnsPacket(packet: Buffer): MdnsPacket | null {
   }
 }
 
-function localIpv4Addresses(): string[] {
+const VIRTUAL_INTERFACE_PREFIXES = [
+  "docker",
+  "br-",
+  "veth",
+  "virbr",
+  "podman",
+  "cni",
+  "flannel",
+  "wg",
+  "zt",
+  "lxc",
+  "lxd",
+  "incus",
+  "tailscale",
+] as const;
+
+/** Excludes container bridges, VPN/mesh tunnels, and VM virtual NICs from LAN mDNS A records. */
+export function isVirtualInterface(name: string): boolean {
+  const lower = name.trim().toLowerCase();
+  return VIRTUAL_INTERFACE_PREFIXES.some((prefix) => lower.startsWith(prefix));
+}
+
+export function localIpv4Addresses(
+  interfaces: NodeJS.Dict<NetworkInterfaceInfo[]> = networkInterfaces(),
+): string[] {
   const seen = new Set<string>();
-  const interfaces = networkInterfaces();
-  for (const entries of Object.values(interfaces)) {
-    if (!entries) continue;
+  for (const [name, entries] of Object.entries(interfaces)) {
+    if (!entries || isVirtualInterface(name)) continue;
     for (const info of entries) {
       if (info.family === "IPv4" && !info.internal && info.address) seen.add(info.address);
     }
   }
   return [...seen];
+}
+
+function hasExecutableInPath(command: string): boolean {
+  if (!command) return false;
+  if (command.includes("/")) {
+    try {
+      accessSync(command, fsConstants.X_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  for (const dir of (process.env.PATH ?? "").split(delimiter)) {
+    if (!dir) continue;
+    try {
+      accessSync(join(dir, command), fsConstants.X_OK);
+      return true;
+    } catch {
+      // Try next PATH entry.
+    }
+  }
+  return false;
 }
 
 /**
@@ -799,13 +845,26 @@ export class MdnsAdvertiser {
     if (this.stopped || this.active) return this.active;
     const platform = this.options.platform ?? process.platform;
 
-    // Windows and Linux use the zero-dependency built-in mDNS responder natively (no Avahi/Bonjour required).
-    if (platform === "win32" || platform === "linux") {
+    // Windows uses the zero-dependency built-in mDNS responder natively (no Bonjour required).
+    if (platform === "win32") {
       return this.startPureFallback();
     }
 
     const spec = buildMdnsCommand(this.options);
     if (!spec) return false;
+
+    // On Linux, prefer Avahi (`avahi-publish-service`) when installed so we integrate cleanly
+    // with an active avahi-daemon; otherwise jump straight to PureMdnsResponder without ENOENT noise.
+    if (platform === "linux" && !this.options.spawnProcess) {
+      const hasCommand = this.options.hasCommand ?? hasExecutableInPath;
+      if (!hasCommand(spec.command)) {
+        return this.startPureFallback(`${spec.command} not installed`);
+      }
+    }
+    if (platform === "linux" && this.options.hasCommand && !this.options.hasCommand(spec.command)) {
+      return this.startPureFallback(`${spec.command} not installed`);
+    }
+
     const spawnFn =
       this.options.spawnProcess ??
       ((command: string, args: string[]) => spawn(command, args, { stdio: "ignore", windowsHide: true }));

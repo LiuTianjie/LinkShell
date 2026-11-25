@@ -36,6 +36,7 @@ export const acpFeaturesSchema = z.object({
   authMethods: z.array(acpAuthMethodSchema),
   logout: z.boolean(), providers: z.boolean(), nes: z.boolean(),
   additionalDirectories: z.boolean(), mcpHttp: z.boolean(), mcpSse: z.boolean(),
+  mcpStdio: z.boolean().optional(), mcpAcp: z.boolean().optional(),
 });
 export type AcpFeatures = z.infer<typeof acpFeaturesSchema>;
 

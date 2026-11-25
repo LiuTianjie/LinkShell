@@ -477,12 +477,16 @@ export function InspectorNewTabView({
             </span>
             {dirtyDiff ? (
               <span className="inspector-diff-stat-pill" data-tabular="">
-                <span className="inspector-diff-stat-add">
-                  +{formatCompactStat(diffStats.added)}
-                </span>
-                <span className="inspector-diff-stat-del">
-                  -{formatCompactStat(diffStats.removed)}
-                </span>
+                {diffStats.added > 0 ? (
+                  <span className="inspector-diff-stat-add">
+                    +{formatCompactStat(diffStats.added)}
+                  </span>
+                ) : null}
+                {diffStats.removed > 0 ? (
+                  <span className="inspector-diff-stat-del">
+                    -{formatCompactStat(diffStats.removed)}
+                  </span>
+                ) : null}
               </span>
             ) : null}
           </button>

@@ -171,6 +171,10 @@
         func startMomentumScrolling(velocity: CGPoint) {
             guard abs(velocity.x) > 50 || abs(velocity.y) > 50 else { return }
 
+            // Always invalidate any prior momentum CADisplayLink before creating a new one so links never leak.
+            momentumScroll.displayLink?.invalidate()
+            momentumScroll.displayLink = nil
+
             momentumScroll.velocity = velocity
             TerminalDebugLog.log(
                 .input,
@@ -183,12 +187,19 @@
                 target: self,
                 selector: #selector(momentumScrollFrame(_:)),
             )
+            if #available(iOS 15.0, *) {
+                let maxFps = Float(window?.screen.maximumFramesPerSecond ?? UIScreen.main.maximumFramesPerSecond)
+                let preferred = max(60, min(120, maxFps))
+                link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: preferred, preferred: preferred)
+            }
             link.add(to: .main, forMode: .common)
             momentumScroll.displayLink = link
         }
 
         @objc func momentumScrollFrame(_ link: CADisplayLink) {
-            let dt = link.targetTimestamp - link.timestamp
+            // Clamp dt to prevent huge scroll jumps after frame drops or zero/negative intervals on first tick.
+            let rawDt = link.targetTimestamp - link.timestamp
+            let dt = min(max(rawDt, 1.0 / 240.0), 1.0 / 20.0)
             // Use the same deceleration as the ordinary shell's UIScrollView,
             // independently of whether the display runs at 60 or 120 Hz.
             let decay = pow(UIScrollView.DecelerationRate.normal.rawValue, CGFloat(dt * 1000))

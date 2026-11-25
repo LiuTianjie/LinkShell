@@ -290,6 +290,10 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
   }
   public func stop() {
     cancelWindowDragReleaseTracking()
+    pendingWindowDrag = false
+    downEvent = nil
+    downPoint = .zero
+    dragTakenOver = false
     releaseInput()
     stopped = true; active = false
     renderer.stop()
@@ -514,14 +518,20 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
     if pendingWindowDrag, let savedDown = downEvent {
       pendingWindowDrag = false
       downEvent = nil
+      downPoint = .zero
       dragTakenOver = false
       button("left", down: true, event: savedDown)
       button("left", down: false, event: event)
       return
     }
+    let wasTakenOver = dragTakenOver
     pendingWindowDrag = false
     downEvent = nil
-    dragTakenOver = false
+    downPoint = .zero
+    if wasTakenOver {
+      finishWindowDragIfActive()
+      return
+    }
     button("left", down: false, event: event)
   }
   public override func rightMouseDown(with event: NSEvent) { onPointerDown?(); activateWindowIfNeeded(); button("right", down: true, event: event) }
@@ -572,6 +582,12 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
     releaseInput()
   }
   private func releaseInput() {
+    pendingWindowDrag = false
+    downEvent = nil
+    downPoint = .zero
+    if dragTakenOver || dragReleaseTimer != nil || dragMonitor != nil {
+      finishWindowDragIfActive()
+    }
     for button in heldButtons.sorted() { onInput?(["t": "up", "b": button, "n": 1, "m": [String]()], false) }
     heldButtons.removeAll()
     for key in pressedKeys.union(pressedModifiers).sorted() {
@@ -834,7 +850,10 @@ private final class DesktopScreenMetalRenderer {
     generation &+= 1
     if !value { current = nil; clearRequested = true; changes &+= 1; reportedSize = .zero; reportedFirst = false }
     lock.unlock()
-    if !value { layer.isOpaque = false }
+    if !value {
+      layer.isOpaque = false
+      if layer.drawableSize.width >= 1, layer.drawableSize.height >= 1 { drawNow() }
+    }
   }
   func resetPresentation() {
     lock.lock()
@@ -842,6 +861,7 @@ private final class DesktopScreenMetalRenderer {
     reportedSize = .zero; reportedFirst = false
     lock.unlock()
     layer.isOpaque = false
+    if layer.drawableSize.width >= 1, layer.drawableSize.height >= 1 { drawNow() }
   }
   func stop() {
     lock.lock(); stopped = true; accepting = false; pending = nil; current = nil; generation &+= 1; lock.unlock()
@@ -851,11 +871,14 @@ private final class DesktopScreenMetalRenderer {
 
   private func draw(waitTimeout: DispatchTime = .now()) {
     lock.lock()
-    guard !stopped, accepting, running, !frozen else { lock.unlock(); return }
-    if let next = pending { current = next; pending = nil; changes &+= 1 }
+    if stopped || frozen { lock.unlock(); return }
+    // Allow clearing a stale drawable even after the surface becomes inactive or pauses its display link.
+    let clearOnly = clearRequested && current == nil && (!accepting || !running)
+    guard clearOnly || (accepting && running) else { lock.unlock(); return }
+    if accepting, let next = pending { current = next; pending = nil; changes &+= 1 }
     let picture = current, mark = changes, ticket = generation, stretch = fillsBounds
     let clear = clearRequested && picture == nil
-    let needed = clear || (picture != nil && mark != drawn)
+    let needed = clear || (accepting && running && picture != nil && mark != drawn)
     lock.unlock()
     guard needed, inFlight.wait(timeout: waitTimeout) == .success else { return }
     var committed = false

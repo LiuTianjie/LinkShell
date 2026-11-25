@@ -127,7 +127,12 @@ describe("ActivityKit registration handoff", () => {
     harness.native.token = "cd".repeat(32);
     harness.onToken?.({ activityId: "activity-1" }); await settle();
     expect(request.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(2);
-    expect(JSON.parse(request.mock.calls[1][1]!.body as string)).toEqual({ token: "cd".repeat(32), grant });
+    expect(JSON.parse(request.mock.calls[1][1]!.body as string)).toMatchObject({
+      token: "cd".repeat(32),
+      grant,
+      computerKey: "computer-1",
+      deviceId: expect.stringMatching(/^ios-/),
+    });
     expect(harness.call).toHaveBeenCalledTimes(2);
     expect(harness.ready).toHaveBeenCalledTimes(2);
   });
@@ -182,13 +187,13 @@ describe("ActivityKit registration handoff", () => {
     expect(harness.ready).not.toHaveBeenCalled();
   });
 
-  it("revokes an ended activity while registration is in flight", async () => {
+  it("revokes an ended activity while registration is in flight and prunes it from Keychain", async () => {
     const registration = deferred<Response>();
     request.mockImplementationOnce(() => registration.promise);
     mount(); await settle();
     harness.onToken?.({ activityId: "activity-1", ended: true });
     registration.resolve(registered()); await settle();
-    expect(harness.saved?.records[0]?.ended).toBe(true);
+    expect(harness.saved?.records.find((record) => record.activityId === "activity-1")).toBeUndefined();
     expect(request.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(true);
     expect(harness.call.mock.calls.some(([method]) => method === "liveActivities.subscribe")).toBe(false);
     expect(harness.ready).not.toHaveBeenCalled();
@@ -346,5 +351,64 @@ describe("ActivityKit registration handoff", () => {
         computerKey: "computer-1",
       }),
     );
+  });
+
+  it("ending activity #1 NEVER revokes or cancels an in-flight registration for activity #2", async () => {
+    const activity1 = { activityId: "activity-1", computerKey: "computer-1", token: "ab".repeat(32) };
+    const activity2 = { activityId: "activity-2", computerKey: "computer-1", token: "cd".repeat(32) };
+    harness.saved = {
+      records: [{ ...activity1, grant: "11".repeat(32), owner: "owner-1", serviceUrl: "https://push.itool.tech", expiresAt: Date.now() + 3_600_000, registeredAt: Date.now() } as SavedRegistration & { serviceUrl: string; expiresAt: number; registeredAt: number }],
+    };
+    harness.getNative.mockImplementation(async () => [activity2]);
+    const put2 = deferred<Response>();
+    request.mockImplementation(async (url, init) => {
+      if (String(url).endsWith("/activity-2") && init?.method === "PUT") return put2.promise;
+      return new Response(null, { status: 204 });
+    });
+
+    mount();
+    await settle();
+    // While PUT for activity-2 is still in flight, native reconciliation ends stale activity-1.
+    harness.onToken?.({ activityId: "activity-1", ended: true });
+    put2.resolve(Response.json({ activityId: "activity-2", expiresAt: Date.now() + 3_600_000 }));
+    await settle();
+
+    // Activity-2 MUST NOT have been revoked; it must complete subscribe + pushReady cleanly.
+    expect(request.mock.calls.filter(([url, init]) => String(url).endsWith("/activity-2") && init?.method === "DELETE")).toHaveLength(0);
+    expect(request.mock.calls.filter(([url, init]) => String(url).endsWith("/activity-1") && init?.method === "DELETE")).toHaveLength(1);
+    expect(harness.call).toHaveBeenCalledWith(
+      "liveActivities.subscribe",
+      expect.objectContaining({ activityId: "activity-2", computerKey: "computer-1" }),
+    );
+    expect(harness.ready).toHaveBeenCalledWith("activity-2");
+    expect(harness.saved?.records.map((r) => r.activityId)).toEqual(["activity-2"]);
+  });
+
+  it("prunes legacy ended:true and expired records from SecureStore on startup", async () => {
+    harness.saved = {
+      records: [
+        { activityId: "legacy-ended", computerKey: "computer-1", token: "aa".repeat(32), grant: "1".repeat(64), owner: "owner-1", ended: true },
+        { activityId: "legacy-expired", computerKey: "computer-1", token: "bb".repeat(32), grant: "2".repeat(64), owner: "owner-1", expiresAt: Date.now() - 1000 } as SavedRegistration & { expiresAt: number },
+      ],
+    };
+    harness.getNative.mockImplementation(async () => []);
+    mount();
+    await settle();
+    expect(harness.saved?.records).toEqual([]);
+  });
+
+  it("falls back to { token, grant } when an older push service returns HTTP 400", async () => {
+    request
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "invalid_registration" }), { status: 400 }))
+      .mockResolvedValueOnce(registered());
+    mount();
+    await settle();
+    const puts = request.mock.calls.filter(([, init]) => init?.method === "PUT");
+    expect(puts).toHaveLength(2);
+    expect(JSON.parse(puts[1]![1]!.body as string)).toEqual({
+      token: harness.native.token,
+      grant: "07".repeat(32),
+    });
+    expect(harness.ready).toHaveBeenCalledWith("activity-1");
   });
 });

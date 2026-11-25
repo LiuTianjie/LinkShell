@@ -29,7 +29,10 @@ export class AcpMcpBridge {
     this.servers.set(serverId, server);
     child.stdout.on("data", (data: Buffer) => {
       server.buffer += server.decoder.write(data);
-      if (Buffer.byteLength(server.buffer) > 32 * 1024 * 1024) { this.fail(server, new Error("MCP 消息过大")); child.kill(); return; }
+      // UTF-8 expands at most 3 bytes per UTF-16 code unit; skip byteLength scan for short buffers.
+      if (server.buffer.length > (32 * 1024 * 1024) / 3 && Buffer.byteLength(server.buffer) > 32 * 1024 * 1024) {
+        this.fail(server, new Error("MCP 消息过大")); child.kill(); return;
+      }
       let newline: number;
       while ((newline = server.buffer.indexOf("\n")) >= 0) {
         const line = server.buffer.slice(0, newline); server.buffer = server.buffer.slice(newline + 1);
@@ -78,7 +81,14 @@ export class AcpMcpBridge {
         return;
       }
       const token = obj(message.params).progressToken;
-      const recipients = token === undefined ? [...server.pending.values()] : [...server.pending.values()].filter((pending) => pending.token === token);
+      let recipients: Pending[];
+      if (token === undefined) {
+        // Avoid duplicating uncorrelated server notifications across every concurrent pending request.
+        const first = server.pending.values().next().value;
+        recipients = first ? [first] : [];
+      } else {
+        recipients = [...server.pending.values()].filter((pending) => pending.token === token);
+      }
       for (const pending of recipients) this.options.notify({ serverId, requestId: pending.id, method: message.method,
         ...(message.params == null ? {} : { params: message.params }) });
       return;

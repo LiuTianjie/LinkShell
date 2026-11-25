@@ -16,6 +16,7 @@ import {
 import {
   FULLSCREEN_SHORTCUT,
   formatShortcut,
+  isEditableTarget,
 } from "../../bridge/shortcuts";
 import { hasOpenOverlay, notifyOverlayLayout } from "../../bridge/top-layer-registry";
 import { useI18n } from "../../core/i18n";
@@ -194,14 +195,14 @@ export function RemoteScreenWorkspace({
   );
 
   const localEnv = resolveLocalDesktopEnv();
-  const isWindowsClient =
-    localEnv.localPlatform === "windows" ||
-    (typeof document !== "undefined" &&
-      document.documentElement.dataset.platform === "windows");
-  const fullscreenShortcut = isWindowsClient
-    ? "F11"
-    : localEnv.localPlatform === "macos"
-      ? "⌃⌘F"
+  const isMacClient =
+    localEnv.localPlatform === "macos" &&
+    (typeof document === "undefined" ||
+      document.documentElement.dataset.platform !== "windows");
+  const fullscreenShortcut = isMacClient
+    ? "⌃⌘F"
+    : localEnv.localPlatform === "windows" || localEnv.localPlatform === "linux"
+      ? "F11"
       : formatShortcut(FULLSCREEN_SHORTCUT);
   const canUseNativeMetal =
     localEnv.electron && localEnv.localPlatform === "macos";
@@ -423,12 +424,21 @@ export function RemoteScreenWorkspace({
         setFullscreenEnabled(false);
         return;
       }
-      if (
-        event.key === "F11" ||
-        (event.ctrlKey &&
-          event.metaKey &&
-          event.key.toLowerCase() === "f")
-      ) {
+      const isBareF11 =
+        event.key === "F11" &&
+        !event.altKey &&
+        !event.shiftKey &&
+        !event.ctrlKey &&
+        !event.metaKey;
+      const isMacFullscreenChord =
+        event.ctrlKey &&
+        event.metaKey &&
+        !event.altKey &&
+        !event.shiftKey &&
+        event.key.toLowerCase() === "f";
+      if (isBareF11 || isMacFullscreenChord) {
+        if (document.querySelector("dialog[open]")) return;
+        if (!fullscreen && (hasOpenOverlay() || isEditableTarget(event.target))) return;
         event.preventDefault();
         setFullscreenEnabled(!fullscreen);
       }

@@ -41,17 +41,14 @@ function defaultOpenDatabase(): OutboxSQLiteDatabase | null {
  * iOS app termination, falling back transparently to memory when native SQLite is unavailable.
  */
 export function createOutboxStorage(openDb: () => OutboxSQLiteDatabase | null = defaultOpenDatabase): OutboxStorage {
-  let db: OutboxSQLiteDatabase | null | undefined;
+  let db: OutboxSQLiteDatabase | undefined;
   const memory = new Map<string, OutboxItem[]>();
 
   const getDb = (): OutboxSQLiteDatabase | null => {
     if (db !== undefined) return db;
     try {
       const opened = openDb();
-      if (!opened) {
-        db = null;
-        return null;
-      }
+      if (!opened) return null;
       opened.execSync(
         `CREATE TABLE IF NOT EXISTS outbox_items (
           computer_key TEXT NOT NULL,
@@ -68,7 +65,8 @@ export function createOutboxStorage(openDb: () => OutboxSQLiteDatabase | null = 
       db = opened;
       return db;
     } catch {
-      db = null;
+      // Leave db unset so transient SQLite errors (e.g. SQLITE_BUSY / locked file) retry cleanly on next op.
+      db = undefined;
       return null;
     }
   };
@@ -108,7 +106,7 @@ export function createOutboxStorage(openDb: () => OutboxSQLiteDatabase | null = 
           memory.set(key, cloneItems(items));
           return items;
         } catch {
-          db = null;
+          db = undefined;
         }
       }
       return cloneItems(memory.get(key) ?? []);
@@ -161,7 +159,7 @@ export function createOutboxStorage(openDb: () => OutboxSQLiteDatabase | null = 
           }
         }
       } catch {
-        db = null;
+        db = undefined;
       }
     },
   };

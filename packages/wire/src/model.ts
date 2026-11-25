@@ -90,7 +90,7 @@ export const toolKindSchema = z.enum([
   "fetch",
   "switch_mode",
   "other",
-]);
+]).catch("other");
 export type ToolKind = z.infer<typeof toolKindSchema>;
 
 export const permissionOptionSchema = z.object({
@@ -114,6 +114,14 @@ export type SessionActivity = z.infer<typeof sessionActivitySchema>;
  * among options, several of them, or something to type (Claude's
  * AskUserQuestion, Codex's request_user_input, an MCP server's form).
  */
+export const questionOptionSchema = z.object({
+  value: z.string(),
+  label: z.string(),
+  description: z.string().optional(),
+  preview: z.string().optional(),
+});
+export type QuestionOption = z.infer<typeof questionOptionSchema>;
+
 export const questionSchema = z.object({
   id: z.string(),
   constraints: z.object({
@@ -129,7 +137,7 @@ export const questionSchema = z.object({
   text: z.string(),
   /** `choice`: one of `options`; `choices`: any number of them; `text`: typed. */
   kind: z.enum(["choice", "choices", "text"]),
-  options: z.array(z.object({ value: z.string(), label: z.string(), description: z.string().optional() })).optional(),
+  options: z.array(questionOptionSchema).optional(),
   /** With options: an answer of the user's own can be typed instead of, or beside, a pick. */
   other: z.boolean().optional(),
   /** What is typed shouldn't be shown (a token). */

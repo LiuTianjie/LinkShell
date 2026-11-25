@@ -303,7 +303,7 @@ export class HelperApp {
   private readonly watchers = new Set<(status: HelperStatus) => void>();
   private readonly configuring = new Map<string, Map<number, { resolve(value: VideoConfigured): void; reject(error: Error): void }>>();
   private waiting: { resolve(status: HelperStatus): void; reject(error: Error): void }[] = [];
-  private listing: ((displays: AppDisplay[]) => void)[] = [];
+  private listing: { resolve(displays: AppDisplay[]): void; reject(error: Error): void }[] = [];
 
   constructor(
     private readonly app: string,
@@ -363,6 +363,7 @@ export class HelperApp {
       for (const route of this.routes.values()) route({ t: "gone" });
       this.routes.clear();
       for (const waiter of this.waiting.splice(0)) waiter.reject(new Error("LinkShell.app went before it answered"));
+      for (const waiter of this.listing.splice(0)) waiter.reject(new Error("LinkShell.app went before it listed displays"));
     });
     createInterface({ input: socket }).on("line", (line) => {
       const message = parse(line);
@@ -381,7 +382,7 @@ export class HelperApp {
         this.log(`[app] ${String(message.message).slice(0, 2000)}`);
       } else if (message.t === "displays") {
         const displays = displaysOf(message.list);
-        for (const waiter of this.listing.splice(0)) waiter(displays);
+        for (const waiter of this.listing.splice(0)) waiter.resolve(displays);
       } else if (typeof message.v === "string") {
         const waiting = typeof message.requestId === "number" ? this.configuring.get(message.v)?.get(message.requestId) : undefined;
         if (waiting && (message.t === "rtc.configured" || message.t === "rtc.configure.error")) {
@@ -403,25 +404,57 @@ export class HelperApp {
   }
 
   /** What the app may do. It says so as it connects; asked again, it looks again. */
-  async access(): Promise<HelperStatus> {
+  async access(timeoutMs = 8000): Promise<HelperStatus> {
     await this.link();
+    const waitStatus = () =>
+      new Promise<HelperStatus>((resolve, reject) => {
+        const entry = {
+          resolve: (status: HelperStatus) => {
+            clearTimeout(timer);
+            resolve(status);
+          },
+          reject: (error: Error) => {
+            clearTimeout(timer);
+            reject(error);
+          },
+        };
+        const timer = setTimeout(() => {
+          const idx = this.waiting.indexOf(entry);
+          if (idx >= 0) this.waiting.splice(idx, 1);
+          reject(new Error("LinkShell.app did not report status"));
+        }, timeoutMs);
+        timer.unref?.();
+        this.waiting.push(entry);
+      });
     if (this.status) {
-      const answer = new Promise<HelperStatus>((resolve, reject) => this.waiting.push({ resolve, reject }));
+      const answer = waitStatus();
       await this.write({ t: "status" });
       return answer;
     }
-    return new Promise<HelperStatus>((resolve, reject) => this.waiting.push({ resolve, reject }));
+    return waitStatus();
   }
 
   /** The displays there are to watch. */
-  async displays(): Promise<AppDisplay[]> {
+  async displays(timeoutMs = 8000): Promise<AppDisplay[]> {
     await this.link();
     const answer = new Promise<AppDisplay[]>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("LinkShell.app did not list the displays")), 8000);
-      this.listing.push((displays) => {
-        clearTimeout(timer);
-        resolve(displays);
-      });
+      const entry = {
+        resolve: (displays: AppDisplay[]) => {
+          clearTimeout(timer);
+          resolve(displays);
+        },
+        reject: (error: Error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      };
+      const timer = setTimeout(() => {
+        const idx = this.listing.indexOf(entry);
+        if (idx >= 0) this.listing.splice(idx, 1);
+        reject(new Error("LinkShell.app did not list the displays"));
+      }, timeoutMs);
+      timer.unref?.();
+      this.listing.push(entry);
     });
     await this.write({ t: "displays" });
     return answer;

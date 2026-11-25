@@ -56,8 +56,26 @@ export function useSessionOnline() {
 }
 export const messageOf = (reason: unknown) =>
   reason instanceof Error ? reason.message : String(reason);
-export const baseName = (path: string) =>
-  path.replace(/\/$/, "").split("/").pop() ?? path;
+export const baseName = (path: string) => {
+  const trimmed = path.replace(/[/\\]+$/, "");
+  if (!trimmed) return "";
+  // Keep Windows drive roots (e.g. "C:\") intact instead of collapsing to empty or corrupting.
+  if (/^[A-Za-z]:$/.test(trimmed)) return path;
+  const sep = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+  return sep >= 0 ? trimmed.slice(sep + 1) : trimmed;
+};
+export const dirName = (path: string) => {
+  const trimmed = path.replace(/[/\\]+$/, "");
+  if (!trimmed) return path.startsWith("\\") ? "\\" : "/";
+  if (/^[A-Za-z]:$/.test(trimmed)) return `${trimmed}\\`;
+  const sep = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+  if (sep < 0) return "/";
+  if (sep === 0) return trimmed[0]!;
+  const parent = trimmed.slice(0, sep);
+  // Preserve the root separator for top-level Windows files ("C:\foo.ts" -> "C:\").
+  if (/^[A-Za-z]:$/.test(parent)) return `${parent}${trimmed[sep]}`;
+  return parent;
+};
 export const titleOf = (session: { title?: string; cwd: string }) =>
   session.title || baseName(session.cwd) || "未命名会话";
 // Session states use the names every end shares (docs/design/visual-system.md); a task's or a

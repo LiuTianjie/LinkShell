@@ -2,10 +2,10 @@ import { router, useIsFocused, useLocalSearchParams, useNavigation } from "expo-
 import { CommonActions } from "expo-router/react-navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Pressable, ScrollView, View } from "react-native";
-import { consumeNativeLiveActivityAction, type LiveActivityAction } from "../../modules/link-layout";
+import { consumeNativeLiveActivityAction, pendingNativeLiveActivityActionId, type LiveActivityAction } from "../../modules/link-layout";
 import { EmptyState, LoadingState } from "@/components/state-views";
 import { useActions, useClient, useConnection, useSessionSubscription } from "@/lib/client";
-import { listComputers, useComputers } from "@/lib/computers";
+import { lanHostDisplayName, lanHostUrl, listComputers, useComputers } from "@/lib/computers";
 import { isLiveActivityActionCurrent } from "@/lib/live-activity-actions";
 import { activityEntries, activityRoute, activityDetailStack, type ActivityFilter, type ActivityRoute } from "@/lib/live-activity-navigation";
 import { useTerminals } from "@/lib/terminals";
@@ -14,6 +14,45 @@ import { Text } from "@/components/fixed-text";
 import { SessionRow, positionOf } from "@/components/session-row";
 import { TerminalRow } from "@/components/terminal-row";
 import { colors } from "@/theme/colors";
+
+export interface ActivityNavRoute {
+  name: string;
+  key?: string;
+  params?: Record<string, unknown>;
+}
+
+function routeActionId(route: ActivityNavRoute | undefined): string | undefined {
+  if (!route || route.name !== "activity") return undefined;
+  const raw = route.params?.action;
+  return (Array.isArray(raw) ? raw[0] : typeof raw === "string" ? raw : undefined)?.trim() || undefined;
+}
+
+/** Finds a newer Live Activity action stacked above `currentActionId` so action A never wipes action B. */
+export function findNewerQueuedActivityAction(
+  routes: readonly ActivityNavRoute[],
+  currentActionId?: string,
+): string | undefined {
+  if (!currentActionId) return undefined;
+  const currentIndex = routes.findIndex((route) => routeActionId(route) === currentActionId);
+  if (currentIndex < 0) return undefined;
+  for (let i = routes.length - 1; i > currentIndex; i -= 1) {
+    const candidate = routeActionId(routes[i]);
+    if (candidate && candidate !== currentActionId) return candidate;
+  }
+  return undefined;
+}
+
+/** True when finishing `currentActionId` must NOT reset the navigation stack. */
+export function shouldDeferActionCompletionReset(
+  routes: readonly ActivityNavRoute[],
+  currentActionId?: string,
+): boolean {
+  if (!currentActionId) return false;
+  const currentIndex = routes.findIndex((route) => routeActionId(route) === currentActionId);
+  // If this action screen is already gone from the stack, a newer navigation owns the stack.
+  if (currentIndex < 0) return true;
+  return findNewerQueuedActivityAction(routes, currentActionId) !== undefined;
+}
 
 export function ActivityActionScreen() {
   const params = activityRoute(useLocalSearchParams());
@@ -35,17 +74,31 @@ function ActivitySelection(params: ActivityRoute) {
   const computerKey = selection?.computerKey ?? params.computer ?? (params.action ? "" : computer.key);
   const saved = useComputers((state) => state.saved);
   const live = useComputers((state) => state.live);
+  const lanHosts = useComputers((state) => state.lanHosts);
   const online = useClient((state) => state.status === "online");
+  const sessionsLoaded = useClient((state) => state.sessionsLoaded);
   const ready = useClient((state) => Boolean(state.ready[sessionId]));
   const session = useClient((state) => state.sessions[sessionId]);
   const detail = useCallback((kind: "session" | "terminal", id: string) => {
     navigation.dispatch(CommonActions.reset(activityDetailStack(navigation.getState()?.routes ?? [], kind, id)));
   }, [navigation]);
+  const completeAction = useCallback(async (targetSessionId: string) => {
+    const routes = (navigation.getState()?.routes ?? []) as readonly ActivityNavRoute[];
+    if (shouldDeferActionCompletionReset(routes, params.action)) return;
+    const queuedActionId = await pendingNativeLiveActivityActionId().catch(() => null);
+    if (queuedActionId && queuedActionId !== params.action) {
+      router.replace({ pathname: "/activity", params: { action: queuedActionId } });
+      return;
+    }
+    const latestRoutes = (navigation.getState()?.routes ?? []) as readonly ActivityNavRoute[];
+    if (shouldDeferActionCompletionReset(latestRoutes, params.action)) return;
+    detail("session", targetSessionId);
+  }, [navigation, params.action, detail]);
   const permissions = useClient((state) => state.views[sessionId]?.permissions);
   const actions = useActions();
   const connected = computer.key === computerKey;
   const list = !params.action && !params.session && !params.terminal;
-  useSessionSubscription(sessionId, Boolean(selection && connected && online && focused));
+  useSessionSubscription(sessionId, Boolean(selection && connected && online && focused && (!sessionsLoaded || session)));
 
   useEffect(() => {
     if (!params.action) return;
@@ -61,10 +114,27 @@ function ActivitySelection(params: ActivityRoute) {
 
   useEffect(() => {
     if (!computerKey || connected || !focused) return;
-    if (listComputers({ saved, live }).some((item) => item.key === computerKey)) {
+    if (listComputers({ saved, live, lanHosts }).some((item) => item.key === computerKey)) {
       useComputers.getState().select(computerKey);
+      return;
     }
-  }, [computerKey, connected, focused, saved, live]);
+    const discovered = lanHosts.find((host) => {
+      const url = lanHostUrl(host);
+      return Boolean(url && `direct:${url}` === computerKey);
+    });
+    if (discovered) {
+      const url = lanHostUrl(discovered);
+      if (url) {
+        const key = useComputers.getState().discoverLanHost({
+          url,
+          name: lanHostDisplayName(discovered),
+          machineId: discovered.machineId,
+          fingerprint: discovered.fingerprint,
+        });
+        if (key) useComputers.getState().select(key);
+      }
+    }
+  }, [computerKey, connected, focused, saved, live, lanHosts]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -85,7 +155,15 @@ function ActivitySelection(params: ActivityRoute) {
       }
       return;
     }
-    if (!selection || !online || !ready) return;
+    if (!selection || !online) return;
+    // Fail fast once the host has loaded its session list and this session is gone,
+    // instead of hanging for 20s waiting on ready[sessionId].
+    if (sessionsLoaded && !session && !ready) {
+      started.current = true;
+      setError("该会话已不存在，无法提交操作。");
+      return;
+    }
+    if (!ready) return;
     started.current = true;
     if (!isLiveActivityActionCurrent(selection, computer.key, session, permissions)) {
       setError("这个请求已处理或选项已变化，请在详情中查看最新状态。");
@@ -100,19 +178,19 @@ function ActivitySelection(params: ActivityRoute) {
         const question = session!.asyncQuestions!.find((item) => item.id === selection.requestId)!;
         await actions.answerAsync(sessionId, question, selection.optionId);
       }
-      detail("session", sessionId);
+      await completeAction(sessionId);
     };
     // An uncertain response is never automatically replayed as another approval.
     void submit().catch(() => setError("未能确认操作结果，请打开任务详情查看；不会自动重复提交。"));
-  }, [connected, focused, error, params.action, params.session, params.terminal, selection, online, ready,
-    computer.key, session, permissions, actions, sessionId, detail]);
+  }, [connected, focused, error, params.action, params.session, params.terminal, selection, online, sessionsLoaded, ready,
+    computer.key, session, permissions, actions, sessionId, detail, completeAction]);
 
   if (list && connected && online && !error) return <ActivityTaskList initialFilter={params.filter} />;
 
   return <View style={{ flex: 1, justifyContent: "center" }}>
     {error ? <EmptyState icon={{ sf: "clock.badge.exclamationmark", md: "info_outline" }} title="请查看任务详情" message={error}
-      action={{ title: connected && sessionId ? "打开详情" : params.action ? "返回首页" : "重试连接", onPress: () => {
-        if (connected && sessionId) detail("session", sessionId);
+      action={{ title: connected && sessionId && session ? "打开详情" : params.action ? "返回首页" : "重试连接", onPress: () => {
+        if (connected && sessionId && session) detail("session", sessionId);
         else if (params.action) router.replace("/");
         else { expired.current = false; setError(""); setAttempt((value) => value + 1); link.reconnectNow(); }
       } }} />
