@@ -48,7 +48,7 @@ namespace LinkShell.Windows {
             if (!Path.IsPathRooted(executable) || !File.Exists(executable)) throw new ArgumentException("Windows 视频组件缺失");
             fps = Math.Max(1, Math.Min(60, fps));
             bitrate = Math.Max(300000, Math.Min(24000000, bitrate));
-            Rectangle svcBounds;
+            System.Drawing.Rectangle svcBounds;
             bool startedOnSecure = !IsDefaultDesktopActive();
             if (startedOnSecure && TryServiceDisplayBounds(screen, out svcBounds)) {
                 bounds = svcBounds;
