@@ -19,6 +19,7 @@ import {
   saveLocal,
   serviceAction,
   setDesktopSetting,
+  setElevatedScreenService,
   setKeepAwakeMode,
   setLaunchAtLogin,
   setScreenSharing,
@@ -330,23 +331,87 @@ export function SystemSettingsPage() {
         </div>
         <div className="ls-system-card">
           {isWin ? (
-            <div className="ls-system-row">
-              <div className="ls-system-row__copy">
-                <span className="ls-system-row__title">
-                  {ts("settings.winSharing")}
-                </span>
-                <span className="ls-system-row__detail">
-                  {ts("settings.winSharingDesc")}
-                </span>
+            <>
+              <div className="ls-system-row">
+                <div className="ls-system-row__copy">
+                  <span className="ls-system-row__title">
+                    {ts("settings.winSharing")}
+                  </span>
+                  <span className="ls-system-row__detail">
+                    {ts("settings.winSharingDesc")}
+                  </span>
+                </div>
+                <div className="ls-system-row__controls">
+                  <Switch
+                    checked={permissions.sharing !== false}
+                    aria-label={ts("settings.winSharing")}
+                    onCheckedChange={(checked) => void setScreenSharing(checked)}
+                  />
+                </div>
               </div>
-              <div className="ls-system-row__controls">
-                <Switch
-                  checked={permissions.sharing !== false}
-                  aria-label={ts("settings.winSharing")}
-                  onCheckedChange={(checked) => void setScreenSharing(checked)}
-                />
-              </div>
-            </div>
+              {permissions.elevatedService ? (
+                <div className="ls-system-row">
+                  <div className="ls-system-row__copy">
+                    <span className="ls-system-row__title">
+                      {ts("settings.winElevated")}
+                    </span>
+                    <span className="ls-system-row__detail">
+                      {ts("settings.winElevatedDesc")}
+                    </span>
+                  </div>
+                  <div className="ls-system-row__controls">
+                    {permissions.elevatedService.installed &&
+                    permissions.elevatedService.running &&
+                    permissions.elevatedService.authorized ? (
+                      <>
+                        <Badge
+                          tone={permissions.elevatedService.outdated ? "waiting" : "ok"}
+                          dot={permissions.elevatedService.outdated ? "waiting" : "ok"}
+                        >
+                          {permissions.elevatedService.outdated
+                            ? ts("settings.winElevatedOutdated")
+                            : ts("settings.winElevatedEnabled")}
+                        </Badge>
+                        {permissions.elevatedService.outdated ? (
+                          <Button
+                            size="sm"
+                            variant="primary"
+                            loading={state.elevatedServiceBusy}
+                            disabled={state.elevatedServiceBusy}
+                            onClick={() => void setElevatedScreenService(true)}
+                          >
+                            {ts("settings.winElevatedUpdateBtn")}
+                          </Button>
+                        ) : null}
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          disabled={state.elevatedServiceBusy}
+                          onClick={() => void setElevatedScreenService(false)}
+                        >
+                          {ts("settings.winElevatedRemoveBtn")}
+                        </Button>
+                      </>
+                    ) : (
+                      <>
+                        <Badge tone="neutral">{ts("settings.winElevatedOff")}</Badge>
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          loading={state.elevatedServiceBusy}
+                          disabled={state.elevatedServiceBusy}
+                          onClick={() => void setElevatedScreenService(true)}
+                        >
+                          {state.elevatedServiceBusy
+                            ? ts("settings.winElevatedBusy")
+                            : ts("settings.winElevatedEnableBtn")}
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ) : null}
+            </>
           ) : (
             <>
               <div className="ls-system-row">
@@ -386,7 +451,17 @@ export function SystemSettingsPage() {
             </>
           )}
         </div>
-        {isWin ? <p className="ls-system-note">{ts("settings.winSharingNote")}</p> : null}
+        {isWin && state.elevatedServiceMessage ? (
+          <p className="ls-system-note" role="status">
+            {tm(state.elevatedServiceMessage)}
+          </p>
+        ) : null}
+        {isWin ? (
+          <>
+            <p className="ls-system-note">{ts("settings.winSharingNote")}</p>
+            <p className="ls-system-note">{ts("settings.winHeadlessNote")}</p>
+          </>
+        ) : null}
       </section>
 
       {/* 4. Data Directory & Bundled CLI */}

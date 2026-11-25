@@ -1,8 +1,9 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, powerMonitor, powerSaveBlocker, screen, shell, type WebContents } from "electron";
 import { randomUUID } from "node:crypto";
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
+import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { CommandQueue, type PageCommand } from "./command-queue.js";
 import { installEditingContextMenu } from "./editing-context-menu.js";
@@ -931,13 +932,19 @@ async function handle(method: string, params: Record<string, unknown>): Promise<
     case "permissions": {
       if (!WINDOWS) return nativeModule?.permissions() ?? { recording: false, control: false, unavailable: true };
       const sharing = !existsSync(screenDisabled());
-      return { recording: sharing, control: sharing, notNeeded: true, sharing };
+      const elevatedService = await queryWindowsElevatedService();
+      return { recording: sharing, control: sharing, notNeeded: true, sharing, elevatedService };
     }
     case "setScreenSharing": {
       if (!WINDOWS) throw new Error("不支持的操作");
       if (params.enabled === true) rmSync(screenDisabled(), { force: true });
       else { mkdirSync(runtime.home, { recursive: true }); writeFileSync(screenDisabled(), "disabled\n"); }
       return { sharing: params.enabled === true };
+    }
+    case "setElevatedScreenService": {
+      if (!WINDOWS) throw new Error("不支持的操作");
+      const elevatedService = await setWindowsElevatedService(params.enabled === true);
+      return { elevatedService };
     }
     case "openSetup": return openSetup(params);
     case "loginItem": return nativeModule?.loginItem() ?? { enabled: windowsLoginItem() ?? app.getLoginItemSettings().openAtLogin, approval: false };
@@ -1127,6 +1134,83 @@ async function openRemotePortExternal(params: Record<string, unknown>): Promise<
 
 function screenDisabled() { return join(runtime.home, "windows-screen-disabled"); }
 
+const execFileAsync = promisify(execFile);
+
+interface WindowsElevatedServiceStatus {
+  installed: boolean;
+  running: boolean;
+  authorized: boolean;
+  outdated: boolean;
+}
+
+function psSingleQuote(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+async function queryWindowsElevatedService(): Promise<WindowsElevatedServiceStatus | undefined> {
+  if (!WINDOWS || !runtime.helper || !existsSync(runtime.helper)) return undefined;
+  try {
+    const { stdout } = await execFileAsync(runtime.helper, ["--service-status"], {
+      windowsHide: true,
+      timeout: 5_000,
+      encoding: "utf8",
+      env: { ...process.env, LINKSHELL_HOME: runtime.home },
+    });
+    const parsed = JSON.parse(stdout.trim()) as Partial<WindowsElevatedServiceStatus>;
+    return {
+      installed: parsed.installed === true,
+      running: parsed.running === true,
+      authorized: parsed.authorized === true,
+      outdated: parsed.outdated === true,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+async function currentWindowsUserSid(): Promise<string> {
+  const { stdout } = await execFileAsync("whoami.exe", ["/user", "/fo", "csv", "/nh"], {
+    windowsHide: true,
+    timeout: 5_000,
+    encoding: "utf8",
+  });
+  const match = /"(S-1-[0-9-]+)"/.exec(stdout);
+  if (!match?.[1]) throw new Error("无法读取当前 Windows 用户 SID");
+  return match[1];
+}
+
+async function setWindowsElevatedService(enable: boolean): Promise<WindowsElevatedServiceStatus> {
+  const helper = runtime.helper;
+  if (!WINDOWS || !helper || !existsSync(helper)) {
+    throw new Error("未找到 LinkShell.Screen.exe，请重新安装 Windows 桌面版");
+  }
+  const cleanHome = runtime.home.replace(/[\\]+$/, "");
+  const helperArgs = enable
+    ? ["--install-service", await currentWindowsUserSid(), cleanHome]
+    : ["--uninstall-service", cleanHome];
+  const argArray = helperArgs.map(psSingleQuote).join(", ");
+  const script = `$p = Start-Process -FilePath ${psSingleQuote(helper)} -ArgumentList @(${argArray}) -Verb RunAs -Wait -PassThru -WindowStyle Hidden; exit $p.ExitCode`;
+  try {
+    await execFileAsync("powershell.exe", ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", script], {
+      windowsHide: true,
+      timeout: 60_000,
+      encoding: "utf8",
+    });
+  } catch (error) {
+    const text = error instanceof Error ? `${error.message} ${String((error as { stderr?: string }).stderr ?? "")}` : String(error);
+    if (/canceled by the user|被用户取消|1223/i.test(text)) {
+      throw new Error("已取消管理员授权，未更改系统控制服务");
+    }
+    throw new Error(`系统控制服务操作失败：${error instanceof Error ? error.message : String(error)}`);
+  }
+  const next = await queryWindowsElevatedService();
+  if (!next) throw new Error("无法确认系统控制服务状态，请重试");
+  if (enable && (!next.installed || !next.running || !next.authorized)) {
+    throw new Error("系统控制服务未能启动，请在管理员权限下重试");
+  }
+  return next;
+}
+
 async function installCommand(): Promise<string> {
   if (runtime.folder) throw new Error(`可直接使用安装目录中的 ${join(runtime.folder, "linkshell.cmd")}`);
   if (!runtime.standalone || !runtime.bundle) throw new Error("当前不是独立 App 安装");
@@ -1156,6 +1240,13 @@ async function ready() {
   keepAwake.set("off");
   if (launch.home) { settings.set("home", launch.home); void settings.save(); }
   else if (typeof settings.get("home") === "string" && runtime.standalone) process.env.LINKSHELL_HOME = settings.get("home") as string;
+  if (WINDOWS && runtime.standalone && !launch.home && !process.env.LINKSHELL_HOME && settings.get("windowsAutoLaunchInitialized") !== true) {
+    try {
+      app.setLoginItemSettings({ openAtLogin: true, path: process.execPath, args: ["--hidden"], name: "LinkShell" });
+    } catch { /* Non-fatal if Group Policy blocks HKCU Run keys. */ }
+    settings.set("windowsAutoLaunchInitialized", true);
+    void settings.save();
+  }
   nativeTheme.themeSource = settings.appearance();
   nativeModule = native(runtime.bundle, app.getAppPath());
   if (MAC && !runtime.bundle) {

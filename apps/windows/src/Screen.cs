@@ -38,7 +38,7 @@ namespace LinkShell.Windows {
             public CaptureProfile(int width, int fps, int quality) {
                 Width = Math.Max(320, Math.Min(3840, width));
                 Fps = Math.Max(1, Math.Min(30, fps));
-                Quality = Math.Max(35, Math.Min(92, quality));
+                Quality = Math.Max(35, Math.Min(95, quality));
             }
         }
         static volatile CaptureProfile captureProfile;
@@ -90,22 +90,58 @@ namespace LinkShell.Windows {
             dryRun = args.Contains("--dry-run");
             try { SetProcessDpiAwarenessContext(new IntPtr(-4)); } catch (EntryPointNotFoundException) { SetProcessDPIAware(); }
             try {
+                // Service management and Session-0 service modes run outside the user's input desktop.
+                if (args.Length == 1 && args[0] == "--service") {
+                    RunElevatedWindowsService();
+                    return 0;
+                }
+                if (args.Length == 9 && args[0] == "--service-worker") {
+                    RunElevatedServiceWorker(args[1], args[2], Int32.Parse(args[3]), Int32.Parse(args[4]), Int32.Parse(args[5]), Int32.Parse(args[6]), Int32.Parse(args[7]), args[8]);
+                    return 0;
+                }
+                if (args.Length >= 2 && args[0] == "--install-service") {
+                    InstallElevatedService(args[1], args.Length >= 3 ? args[2] : UserHomeDir());
+                    return 0;
+                }
+                if (args.Length >= 1 && args[0] == "--uninstall-service") {
+                    UninstallElevatedService(args.Length >= 2 ? args[1] : UserHomeDir());
+                    return 0;
+                }
+                if (args.Length == 1 && args[0] == "--service-status") {
+                    PrintElevatedServiceStatus();
+                    return 0;
+                }
+
                 // Helpers launched by background consoles may inherit a non-input desktop.
-                // Never switch the user's desktop or attach to Winlogon/UAC.
+                // Never switch the user's desktop or attach to Winlogon/UAC unless the elevated service handles it.
+                bool serviceAvailable = IsElevatedServiceAvailable();
                 if (!dryRun) {
                     desktop = OpenInputDesktop(0, false, 0x0001 | 0x0080);
-                    if (desktop == IntPtr.Zero) throw new InvalidOperationException("无法访问当前 Windows 桌面：" + Marshal.GetLastWin32Error());
-                    string inputName = DesktopName(desktop), ownName = DesktopName(GetThreadDesktop(GetCurrentThreadId()));
-                    if (!String.Equals(inputName, "Default", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("请解锁 Windows 并关闭 UAC 提示后重试屏幕连接（" + inputName + "）");
-                    if (ownName != inputName && !SetThreadDesktop(desktop)) throw new InvalidOperationException("无法连接 Windows 输入桌面：" + Marshal.GetLastWin32Error());
+                    if (desktop == IntPtr.Zero) {
+                        if (!serviceAvailable) throw new InvalidOperationException("无法访问当前 Windows 桌面：" + Marshal.GetLastWin32Error());
+                    } else {
+                        string inputName = DesktopName(desktop), ownName = DesktopName(GetThreadDesktop(GetCurrentThreadId()));
+                        if (!String.Equals(inputName, "Default", StringComparison.OrdinalIgnoreCase)) {
+                            if (!serviceAvailable) throw new InvalidOperationException("请解锁 Windows 并关闭 UAC 提示后重试屏幕连接（" + inputName + "）");
+                        } else if (ownName != inputName && !SetThreadDesktop(desktop)) {
+                            if (!serviceAvailable) throw new InvalidOperationException("无法连接 Windows 输入桌面：" + Marshal.GetLastWin32Error());
+                        }
+                    }
                 }
                 if (args.Length == 1 && args[0] == "--displays") {
-                    EnsureDesktop();
-                    Write(EnumerateDisplays().Select((s, i) => new { screen = i, name = s.Primary ? "主屏幕" : "屏幕 " + (i + 1), w = s.Bounds.Width, h = s.Bounds.Height, main = s.Primary }).ToArray());
+                    EnsureSharingEnabled();
+                    if (!IsDefaultDesktopActive()) {
+                        string svcJson;
+                        if (TryServiceDisplaysJson(out svcJson)) { lock (OutputLock) { Console.Out.WriteLine(svcJson); Console.Out.Flush(); } return 0; }
+                        EnsureDesktop();
+                    }
+                    var displays = EnumerateDisplays();
+                    if (displays.Length == 0) throw new InvalidOperationException("这台 Windows 电脑未检测到可用显示器（无头模式）。请连接显示器、插入 HDMI/DP 欺骗器，或安装虚拟显示器驱动（Virtual Display Driver）后再试。");
+                    Write(displays.Select((s, i) => new { screen = i, name = s.Primary ? "主屏幕" : "屏幕 " + (i + 1), w = s.Bounds.Width, h = s.Bounds.Height, main = s.Primary }).ToArray());
                     return 0;
                 }
                 if ((args.Length == 4 || args.Length == 5) && args[0] == "--capture") {
-                    Capture(Int32.Parse(args[1]), Int32.Parse(args[2]), Int32.Parse(args[3]), args.Length == 5 ? Int32.Parse(args[4]) : 75);
+                    Capture(Int32.Parse(args[1]), Int32.Parse(args[2]), Int32.Parse(args[3]), args.Length == 5 ? Int32.Parse(args[4]) : 85);
                     return 0;
                 }
                 if (args.Length == 1 && args[0] == "--fusion") {
@@ -129,8 +165,11 @@ namespace LinkShell.Windows {
                     return 0;
                 }
                 if (args.Length >= 1) {
-                    bounds = Display(Int32.Parse(args[0]));
+                    int screenIndex = Int32.Parse(args[0]);
                     dryRun = args.Contains("--dry-run");
+                    EnsureSharingEnabled();
+                    if (!dryRun && TryRunElevatedControl(screenIndex)) return 0;
+                    bounds = Display(screenIndex);
                     Control();
                     return 0;
                 }
@@ -196,7 +235,12 @@ namespace LinkShell.Windows {
                 return true;
             }, IntPtr.Zero);
             if (list.Count == 0) {
-                return Screen.AllScreens.Select(s => new DisplayInfo { Bounds = s.Bounds, Primary = s.Primary }).ToArray();
+                int sw = GetSystemMetrics(0), sh = GetSystemMetrics(1);
+                if (sw > 0 && sh > 0) {
+                    list.Add(new DisplayInfo { Bounds = new Rectangle(0, 0, sw, sh), Primary = true });
+                } else {
+                    return Screen.AllScreens.Where(s => s.Bounds.Width > 0 && s.Bounds.Height > 0).Select(s => new DisplayInfo { Bounds = s.Bounds, Primary = s.Primary }).ToArray();
+                }
             }
             return list.OrderByDescending(d => d.Primary).ToArray();
         }
@@ -219,13 +263,20 @@ namespace LinkShell.Windows {
         static Rectangle Display(int index) {
             EnsureDesktop();
             var all = EnumerateDisplays();
+            if (all.Length == 0) throw new InvalidOperationException("这台 Windows 电脑未检测到可用显示器（无头模式）。请连接显示器、插入 HDMI/DP 欺骗器，或安装虚拟显示器驱动（Virtual Display Driver）后再试。");
             if (index < 0 || index >= all.Length) throw new ArgumentOutOfRangeException("display", "屏幕已断开，请重新打开屏幕共享");
             return all[index].Bounds;
         }
         static void Write(object value) { lock (OutputLock) { Console.WriteLine(Json.Serialize(value)); Console.Out.Flush(); } }
 
         static void Capture(int screen, int width, int fps, int quality) {
-            bounds = Display(screen);
+            EnsureSharingEnabled();
+            Rectangle svcBounds;
+            if (!IsDefaultDesktopActive() && TryServiceDisplayBounds(screen, out svcBounds)) {
+                bounds = svcBounds;
+            } else {
+                bounds = Display(screen);
+            }
             captureProfile = new CaptureProfile(width, fps, quality);
             // EOF also stops capture after a host crash; nothing keeps recording without a reader.
             var eof = new Thread(() => {
@@ -275,8 +326,12 @@ namespace LinkShell.Windows {
                                     EnsureSharingEnabled();
                                     if (!IsDefaultDesktopActive()) {
                                         if (duplication != null) { duplication.Dispose(); duplication = null; }
-                                        Console.Error.WriteLine("[capture] desktop interrupted (UAC/secure desktop); waiting for Default desktop");
-                                        if (!WaitForDefaultDesktop(120000)) break;
+                                        Console.Error.WriteLine("[capture] desktop interrupted (UAC/secure desktop); switching to secure capture/wait");
+                                        if (!TryStreamSecureDesktopJpeg(screen, w, Math.Min(15, profile.Fps), profile.Quality, output)) {
+                                            if (!WaitForDefaultDesktop(120000)) break;
+                                        }
+                                        if (ended) break;
+                                        if (!IsDefaultDesktopActive()) { checkedAt = -1000; continue; }
                                         CaptureWake.WaitOne(150);
                                         EnsureSharingEnabled();
                                         if (screenDC != IntPtr.Zero) ReleaseDC(IntPtr.Zero, screenDC);
@@ -332,7 +387,7 @@ namespace LinkShell.Windows {
                                 bool forced = Interlocked.Exchange(ref forceFrame, 0) != 0;
                                 long comparedAt = clock.ElapsedMilliseconds, encodedAt = comparedAt;
                                 if (changed || refine || forced || began - lastSent >= 2000) {
-                                    int nextQuality = refine || refined ? Math.Min(92, profile.Quality + 15) : profile.Quality;
+                                    int nextQuality = refine || refined ? Math.Min(95, profile.Quality + 15) : profile.Quality;
                                     if (changed || encodedQuality != nextQuality || frame.Length == 0) {
                                         frame.SetLength(0);
                                         using (var parameters = new EncoderParameters(1)) {

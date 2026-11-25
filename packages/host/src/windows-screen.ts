@@ -6,11 +6,11 @@ import { z } from "zod";
 import type { AppDisplay, StreamProfile } from "./input.js";
 
 const JPEG_PROFILES = [
-  { width: 1920, fps: 30, quality: 80 },
-  { width: 1600, fps: 24, quality: 75 },
-  { width: 1440, fps: 20, quality: 70 },
-  { width: 1024, fps: 15, quality: 65 },
-  { width: 960, fps: 12, quality: 58 },
+  { width: 2560, fps: 30, quality: 88 },
+  { width: 1920, fps: 24, quality: 84 },
+  { width: 1600, fps: 20, quality: 80 },
+  { width: 1280, fps: 15, quality: 74 },
+  { width: 1024, fps: 12, quality: 68 },
 ] as const;
 
 export function windowsProfile(level: number, maxWidth = 1920, maxFps = 30) {

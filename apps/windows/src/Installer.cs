@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Security.Principal;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
@@ -39,7 +40,7 @@ namespace LinkShell.Windows {
         readonly ProgressBar progress;
         readonly Button primary, secondary;
         readonly Border progressCard;
-        readonly CheckBox launch;
+        readonly CheckBox launch, elevatedService;
         readonly string version;
         CancellationTokenSource cancellation;
         bool working, committing, installed, updateStarted;
@@ -83,7 +84,8 @@ namespace LinkShell.Windows {
             detail = Label("", 11, false, "Secondary"); detail.TextWrapping = TextWrapping.NoWrap; detail.TextTrimming = TextTrimming.CharacterEllipsis; status.Children.Add(detail);
             progressCard = new Border { Child = status, Visibility = Visibility.Collapsed, Margin = new Thickness(0, 0, 0, 16) }; body.Children.Add(progressCard);
             result = Label("仅为当前用户安装，无需管理员权限。\n更新前请从托盘退出 LinkShell；更新会暂时停止其托管的服务，可能中断任务。账号、配对和会话历史会保留。", 12, false, "Secondary"); result.LineHeight = 21; body.Children.Add(result);
-            launch = new CheckBox { Content = "安装完成后启动 LinkShell", IsChecked = true, Margin = new Thickness(0, 20, 0, 0), Visibility = Visibility.Collapsed, FocusVisualStyle = focusStyle }; body.Children.Add(launch);
+            launch = new CheckBox { Content = "安装完成后启动 LinkShell", IsChecked = true, Margin = new Thickness(0, 16, 0, 0), Visibility = Visibility.Collapsed, FocusVisualStyle = focusStyle }; body.Children.Add(launch);
+            elevatedService = new CheckBox { Content = "开启管理员窗口与 UAC 远程控制服务（推荐，点完成时仅需授权一次）", IsChecked = true, Margin = new Thickness(0, 10, 0, 0), Visibility = Visibility.Collapsed, FocusVisualStyle = focusStyle }; body.Children.Add(elevatedService);
             var footer = new StackPanel(); Grid.SetRow(footer, 2); root.Children.Add(footer);
             footer.Children.Add(new Border { Height = 1, Background = Brush("Line"), Margin = new Thickness(0, 18, 0, 18) });
             var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
@@ -146,6 +148,7 @@ namespace LinkShell.Windows {
                 heading.Text = "LinkShell 已准备就绪"; description.Text = "安装成功。开始连接你的手机。";
                 result.Text = "账号、配对和会话历史已保留。";
                 primary.Content = "完成"; secondary.Content = "打开安装目录"; secondary.IsEnabled = true; launch.Visibility = Visibility.Visible;
+                if (update == null) elevatedService.Visibility = Visibility.Visible;
             } catch (OperationCanceledException) {
                 ExitCode = 0; heading.Text = "安装已取消"; description.Text = "临时文件已清理，现有安装保持不变。";
                 stage.Text = "已取消"; detail.Text = ""; result.Text = "可以随时重新开始安装。";
@@ -164,8 +167,27 @@ namespace LinkShell.Windows {
             Close();
         }
         void Finish() {
+            if (update == null && elevatedService.IsChecked == true) InstallElevatedScreenServiceBestEffort();
             if (launch.IsChecked == true && !(update == null ? Open(Path.Combine(engine.Destination, "LinkShell.exe")) : LaunchUpdated())) return;
             Close();
+        }
+        void InstallElevatedScreenServiceBestEffort() {
+            try {
+                string helper = Path.Combine(engine.Destination, "LinkShell.Screen.exe");
+                if (!File.Exists(helper)) return;
+                string sid;
+                using (var identity = WindowsIdentity.GetCurrent()) sid = identity.User != null ? identity.User.Value : "";
+                if (String.IsNullOrEmpty(sid)) return;
+                string home = Environment.GetEnvironmentVariable("LINKSHELL_HOME") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".linkshell");
+                var psi = new ProcessStartInfo(helper, "--install-service \"" + sid + "\" \"" + home.TrimEnd('\\') + "\"") {
+                    UseShellExecute = true,
+                    Verb = "runas",
+                    WindowStyle = ProcessWindowStyle.Hidden,
+                };
+                using (var proc = Process.Start(psi)) {
+                    if (proc != null) proc.WaitForExit(30000);
+                }
+            } catch { /* User may cancel UAC and enable the elevated service later in Settings. */ }
         }
         bool LaunchUpdated() {
             try { update.Launch(); return true; }

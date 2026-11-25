@@ -213,7 +213,7 @@ test('Windows native helpers maintain multi-GPU, dynamic display, monotonic tick
   const read = name => readFileSync(resolve('src', name), 'utf8');
   const screen = read('Screen.cs');
   assert.match(screen, /\bEnumDisplayMonitors\b/);
-  assert.match(screen, /Write\(EnumerateDisplays\(\)\.Select/);
+  assert.match(screen, /var displays = EnumerateDisplays\(\);/);
   assert.match(screen, /SetStretchBltMode\(dc,\s*4\)/);
   assert.match(screen, /\bEnsureSharingEnabled\b/);
   assert.match(screen, /\bIsDefaultDesktopActive\b/);
@@ -221,15 +221,24 @@ test('Windows native helpers maintain multi-GPU, dynamic display, monotonic tick
 
   const videoCapture = read('VideoCapture.cs');
   assert.match(videoCapture, /LINKSHELL_WINDOWS_PROFILE/);
-  assert.match(videoCapture, /Math\.Min\(2560,\s*width\)/);
-  assert.match(videoCapture, /16000000/);
-  assert.match(videoCapture, /flags=bicubic/);
+  assert.match(videoCapture, /Math\.Min\(3840,\s*width\)/);
+  assert.match(videoCapture, /24000000/);
+  assert.match(videoCapture, /flags=lanczos/);
+  assert.match(videoCapture, /bt709/);
+  assert.match(videoCapture, /-rc vbr -cq 19/);
   assert.match(videoCapture, /scale_d3d11=width=.*:format=nv12/);
-  assert.match(videoCapture, /-bufsize "\s*\+\s*\(bitrate \/ 2\)/);
   assert.match(videoCapture, /\bVideoDesktopPaused\b/);
   assert.match(videoCapture, /\bIsDesktopAccessLostMessage\b/);
+  assert.match(videoCapture, /\bTryStreamSecureDesktopVideo\b/);
   assert.doesNotMatch(videoCapture, /-force_key_frames/);
   assert.doesNotMatch(videoCapture, /-header_spacing\s+1/);
+
+  const screenService = read('ScreenService.cs');
+  assert.match(screenService, /LinkShellScreenService/);
+  assert.match(screenService, /\bConstantTimeEquals\b/);
+  assert.match(screenService, /\bApplyAdminOnlyDirectoryAcl\b/);
+  assert.match(screenService, /\bCreateProcessAsUser\b/);
+  assert.match(screenService, /\bServiceAttachActiveDesktop\b/);
 
   const dxgi = read('DesktopDuplication.cs');
   assert.match(dxgi, /\bCreateDXGIFactory1\b/);

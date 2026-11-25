@@ -35,7 +35,7 @@ const csc = join(process.env.WINDIR || 'C:\\Windows', 'Microsoft.NET', 'Framewor
 if (!existsSync(csc)) throw new Error('The Windows screen helper requires .NET Framework 4.8 on 64-bit Windows.');
 // The window is Electron (scripts/electron.mjs); the screen helper stays native: DXGI capture,
 // Media Foundation H.264 and SendInput.
-const screen = spawnSync(csc, ['/nologo', '/optimize+', '/platform:x64', '/target:exe', '/codepage:65001', `/out:${join(output, 'LinkShell.Screen.exe')}`, '/r:System.Drawing.dll', '/r:System.Windows.Forms.dll', '/r:System.Web.Extensions.dll', '/r:System.Core.dll', join(root, 'src/Screen.cs'), join(root, 'src/DesktopDuplication.cs'), join(root, 'src/VideoCapture.cs'), join(root, 'src/Fusion.cs')], { stdio: 'inherit', windowsHide: true });
+const screen = spawnSync(csc, ['/nologo', '/optimize+', '/platform:x64', '/target:exe', '/codepage:65001', `/out:${join(output, 'LinkShell.Screen.exe')}`, '/r:System.Drawing.dll', '/r:System.Windows.Forms.dll', '/r:System.Web.Extensions.dll', '/r:System.Core.dll', '/r:System.ServiceProcess.dll', join(root, 'src/Screen.cs'), join(root, 'src/DesktopDuplication.cs'), join(root, 'src/VideoCapture.cs'), join(root, 'src/Fusion.cs'), join(root, 'src/ScreenService.cs')], { stdio: 'inherit', windowsHide: true });
 if (screen.error) throw screen.error;
 if (screen.status !== 0) process.exit(screen.status || 1);
 if (process.argv.includes('--qa')) {

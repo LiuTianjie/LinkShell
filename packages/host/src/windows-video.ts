@@ -44,11 +44,11 @@ export function windowsMedia(): string | undefined {
 }
 
 const profiles = [
-  { width: 1920, fps: 60, bitrate: 8_000_000 },
-  { width: 1600, fps: 60, bitrate: 5_000_000 },
-  { width: 1280, fps: 30, bitrate: 3_000_000 },
-  { width: 960, fps: 30, bitrate: 1_500_000 },
-  { width: 640, fps: 20, bitrate: 700_000 },
+  { width: 2560, fps: 60, bitrate: 14_000_000 },
+  { width: 1920, fps: 60, bitrate: 10_000_000 },
+  { width: 1920, fps: 30, bitrate: 6_000_000 },
+  { width: 1600, fps: 30, bitrate: 3_500_000 },
+  { width: 1280, fps: 24, bitrate: 1_800_000 },
 ];
 
 /**
@@ -83,13 +83,13 @@ export function windowsSlowerLevel(level: number, made: number | undefined): num
 export function windowsVideoProfile(level: number, request: Pick<VideoOffer, "maxWidth" | "maxFps" | "fps">) {
   const index = Math.max(0, Math.min(profiles.length - 1, level));
   const profile = profiles[index]!;
-  // Allow up to 2560x1440 at level 0 when explicitly requested; keep 1920 default when unspecified.
+  // Allow up to 4K native (3840x2160) at level 0 when requested; default to crisp 2560 at level 0.
   const ceiling = index === 0 && request.maxWidth && request.maxWidth > profile.width
-    ? Math.min(2560, request.maxWidth)
+    ? Math.min(3840, request.maxWidth)
     : profile.width;
-  const width = Math.min(ceiling, request.maxWidth ?? 1920);
+  const width = Math.min(ceiling, request.maxWidth ?? profile.width);
   const fps = Math.min(profile.fps, request.maxFps ?? 60, request.fps ?? 60);
-  const bitrate = Math.min(16_000_000, Math.max(400_000, Math.round(profile.bitrate * (width / profile.width) ** 2 * fps / profile.fps)));
+  const bitrate = Math.min(24_000_000, Math.max(600_000, Math.round(profile.bitrate * (width / profile.width) ** 2 * fps / profile.fps)));
   return { width, fps, bitrate };
 }
 
@@ -447,8 +447,8 @@ export class WindowsVideoSession implements ScreenVideoSession {
   }
 
   private resolvedDimensions(requestedWidth: number, screenChanged: boolean): { width: number; height: number } {
-    const maxW = requestedWidth > 1920 ? Math.min(2560, requestedWidth) : Math.max(320, Math.min(1920, requestedWidth));
-    const maxH = requestedWidth > 1920 ? 1440 : 1080;
+    const maxW = Math.max(320, Math.min(3840, requestedWidth));
+    const maxH = maxW > 2560 ? 2160 : maxW > 1920 ? 1440 : 1080;
     const display = this.deps.displaySize?.(this.targetScreen);
     if (display && display.w && display.h) {
       const scale = Math.min(1, Math.min(maxW / display.w, maxH / display.h));
@@ -464,7 +464,11 @@ export class WindowsVideoSession implements ScreenVideoSession {
   /** The profile for a given level, held to the relay's share while the path goes through one. */
   private profileFor(level: number) {
     const profile = windowsVideoProfile(level, { maxWidth: this.targetMaxWidth, maxFps: this.targetMaxFps, fps: this.request.fps });
-    return this.relayed ? { ...profile, bitrate: Math.min(profile.bitrate, (this.request.relayKbps ?? 3000) * 1000) } : profile;
+    if (!this.relayed) return profile;
+    // On TURN (typically 3 Mbps), cap to 30 fps so every frame gets 2x the bits for razor-sharp UI text.
+    const relayKbps = this.request.relayKbps ?? 3000;
+    const relayFps = Math.min(profile.fps, relayKbps <= 2500 ? 24 : 30);
+    return { ...profile, fps: relayFps, bitrate: Math.min(profile.bitrate, relayKbps * 1000) };
   }
 
   private profile() {
@@ -637,8 +641,10 @@ export class WindowsVideoSession implements ScreenVideoSession {
     // A same-computer receiver can bootstrap a low REMB from an almost still desktop.
     // That estimate says nothing about link capacity and must not trigger repeated encoder restarts.
     const loopback = pair && pair.localCandidate.host === pair.remoteCandidate.host;
-    // A static desktop may emit < 5 fps; only treat an active stream falling well below target fps as CPU/GPU-bound.
-    const behind = now > this.steadySince && this.made >= 5 && this.made < profile.fps * 0.7;
+    // A mostly static desktop (typing, cursor moves) legitimately produces 5-35 fps at low bitrate.
+    // Only treat sub-target FPS as a real CPU/GPU machine bottleneck during sustained active motion.
+    const activeMotion = sendBitrate > profile.bitrate * 0.25;
+    const behind = now > this.steadySince && activeMotion && this.made >= 15 && this.made < profile.fps * 0.55;
     this.behindIntervals = behind ? this.behindIntervals + 1 : 0;
     // REMB estimates link capacity; werift's TWCC senderBWE reports min(send, recv) throughput which tracks
     // sendBitrate on a quiet screen, so TWCC only flags congestion when recv lags send or congestion triggers.

@@ -30,7 +30,7 @@ describe("Windows paths and frames", () => {
     expect(windowsProfile(0)).toMatchObject({ fps: 30, width: 1920 });
     expect(windowsProfile(0, 2560)).toMatchObject({ fps: 30, width: 2560 });
     expect(windowsProfile(1, 1280)).toMatchObject({ fps: 24, width: 1280 });
-    expect(windowsProfile(3, 1920, 12)).toMatchObject({ fps: 12, width: 1024 });
+    expect(windowsProfile(3, 1920, 12)).toMatchObject({ fps: 12, width: 1280 });
     expect(windowsProfile(100, 9999).quality).toBeLessThan(windowsProfile(0).quality);
     expect(windowsProfile(0, 9999).width).toBe(3840);
   });

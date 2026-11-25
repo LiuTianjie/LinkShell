@@ -33,23 +33,15 @@ Windows 桌面端复用现有 Host / Gateway / 手机协议，窗口与 macOS �
 
 官方网关需要 iTool 会员，手机登录同一账号即可发现电脑。设备页可生成六位配对码和配对链接，过期后重新生成。自建网关使用内置 CLI：`linkshell.cmd host --gateway wss://your-gateway.example --daemon`。
 
-开机启动默认为关闭；设置开启的是当前用户登录项，不是登录前运行的 Windows 服务。
+开机启动在独立桌面版首次启动时默认开启当前用户登录项（可在设置中随时关闭），以便重启后自动上线。
 
 ## 屏幕与控制
 
 Windows 屏幕组件在已登录、已解锁的交互桌面中运行，按远程请求启动，支持多显示器与 DPI 缩放。手机和 Web 工作区继续使用现有屏幕查看页、配对权限及端到端加密通道。
 
-优先走 DXGI Desktop Duplication → GPU 缩放 → 硬件 H.264 → WebRTC 视频直连，复用 Mac 的 SDP/ICE 协商与 iOS 原生、Android 原生、WebView、Web 接收端。安装包自带校验固定版本的 FFmpeg LGPL 共享运行库，按显示适配器选择 AMD AMF、NVIDIA NVENC 或 Intel QSV，之后尝试硬件 Media Foundation。驱动拒绝 GPU 转换时，可使用 CPU 缩放与颜色转换，仍由硬件编码。初始能力上限为 1920×1080、60 fps；实际帧率取决于显卡、显示器、接收端与网络。已补齐 Win32 光标形状同步（`Screen.cs` / `Fusion.cs` 经 `GetCursorInfo` + `GetIconInfo` 编码 PNG 在 `shape` 通道下发）、WASAPI loopback 系统音频采集（`VideoCapture.cs --audio`，48 kHz 立体声经 `audio` DataChannel 发送）及 Fusion 文件剪贴板（`file-clipboard`，50 MiB 上限）；仍未提供 Mac 的 120 fps、HEVC 和 FlexFEC。接收端丢包反馈触发重传和关键帧恢复，带宽不足时降档；当前切换视频档位会重启编码器。
+优先走 DXGI Desktop Duplication → GPU 缩放 → 硬件 H.264 → WebRTC 视频直连，复用 Mac 的 SDP/ICE 协商与 iOS 原生、Android 原生、WebView、Web 接收端。安装包自带校验固定版本的 FFmpeg LGPL 共享运行库，按显示适配器选择 AMD AMF、NVIDIA NVENC 或 Intel QSV，之后尝试硬件 Media Foundation，采用低延迟 VBR + QP 边界与 BT.709 色彩矩阵以保持高分辨率文字锐利。能力上限支持至原生 4K（3840×2160、60 fps、最高 24 Mbps），TURN 中继场景自动限帧至 30 fps 以保证单帧清晰度。已补齐 Win32 光标形状同步、WASAPI loopback 系统音频采集及 Fusion 文件剪贴板。
 
-视频旁的四条 DataChannel 与 Mac 使用相同协议：按键和鼠标按下/松开可靠有序，移动走独立的无序低延迟通道，并丢弃过期位置；光标位置也可直接回传。网关继续传输加密协商消息，不转发视频。没有 TURN，无法穿透的网络自动回退到兼容画面。`LINKSHELL_SCREEN_VIDEO=off` 可强制兼容；`LINKSHELL_WINDOWS_ENCODER` 可指定 `h264_amf`、`h264_nvenc`、`h264_qsv`、`h264_mf` 用于诊断。
-
-编码器不可用、旋转屏幕或不支持的显示适配器使用 JPEG 兼容路径：DXGI GPU 缩放后读回像素，必要时改用 GDI。动态采集目标最高 30 fps，宽度最高 3840，按网络降档。iOS 可回退到 WebView 和强制中继。视频和 JPEG 路径都保留桌面解锁与本地禁用检查，隐藏查看器会暂停采集；原生组件通过 Windows Job Object 保证编码子进程随自身结束。
-
-JPEG 兼容路径的正常发送窗口最多保留两帧待确认，查看器绘制后立即确认，避免拖动时排队播放旧画面；确认丢失时仅发送稀疏探测帧。画质、分辨率和帧率直接在采集进程内调整。完全相同的像素不重复编码，静止后补发更清晰的一帧，并复用缓存画面发送低频心跳。连接详情显示当前实际模式、接收帧率和带宽。
-
-控制使用 `SendInput`，支持左右键、拖动、滚轮、常用快捷键、功能键和 Unicode 文本；工具栏显示 Windows 的 Ctrl / Alt / Win 组合。断开连接后释放已按下的按钮与修饰键。组件只通过 Host 持有的标准输入/输出工作，不另开监听端口；Host 退出或管道关闭会结束采集。
-
-设置可关闭远程屏幕，拒绝后续采集与输入。锁屏、UAC 安全桌面及高权限窗口不可控制；不会提升权限或绕过 Windows 的输入隔离。显示器布局变化时需要重新连接。
+设置可关闭远程屏幕，拒绝后续采集与输入。**可选 `LinkShellScreenService` 系统控制服务**：在首次安装完成页或桌面版「总览 / 通用设置」中一键授权一次后，将极简纯 C# 组件 `LinkShell.Screen.exe` 安装到受系统保护的 `%ProgramFiles%\LinkShell\ScreenService\` 并以 `LocalSystem` 运行（Node/Electron/FFmpeg 绝不以 SYSTEM 运行，Named Pipe 同时校检用户 SID DACL 与 256 位随机密钥），从而支持直接操控管理员 PowerShell / 任务管理器等高权限窗口，并在现有 WebRTC/JPEG 通道内实时查看与点击 UAC 安全桌面弹窗及锁屏。未安装系统服务时，弹出 UAC 仅暂停采集而不断开会话。无物理显示器的无头 Windows 主机需插接 HDMI/DP 欺骗器或安装开源虚拟显示器驱动（Virtual Display Driver）以启用硬件加速捕获。
 
 ## 更新与卸载
 

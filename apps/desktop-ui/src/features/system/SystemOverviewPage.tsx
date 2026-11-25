@@ -15,8 +15,10 @@ import {
   openYearlyUpgradePage,
   refreshAccount,
   serviceAction,
+  setElevatedScreenService,
   setGateway,
   standalone as isStandalone,
+  useActiveDesktopPlatform,
   useManagement,
   validateGateway,
   type GatewayChoice,
@@ -57,6 +59,8 @@ export function SystemOverviewPage({
   onRequestConfirm: (action: SystemConfirmAction) => void;
 }) {
   const { locale, tCore, ts, tm, computer } = useSystemI18n();
+  const activePlatform = useActiveDesktopPlatform();
+  const isWin = activePlatform === "windows";
   const state = useManagement();
   const healthy = isHealthy(state);
   const unreachable = state.snapshot?.status === "unreachable";
@@ -67,6 +71,10 @@ export function SystemOverviewPage({
   const onlineCount = devices.filter((d) => d.online).length;
   const signedIn = snapshot?.account?.state === "signed-in";
   const permissions = state.permissions;
+  const elevated = permissions.elevatedService;
+  const elevatedActive = Boolean(elevated?.installed && elevated?.running && elevated?.authorized);
+  const needsElevatedOnboarding =
+    isWin && permissions.known && permissions.sharing !== false && Boolean(elevated) && (!elevatedActive || elevated?.outdated);
   const screenReady = permissions.recording && permissions.control;
   const externalCliHost =
     standalone &&
@@ -180,6 +188,37 @@ export function SystemOverviewPage({
             {ts("overview.switchBuiltin")}
           </Button>
         </div>
+      ) : null}
+
+      {needsElevatedOnboarding ? (
+        <div className="ls-system-banner">
+          <div className="ls-system-banner__copy">
+            <DesktopIcon name="remote-screen" size="sm" />
+            <span>
+              {elevatedActive && elevated?.outdated
+                ? ts("settings.winElevatedOutdatedBanner")
+                : ts("settings.winElevatedBanner")}
+            </span>
+          </div>
+          <Button
+            size="sm"
+            variant="primary"
+            loading={state.elevatedServiceBusy}
+            disabled={state.elevatedServiceBusy}
+            onClick={() => void setElevatedScreenService(true)}
+          >
+            {state.elevatedServiceBusy
+              ? ts("settings.winElevatedBusy")
+              : elevatedActive && elevated?.outdated
+                ? ts("settings.winElevatedUpdateBtn")
+                : ts("settings.winElevatedEnableBtn")}
+          </Button>
+        </div>
+      ) : null}
+      {isWin && state.elevatedServiceMessage ? (
+        <p className="ls-system-note" role="status">
+          {tm(state.elevatedServiceMessage)}
+        </p>
       ) : null}
 
       {/* 1. LinkShell Account & iTool Pro Entitlement (Inline Sign-In, Zero Nested Modal!) */}

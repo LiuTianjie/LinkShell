@@ -103,16 +103,19 @@ describe("Windows H.264 media", () => {
     expect(order.accept({ t: "key", i: 7 }, true)).toBe(false);
     expect(order.accept({ t: "move" }, true)).toBe(true);
   });
-  it("respects receiver ceilings while enabling standard video on Windows", () => {
+  it("respects receiver ceilings while enabling crisp 2.5K/4K video on Windows", () => {
     expect(windowsVideoProfile(0, { maxWidth: 1280, maxFps: 30 })).toMatchObject({ width: 1280, fps: 30 });
-    expect(windowsVideoProfile(0, { maxFps: 120 })).toMatchObject({ width: 1920, fps: 60 });
+    expect(windowsVideoProfile(0, { maxFps: 120 })).toMatchObject({ width: 2560, fps: 60 });
     const qhd = windowsVideoProfile(0, { maxWidth: 2560, maxFps: 60 });
     expect(qhd).toMatchObject({ width: 2560, fps: 60 });
-    expect(qhd.bitrate).toBeGreaterThan(12_000_000);
-    expect(qhd.bitrate).toBeLessThanOrEqual(16_000_000);
-    expect(windowsVideoProfile(0, { maxWidth: 3840, maxFps: 60 })).toMatchObject({ width: 2560, fps: 60 });
-    expect(windowsVideoProfile(1, { maxWidth: 2560, maxFps: 60 })).toMatchObject({ width: 1600, fps: 60 });
-    expect(windowsVideoProfile(4, {})).toMatchObject({ width: 640, fps: 20 });
+    expect(qhd.bitrate).toBeGreaterThanOrEqual(14_000_000);
+    expect(qhd.bitrate).toBeLessThanOrEqual(24_000_000);
+    const uhd = windowsVideoProfile(0, { maxWidth: 3840, maxFps: 60 });
+    expect(uhd).toMatchObject({ width: 3840, fps: 60 });
+    expect(uhd.bitrate).toBeLessThanOrEqual(24_000_000);
+    expect(windowsVideoProfile(1, { maxWidth: 2560, maxFps: 60 })).toMatchObject({ width: 1920, fps: 60 });
+    expect(windowsVideoProfile(2, { maxWidth: 2560, maxFps: 60 })).toMatchObject({ width: 1920, fps: 30 });
+    expect(windowsVideoProfile(4, {})).toMatchObject({ width: 1280, fps: 24 });
     const page = viewerPage("win32");
     expect(page).toContain('const wantVideo = !nativePicture && "RTCPeerConnection" in window');
     expect(page).toContain('if (windowsHost)');
@@ -519,11 +522,12 @@ describe("Windows video quality, pacing, recovery and in-band reconfigure", () =
     internals.connected = true;
     internals.steadySince = 0;
 
-    // 10 consecutive seconds of static desktop (2 fps) + 40 waiting-for-IDR drops (queueDrops=0) must NOT downgrade or lock machine level.
+    // 10 consecutive seconds of quiet typing/browsing desktop (18 fps at low bitrate) + waiting-for-IDR drops must NOT downgrade or lock machine level.
     for (let i = 0; i < 10; i++) {
       internals.lastStats = performance.now() - 1000;
       internals.changed = performance.now() - 30_000;
-      internals.captured = 2;
+      internals.captured = 18;
+      internals.sentBytes = 200_000; // 1.6 Mbps (< 25% of 14 Mbps): normal typing/scrolling, NOT encoder overload
       internals.dropped = 40;
       internals.queueDrops = 0;
       internals.plis = 0;

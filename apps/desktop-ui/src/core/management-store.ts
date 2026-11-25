@@ -313,6 +313,13 @@ export function splitPath(path: string): [head: string, tail: string] {
 
 export type SignInMethod = "web" | "password" | "github" | "google";
 
+export interface WindowsElevatedServiceStatus {
+  installed: boolean;
+  running: boolean;
+  authorized: boolean;
+  outdated: boolean;
+}
+
 export interface ManagementState {
   snapshot?: DesktopSnapshot;
   problem?: string;
@@ -332,7 +339,10 @@ export interface ManagementState {
     recording: boolean;
     control: boolean;
     sharing?: boolean;
+    elevatedService?: WindowsElevatedServiceStatus;
   };
+  elevatedServiceBusy: boolean;
+  elevatedServiceMessage: ManagementMessage;
   loginItem: { enabled: boolean; approval: boolean };
   loginItemMessage: ManagementMessage;
   activity: { at: number; text: ManagementMessage }[];
@@ -382,6 +392,8 @@ const INITIAL_MANAGEMENT_STATE: ManagementState = {
   settings: { opaqueWindow: false, autoCheck: true, updateChannel: "stable", notifications: true },
   keepAwakeError: "",
   permissions: { known: false, recording: false, control: false },
+  elevatedServiceBusy: false,
+  elevatedServiceMessage: "",
   loginItem: { enabled: false, approval: false },
   loginItemMessage: "",
   activity: [],
@@ -713,6 +725,7 @@ async function refreshPermissions() {
       control: boolean;
       unavailable?: boolean;
       sharing?: boolean;
+      elevatedService?: WindowsElevatedServiceStatus;
     }>("permissions", {}, 15_000);
     set({
       permissions: {
@@ -720,6 +733,7 @@ async function refreshPermissions() {
         recording: value.recording,
         control: value.control,
         sharing: value.sharing,
+        elevatedService: value.elevatedService,
       },
     });
   } catch {
@@ -1298,6 +1312,30 @@ export async function setScreenSharing(enabled: boolean): Promise<void> {
     reportDesktopError(error);
   }
   await refreshPermissions();
+}
+
+export async function setElevatedScreenService(enabled: boolean): Promise<boolean> {
+  if (get().elevatedServiceBusy) return false;
+  set({ elevatedServiceBusy: true, elevatedServiceMessage: "" });
+  try {
+    await desktopInvoke<{ elevatedService?: WindowsElevatedServiceStatus }>(
+      "setElevatedScreenService",
+      { enabled },
+      70_000,
+    );
+    await refreshPermissions();
+    set({
+      elevatedServiceBusy: false,
+      elevatedServiceMessage: enabled
+        ? { key: "settings.winElevatedInstalled" }
+        : { key: "settings.winElevatedRemoved" },
+    });
+    return true;
+  } catch (error) {
+    set({ elevatedServiceBusy: false, elevatedServiceMessage: messageOf(error) });
+    await refreshPermissions();
+    return false;
+  }
 }
 
 export async function copyCommandPath(): Promise<void> {
