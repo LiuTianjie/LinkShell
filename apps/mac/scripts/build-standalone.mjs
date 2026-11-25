@@ -84,7 +84,10 @@ try {
   pruneRuntime(runtime, arch);
   {
     const file = `node-v${config.nodeVersion}-darwin-${arch}.tar.gz`, archive = join(scratch, file);
-    run('/usr/bin/curl', ['-fL', '--retry', '3', '-o', archive, `https://nodejs.org/dist/v${config.nodeVersion}/${file}`]);
+    const cached = process.env.LINKSHELL_NODE_CACHE ? join(resolve(process.env.LINKSHELL_NODE_CACHE), file) : '';
+    const distBase = (process.env.LINKSHELL_NODE_DIST_URL || 'https://nodejs.org/dist').replace(/\/+$/, '');
+    if (cached && existsSync(cached)) cpSync(cached, archive);
+    else run('/usr/bin/curl', ['-fL', '--retry', '3', '-o', archive, `${distBase}/v${config.nodeVersion}/${file}`]);
     if (sha256(archive) !== hashes[arch]) throw new Error(`Node ${arch} checksum mismatch`);
     run('/usr/bin/tar', ['-xzf', archive, '-C', scratch]);
   }

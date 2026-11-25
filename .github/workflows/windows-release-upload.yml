@@ -1,0 +1,90 @@
+name: Publish Windows desktop release assets
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Completed windows.yml workflow run ID"
+        required: true
+        type: string
+      release_tag:
+        description: "Existing desktop GitHub Release tag (e.g. desktop-v0.10.118)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RUN_ID: ${{ inputs.run_id }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+    steps:
+      - name: Validate inputs and release
+        run: |
+          set -euo pipefail
+          if ! [[ "$RUN_ID" =~ ^[0-9]+$ ]]; then
+            echo "Invalid run_id: $RUN_ID" >&2
+            exit 1
+          fi
+          if ! [[ "$RELEASE_TAG" =~ ^desktop-v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release_tag: $RELEASE_TAG" >&2
+            exit 1
+          fi
+          VERSION="${RELEASE_TAG#desktop-v}"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json tagName,url
+          RUN_CONCLUSION="$(gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" --json conclusion --jq '.conclusion')"
+          if [[ "$RUN_CONCLUSION" != "success" ]]; then
+            echo "Workflow run $RUN_ID conclusion is '$RUN_CONCLUSION', expected 'success'" >&2
+            exit 1
+          fi
+
+      - name: Download and verify Windows x64 and arm64 artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p work/x64 work/arm64
+          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" -n "LinkShell-Windows-x64-unsigned" -D work/x64
+          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" -n "LinkShell-Windows-arm64-unsigned" -D work/arm64
+
+          for arch in x64 arm64; do
+            echo "=== Verifying $arch ==="
+            (
+              cd "work/$arch"
+              ls -la
+              sha256sum -c "LinkShell-Setup-${VERSION}-windows-${arch}.exe.sha256"
+              sha256sum -c "LinkShell-${VERSION}-windows-${arch}.zip.sha256"
+              ZIP="LinkShell-${VERSION}-windows-${arch}.zip"
+              STANDALONE_VER="$(unzip -p "$ZIP" standalone.json | jq -r '.version')"
+              STANDALONE_ARCH="$(unzip -p "$ZIP" standalone.json | jq -r '.arch')"
+              APP_VER="$(unzip -p "$ZIP" resources/app/package.json | jq -r '.version')"
+              CLI_VER="$(unzip -p "$ZIP" runtime/cli/package.json | jq -r '.version')"
+              echo "standalone.json: version=$STANDALONE_VER arch=$STANDALONE_ARCH"
+              echo "resources/app/package.json: version=$APP_VER"
+              echo "runtime/cli/package.json: version=$CLI_VER"
+              test "$STANDALONE_VER" = "$VERSION"
+              test "$STANDALONE_ARCH" = "$arch"
+              test "$APP_VER" = "$VERSION"
+              test "$CLI_VER" = "$VERSION"
+              unzip -l "$ZIP" | grep -q "runtime/cli/dist/cli/src/index.js"
+            )
+          done
+
+      - name: Upload verified assets to GitHub Release
+        run: |
+          set -euo pipefail
+          gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --clobber \
+            "work/x64/LinkShell-Setup-${VERSION}-windows-x64.exe" \
+            "work/x64/LinkShell-Setup-${VERSION}-windows-x64.exe.sha256" \
+            "work/x64/LinkShell-${VERSION}-windows-x64.zip" \
+            "work/x64/LinkShell-${VERSION}-windows-x64.zip.sha256" \
+            "work/arm64/LinkShell-Setup-${VERSION}-windows-arm64.exe" \
+            "work/arm64/LinkShell-Setup-${VERSION}-windows-arm64.exe.sha256" \
+            "work/arm64/LinkShell-${VERSION}-windows-arm64.zip" \
+            "work/arm64/LinkShell-${VERSION}-windows-arm64.zip.sha256"
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json tagName,assets --jq '{tagName, count: (.assets | length), assets: [.assets[] | {name, size}]}'
