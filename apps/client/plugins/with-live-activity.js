@@ -457,7 +457,7 @@ module.exports = function withLiveActivity(config) {
     let src = config.modResults.contents;
     if (!src.includes("LocalApprovalNotifications.shared.install()")) {
       if (!src.includes("import LinkLayout")) {
-        src = `#if canImport(LinkLayout)\nimport LinkLayout\n#endif\n${src}`;
+        src = `#if canImport(LinkLayout)\ninternal import LinkLayout\n#endif\n${src}`;
       }
       src = src.replace(
         /return\s+super\.application\(application,\s*didFinishLaunchingWithOptions:\s*launchOptions\)/,
