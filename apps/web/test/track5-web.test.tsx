@@ -49,7 +49,7 @@ describe("Track 5 Web workspace upgrades & regression guards", () => {
   });
 
   it("keeps Conversation zero-reflow at bottom and consumes focusTarget.nonce only once", () => {
-    const src = readFileSync(new URL("../src/live/Conversation.tsx", import.meta.url), "utf8");
+    const src = readFileSync(new URL("../src/live/Conversation.tsx", import.meta.url), "utf8").replace(/\r\n/g, "\n");
     expect(src).toContain("if (state.isAtBottom) {\n        anchor = undefined;\n        return;\n      }");
     expect(src).toContain("consumedFocusNonce");
     expect(src).toContain("consumedFocusNonce.current === focusTarget.nonce");

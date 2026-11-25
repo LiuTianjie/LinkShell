@@ -88,16 +88,51 @@ namespace LinkShell.Windows {
                 if (known > 0) { var first = attempts[known]; attempts.RemoveAt(known); attempts.Insert(0, first); }
                 using (var destination = Console.OpenStandardOutput()) {
                     foreach (var attempt in attempts) {
-                        if (ended) return;
-                        EnsureDesktop();
-                        if (RunVideoEncoder(job, destination, executable, source, w, h, fps, bitrate, attempt.Key, attempt.Value, adapterIndex)) return;
+                        int zeroFramePauses = 0;
+                        while (!ended) {
+                            EnsureSharingEnabled();
+                            if (!IsDefaultDesktopActive()) {
+                                if (!WaitForDefaultDesktop(120000)) return;
+                                Thread.Sleep(250);
+                                EnsureSharingEnabled();
+                                if (DisplayFromCacheChanged()) throw new InvalidOperationException("屏幕布局已改变，请重新连接");
+                            }
+                            bool hadFrames;
+                            int outcome = RunVideoEncoder(job, destination, executable, source, w, h, fps, bitrate, attempt.Key, attempt.Value, adapterIndex, out hadFrames);
+                            if (outcome == VideoEnded) return;
+                            if (outcome == VideoDesktopPaused) {
+                                if (hadFrames) zeroFramePauses = 0;
+                                else if (++zeroFramePauses >= 5) break;
+                                Console.Error.WriteLine("[video] desktop interrupted (UAC/secure desktop); waiting for Default desktop");
+                                if (!WaitForDefaultDesktop(120000)) return;
+                                Thread.Sleep(250);
+                                EnsureSharingEnabled();
+                                if (DisplayFromCacheChanged()) throw new InvalidOperationException("屏幕布局已改变，请重新连接");
+                                continue;
+                            }
+                            break;
+                        }
                     }
                 }
                 if (!ended) throw new InvalidOperationException("这台电脑的硬件视频编码不可用，将使用兼容画面");
             } finally { CloseHandle(job); }
         }
 
-        static bool RunVideoEncoder(IntPtr job, Stream destination, string executable, string source, int width, int height, int fps, int bitrate, string encoder, bool compatible, int adapterIndex) {
+        const int VideoFailed = 0;
+        const int VideoEnded = 1;
+        const int VideoDesktopPaused = 2;
+
+        static bool IsDesktopAccessLostMessage(string line) {
+            if (String.IsNullOrEmpty(line)) return false;
+            return line.IndexOf("887a0026", StringComparison.OrdinalIgnoreCase) >= 0
+                || line.IndexOf("DXGI_ERROR_ACCESS_LOST", StringComparison.OrdinalIgnoreCase) >= 0
+                || line.IndexOf("access lost", StringComparison.OrdinalIgnoreCase) >= 0
+                || line.IndexOf("failed to acquire", StringComparison.OrdinalIgnoreCase) >= 0
+                || line.IndexOf("desktop switch", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        static int RunVideoEncoder(IntPtr job, Stream destination, string executable, string source, int width, int height, int fps, int bitrate, string encoder, bool compatible, int adapterIndex, out bool hadFrames) {
+            hadFrames = false;
             string filter = source;
             bool framed = Environment.GetEnvironmentVariable("LINKSHELL_VIDEO_FRAMED") == "1";
             // Older drivers reject D3D11_BIND_VIDEO_ENCODER surfaces. Use the vendor's scaler
@@ -134,8 +169,14 @@ namespace LinkShell.Windows {
                 // up over a long one, where a window's capture simply had nothing new to send.
                 (framed ? " -bsf:v h264_metadata=aud=insert,setts=ts=N -flush_packets 1 -f avi pipe:1" : " -bsf:v h264_metadata=aud=insert -flush_packets 1 -f h264 pipe:1");
             using (var process = new Process()) {
+                int accessLost = 0;
                 process.StartInfo = new ProcessStartInfo(executable, args) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
-                process.ErrorDataReceived += (sender, e) => { if (e.Data != null) Console.Error.WriteLine("[video:" + encoder + "] " + e.Data); };
+                process.ErrorDataReceived += (sender, e) => {
+                    if (e.Data != null) {
+                        Console.Error.WriteLine("[video:" + encoder + "] " + e.Data);
+                        if (IsDesktopAccessLostMessage(e.Data)) Interlocked.Exchange(ref accessLost, 1);
+                    }
+                };
                 process.Start();
                 if (!AssignProcessToJobObject(job, process.Handle)) { process.Kill(); throw new InvalidOperationException("无法绑定视频进程生命周期"); }
                 Console.Error.WriteLine("[video] child=" + process.Id);
@@ -158,22 +199,29 @@ namespace LinkShell.Windows {
                         destination.Write(buffer, 0, count); destination.Flush();
                     }
                 });
+                bool desktopPaused = false;
                 try {
                     var clock = Stopwatch.StartNew();
                     while (!ended && !process.WaitForExit(50)) {
-                        EnsureDesktop();
+                        EnsureSharingEnabled();
+                        if (!IsDefaultDesktopActive()) { desktopPaused = true; break; }
                         if (DisplayFromCacheChanged()) throw new InvalidOperationException("屏幕布局已改变，请重新连接");
                         if (copy.IsFaulted) throw copy.Exception;
                         if (received == 0 && clock.ElapsedMilliseconds > 5000) break;
                     }
                 } finally {
-                    if (!process.HasExited) { try { process.StandardInput.WriteLine("q"); } catch {} if (!process.WaitForExit(500)) process.Kill(); }
+                    if (!process.HasExited) {
+                        try { process.StandardInput.WriteLine("q"); } catch {}
+                        if (!process.WaitForExit(desktopPaused ? 1000 : 500)) process.Kill();
+                    }
                     process.WaitForExit();
                     if (!copy.Wait(2000)) throw new IOException("视频输出没有关闭");
                 }
-                if (ended) return true;
-                if (received != 0) throw new InvalidOperationException("硬件视频编码已停止");
-                return false;
+                hadFrames = received != 0;
+                if (ended) return VideoEnded;
+                if (desktopPaused || !IsDefaultDesktopActive() || (hadFrames && Interlocked.CompareExchange(ref accessLost, 0, 0) != 0)) return VideoDesktopPaused;
+                if (hadFrames) throw new InvalidOperationException("硬件视频编码已停止");
+                return VideoFailed;
             }
         }
 
@@ -255,7 +303,8 @@ namespace LinkShell.Windows {
 
             using (var destination = Console.OpenStandardOutput()) {
                 while (!ended) {
-                    EnsureDesktop();
+                    EnsureSharingEnabled();
+                    if (!IsDefaultDesktopActive()) { Thread.Sleep(150); continue; }
                     IMMDeviceEnumerator enumerator = null;
                     IMMDevice device = null;
                     IAudioClient audioClient = null;
@@ -321,8 +370,9 @@ namespace LinkShell.Windows {
                         while (!ended) {
                             long nowMs = clock.ElapsedMilliseconds;
                             if (nowMs - desktopCheckedAt >= 250) {
-                                EnsureDesktop();
+                                EnsureSharingEnabled();
                                 desktopCheckedAt = nowMs;
+                                if (!IsDefaultDesktopActive()) break;
                             }
 
                             uint packetFrames;

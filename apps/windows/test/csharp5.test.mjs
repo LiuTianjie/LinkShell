@@ -215,6 +215,9 @@ test('Windows native helpers maintain multi-GPU, dynamic display, monotonic tick
   assert.match(screen, /\bEnumDisplayMonitors\b/);
   assert.match(screen, /Write\(EnumerateDisplays\(\)\.Select/);
   assert.match(screen, /SetStretchBltMode\(dc,\s*4\)/);
+  assert.match(screen, /\bEnsureSharingEnabled\b/);
+  assert.match(screen, /\bIsDefaultDesktopActive\b/);
+  assert.match(screen, /\bWaitForDefaultDesktop\b/);
 
   const videoCapture = read('VideoCapture.cs');
   assert.match(videoCapture, /LINKSHELL_WINDOWS_PROFILE/);
@@ -223,6 +226,8 @@ test('Windows native helpers maintain multi-GPU, dynamic display, monotonic tick
   assert.match(videoCapture, /flags=bicubic/);
   assert.match(videoCapture, /scale_d3d11=width=.*:format=nv12/);
   assert.match(videoCapture, /-bufsize "\s*\+\s*\(bitrate \/ 2\)/);
+  assert.match(videoCapture, /\bVideoDesktopPaused\b/);
+  assert.match(videoCapture, /\bIsDesktopAccessLostMessage\b/);
   assert.doesNotMatch(videoCapture, /-force_key_frames/);
   assert.doesNotMatch(videoCapture, /-header_spacing\s+1/);
 

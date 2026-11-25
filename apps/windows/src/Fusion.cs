@@ -303,8 +303,13 @@ namespace LinkShell.Windows {
                 // Input does not wait for the next look at the windows: it is typed as it arrives.
                 if (scanned && scannedAt.ElapsedMilliseconds < every) { CommandArrived.WaitOne((int)Math.Max(1, every - scannedAt.ElapsedMilliseconds)); continue; }
                 scanned = true; scannedAt.Restart();
+                EnsureSharingEnabled();
+                if (!IsDefaultDesktopActive()) {
+                    lastShapeId = null;
+                    if (last != "[]") { Write(new { t = "windows", windows = new object[0] }); last = "[]"; }
+                    continue;
+                }
                 try {
-                    EnsureDesktop();
                     var list = Json.Serialize(FusionWindowsJson());
                     if (list != last) { lock (OutputLock) { Console.Out.WriteLine("{\"t\":\"windows\",\"windows\":" + list + "}"); Console.Out.Flush(); } last = list; }
                     if (idle || !FusedInFront) {

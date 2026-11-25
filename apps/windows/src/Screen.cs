@@ -146,14 +146,38 @@ namespace LinkShell.Windows {
             return GetUserObjectInformation(handle, 2, name, name.Capacity * 2, out needed) ? name.ToString() : "";
         }
 
-        static void EnsureDesktop() {
+        static void EnsureSharingEnabled() {
             var home = Environment.GetEnvironmentVariable("LINKSHELL_HOME") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".linkshell");
             if (File.Exists(Path.Combine(home, "windows-screen-disabled"))) throw new InvalidOperationException("请在 LinkShell 桌面版设置中允许远程屏幕");
             if (!Environment.UserInteractive) throw new InvalidOperationException("屏幕共享需要登录 Windows 桌面");
-            if (dryRun) return;
+        }
+
+        static bool IsDefaultDesktopActive() {
+            if (dryRun) return true;
             var current = OpenInputDesktop(0, false, 0x0001);
-            try { if (current == IntPtr.Zero || DesktopName(current) != "Default") throw new InvalidOperationException("Windows 已锁定或正在显示安全桌面，请在电脑上解锁后重新连接"); }
-            finally { if (current != IntPtr.Zero) CloseDesktop(current); }
+            if (current == IntPtr.Zero) return false;
+            try { return String.Equals(DesktopName(current), "Default", StringComparison.OrdinalIgnoreCase); }
+            finally { CloseDesktop(current); }
+        }
+
+        // Transient UAC prompts switch the input desktop to Winlogon for a few seconds.
+        // Wait for Default to return instead of tearing down an active remote session.
+        static bool WaitForDefaultDesktop(int maxWaitMs) {
+            var waited = Stopwatch.StartNew();
+            while (!ended) {
+                EnsureSharingEnabled();
+                if (IsDefaultDesktopActive()) return true;
+                if (waited.ElapsedMilliseconds >= maxWaitMs) {
+                    throw new InvalidOperationException("Windows 已锁定或正在显示安全桌面，请在电脑上解锁后重新连接");
+                }
+                Thread.Sleep(150);
+            }
+            return false;
+        }
+
+        static void EnsureDesktop() {
+            EnsureSharingEnabled();
+            if (!IsDefaultDesktopActive()) throw new InvalidOperationException("Windows 已锁定或正在显示安全桌面，请在电脑上解锁后重新连接");
         }
         // Query Win32 directly on each call: System.Windows.Forms.Screen.AllScreens caches monitor
         // bounds for the process lifetime when no WinForms message loop processes WM_DISPLAYCHANGE.
@@ -248,6 +272,21 @@ namespace LinkShell.Windows {
                             while (!ended && profile == captureProfile) {
                                 long began = clock.ElapsedMilliseconds;
                                 if (began - checkedAt >= 250) {
+                                    EnsureSharingEnabled();
+                                    if (!IsDefaultDesktopActive()) {
+                                        if (duplication != null) { duplication.Dispose(); duplication = null; }
+                                        Console.Error.WriteLine("[capture] desktop interrupted (UAC/secure desktop); waiting for Default desktop");
+                                        if (!WaitForDefaultDesktop(120000)) break;
+                                        CaptureWake.WaitOne(150);
+                                        EnsureSharingEnabled();
+                                        if (screenDC != IntPtr.Zero) ReleaseDC(IntPtr.Zero, screenDC);
+                                        screenDC = GetDC(IntPtr.Zero);
+                                        if (screenDC == IntPtr.Zero) throw new InvalidOperationException("无法读取 Windows 桌面");
+                                        duplication = DesktopDuplication.TryCreate(bounds, out duplicationReason);
+                                        Interlocked.Exchange(ref forceFrame, 1);
+                                        checkedAt = -1000;
+                                        continue;
+                                    }
                                     if (Display(screen) != bounds) throw new InvalidOperationException("屏幕布局已改变，请重新连接");
                                     checkedAt = began;
                                 }
@@ -257,16 +296,27 @@ namespace LinkShell.Windows {
                                 bool copied = false;
                                 if (duplication != null) {
                                     try { copied = duplication.CopyTo(target, w, h, frame.Length == 0); }
-                                    catch (Exception error) { Console.Error.WriteLine("[capture] GDI fallback: " + error.Message); duplication.Dispose(); duplication = null; }
+                                    catch (Exception error) {
+                                        duplication.Dispose(); duplication = null;
+                                        if (!IsDefaultDesktopActive()) { checkedAt = -1000; continue; }
+                                        Console.Error.WriteLine("[capture] GDI fallback: " + error.Message);
+                                    }
                                 }
                                 if (duplication == null) {
                                     var dc = target.GetHdc();
+                                    bool bltOk;
+                                    int bltErr = 0;
                                     try {
                                         // HALFTONE (4) preserves crisp text edges when GDI downscales high-DPI displays.
                                         SetStretchBltMode(dc, 4); SetBrushOrgEx(dc, 0, 0, IntPtr.Zero);
-                                        if (!StretchBlt(dc, 0, 0, w, h, screenDC, bounds.Left, bounds.Top, bounds.Width, bounds.Height, 0x40cc0020)) throw new InvalidOperationException("Windows 屏幕采集失败：" + Marshal.GetLastWin32Error());
-                                        copied = true;
+                                        bltOk = StretchBlt(dc, 0, 0, w, h, screenDC, bounds.Left, bounds.Top, bounds.Width, bounds.Height, 0x40cc0020);
+                                        if (!bltOk) bltErr = Marshal.GetLastWin32Error();
                                     } finally { target.ReleaseHdc(dc); }
+                                    if (!bltOk) {
+                                        if (!IsDefaultDesktopActive()) { checkedAt = -1000; continue; }
+                                        throw new InvalidOperationException("Windows 屏幕采集失败：" + bltErr);
+                                    }
+                                    copied = true;
                                 }
                                 if (!copied && frame.Length == 0) { CaptureWake.WaitOne(10); continue; }
                                 long copiedAt = clock.ElapsedMilliseconds;
@@ -337,8 +387,8 @@ namespace LinkShell.Windows {
             string lastId = null;
             var sent = new HashSet<string>();
             while (!ended) {
-                EnsureDesktop();
-                if (!capturePaused) {
+                EnsureSharingEnabled();
+                if (!capturePaused && IsDefaultDesktopActive()) {
                     double displayScale = Math.Max(1.0, Math.Min(4.0, MonitorScale(new Point(bounds.Left + bounds.Width / 2, bounds.Top + bounds.Height / 2))));
                     var shape = CaptureCursorShape(displayScale);
                     if (shape != null && shape.Id != lastId) {
@@ -522,9 +572,20 @@ namespace LinkShell.Windows {
             Write(new { t = "ready", trusted = true, app = "LinkShell" });
             var next = Task.Run(() => Console.ReadLine());
             POINT last = new POINT { X = Int32.MinValue, Y = Int32.MinValue };
+            bool inSecureDesktop = false;
             for (;;) {
-                // Recheck while idle too: disabling sharing or locking the PC releases a held drag.
-                EnsureDesktop();
+                // Recheck while idle too: disabling sharing stops control immediately, while UAC
+                // pauses input and releases held drags without tearing down the session.
+                EnsureSharingEnabled();
+                if (!IsDefaultDesktopActive()) {
+                    if (!inSecureDesktop) { Release(); inSecureDesktop = true; }
+                    if (!next.Wait(150)) continue;
+                    var skipped = next.Result;
+                    if (skipped == null) return;
+                    next = Task.Run(() => Console.ReadLine());
+                    continue;
+                }
+                inSecureDesktop = false;
                 POINT p;
                 if (GetCursorPos(out p) && (p.X != last.X || p.Y != last.Y)) {
                     Write(new { t = "cursor", x = Math.Max(0, Math.Min(1, (p.X - bounds.Left) / (double)bounds.Width)), y = Math.Max(0, Math.Min(1, (p.Y - bounds.Top) / (double)bounds.Height)) });
