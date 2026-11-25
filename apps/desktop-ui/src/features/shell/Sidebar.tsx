@@ -19,12 +19,14 @@ import {
   engine,
   evaluateFusionCapability,
   fusionCapabilityMessage,
+  isLocalHostUnavailable,
   openProjectContextMenu,
   openSessionContextMenu,
   projectFoldKey,
   projectScopeStore,
   readTreeFold,
   refreshConnectionProjects,
+  resolveLocalHostPhase,
   revealInFilesLabel,
   revealPathOnDesktop,
   sessionFamilies,
@@ -36,6 +38,7 @@ import {
   useActiveDesktopPlatform,
   useFusionState,
   useI18n,
+  useManagement,
   useRouter,
   type Computer,
   type ComputerSessionTree,
@@ -745,6 +748,7 @@ export function Sidebar({
   const activeConnection = useStore(engine.state, (s) => s.connection);
   const names = useStore(computerNames.store);
   const scope = useStore(projectScopeStore, (s) => s.scope);
+  const mgmt = useManagement();
 
   const activeComputer: Computer | undefined =
     activeConnection?.computer ?? localComputer ?? computers[0];
@@ -906,19 +910,26 @@ export function Sidebar({
     next?.focus();
   };
 
-  const emptyHint =
-    listState === "loading" ? (
-      <div className="sidebar-empty-hint" data-state="loading">
-        <DesktopIcon name="spinner" size="xs" />
-        <span>{t("desktop.shell.connectingTo", { name: activeComputerTitle })}</span>
-      </div>
-    ) : listState === "offline" ? (
-      <div className="sidebar-empty-hint" data-state="offline">
-        {t("desktop.shell.offlineTitle", { name: activeComputerTitle })}
-      </div>
-    ) : (
-      <div className="sidebar-empty-hint">{t("desktop.shell.noSessions")}</div>
-    );
+  const localUnavailable = !activeIsRemote && isLocalHostUnavailable(mgmt);
+
+  const emptyHint = localUnavailable ? (
+    <div className="sidebar-empty-hint" data-state="offline">
+      {resolveLocalHostPhase(mgmt) === "stopped"
+        ? t("desktop.fleet.localStoppedTitle")
+        : t("desktop.fleet.localUnreachableTitle")}
+    </div>
+  ) : listState === "loading" ? (
+    <div className="sidebar-empty-hint" data-state="loading">
+      <DesktopIcon name="spinner" size="xs" />
+      <span>{t("desktop.shell.connectingTo", { name: activeComputerTitle })}</span>
+    </div>
+  ) : listState === "offline" ? (
+    <div className="sidebar-empty-hint" data-state="offline">
+      {t("desktop.shell.offlineTitle", { name: activeComputerTitle })}
+    </div>
+  ) : (
+    <div className="sidebar-empty-hint">{t("desktop.shell.noSessions")}</div>
+  );
 
   return (
     <aside

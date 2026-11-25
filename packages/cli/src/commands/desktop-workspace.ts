@@ -1,15 +1,17 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { randomBytes, timingSafeEqual } from "node:crypto";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { readFile, readdir, realpath } from "node:fs/promises";
-import { extname, isAbsolute, join } from "node:path";
-import { homedir } from "node:os";
+import { extname, isAbsolute, join, sep } from "node:path";
+import { homedir, uptime } from "node:os";
 import type { Readable } from "node:stream";
 import type { Socket } from "node:net";
 import WebSocket, { WebSocketServer } from "ws";
 import { localWebSocket } from "@linkshell/host/local-transport";
-import { gatewayStatusSchema, isMethodName, machineInfoSchema, rpcMessageSchema, type MachineEntry } from "@linkshell/wire";
+import { gatewayStatusSchema, isMethodName, machineInfoSchema, rpcMessageSchema, type GatewayStatus, type MachineEntry, type MachineInfo } from "@linkshell/wire";
 import { getValidToken, loadAuth, SUPABASE_ANON_KEY, SUPABASE_URL } from "../auth.js";
-import { cacheMembership } from "../pro-membership.js";
+import { cachedMembership, cacheMembership } from "../pro-membership.js";
+import { standaloneBundle } from "../utils/standalone.js";
 import { fetchProMembership, fetchReferralSummary, MembershipError } from "../../../client-core/src/pro-membership.js";
 import type { Locale } from "../../../client-core/src/i18n.js";
 import { runLogin, type LoginResult } from "./login.js";
@@ -18,6 +20,8 @@ import { LoginError } from "./login-error.js";
 import { runLogout } from "./logout.js";
 import { followAccountGateway, refreshGateway, silenceSqliteWarning } from "./host.js";
 import { DesktopClientState, validStorageKey } from "./desktop-workspace-state.js";
+import { HostControlWatcher, type HostLiveState } from "./desktop-host-watcher.js";
+import { readHostLogTail, streamHostLog } from "./desktop-log-stream.js";
 
 const MAX_REQUEST_BYTES = 1024 * 1024;
 const MAX_PROXY_BYTES = 40 * 1024 * 1024;
@@ -263,10 +267,160 @@ function proxyHost(client: WebSocket, target: string, upstreams: Set<WebSocket>)
   client.on("close", () => { pending = []; host.terminate(); });
 }
 
+interface HostSnapshotLive {
+  machine: MachineInfo;
+  gateway: GatewayStatus;
+  accessPassword?: boolean;
+}
+
+/** Read-only PID check scoped to `home`: never mutates files in the state directory. */
+function readHomeHostPid(home: string): number | null {
+  try {
+    const file = join(home, "host.pid");
+    if (!existsSync(file)) return null;
+    const pid = Number(readFileSync(file, "utf8").trim());
+    if (!Number.isSafeInteger(pid) || pid <= 0) return null;
+    if (statSync(file).mtimeMs < Date.now() - uptime() * 1000 - 60_000) return null;
+    process.kill(pid, 0);
+    return pid;
+  } catch {
+    return null;
+  }
+}
+
+function readHomeHostOwner(home: string, pid: number): string | undefined {
+  try {
+    const saved = JSON.parse(readFileSync(join(home, "host-launch.json"), "utf8")) as { pid?: number; appBundle?: string };
+    return saved.pid === pid && typeof saved.appBundle === "string" ? saved.appBundle : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function hostSnapshotRpc(
+  target: string,
+  upstreams: Set<WebSocket>,
+  timeouts: { handshakeMs: number; finishMs: number } = { handshakeMs: 1_500, finishMs: 5_000 },
+): Promise<HostSnapshotLive | undefined> {
+  return new Promise((resolve) => {
+    const client = localWebSocket(target, timeouts.handshakeMs, { maxPayload: MAX_PROXY_BYTES });
+    upstreams.add(client);
+    let machine: MachineInfo | undefined;
+    let gateway: GatewayStatus | undefined;
+    let accessPassword: boolean | undefined;
+    let accessDone = false;
+    let settled = false;
+    const finish = (result?: HostSnapshotLive) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      resolve(result);
+      client.terminate();
+    };
+    const maybeDone = () => {
+      if (machine && gateway && accessDone) finish({ machine, gateway, accessPassword });
+    };
+    const timeout = setTimeout(() => {
+      finish(machine && gateway ? { machine, gateway, accessPassword } : undefined);
+    }, timeouts.finishMs);
+    client.on("error", () => finish(undefined));
+    client.on("close", () => {
+      upstreams.delete(client);
+      if (!settled) finish(machine && gateway ? { machine, gateway, accessPassword } : undefined);
+    });
+    client.on("open", () => {
+      client.send(JSON.stringify({ jsonrpc: "2.0", id: "snap-info", method: "machine.info", params: {} }));
+      client.send(JSON.stringify({ jsonrpc: "2.0", id: "snap-gateway", method: "gateway.status", params: {} }));
+      client.send(JSON.stringify({ jsonrpc: "2.0", id: "snap-access", method: "access.status", params: {} }));
+    });
+    client.on("message", (raw) => {
+      try {
+        const response: unknown = JSON.parse(raw.toString());
+        if (!response || typeof response !== "object" || !("id" in response)) return;
+        const payload = "result" in response ? response.result : undefined;
+        if (response.id === "snap-info") {
+          const parsed = machineInfoSchema.safeParse(payload);
+          if (!parsed.success) { finish(undefined); return; }
+          machine = parsed.data;
+          maybeDone();
+        } else if (response.id === "snap-gateway") {
+          const parsed = gatewayStatusSchema.safeParse(payload);
+          if (!parsed.success) { finish(undefined); return; }
+          gateway = parsed.data;
+          maybeDone();
+        } else if (response.id === "snap-access") {
+          if (payload && typeof payload === "object" && typeof (payload as { password?: unknown }).password === "boolean") {
+            accessPassword = (payload as { password: boolean }).password;
+          }
+          accessDone = true;
+          maybeDone();
+        }
+      } catch {
+        finish(undefined);
+      }
+    });
+  });
+}
+
+function localComputerFromLive(live: HostLiveState | undefined): LocalComputer | undefined {
+  if (!live) return undefined;
+  const info = live.machine;
+  const relayId = live.gateway.machine?.id;
+  return {
+    key: "desktop:local",
+    gateway: "desktop:local",
+    machine: {
+      id: info.machineId,
+      name: info.naming ? info.hostname : info.hostname.replace(/\.local$/, ""),
+      platform: info.platform,
+      ...(info.naming?.configured ? { namingConfigured: true } : {}),
+      signKey: "",
+      boxKey: "",
+      online: true,
+      via: "paired",
+    },
+    ...(relayId ? { relayId } : {}),
+  };
+}
+
+async function workspaceSnapshot(
+  home: string,
+  hostSocket: string,
+  upstreams: Set<WebSocket>,
+  version: string,
+  cachedLive?: HostLiveState | null,
+) {
+  let executable = process.argv[1] ?? "";
+  try { if (executable) executable = realpathSync(executable); } catch { /* Retain launch path. */ }
+  const auth = loadAuth();
+  const account = auth?.userId
+    ? { state: "signed-in" as const, email: auth.email, userId: auth.userId, ...cachedMembership(auth.userId, home) }
+    : { state: "signed-out" as const };
+  const pid = readHomeHostPid(home);
+  const appBundle = standaloneBundle();
+  const source = appBundle ? "standalone" : executable.includes(`${sep}Cellar${sep}linkshell${sep}`) ? "homebrew" : "npm";
+  const hostOwner = pid ? readHomeHostOwner(home, pid) ?? "external" : "none";
+  const live = cachedLive === null ? undefined : (cachedLive ?? await hostSnapshotRpc(hostSocket, upstreams));
+  let password = live?.accessPassword;
+  if (typeof password !== "boolean") {
+    try {
+      const { AccessControl } = await import("@linkshell/host");
+      password = new AccessControl(home).enabled;
+    } catch {
+      password = false;
+    }
+  }
+  const base = { schema: 1 as const, cliVersion: version, home, source, executable, hostOwner, appBundle, account, access: { password } };
+  return live
+    ? { ...base, status: "running" as const, machine: live.machine, gateway: live.gateway }
+    : { ...base, status: pid ? ("unreachable" as const) : ("stopped" as const) };
+}
+
 /** A capability-protected UI server owned by the native application's lifetime. */
-export async function startDesktopWorkspace(options: { assets: string; home?: string; hostSocket?: string }): Promise<DesktopWorkspace> {
+export async function startDesktopWorkspace(options: { assets: string; home?: string; hostSocket?: string; version?: string }): Promise<DesktopWorkspace> {
   silenceSqliteWarning();
   const home = options.home ?? process.env.LINKSHELL_HOME ?? join(homedir(), ".linkshell");
+  const version = options.version ?? "";
   const assets = await loadAssets(options.assets);
   const state = await DesktopClientState.open(home);
   const hostSocket = options.hostSocket ?? (await import("@linkshell/host")).hostPaths(home).hostSocket;
@@ -281,24 +435,84 @@ export async function startDesktopWorkspace(options: { assets: string; home?: st
   let previewOrigin = "";
   let previewHost = "";
   let login: PendingLogin | undefined;
+  let stopping: Promise<void> | undefined;
+  const peers = new WebSocketServer({ noServer: true, perMessageDeflate: false, maxPayload: MAX_PROXY_BYTES });
+  const upstreams = new Set<WebSocket>();
+  const sockets = new Set<Socket>();
+  const sseClients = new Set<ServerResponse>();
+  const accountAbort = new AbortController();
+
+  const broadcastEvent = (event: string, data: unknown) => {
+    if (sseClients.size === 0) return;
+    const frame = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+    for (const client of sseClients) {
+      if (client.destroyed || client.writableEnded) {
+        sseClients.delete(client);
+        continue;
+      }
+      client.write(frame);
+    }
+  };
+
+  let statePushTimer: ReturnType<typeof setTimeout> | undefined;
+  let pendingLivePush: HostLiveState | null | undefined;
+  const pushStateNow = async (liveOverride?: HostLiveState | null) => {
+    if (sseClients.size === 0) return;
+    const live = liveOverride === undefined ? hostWatcher.currentLive() : liveOverride;
+    const snap = await workspaceSnapshot(home, hostSocket, upstreams, version, live);
+    broadcastEvent("snapshot", snap);
+    broadcastEvent("local", { computer: localComputerFromLive(live ?? undefined) ?? null });
+  };
+  const scheduleStatePush = (live: HostLiveState | undefined) => {
+    if (sseClients.size === 0) return;
+    pendingLivePush = live ?? null;
+    clearTimeout(statePushTimer);
+    statePushTimer = setTimeout(() => {
+      statePushTimer = undefined;
+      const next = pendingLivePush;
+      pendingLivePush = undefined;
+      void pushStateNow(next);
+    }, 20);
+  };
+
+  const hostWatcher = new HostControlWatcher(hostSocket, upstreams, {
+    onStateChange: () => scheduleStatePush(hostWatcher.currentLive()),
+    onPairingDone: (device) => broadcastEvent("pairing.done", { device }),
+  });
+
+  const sseKeepalive = setInterval(() => {
+    for (const client of sseClients) {
+      if (client.destroyed || client.writableEnded) {
+        sseClients.delete(client);
+        continue;
+      }
+      client.write(": keepalive\n\n");
+    }
+  }, 25_000);
+  sseKeepalive.unref();
+
   const startLogin = (request: LoginRequest): PendingLogin => {
     // One sign-in at a time: choosing another way ends the one still waiting on the browser.
     login?.abort.abort();
     const abort = new AbortController();
     const pending: PendingLogin = { method: request.method, abort, result: Promise.resolve(null) };
     const signal = abort.signal;
+    broadcastEvent("login", { state: "pending", method: request.method });
     pending.result = (request.method === "web" ? runLogin({ signal })
       : request.method === "password" ? loginWithPassword({ email: request.email!, password: request.password!, signal })
-      : loginWithOAuth({ provider: request.method, signal, open: (url) => { pending.url = url; openInBrowser(url); } }))
+      : loginWithOAuth({
+          provider: request.method,
+          signal,
+          open: (url) => {
+            pending.url = url;
+            openInBrowser(url);
+            broadcastEvent("login", { state: "authorize", method: request.method, url });
+          },
+        }))
       .finally(() => { if (login === pending) login = undefined; });
     login = pending;
     return pending;
   };
-  let stopping: Promise<void> | undefined;
-  const peers = new WebSocketServer({ noServer: true, perMessageDeflate: false, maxPayload: MAX_PROXY_BYTES });
-  const upstreams = new Set<WebSocket>();
-  const sockets = new Set<Socket>();
-  const accountAbort = new AbortController();
 
   const serve = async (request: IncomingMessage, response: ServerResponse) => {
     const host = request.headers.host;
@@ -321,7 +535,98 @@ export async function startDesktopWorkspace(options: { assets: string; home?: st
           json(response, 200, { ...state.snapshot(), localComputer: await localComputer(hostSocket, upstreams) }); return;
         }
         if (request.method === "GET" && path === "/desktop/local") {
-          json(response, 200, { computer: await localComputer(hostSocket, upstreams, { handshakeMs: 2_000, finishMs: 5_000 }) }); return;
+          const computer = hostWatcher.isConnected
+            ? localComputerFromLive(hostWatcher.currentLive())
+            : await localComputer(hostSocket, upstreams, { handshakeMs: 2_000, finishMs: 5_000 });
+          json(response, 200, { computer }); return;
+        }
+        if (request.method === "GET" && path === "/desktop/snapshot") {
+          const fresh = url.searchParams.get("fresh") === "1";
+          json(response, 200, await workspaceSnapshot(home, hostSocket, upstreams, version, fresh ? undefined : hostWatcher.currentLive())); return;
+        }
+        if (request.method === "GET" && path === "/desktop/events") {
+          request.socket.setTimeout(0);
+          response.writeHead(200, {
+            "content-type": "text/event-stream; charset=utf-8",
+            "cache-control": "no-store",
+            "x-content-type-options": "nosniff",
+            "x-accel-buffering": "no",
+            "referrer-policy": "no-referrer",
+            "x-frame-options": "DENY",
+            connection: "keep-alive",
+          });
+          response.flushHeaders();
+          sseClients.add(response);
+          if (sseClients.size === 1) hostWatcher.start();
+          const sendInitial = (event: string, data: unknown) => {
+            if (!response.destroyed && !response.writableEnded) {
+              response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+            }
+          };
+          if (login) {
+            sendInitial("login", {
+              state: login.url ? "authorize" : "pending",
+              method: login.method,
+              ...(login.url ? { url: login.url } : {}),
+            });
+          }
+          void (async () => {
+            try {
+              const live = hostWatcher.currentLive() ?? (await hostSnapshotRpc(hostSocket, upstreams)) ?? null;
+              const [snap, acc] = await Promise.all([
+                workspaceSnapshot(home, hostSocket, upstreams, version, live),
+                account(accountAbort.signal).catch(() => ({})),
+              ]);
+              sendInitial("snapshot", snap);
+              sendInitial("local", { computer: localComputerFromLive(live ?? undefined) ?? null });
+              sendInitial("account", acc);
+            } catch { /* Subsequent watcher push will populate. */ }
+          })();
+          await new Promise<void>((resolve) => {
+            const detach = () => {
+              sseClients.delete(response);
+              if (sseClients.size === 0) hostWatcher.stop();
+              resolve();
+            };
+            if (response.destroyed || response.writableEnded) detach();
+            else response.once("close", detach);
+          });
+          return;
+        }
+        if (request.method === "GET" && path === "/desktop/log") {
+          const tail = await readHostLogTail(home);
+          json(response, 200, { text: tail.text, path: tail.path }); return;
+        }
+        if (request.method === "GET" && path === "/desktop/log/stream") {
+          request.socket.setTimeout(0);
+          await streamHostLog(home, response, accountAbort.signal);
+          return;
+        }
+        if (request.method === "POST" && path === "/desktop/action") {
+          const input = await body(request);
+          const name = typeof input.name === "string" ? input.name : "";
+          const params = input.input && typeof input.input === "object" && !Array.isArray(input.input)
+            ? input.input as Record<string, unknown>
+            : {};
+          const { runDesktopSidecarAction } = await import("./desktop-actions.js");
+          let actionResult;
+          try {
+            actionResult = await runDesktopSidecarAction(version, name, params);
+          } catch (error) {
+            throw new HttpError(409, error instanceof Error ? error.message : String(error));
+          }
+          if (actionResult.kind === "json") {
+            json(response, 200, actionResult.payload); return;
+          }
+          hostWatcher.nudge();
+          const freshLive = (await hostSnapshotRpc(hostSocket, upstreams)) ?? null;
+          const snap = await workspaceSnapshot(home, hostSocket, upstreams, version, freshLive);
+          broadcastEvent("snapshot", snap);
+          broadcastEvent("local", { computer: localComputerFromLive(freshLive ?? undefined) ?? null });
+          if (name === "account-refresh") {
+            void account(accountAbort.signal).then((acc) => broadcastEvent("account", acc)).catch(() => undefined);
+          }
+          json(response, 200, snap); return;
         }
         if (request.method === "GET" && path === "/desktop/account") {
           json(response, 200, await account(accountAbort.signal)); return;
@@ -398,17 +703,29 @@ export async function startDesktopWorkspace(options: { assets: string; home?: st
           try { result = await pending.result; }
           catch (error) {
             // Only our own messages reach the page; anything else may name paths or tokens.
-            throw new HttpError(409, error instanceof LoginError ? error.message : "登录未完成，请重试");
+            const message = error instanceof LoginError ? error.message : "登录未完成，请重试";
+            broadcastEvent("login", { state: pending.abort.signal.aborted ? "cancelled" : "error", method: wanted.method, error: message });
+            throw new HttpError(409, message);
           }
-          if (!result?.success) throw new HttpError(409, pending.abort.signal.aborted ? "已取消登录。" : "登录未完成，请重试");
+          if (!result?.success) {
+            const message = pending.abort.signal.aborted ? "已取消登录。" : "登录未完成，请重试";
+            broadcastEvent("login", { state: pending.abort.signal.aborted ? "cancelled" : "error", method: wanted.method, error: message });
+            throw new HttpError(409, message);
+          }
           await accountChanged(result.plan);
-          json(response, 200, await account(accountAbort.signal)); return;
+          hostWatcher.nudge();
+          const currentAccount = await account(accountAbort.signal);
+          broadcastEvent("login", { state: "done", method: wanted.method });
+          broadcastEvent("account", currentAccount);
+          void pushStateNow();
+          json(response, 200, currentAccount); return;
         }
         if (request.method === "GET" && path === "/desktop/login") {
           json(response, 200, { pending: login ? { method: login.method, ...(login.url ? { url: login.url } : {}) } : null }); return;
         }
         if (request.method === "DELETE" && path === "/desktop/login") {
           login?.abort.abort();
+          broadcastEvent("login", { state: "cancelled" });
           json(response, 200, {}); return;
         }
         if (request.method === "POST" && path === "/desktop/logout") {
@@ -417,6 +734,9 @@ export async function startDesktopWorkspace(options: { assets: string; home?: st
           await pending?.result.catch(() => undefined);
           await runLogout();
           await accountChanged();
+          hostWatcher.nudge();
+          broadcastEvent("account", {});
+          void pushStateNow();
           json(response, 200, {}); return;
         }
         throw new HttpError(404, "未找到操作");
@@ -469,8 +789,15 @@ export async function startDesktopWorkspace(options: { assets: string; home?: st
     url: `${workspaceOrigin}/#desktop=${capability}`,
     stop() {
       return stopping ??= (async () => {
+        clearInterval(sseKeepalive);
+        clearTimeout(statePushTimer);
+        hostWatcher.stop();
         accountAbort.abort();
         login?.abort.abort();
+        for (const client of sseClients) {
+          if (!client.destroyed && !client.writableEnded) client.end();
+        }
+        sseClients.clear();
         for (const client of peers.clients) client.terminate();
         for (const upstream of upstreams) upstream.terminate();
         for (const socket of sockets) socket.destroy();
@@ -484,7 +811,7 @@ export async function startDesktopWorkspace(options: { assets: string; home?: st
   };
 }
 
-export async function runDesktopWorkspace(assets: string, input: Readable = process.stdin): Promise<void> {
+export async function runDesktopWorkspace(assets: string, input: Readable = process.stdin, version?: string): Promise<void> {
   let close!: () => void;
   const ended = new Promise<void>((resolve) => { close = resolve; });
   input.once("end", close);
@@ -496,7 +823,7 @@ export async function runDesktopWorkspace(assets: string, input: Readable = proc
   if (input.readableEnded || input.destroyed) close();
   let workspace: DesktopWorkspace | undefined;
   try {
-    workspace = await startDesktopWorkspace({ assets });
+    workspace = await startDesktopWorkspace({ assets, version });
     process.stdout.write(`${JSON.stringify({ url: workspace.url })}\n`);
     await ended;
   } finally {

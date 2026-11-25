@@ -11,9 +11,14 @@ import {
   cancelDesktopLoginRequest,
   engine,
   fetchDesktopProMembership,
+  isSidecarEventsConnected,
   logoutDesktopAccount,
+  notifyDesktopHostChanged,
+  openMembershipPage,
   pollDesktopLoginState,
+  refreshManagement,
   startDesktopLogin,
+  subscribeSidecarEvents,
   validateGateway,
   type DesktopSignInMethod,
   type DesktopSignInRequest,
@@ -22,6 +27,7 @@ import {
   getLanHosts,
   isElectronRuntime,
   onLanHosts,
+  postDesktopMessage,
   startLanDiscovery,
   stopLanDiscovery,
   type LanHostEntry,
@@ -77,6 +83,7 @@ export function SignInPairModal(props: {
   const [confirmSignOut, setConfirmSignOut] = useState(false);
   const loginRunningRef = useRef(false);
   const loginCancelledRef = useRef(false);
+  const pendingMethodRef = useRef<DesktopSignInMethod | undefined>(undefined);
 
   // Pairing Form State
   const [codeDigits, setCodeDigits] = useState("");
@@ -156,6 +163,22 @@ export function SignInPairModal(props: {
     }
   };
 
+  useEffect(() => {
+    if (!open) return undefined;
+    return subscribeSidecarEvents({
+      onLogin: (event) => {
+        if (
+          loginRunningRef.current &&
+          event.state === "authorize" &&
+          event.url &&
+          event.method === pendingMethodRef.current
+        ) {
+          setAuthLink(event.url);
+        }
+      },
+    });
+  }, [open]);
+
   const waitingOnBrowser =
     pendingMethod !== undefined && pendingMethod !== "password";
 
@@ -163,12 +186,15 @@ export function SignInPairModal(props: {
     if (loginRunningRef.current) return;
     loginRunningRef.current = true;
     loginCancelledRef.current = false;
+    pendingMethodRef.current = request.method;
     setPendingMethod(request.method);
     setAuthLink(undefined);
     setAuthError(undefined);
 
+    // Prefer real-time SSE `login` push; only fall back to 400ms polling when SSE isn't active.
     let pollingLink =
-      request.method === "github" || request.method === "google";
+      (request.method === "github" || request.method === "google") &&
+      !isSidecarEventsConnected();
     const pollLinkLoop = async () => {
       while (pollingLink) {
         await new Promise((resolve) => setTimeout(resolve, LINK_POLL_MS));
@@ -188,7 +214,12 @@ export function SignInPairModal(props: {
 
     try {
       await startDesktopLogin(request);
+      if (request.method !== "password") {
+        postDesktopMessage({ action: "focusWindow" });
+      }
       await engine.connectAccount();
+      notifyDesktopHostChanged();
+      void refreshManagement();
       onOpenChange(false);
     } catch (err) {
       if (!loginCancelledRef.current) {
@@ -197,6 +228,7 @@ export function SignInPairModal(props: {
     } finally {
       pollingLink = false;
       loginRunningRef.current = false;
+      pendingMethodRef.current = undefined;
       setPendingMethod(undefined);
       setAuthLink(undefined);
     }
@@ -317,7 +349,11 @@ export function SignInPairModal(props: {
                   setAccountBusy(true);
                   void engine
                     .connectAccount()
-                    .then(() => onOpenChange(false))
+                    .then(() => engine.refreshComputers())
+                    .then(() => {
+                      void refreshManagement();
+                      onOpenChange(false);
+                    })
                     .catch((err: unknown) =>
                       setAuthError(
                         err instanceof Error ? err.message : String(err),
@@ -555,7 +591,11 @@ export function SignInPairModal(props: {
         onConfirm={() => {
           setAccountBusy(true);
           void logoutDesktopAccount()
-            .then(() => engine.connectAccount())
+            .then(async () => {
+              await engine.connectAccount();
+              notifyDesktopHostChanged();
+              void refreshManagement();
+            })
             .catch((err: unknown) =>
               setAuthError(err instanceof Error ? err.message : String(err)),
             )
@@ -590,6 +630,7 @@ function SignedInWorkspacePanel({
   signOutLabel: string;
   footNote: string;
 }) {
+  const { tCore, ts } = useSystemI18n();
   const [membership, setMembership] = useState<ProMembership>();
 
   useEffect(() => {
@@ -630,12 +671,20 @@ function SignedInWorkspacePanel({
                     )}`
                   : ""}
               </span>
+            ) : membership?.plan === "free" ? (
+              <span className="ls-system-row__detail">
+                {ts("overview.membershipFreeDetail")}
+              </span>
             ) : null}
           </div>
           <div className="ls-system-row__controls">
             {membership?.plan === "pro" ? (
               <Badge tone="ok" dot="ok">
                 Pro
+              </Badge>
+            ) : membership?.plan === "free" ? (
+              <Badge tone="neutral">
+                {tCore("desktop.membership.notSubscribed")}
               </Badge>
             ) : null}
             <Button
@@ -648,6 +697,25 @@ function SignedInWorkspacePanel({
             </Button>
           </div>
         </div>
+        {membership?.plan === "free" ? (
+          <div className="ls-system-row">
+            <div className="ls-system-row__copy">
+              <span className="ls-system-row__detail">
+                {ts("overview.subscribeDetail")}
+              </span>
+            </div>
+            <div className="ls-system-row__controls">
+              <Button
+                size="sm"
+                variant="secondary"
+                leadingIcon="external-link"
+                onClick={() => openMembershipPage(locale)}
+              >
+                {tCore("desktop.membership.subscribeAction")}
+              </Button>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {userId ? <ReferralSummaryCard userId={userId} disabled={busy} /> : null}

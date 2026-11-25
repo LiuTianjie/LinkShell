@@ -2,6 +2,7 @@ import { useEffect, useId, useState, type ReactElement } from "react";
 import {
   MANAGE_PAGES,
   accountAction,
+  cancelLogin,
   healthy as isHealthy,
   newVersion as hasNewVersion,
   pollManagement,
@@ -85,6 +86,7 @@ export function SystemHostModal(): ReactElement {
   };
 
   const closeModal = () => {
+    if (state.signingIn) cancelLogin();
     routerStore.getState().closeSystemModal();
   };
 

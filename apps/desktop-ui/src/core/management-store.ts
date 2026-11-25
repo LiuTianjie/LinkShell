@@ -12,6 +12,7 @@ import type { KeepAwakeMode, MachineKeepAwake } from "@linkshell/wire";
 import {
   DESKTOP_LOCAL,
   DESKTOP_LOGIN_EVENT,
+  DESKTOP_RESUME_EVENT,
   DESKTOP_UPDATE_EVENT,
   DESKTOP_VISIBILITY_EVENT,
   desktopInvoke,
@@ -25,6 +26,11 @@ import {
 import { translateSystem, type SystemI18nKey } from "../features/system/system-i18n";
 import { engine } from "./engine";
 import { getDesktopLocale } from "./i18n";
+import {
+  isSidecarEventsConnected,
+  startSidecarEvents,
+  subscribeSidecarEvents,
+} from "./sidecar-events";
 import { notifyDesktopHostChanged, reportDesktopError } from "./storage";
 
 export { DESKTOP_UPDATE_EVENT };
@@ -423,6 +429,9 @@ let lastAccountRefresh = 0;
 let loginCancelled = false;
 let busyNoticeTimer: ReturnType<typeof setTimeout> | undefined;
 let usageRequest = 0;
+let detachSidecarEvents: (() => void) | undefined;
+
+const MAX_HOST_LOG_CHARS = 128_000;
 
 function begin(partial: Partial<ManagementState> = {}) {
   revision++;
@@ -453,6 +462,54 @@ function applySnapshot(next: DesktopSnapshot) {
   }
 }
 
+function reconcileSnapshot(next: DesktopSnapshot): { statusChanged: boolean } {
+  const before = get().snapshot;
+  const statusChanged = next.status !== before?.status;
+  if (statusChanged) {
+    managementEvent({
+      key:
+        next.status === "running"
+          ? "activity.serviceConnected"
+          : next.status === "stopped"
+            ? "activity.serviceStopped"
+            : "activity.serviceUnreachable",
+    });
+  }
+  if (before?.gateway?.status && before.gateway.status !== next.gateway?.status) {
+    managementEvent({ key: "activity.gatewayChanged" });
+  }
+  if (next.status === "running" && !next.error) startupProblem = undefined;
+  applySnapshot(next);
+  set({ problem: next.error ?? recoveryProblem ?? startupProblem });
+  if (statusChanged) notifyDesktopHostChanged();
+  return { statusChanged };
+}
+
+/** Applies a sidecar-pushed snapshot without taking the busy lock or racing in-flight mutations. */
+export function applyPushedSnapshot(next: DesktopSnapshot): void {
+  if (get().busy || get().starting) return;
+  const { statusChanged } = reconcileSnapshot(next);
+  if (statusChanged && next.status === "running") {
+    void refreshKeepAwake();
+  }
+  if (
+    next.account?.state === "signed-in" &&
+    Date.now() - lastAccountRefresh > ACCOUNT_INTERVAL
+  ) {
+    refreshAccount();
+  }
+}
+
+/** Retires the active pairing offer immediately when the Host pushes `pairing.done` over SSE. */
+export function applyPushedPairingDone(device: { id: string; name: string }): void {
+  if (!get().pairingOffer) return;
+  set({
+    pairingOffer: undefined,
+    pairedDevice: { id: device.id, name: device.name, at: Date.now() },
+  });
+  managementEvent({ key: "activity.devicePaired", params: { name: device.name } });
+}
+
 export const healthy = (state: ManagementState) =>
   state.snapshot?.status === "running" && !state.problem;
 export const standalone = (state: ManagementState) => state.about?.standalone === true;
@@ -471,8 +528,27 @@ export const newVersion = (state: ManagementState) => {
 export function startManagement(): void {
   if (!isElectronDesktop || get().started || typeof window === "undefined") return;
   set({ started: true, starting: true });
+  startSidecarEvents();
+  detachSidecarEvents?.();
+  detachSidecarEvents = subscribeSidecarEvents({
+    onSnapshot: (snap) => applyPushedSnapshot(snap),
+    onPairingDone: (device) => applyPushedPairingDone(device),
+    onLogin: (event) => {
+      if (event.state === "authorize" && event.url) {
+        const state = get();
+        if (state.signingIn && event.method === state.signInMethod) {
+          set({ signInLink: event.url });
+        }
+      }
+    },
+  });
   window.addEventListener(DESKTOP_UPDATE_EVENT, receiveUpdate);
   window.addEventListener(DESKTOP_LOGIN_EVENT, receiveLoginLink);
+  window.addEventListener(DESKTOP_RESUME_EVENT, () => {
+    void refreshManagement().then(() => {
+      if (get().snapshot?.status === "running") void refreshKeepAwake();
+    });
+  });
   window.addEventListener("focus", returnedFromShop);
   window.addEventListener("focus", returnedToWindow);
   void desktopInvoke<ManagementState["update"] | undefined>("updateStatus").then(
@@ -491,9 +567,14 @@ export function startManagement(): void {
   void refreshLoginItem();
   begin();
   void (async () => {
+    let startupOk = false;
     try {
-      applySnapshot(await desktopInvoke<DesktopSnapshot>("startup", {}, 100_000));
+      const snap = await desktopInvoke<DesktopSnapshot>("startup", {}, 100_000);
+      applySnapshot(snap);
       recoveryProblem = undefined;
+      startupProblem = undefined;
+      set({ problem: snap.error });
+      startupOk = true;
       managementEvent({
         key:
           get().snapshot?.status === "running"
@@ -510,7 +591,17 @@ export function startManagement(): void {
       reportDesktopError(message);
     }
     set({ busy: false, starting: false });
-    void refreshManagement();
+    if (startupOk) {
+      void refreshPermissions();
+      if (
+        get().snapshot?.account?.state === "signed-in" &&
+        Date.now() - lastAccountRefresh > ACCOUNT_INTERVAL
+      ) {
+        refreshAccount();
+      }
+    } else {
+      void refreshManagement();
+    }
   })();
 }
 
@@ -528,25 +619,7 @@ export function refreshManagement(options?: {
     try {
       const next = await invoke<DesktopSnapshot>("snapshot", {}, 30_000);
       if (get().busy || started !== revision) return;
-      const before = get().snapshot;
-      const statusChanged = next.status !== before?.status;
-      if (statusChanged) {
-        managementEvent({
-          key:
-            next.status === "running"
-              ? "activity.serviceConnected"
-              : next.status === "stopped"
-                ? "activity.serviceStopped"
-                : "activity.serviceUnreachable",
-        });
-      }
-      if (before?.gateway?.status && before.gateway.status !== next.gateway?.status) {
-        managementEvent({ key: "activity.gatewayChanged" });
-      }
-      if (next.status === "running" && !next.error) startupProblem = undefined;
-      applySnapshot(next);
-      set({ problem: next.error ?? recoveryProblem ?? startupProblem });
-      if (statusChanged) notifyDesktopHostChanged();
+      reconcileSnapshot(next);
       if (!options?.invoke) void refreshPermissions();
     } catch (error) {
       if (!get().busy && started === revision) {
@@ -591,7 +664,12 @@ function pollWhileVisible(interval: number, keepAwake = false): () => void {
   const startTimer = () => {
     clearInterval(timer);
     timer = setInterval(() => {
-      if (visible) refresh();
+      if (!visible) return;
+      if (isSidecarEventsConnected()) {
+        if (keepAwake && get().snapshot?.status === "running") void refreshKeepAwake();
+        return;
+      }
+      refresh();
     }, interval);
   };
   const onVisibility = (event: Event) => {
@@ -1179,10 +1257,27 @@ export async function fetchUsageAnalytics(
   }
 }
 
+export function setHostLog(text: string, path?: string): void {
+  const trimmed =
+    text.length > MAX_HOST_LOG_CHARS ? text.slice(-MAX_HOST_LOG_CHARS) : text;
+  set({ log: trimmed, ...(path !== undefined ? { logPath: path } : {}) });
+}
+
+export function appendHostLog(chunk: string): void {
+  if (!chunk) return;
+  const combined = get().log + chunk;
+  set({
+    log:
+      combined.length > MAX_HOST_LOG_CHARS
+        ? combined.slice(-MAX_HOST_LOG_CHARS)
+        : combined,
+  });
+}
+
 export async function readLog(): Promise<void> {
   try {
     const reply = await desktopInvoke<{ text: string; path?: string }>("log");
-    set({ log: reply.text, logPath: reply.path });
+    setHostLog(reply.text, reply.path);
   } catch (error) {
     set({ log: messageOf(error) });
   }
@@ -1366,7 +1461,7 @@ function receiveUpdate(event: Event) {
       });
       break;
     case "current":
-      set({ update: { ...update, available: false, message, checkedAt: Date.now() } });
+      set({ update: { ...update, available: false, version: undefined, message, checkedAt: Date.now() } });
       break;
     case "message":
       set({ update: { ...update, message } });
@@ -1388,6 +1483,8 @@ export function resetManagementStoreForTests(): void {
   lastAccountRefresh = 0;
   loginCancelled = false;
   usageRequest = 0;
+  detachSidecarEvents?.();
+  detachSidecarEvents = undefined;
   clearTimeout(busyNoticeTimer);
   management.setState({ ...INITIAL_MANAGEMENT_STATE }, true);
 }

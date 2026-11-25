@@ -41,6 +41,14 @@ function isSameGateway(a: string, b: string): boolean {
   return normalize(a) === normalize(b);
 }
 
+function sameInstallPath(a: string | undefined, b: string | undefined): boolean {
+  if (!a || !b) return false;
+  const normalize = (value: string) => value.replace(/[\\/]+$/, "").replace(/\\/g, "/");
+  const left = normalize(a);
+  const right = normalize(b);
+  return left === right || left.toLowerCase() === right.toLowerCase();
+}
+
 export function SystemOverviewPage({
   onNavigate,
   onRequestConfirm,
@@ -64,7 +72,7 @@ export function SystemOverviewPage({
     standalone &&
     healthy &&
     Boolean(state.about?.bundle) &&
-    snapshot?.hostOwner !== state.about?.bundle;
+    !sameInstallPath(snapshot?.hostOwner, state.about?.bundle);
 
   const [editingGateway, setEditingGateway] = useState(false);
   const [gatewayKind, setGatewayKind] = useState<GatewayChoice["kind"]>("official");

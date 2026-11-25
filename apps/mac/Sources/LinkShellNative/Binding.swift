@@ -252,7 +252,17 @@ final class Callback {
   }
 
   func check() {
-    guard let updater, updater.canCheckForUpdates, !updater.sessionInProgress else { return }
+    guard let updater else {
+      emit("message", ["message": "更新服务未就绪，请重新打开 LinkShell 或手动下载最新版本"])
+      emit("finished", [:])
+      return
+    }
+    if updater.sessionInProgress { return }
+    guard updater.canCheckForUpdates else {
+      emit("message", ["message": "更新服务暂时忙，请稍后再试"])
+      emit("finished", [:])
+      return
+    }
     emit("checking", ["message": "正在检查 App 更新…"])
     updater.checkForUpdateInformation()
   }
@@ -263,7 +273,17 @@ final class Callback {
       emit("prepare", [:])
       return
     }
-    guard let updater, updater.canCheckForUpdates, !updater.sessionInProgress else { return }
+    guard let updater else {
+      emit("message", ["message": "更新服务未就绪，请重新打开 LinkShell 或手动下载最新版本"])
+      emit("finished", [:])
+      return
+    }
+    if updater.sessionInProgress { return }
+    guard updater.canCheckForUpdates else {
+      emit("message", ["message": "更新服务暂时忙，请稍后再试"])
+      emit("finished", [:])
+      return
+    }
     prepared = false
     emit("installing", ["message": "正在准备更新…"])
     updater.checkForUpdates()

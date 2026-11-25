@@ -19,6 +19,7 @@ import {
   type RelaySocket,
 } from "@linkshell/wire";
 import {
+  DESKTOP_RESUME_EVENT,
   desktopFetch,
   desktopHostWsUrl,
   desktopPlatform,
@@ -37,12 +38,19 @@ import {
 import { browserDirect } from "./direct";
 import { sessionPreferences } from "./session-preferences";
 import {
+  isSidecarEventsConnected,
+  startSidecarEvents,
+  stopSidecarEvents,
+  subscribeSidecarEvents,
+} from "./sidecar-events";
+import {
   DESKTOP_ACCOUNT_EVENT,
   DESKTOP_ERROR_EVENT,
   DESKTOP_HOST_EVENT,
   DESKTOP_LOCAL,
   DESKTOP_VISIBILITY_EVENT,
   STORAGE_KEYS,
+  applySidecarAccountPush,
   bootstrapDesktopStorage,
   bootstrappedLocalComputer,
   fetchDesktopAccount,
@@ -159,8 +167,10 @@ export class DesktopEngine {
   private desktopRefresh?: Promise<void>;
   private desktopLocalRequest?: Promise<void>;
   private desktopLocalAbort?: AbortController;
+  private desktopLocalSeq = 0;
   private desktopLocalRetry?: ReturnType<typeof setTimeout>;
   private desktopLocalAttempt?: number;
+  private detachSidecarEvents?: () => void;
   private readonly connections = new ComputerConnections((computer) => this.openComputer(computer));
   private releaseSelected?: () => void;
 
@@ -173,6 +183,7 @@ export class DesktopEngine {
         this.applyAccount((event as CustomEvent<DesktopSidecarAccount>).detail),
       );
       window.addEventListener(DESKTOP_HOST_EVENT, () => this.onDesktopHostChanged());
+      window.addEventListener(DESKTOP_RESUME_EVENT, () => this.reconnect());
       window.addEventListener(DESKTOP_VISIBILITY_EVENT, (event) => {
         if ((event as CustomEvent<{ visible?: boolean }>).detail?.visible) this.reconnect();
       });
@@ -243,8 +254,20 @@ export class DesktopEngine {
     else this.desktopLocalAttempt = 0;
 
     if (isElectronDesktop) {
+      startSidecarEvents();
+      this.detachSidecarEvents?.();
+      this.detachSidecarEvents = subscribeSidecarEvents({
+        onLocal: (computer) => {
+          if (this.active) this.setLocalComputer(computer);
+        },
+        onAccount: (account) => {
+          if (!this.active) return;
+          applySidecarAccountPush(account);
+          this.applyAccount(account);
+        },
+      });
       this.desktopPoll = setInterval(() => {
-        void this.refreshDesktop();
+        if (!isSidecarEventsConnected()) void this.refreshDesktop();
       }, 30_000);
       void this.refreshDesktop();
     }
@@ -332,6 +355,12 @@ export class DesktopEngine {
     if (this.desktopLocalRetry) clearTimeout(this.desktopLocalRetry);
     this.desktopLocalRetry = undefined;
     this.desktopLocalAttempt = 0;
+    // Discard any pre-startup probe still waiting in flight so discovery runs immediately against the live Host.
+    this.desktopLocalSeq++;
+    this.desktopLocalAbort?.abort();
+    this.desktopLocalAbort = undefined;
+    this.desktopLocalRequest = undefined;
+    this.desktopRefresh = undefined;
     void this.refreshDesktop();
     for (const connection of this.connections.values()) {
       connection.link.reconnectNow();
@@ -398,15 +427,18 @@ export class DesktopEngine {
     if (!this.active) return Promise.resolve();
     if (this.desktopLocalRequest) return this.desktopLocalRequest;
     const generation = this.generation;
+    const seq = ++this.desktopLocalSeq;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15_000);
     this.desktopLocalAbort = controller;
     const request = fetchDesktopLocalComputer(controller.signal)
       .then((computer) => {
-        if (generation === this.generation) this.setLocalComputer(computer);
+        if (generation === this.generation && seq === this.desktopLocalSeq) {
+          this.setLocalComputer(computer);
+        }
       })
       .catch((error: unknown) => {
-        if (generation !== this.generation) return;
+        if (generation !== this.generation || seq !== this.desktopLocalSeq) return;
         this.setLocalComputer(undefined);
         this.state.setState({ localError: error instanceof Error ? error.message : String(error) });
       })
@@ -416,7 +448,9 @@ export class DesktopEngine {
           this.desktopLocalRequest = undefined;
           this.desktopLocalAbort = undefined;
         }
-        this.retryInitialLocalDiscovery(generation);
+        if (seq === this.desktopLocalSeq) {
+          this.retryInitialLocalDiscovery(generation);
+        }
       });
     this.desktopLocalRequest = request;
     return request;
@@ -444,7 +478,7 @@ export class DesktopEngine {
 
   private refreshDesktop(): Promise<void> {
     if (this.desktopRefresh) return this.desktopRefresh;
-    this.desktopRefresh = Promise.all([
+    const pending = Promise.all([
       this.refreshLocal(),
       fetchDesktopAccount().then(
         () => {},
@@ -453,9 +487,10 @@ export class DesktopEngine {
     ])
       .then(() => {})
       .finally(() => {
-        this.desktopRefresh = undefined;
+        if (this.desktopRefresh === pending) this.desktopRefresh = undefined;
       });
-    return this.desktopRefresh;
+    this.desktopRefresh = pending;
+    return pending;
   }
 
   private async resolveAccountToken(expectedUserId?: string): Promise<string | undefined> {
@@ -928,11 +963,16 @@ export class DesktopEngine {
     if (this.desktopLocalRetry) clearTimeout(this.desktopLocalRetry);
     this.desktopLocalRetry = undefined;
     this.desktopLocalAttempt = undefined;
+    this.desktopLocalSeq++;
     this.desktopLocalAbort?.abort();
     this.desktopLocalAbort = undefined;
     this.desktopLocalRequest = undefined;
+    this.desktopRefresh = undefined;
     if (this.desktopPoll) clearInterval(this.desktopPoll);
     this.desktopPoll = undefined;
+    this.detachSidecarEvents?.();
+    this.detachSidecarEvents = undefined;
+    stopSidecarEvents();
     if (this.accountAuthTimer) clearTimeout(this.accountAuthTimer);
     this.accountAuthTimer = undefined;
     this.disconnect();

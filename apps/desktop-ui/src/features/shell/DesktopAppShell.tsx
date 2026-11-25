@@ -15,6 +15,7 @@ import {
   DESKTOP_SURFACE_EVENT,
   DESKTOP_WINDOW_EVENT,
   getActiveDesktopPlatform,
+  getShellOpaqueWindow,
   isElectronDesktop,
   isElectronRuntime,
   normalizeDesktopPlatform,
@@ -42,9 +43,8 @@ import {
   computerNames,
   connectAndStartComputerFusion,
   engine,
-  healthy,
+  isLocalHostUnavailable,
   routerStore,
-  serviceAction,
   sessionTitle,
   setNavigationConfirmer,
   useI18n,
@@ -55,7 +55,6 @@ import {
 import { AgentMark, DesktopIcon } from "../../icons";
 import {
   Button,
-  EmptyState,
   ErrorBoundary,
   IconButton,
   SplitResizer,
@@ -66,6 +65,7 @@ import { AccessUnlockView } from "./AccessUnlockView";
 import { ArchiveView } from "./ArchiveView";
 import { CommandCenter } from "./CommandCenter";
 import { ComputersFleetView } from "./ComputersFleetView";
+import { LocalHostRecovery } from "./LocalHostRecovery";
 import { ProjectsOverview } from "./ProjectsOverview";
 import {
   displayComputerName,
@@ -168,8 +168,6 @@ function WorkspaceHomeHub({
   const openSession = useRouter((s) => s.openSession);
   const openFusion = useRouter((s) => s.openFusion);
   const openScreen = useRouter((s) => s.openScreen);
-  const setConnectModalOpen = useRouter((s) => s.setConnectModalOpen);
-  const openSystemModal = useRouter((s) => s.openSystemModal);
 
   const computers = useStore(engine.state, (s) => s.computers);
   const activeConnection = useStore(engine.state, (s) => s.connection);
@@ -181,44 +179,14 @@ function WorkspaceHomeHub({
 
   const activeComputerKey = activeComputer?.key ?? DESKTOP_LOCAL;
   const compTitle = displayComputerName(activeComputer, names, locale);
-  const isLocal = isLocalComputer(activeComputer);
+  const isLocal = !activeComputer || isLocalComputer(activeComputer);
   const listState = sessionListState(activeComputer, linkStatus, sessionsLoaded);
 
-  // Local daemon stopped state: give immediate 1-click Start Service CTA without trapping navigation
-  if (isLocal && mgmt.snapshot?.status === "stopped" && !healthy(mgmt)) {
+  // Local daemon stopped or unreachable state: give immediate recovery CTA without trapping navigation
+  if (isLocal && isLocalHostUnavailable(mgmt)) {
     return (
       <div className="shell-page" style={{ display: "flex", alignItems: "center" }}>
-        <EmptyState
-          icon="host-daemon"
-          title={t("desktop.fleet.localStoppedTitle")}
-          description={t("desktop.fleet.localStoppedDesc", { computer: compTitle })}
-          actions={
-            <div style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
-              <Button
-                variant="primary"
-                leadingIcon="play"
-                loading={mgmt.busy}
-                onClick={() => void serviceAction("start")}
-              >
-                {t("desktop.manage.startService")}
-              </Button>
-              <Button
-                variant="secondary"
-                leadingIcon="pair-qr"
-                onClick={() => setConnectModalOpen(true)}
-              >
-                {t("desktop.fleet.connectComputer")}
-              </Button>
-              <Button
-                variant="ghost"
-                leadingIcon="settings"
-                onClick={() => openSystemModal("overview")}
-              >
-                {t("desktop.localManagement")}
-              </Button>
-            </div>
-          }
-        />
+        <LocalHostRecovery computerName={compTitle} showConnect />
       </div>
     );
   }
@@ -419,7 +387,7 @@ export function DesktopAppShell({
   const [windowFocused, setWindowFocused] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [nativeScreenActive, setNativeScreenActive] = useState(false);
-  const [surfaceOpaque, setSurfaceOpaque] = useState(false);
+  const [surfaceOpaque, setSurfaceOpaque] = useState(() => getShellOpaqueWindow());
   const [peekOpen, setPeekOpen] = useState(false);
   const peekCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const suppressPeekUntilRef = useRef(0);
@@ -718,9 +686,12 @@ export function DesktopAppShell({
     // the app from there (⌘ on a Mac never collides).
     const shellSafeKeys = new Set<DesktopShortcutId>(["terminal", "settings"]);
 
+    const modalAllowedKeys = new Set<DesktopShortcutId>(["closeTab", "palette", "settings"]);
+
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || isImeComposing(event)) return;
       if (keysBelongToRemoteOrPreview()) return;
+      const modalOpen = Boolean(document.querySelector("dialog[open]"));
       const inSession = routerStore.getState().activeRoute.kind === "session";
       const editable = isEditableTarget(event.target);
       const inCtrlTerminal =
@@ -731,6 +702,7 @@ export function DesktopAppShell({
       for (const id of Object.keys(DESKTOP_SHORTCUTS) as DesktopShortcutId[]) {
         const binding: ShortcutBinding = DESKTOP_SHORTCUTS[id];
         if (!matchesShortcut(event, binding)) continue;
+        if (modalOpen && !modalAllowedKeys.has(id)) return;
         if (inCtrlTerminal && !shellSafeKeys.has(id) && !binding.shift && !binding.alt) return;
         if (editable && editingKeys.has(id)) return;
         if (DESKTOP_SHORTCUT_META[id].scope === "session" && !inSession) return;
@@ -743,6 +715,8 @@ export function DesktopAppShell({
         run[id]();
         return;
       }
+
+      if (modalOpen) return;
 
       // ⌘1…⌘9 jump to the sidebar's Nth visible session.
       const digit = /^Digit([1-9])$/.exec(event.code)?.[1];
@@ -940,7 +914,17 @@ export function DesktopAppShell({
             ? `${activeRoute.kind}:${activeRoute.computerKey}`
             : `${activeRoute.kind}:${activeComputerKey}`;
 
+  useEffect(() => () => {
+    if (peekCloseTimerRef.current) {
+      clearTimeout(peekCloseTimerRef.current);
+      peekCloseTimerRef.current = null;
+    }
+  }, []);
+
   const schedulePeekClose = () => {
+    if (typeof document !== "undefined" && document.querySelector(".desktop-sidebar-peek :popover-open")) {
+      return;
+    }
     if (peekCloseTimerRef.current) clearTimeout(peekCloseTimerRef.current);
     peekCloseTimerRef.current = setTimeout(() => {
       setPeekOpen(false);

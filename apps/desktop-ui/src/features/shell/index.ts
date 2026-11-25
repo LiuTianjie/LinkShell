@@ -24,6 +24,10 @@ export {
   type LocalHostCapsuleProps,
 } from "./LocalHostCapsule";
 export {
+  LocalHostRecovery,
+  type LocalHostRecoveryProps,
+} from "./LocalHostRecovery";
+export {
   ProjectsOverview,
   type ProjectsOverviewProps,
 } from "./ProjectsOverview";

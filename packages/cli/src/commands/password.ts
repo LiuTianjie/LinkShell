@@ -61,9 +61,11 @@ export async function applyAccessPassword(password: string | undefined): Promise
 }
 
 /** Whether this computer has an access password: the running host's answer, else the file. */
-export async function accessPasswordEnabled(): Promise<boolean> {
-  const live = await withRunningHost((client) => client.call("access.status", {})).catch(() => undefined);
-  if (live) return live.password;
+export async function accessPasswordEnabled(options?: { live?: boolean }): Promise<boolean> {
+  if (options?.live !== false) {
+    const live = await withRunningHost((client) => client.call("access.status", {})).catch(() => undefined);
+    if (live) return live.password;
+  }
   const host = await import("@linkshell/host");
   return new host.AccessControl(linkshellDir()).enabled;
 }

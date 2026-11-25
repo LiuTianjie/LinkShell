@@ -1,39 +1,36 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, Notification, powerSaveBlocker, screen, shell, Tray, type MenuItemConstructorOptions, type WebContents } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, powerMonitor, powerSaveBlocker, screen, shell, type WebContents } from "electron";
 import { randomUUID } from "node:crypto";
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { createConnection, createServer as createNetServer, type AddressInfo, type Server as NetServer, type Socket as NetSocket } from "node:net";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Management } from "./management.js";
 import { CommandQueue, type PageCommand } from "./command-queue.js";
-import { localizeUpdaterMessage, normalizeMainLocale, translateMain, type MainKey, type MainLocale } from "./locale.js";
-import { badgeCount, parseNotification, shouldNotify } from "./notify.js";
-import { isOpenPathApp, openPathPlan } from "./open-path.js";
-import { restoreWindowBounds } from "./window-bounds.js";
 import { installEditingContextMenu } from "./editing-context-menu.js";
-import { fusionSlug, isFusionSlug, pickDirectFusionHost } from "./fusion-probe.js";
-import { FusionElectronHub, fusionIconFile } from "./fusion/electron-hub.js";
+import { FusionController } from "./fusion-controller.js";
 import { KeepAwake, normalizeKeepAwakeMode } from "./keep-awake.js";
-import { macUpdatePreparation } from "./mac-update-preparation.js";
+import { normalizeMainLocale, translateMain, type MainKey, type MainLocale } from "./locale.js";
+import { Management } from "./management.js";
 import { MdnsLanBrowser } from "./mdns-browser.js";
-import { MenuBar, updateFound, updateLabel, type MenuBarEntry, type MenuBarEvent } from "./menubar.js";
 import { native, type NativeModule } from "./native.js";
+import { badgeCount } from "./notify.js";
+import { isOpenPathApp, openPathPlan } from "./open-path.js";
 import { WorkspacePolicy } from "./policy.js";
 import { normalizePreviewSubPath, RemotePortProxyManager, validatePreviewPort } from "./remote-port-proxy.js";
 import { launchOptions, Runtime } from "./runtime.js";
-import { WorkspaceServer } from "./workspace.js";
-import { AUTO_UPDATE_CHECK_COOLDOWN_MS, PERIODIC_UPDATE_CHECK_INTERVAL_MS, shouldAutoCheckUpdates } from "./update-policy.js";
-import { checkWindowsRelease, cleanWindowsUpdateDownloads, compareVersions, downloadWindowsInstaller, verifyInstaller, type DownloadedInstaller, type WindowsRelease } from "./windows-update.js";
+import { SettingsStore } from "./settings-store.js";
+import { TrayMenuController } from "./tray-menu.js";
+import { UpdaterController } from "./updater-controller.js";
+import { restoreWindowBounds } from "./window-bounds.js";
+import { SidecarUnavailableError, WorkspaceServer } from "./workspace.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const launch = launchOptions(process.argv);
 const runtime = new Runtime(app.getAppPath(), launch);
 const management = new Management(runtime);
 const server = new WorkspaceServer(runtime);
-const settings = new Map<string, unknown>();
+const settings = new SettingsStore(() => app.getPath("userData"));
 const keepAwake = new KeepAwake(powerSaveBlocker);
-/** The page's language, for what the native shell draws itself; the saved one until the page says. */
+
 let locale: MainLocale = "zh";
 const t = (key: MainKey, params?: Record<string, string | number>) => translateMain(locale, key, params);
 
@@ -46,21 +43,168 @@ const WINDOWS = process.platform === "win32";
 const ground = () => (nativeTheme.shouldUseDarkColors ? "#090a0c" : "#f2f3f6");
 /** Windows draws its caption buttons over the page's 42 px title row (--chrome-h), in the page's ink (`--ls-fg`). */
 const overlay = () => ({ color: "#00000000", symbolColor: nativeTheme.shouldUseDarkColors ? "#eceef2" : "#141518", height: TOOLBAR });
-/** The theme the opaque ground and the caption buttons were last painted for. */
+
 let surfaceDark: boolean | undefined;
+let surfaceTranslucent: boolean | undefined;
+let userRequestedShow = false;
+let hideAfterLeaveFullScreen = false;
+let boundsTimer: ReturnType<typeof setTimeout> | undefined;
+let resumeTimer: ReturnType<typeof setTimeout> | undefined;
 
 let window: BrowserWindow | undefined;
-let tray: Tray | undefined;
-let menuBar: MenuBar | undefined;
 let nativeModule: NativeModule | undefined;
 let visible = false;
 let systemShortcutCaptured = false;
-const mdnsBrowser = new MdnsLanBrowser({
-  log: (line) => console.log(line),
+let nativeScreenShown = false;
+let pageReady = false;
+let quitting = false;
+let quitConfirmed = false;
+
+const mdnsBrowser = new MdnsLanBrowser({ log: (line) => console.log(line) });
+mdnsBrowser.onChange((hosts) => send("linkshell-desktop-lan-hosts", hosts));
+
+const fusion = new FusionController({
+  mac: MAC,
+  windows: WINDOWS,
+  runtime,
+  preload: join(here, "../preload/fusion-hub.cjs"),
+  homePath: () => app.getPath("home"),
+  appDataPath: () => app.getPath("appData"),
+  pageURL: () => server.url,
+  isTrusted: (url) => server.policy?.isTrusted(url) ?? false,
+  send,
 });
-mdnsBrowser.onChange((hosts) => {
-  send("linkshell-desktop-lan-hosts", hosts);
+
+const trayMenu = new TrayMenuController({
+  mac: MAC,
+  windows: WINDOWS,
+  runtime,
+  settings,
+  t,
+  getWindow: () => window,
+  isVisible: () => visible,
+  showWindow,
+  openWorkspace,
+  openManagement,
+  checkUpdates: () => { updater.check(); },
+  closeTab,
+  toggleFullScreen: toggleWindowFullScreen,
+  command,
 });
+
+const updater = new UpdaterController({
+  mac: MAC,
+  windows: WINDOWS,
+  runtime,
+  settings,
+  appVersion: () => app.getVersion(),
+  userData: () => app.getPath("userData"),
+  getLocale: () => locale,
+  t,
+  getNative: () => nativeModule,
+  runHostAction: (name) => runManagementAction(name),
+  send,
+  noteUpdate: (name, version) => trayMenu.noteUpdate(name, version),
+  getUpdateAvailable: () => trayMenu.getUpdateAvailable(),
+  flush,
+  flushOrConfirm,
+  rememberBounds,
+  quitForUpdate: async () => {
+    rememberBounds();
+    await settings.save();
+    quitConfirmed = true;
+    quitting = true;
+    trayMenu.stop();
+    await server.stop();
+    app.quit();
+  },
+});
+
+const remotePortProxies = new RemotePortProxyManager({
+  dispatch: (payload) => {
+    if (!pageReady || !window || window.isDestroyed() || !server.policy?.isTrusted(window.webContents.getURL())) return false;
+    send("linkshell-desktop-remote-port-req", payload);
+    return true;
+  },
+});
+
+// ── App bootstrap & single instance ──────────────────────────────────────────────────────
+
+app.setName("LinkShell");
+// Hidden or behind other windows, Chromium throttles timers: heartbeats would then come late, and a dead link look alive.
+app.commandLine.appendSwitch("disable-background-timer-throttling");
+app.commandLine.appendSwitch("disable-renderer-backgrounding");
+const forcedLanguage = ({ zh: "zh-CN", en: "en-US", ja: "ja" } as Record<string, string>)[process.env.LINKSHELL_LOCALE ?? ""];
+if (forcedLanguage) app.commandLine.appendSwitch("lang", forcedLanguage);
+
+if (!app.requestSingleInstanceLock({ scope: runtime.scope })) {
+  app.quit();
+} else {
+  app.on("second-instance", (_event, argv) => {
+    const opts = launchOptions(argv);
+    if (opts.checkUpdates) { openManagement("updates"); updater.check(); }
+    if (opts.fusionConnect) {
+      command({ command: "fusion", computerKey: opts.fusionConnect, launchBundle: opts.fusionLaunch });
+      if (!opts.fusionLaunch) { app.focus({ steal: true }); showWindow(); }
+      return;
+    }
+    app.focus({ steal: true });
+    showWindow();
+  });
+  void app.whenReady().then(ready);
+}
+
+// ── Window surface, fullscreen, visibility & lifecycle ───────────────────────────────────
+
+function applyAppearance() {
+  const value = settings.appearance();
+  nativeTheme.themeSource = value;
+  send("linkshell-desktop-appearance", { appearance: value });
+  updateWindowSurface(true);
+}
+
+function setNativeScreenShown(value: boolean) {
+  if (nativeScreenShown === value) return;
+  nativeScreenShown = value;
+  updateWindowSurface();
+}
+
+/** Vibrancy only while it is worth it: focused, and below 4K, where the blur costs frames. */
+function updateWindowSurface(force: unknown = false) {
+  if (!window || window.isDestroyed()) return;
+  const forceSync = force === true;
+  const dark = nativeTheme.shouldUseDarkColors;
+  if (!MAC) {
+    if (dark !== surfaceDark) {
+      surfaceDark = dark;
+      window.setBackgroundColor(ground());
+      if (WINDOWS) window.setTitleBarOverlay(overlay());
+    }
+    if (forceSync || surfaceTranslucent !== false) {
+      surfaceTranslucent = false;
+      send("linkshell-desktop-surface", { translucent: false });
+    }
+    return;
+  }
+  const bounds = window.getBounds();
+  const display = screen.getDisplayMatching(bounds);
+  const physical = bounds.width * display.scaleFactor * bounds.height * display.scaleFactor;
+  const translucent = window.isFocused() && physical < 3840 * 2160 && !settings.opaqueWindow() && !nativeScreenShown && !isWindowFullScreen();
+  const surfaceChanged = translucent !== surfaceTranslucent;
+  const groundChanged = !translucent && dark !== surfaceDark;
+  if (forceSync || surfaceChanged || groundChanged) {
+    surfaceTranslucent = translucent;
+    surfaceDark = dark;
+    window.setVibrancy(translucent ? "menu" : null);
+    window.setBackgroundColor(translucent ? "#00000000" : ground());
+    send("linkshell-desktop-surface", { translucent });
+  }
+}
+
+function send(name: string, detail: unknown) {
+  if (!window || window.isDestroyed() || !server.policy?.isTrusted(window.webContents.getURL())) return;
+  window.webContents.send("linkshell:event", name, detail);
+}
 
 function setSystemShortcutCaptureEnabled(enabled: boolean): boolean {
   if (enabled && MAC && nativeModule) {
@@ -71,115 +215,22 @@ function setSystemShortcutCaptureEnabled(enabled: boolean): boolean {
   nativeModule?.setSystemShortcutCapture(false);
   const changed = systemShortcutCaptured;
   systemShortcutCaptured = false;
-  if (changed) {
-    send("linkshell-desktop-shortcut-capture", { captured: false });
-  }
+  if (changed) send("linkshell-desktop-shortcut-capture", { captured: false });
   return false;
 }
 
 function resetSystemShortcutCapture(): void {
-  if (systemShortcutCaptured) {
-    setSystemShortcutCaptureEnabled(false);
-  } else {
-    nativeModule?.setSystemShortcutCapture(false);
-  }
-}
-/** The workspace document has loaded and mounted: commands can be delivered to it. */
-let pageReady = false;
-let quitting = false;
-let quitConfirmed = false;
-
-app.setName("LinkShell");
-// Hidden or behind other windows, Chromium throttles timers: heartbeats would then come late, and a dead link look alive.
-app.commandLine.appendSwitch("disable-background-timer-throttling");
-app.commandLine.appendSwitch("disable-renderer-backgrounding");
-// LINKSHELL_LOCALE fixes the language for the whole app: Chromium's own strings and, through
-// `navigator.language` and `app.getLocale()`, the page's and the native menus' while the person's
-// setting is "follow the system". The packaged-app checks use it so their labels don't depend
-// on the language of the machine they run on. Before `ready`: Chromium reads it once.
-const forcedLanguage = ({ zh: "zh-CN", en: "en-US", ja: "ja" } as Record<string, string>)[process.env.LINKSHELL_LOCALE ?? ""];
-if (forcedLanguage) app.commandLine.appendSwitch("lang", forcedLanguage);
-
-if (!app.requestSingleInstanceLock({ scope: runtime.scope })) {
-  app.quit();
-} else {
-  app.on("second-instance", (_event, argv) => {
-    const opts = launchOptions(argv);
-    if (opts.checkUpdates) { openManagement("updates"); checkUpdates(); }
-    if (opts.fusionConnect) {
-      command({ command: "fusion", computerKey: opts.fusionConnect, launchBundle: opts.fusionLaunch });
-      if (!opts.fusionLaunch) showWindow();
-      return;
-    }
-    showWindow();
-  });
-  void app.whenReady().then(ready);
+  if (systemShortcutCaptured) setSystemShortcutCaptureEnabled(false);
+  else nativeModule?.setSystemShortcutCapture(false);
 }
 
-function appearance(): "light" | "dark" | "system" {
-  const value = settings.get("appearance");
-  return WorkspacePolicy.validAppearance(value) ? value : "dark";
-}
-
-function applyAppearance() {
-  const value = appearance();
-  nativeTheme.themeSource = value;
-  send("linkshell-desktop-appearance", { appearance: value });
-  updateWindowSurface();
-}
-
-/**
- * A native remote screen is on: the window stays opaque, so the window server does not blend
- * a blurred background under a picture that changes up to 120 times a second.
- */
-let nativeScreenShown = false;
-function setNativeScreenShown(value: boolean) {
-  if (nativeScreenShown === value) return;
-  nativeScreenShown = value;
-  updateWindowSurface();
-}
-/** Vibrancy only while it is worth it: focused, and below 4K, where the blur costs frames. */
-function updateWindowSurface() {
-  if (!window) return;
-  if (!MAC) {
-    // No vibrancy off the Mac: the page paints its own ground, and the caption buttons follow the
-    // theme. Repainted only when it changes: this runs on every resize.
-    const dark = nativeTheme.shouldUseDarkColors;
-    if (dark !== surfaceDark) {
-      surfaceDark = dark;
-      window.setBackgroundColor(ground());
-      if (WINDOWS) window.setTitleBarOverlay(overlay());
-    }
-    send("linkshell-desktop-surface", { translucent: false });
-    return;
-  }
-  const bounds = window.getBounds();
-  const display = screen.getDisplayMatching(bounds);
-  const physical = bounds.width * display.scaleFactor * bounds.height * display.scaleFactor;
-  const translucent = window.isFocused() && physical < 3840 * 2160 && settings.get("opaqueWindow") !== true && !nativeScreenShown && !isWindowFullScreen();
-  window.setVibrancy(translucent ? "menu" : null);
-  window.setBackgroundColor(translucent ? "#00000000" : ground());
-  send("linkshell-desktop-surface", { translucent });
-}
-
-function send(name: string, detail: unknown) {
-  if (!window || window.isDestroyed() || !server.policy?.isTrusted(window.webContents.getURL())) return;
-  window.webContents.send("linkshell:event", name, detail);
-}
-
-/**
- * The page's latest wish for the window's full screen (the remote screen's or the terminal's
- * button), applied once the window is still. macOS animates into and out of a full-screen Space
- * and drops a toggle asked for meanwhile: each finished animation reconciles the window with the
- * newest wish instead, and a toggle that never took is asked again after a second.
- */
 let wantedFullScreen: boolean | undefined;
 let wantedImmersiveFullScreen = false;
 let fullScreenMoving = false;
 let preSimpleFullScreenBounds: Electron.Rectangle | undefined;
-/** The last leave was asked for by the page (its wish is already false), not the window's own button. */
 let fullScreenAsked = false;
 let fullScreenRetry: ReturnType<typeof setTimeout> | undefined;
+
 function isSimpleFullScreen(): boolean {
   return MAC && !!window && !window.isDestroyed() && window.isSimpleFullScreen();
 }
@@ -194,9 +245,6 @@ function syncImmersivePresentation() {
 function reconcileFullScreen() {
   if (!window || window.isDestroyed() || wantedFullScreen === undefined || fullScreenMoving) return;
   const wanted = wantedFullScreen;
-  // On macOS, a full-screen Space forces an auto-hiding local menu bar + 44pt toolbar window over
-  // y = 0..81pt whenever the pointer reaches the top edge, blocking the remote Mac's status bar.
-  // Remote screens enter borderless `simpleFullScreen` with `.hideMenuBar` instead.
   if (MAC && wanted && wantedImmersiveFullScreen && !window.isFullScreen()) {
     clearTimeout(fullScreenRetry);
     if (!window.isSimpleFullScreen()) {
@@ -234,7 +282,6 @@ function reconcileFullScreen() {
   if (window.isFullScreen() === wanted) {
     clearTimeout(fullScreenRetry);
     syncImmersivePresentation();
-    // The answer the page waits for, whether or not anything had to move.
     send("linkshell-desktop-fullscreen", { fullscreen: wanted });
     if (!wanted) { wantedFullScreen = undefined; wantedImmersiveFullScreen = false; }
     return;
@@ -249,13 +296,7 @@ function reconcileFullScreen() {
 
 function toggleWindowFullScreen() {
   if (!window || window.isDestroyed()) return;
-  if (isSimpleFullScreen()) {
-    wantedFullScreen = false;
-    wantedImmersiveFullScreen = false;
-    reconcileFullScreen();
-    return;
-  }
-  if (window.isFullScreen()) {
+  if (isSimpleFullScreen() || window.isFullScreen()) {
     wantedFullScreen = false;
     wantedImmersiveFullScreen = false;
     reconcileFullScreen();
@@ -266,7 +307,6 @@ function toggleWindowFullScreen() {
   reconcileFullScreen();
 }
 
-/** Hidden, minimized or closed: the page pauses its remote screen and previews. */
 function setVisible(value: boolean) {
   visible = value;
   nativeModule?.screenVisible(value);
@@ -276,7 +316,9 @@ function setVisible(value: boolean) {
 
 function createWindow() {
   const state = restoreWindowBounds(settings.get("window"), screen.getAllDisplays().map((display) => display.workArea), { width: 940, height: 640 }, { width: 1280, height: 820 });
-  if (!MAC) surfaceDark = nativeTheme.shouldUseDarkColors;
+  surfaceDark = nativeTheme.shouldUseDarkColors;
+  surfaceTranslucent = undefined;
+  const initialOpaque = settings.opaqueWindow();
   window = new BrowserWindow({
     title: "LinkShell",
     width: state.width,
@@ -287,7 +329,13 @@ function createWindow() {
     minHeight: 640,
     show: false,
     ...(MAC
-      ? { titleBarStyle: "hiddenInset" as const, trafficLightPosition: TRAFFIC_LIGHTS, vibrancy: "menu" as const, visualEffectState: "followWindow" as const, backgroundColor: "#00000000" }
+      ? {
+          titleBarStyle: "hiddenInset" as const,
+          trafficLightPosition: TRAFFIC_LIGHTS,
+          ...(initialOpaque
+            ? { backgroundColor: ground() }
+            : { vibrancy: "menu" as const, visualEffectState: "followWindow" as const, backgroundColor: "#00000000" }),
+        }
       : { titleBarStyle: "hidden" as const, titleBarOverlay: overlay(), backgroundColor: ground(), icon: join(app.getAppPath(), "assets/icon.png") }),
     acceptFirstMouse: true,
     fullscreenable: true,
@@ -305,34 +353,45 @@ function createWindow() {
     },
   });
   if (state.maximized) window.maximize();
-  window.on("closed", () => { clearPageReadyTimer(); pageReady = false; resetSystemShortcutCapture(); nativeModule?.setImmersiveFullScreen(false); nativeModule?.screenStop(); nativeScreenShown = false; void mdnsBrowser.stop(); });
+  window.on("closed", () => {
+    clearPageReadyTimer();
+    clearBoundsTimer();
+    hideAfterLeaveFullScreen = false;
+    pageReady = false;
+    resetSystemShortcutCapture();
+    nativeModule?.setImmersiveFullScreen(false);
+    nativeModule?.screenStop();
+    nativeScreenShown = false;
+    void mdnsBrowser.stop();
+  });
   const web = window.webContents;
   guard(web);
   window.on("focus", () => {
-    // Unhidden after ⌘H the window may not get "show": focus is the sure sign it is on screen again.
     if (!visible && window?.isVisible() && !window.isMinimized()) setVisible(true);
     if (WINDOWS) window?.flashFrame(false);
     syncImmersivePresentation();
     updateWindowSurface();
-    maybeAutoCheckUpdates();
+    updater.maybeAutoCheck();
   });
-  window.on("blur", () => { syncImmersivePresentation(); updateWindowSurface(); });
-  window.on("resize", updateWindowSurface);
-  window.on("moved", updateWindowSurface);
-  // Started at sign-in or silently awakened by a Dock Stub app: wait in the menu bar unless asked for.
-  window.on("ready-to-show", () => { if (!quitting && !launch.hidden && !(launch.fusionConnect && launch.fusionLaunch)) showWindow(); });
+  window.on("blur", () => {
+    syncImmersivePresentation();
+    updateWindowSurface();
+    window?.webContents.setIgnoreMenuShortcuts(false);
+    resetSystemShortcutCapture();
+  });
+  window.on("resize", () => { updateWindowSurface(); scheduleRememberBounds(); });
+  window.on("moved", () => { updateWindowSurface(); scheduleRememberBounds(); });
+  window.on("ready-to-show", () => {
+    if (!quitting && (userRequestedShow || (!launch.hidden && !(launch.fusionConnect && launch.fusionLaunch)))) showWindow();
+  });
   window.on("show", () => setVisible(!window!.isMinimized()));
-  // macOS sends "hide" while the window moves into or out of its full-screen Space, though it stays
-  // on screen: taking that as hidden unmounted the remote screen and so ended its full screen.
   window.on("hide", () => { if (!window!.isVisible()) setVisible(false); });
   window.on("minimize", () => setVisible(false));
   window.on("restore", () => setVisible(true));
   window.on("close", (event) => {
     rememberBounds();
     if (quitting) return;
-    // Closing the window leaves LinkShell in the menu bar (the tray on Windows); the Host is never stopped here.
     event.preventDefault();
-    // A full-screen window would leave an empty Space behind when hidden.
     wantedFullScreen = undefined;
     wantedImmersiveFullScreen = false;
     nativeModule?.setImmersiveFullScreen(false);
@@ -346,19 +405,18 @@ function createWindow() {
       send("linkshell-desktop-window", { fullscreen: false });
       send("linkshell-desktop-fullscreen", { fullscreen: false });
       window!.hide();
-    } else if (window!.isFullScreen()) { window!.once("leave-full-screen", () => window?.hide()); window!.setFullScreen(false); }
-    else window!.hide();
-    if (process.platform === "darwin") app.dock?.hide();
-  });
-  // Losing the focus gives the menu its shortcuts back: they are captured only while the remote screen is typed into.
-  window.on("blur", () => {
-    window?.webContents.setIgnoreMenuShortcuts(false);
-    resetSystemShortcutCapture();
+      if (MAC) app.dock?.hide();
+    } else if (window!.isFullScreen()) {
+      hideAfterLeaveFullScreen = true;
+      window!.setFullScreen(false);
+    } else {
+      window!.hide();
+      if (MAC) app.dock?.hide();
+    }
   });
   window.on("enter-full-screen", () => {
     fullScreenMoving = false;
     syncImmersivePresentation();
-    // Entered by the window's own button or the menu: that is the page's wish from now on.
     if (wantedFullScreen === undefined) wantedFullScreen = true;
     send("linkshell-desktop-window", { fullscreen: true });
     reconcileFullScreen();
@@ -368,21 +426,34 @@ function createWindow() {
     wantedImmersiveFullScreen = false;
     if (MAC && window && !window.isDestroyed()) window.setWindowButtonPosition(TRAFFIC_LIGHTS);
     syncImmersivePresentation();
-    // Left by the window's own button or Esc: what asked for full screen leaves it too.
     if (wantedFullScreen === true && !fullScreenAsked) wantedFullScreen = false;
     fullScreenAsked = false;
     send("linkshell-desktop-window", { fullscreen: false });
-    // A different terminal may already be entering while the old leave animation finishes.
     if (wantedFullScreen !== true) send("linkshell-desktop-fullscreen", { fullscreen: false });
+    if (hideAfterLeaveFullScreen) {
+      hideAfterLeaveFullScreen = false;
+      if (!quitting && window && !window.isDestroyed()) {
+        window.hide();
+        if (MAC) app.dock?.hide();
+      }
+      return;
+    }
     reconcileFullScreen();
   });
-  web.on("did-start-navigation", (details) => { if (details.isMainFrame && !details.isSameDocument) { clearPageReadyTimer(); pageReady = false; resetSystemShortcutCapture(); nativeModule?.screenStop(); setNativeScreenShown(false); void mdnsBrowser.stop(); } });
+  web.on("did-start-navigation", (details) => {
+    if (details.isMainFrame && !details.isSameDocument) {
+      clearPageReadyTimer();
+      pageReady = false;
+      resetSystemShortcutCapture();
+      nativeModule?.screenStop();
+      setNativeScreenShown(false);
+      void mdnsBrowser.stop();
+    }
+  });
   web.on("did-finish-load", () => {
     if (!server.policy?.isTrusted(web.getURL())) return;
     send("linkshell-desktop-visibility", { visible });
     applyAppearance();
-    // Wait for `renderer-ready` once `useDesktopCommand` attaches its listener; keep a 2500ms fallback
-    // so an older/partial renderer still surfaces and receives any queued command.
     if (!pageReady) {
       clearPageReadyTimer();
       pageReadyTimer = setTimeout(() => { markPageReady(); }, 2500);
@@ -399,8 +470,6 @@ function createWindow() {
     void mdnsBrowser.stop();
     showProblem(t("problem.gone"));
   });
-  // Chromium reports a hang after a few seconds; give the page ten more before offering a reload,
-  // so a long synchronous render doesn't interrupt anyone, but a real hang isn't a frozen window.
   web.on("unresponsive", () => {
     if (hungTimer || hungDialog) return;
     hungTimer = setTimeout(() => { hungTimer = undefined; void offerReload(); }, 10_000);
@@ -409,12 +478,20 @@ function createWindow() {
   startServer();
 }
 
+function clearBoundsTimer() {
+  if (!boundsTimer) return;
+  clearTimeout(boundsTimer);
+  boundsTimer = undefined;
+}
+function scheduleRememberBounds() {
+  clearBoundsTimer();
+  boundsTimer = setTimeout(() => { boundsTimer = undefined; rememberBounds(); }, 500);
+}
 function rememberBounds() {
+  clearBoundsTimer();
   if (!window || window.isDestroyed() || isWindowFullScreen() || window.isMinimized()) return;
-  // The normal frame, not the maximized one: restoring a maximized size as a plain window
-  // leaves a window that fills the screen but can't be un-maximized.
   settings.set("window", { ...window.getNormalBounds(), maximized: window.isMaximized() });
-  void saveSettings();
+  void settings.save();
 }
 
 let hungTimer: ReturnType<typeof setTimeout> | undefined;
@@ -429,14 +506,12 @@ async function offerReload() {
       buttons: [t("hung.wait"), t("hung.reload")], defaultId: 0, cancelId: 0,
     });
     if (response !== 1 || !window || window.isDestroyed()) return;
-    // The page can't answer the save barrier while it is hung: reload without waiting on it.
     remotePortProxies.stopAll();
-    server.stop();
+    await server.stop();
     startServer();
   } finally { hungDialog = false; }
 }
 
-/** The signed page owns the bridge; preview and screen frames never do. */
 function guard(web: WebContents) {
   installEditingContextMenu(web, () => window, () => server.policy?.isTrusted(web.getURL()) ?? false, () => ({
     undo: t("menu.undo"), redo: t("menu.redo"), cut: t("menu.cut"), copy: t("menu.copy"),
@@ -449,21 +524,18 @@ function guard(web: WebContents) {
   web.on("will-navigate", (event, url) => {
     if (server.policy?.isTrusted(url)) return;
     event.preventDefault();
-    // The error page's only button: it cannot reach the bridge, so it asks by navigating.
     if (url === "linkshell-retry:" && web.getURL().startsWith("data:")) { void retry(); return; }
     if (WorkspacePolicy.externalURL(url)) void shell.openExternal(url);
   });
   web.on("will-frame-navigate", (details) => {
-    if (details.isMainFrame) return;
-    if (!server.policy?.allowsSubframe(details.url)) details.preventDefault();
+    if (!details.isMainFrame && !server.policy?.allowsSubframe(details.url)) details.preventDefault();
   });
   web.on("will-redirect", (event, url) => {
     if (!server.policy?.isTrusted(url) && !server.policy?.isPreview(url)) event.preventDefault();
   });
-  web.session.setPermissionRequestHandler((contents, permission, callback, details) => {
+  web.session.setPermissionRequestHandler((_contents, permission, callback, details) => {
     const trusted = server.policy?.isTrusted(details.requestingUrl) ?? false;
     callback(trusted && ["clipboard-sanitized-write", "clipboard-read", "media", "fullscreen", "notifications"].includes(permission));
-    void contents;
   });
   web.session.on("will-download", (_event, item) => {
     const url = item.getURL();
@@ -486,7 +558,6 @@ function startServer() {
   }, (message) => showProblem(message));
 }
 
-/** Immediate themed shell shown while the local workspace server cold-starts, preventing a blank 1-3s delay. */
 function showLoading() {
   if (!window) return;
   const html = `<!doctype html><html lang="${locale}"><meta charset="utf-8"><meta name="color-scheme" content="light dark"><title>LinkShell</title><style>
@@ -500,7 +571,6 @@ function showLoading() {
   void window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`).catch(() => undefined);
 }
 
-/** Shown when the page itself cannot be: the native shell has no other way to say it. */
 function showProblem(message: string) {
   if (!window) return;
   const html = `<!doctype html><html lang="${locale}"><meta charset="utf-8"><meta name="color-scheme" content="light dark"><title>LinkShell</title><style>
@@ -508,7 +578,6 @@ function showProblem(message: string) {
     body{margin:0;height:100vh;display:grid;place-items:center;background:transparent;color:light-dark(#1a1c1f,#dfdfdf);-webkit-app-region:drag}
     main{max-width:420px;text-align:center;padding:24px}h1{font-size:16px;font-weight:600;margin:0 0 8px}
     p{margin:0 0 20px;color:light-dark(rgb(26 28 31/.7),rgb(255 255 255/.7))}
-    /* accentFill and accentHover, copied from brand-colors.json: this page can't load the workspace's styles */
     button{-webkit-app-region:no-drag;height:32px;padding:0 12px;border-radius:6px;border:0;font:inherit;font-size:13px;font-weight:500;background:light-dark(#4c5fd5,#5263e8);color:#fff}
     button:hover{background:light-dark(#4254c7,#4d5fe0)}
   </style><main><h1>${escapeHtml(t("problem.title"))}</h1><p></p><button>${escapeHtml(t("problem.retry"))}</button></main>
@@ -523,31 +592,38 @@ function escapeHtml(value: string): string {
 async function retry() {
   if (!(await flushOrConfirm(t("flush.reconnect")))) return;
   remotePortProxies.stopAll();
-  server.stop();
+  await server.stop();
   startServer();
 }
 
 function showWindow() {
+  userRequestedShow = true;
+  hideAfterLeaveFullScreen = false;
   if (!window) return;
-  if (process.platform === "darwin") void app.dock?.show();
+  if (MAC) void app.dock?.show();
   if (window.isMinimized()) window.restore();
-  // Made key while LinkShell is not yet the active app (the menu bar, a second launch), AppKit
-  // tabs into the page and Chromium focuses its first button. With the page already the first
-  // responder there is nothing to tab into, and the page keeps the focus it had.
   if (MAC) window.webContents.focus();
   window.show();
   window.focus();
   setVisible(true);
 }
 
-/** A sign-in finished in the browser: the person is looking at the browser, so LinkShell comes forward. */
 function cameBack<T>(result: T): T {
   app.focus({ steal: true });
   showWindow();
   return result;
 }
 
-/** Commands for the page; those sent before it has loaded (a second launch, --check-updates, a notification click) wait for it. */
+function onSystemResume() {
+  clearTimeout(resumeTimer);
+  resumeTimer = setTimeout(() => {
+    resumeTimer = undefined;
+    if (quitting) return;
+    send("linkshell-desktop-resume", { at: Date.now() });
+    updater.maybeAutoCheck();
+  }, 500);
+}
+
 const pendingCommands = new CommandQueue();
 let pageReadyTimer: ReturnType<typeof setTimeout> | undefined;
 function clearPageReadyTimer() {
@@ -560,7 +636,7 @@ function markPageReady() {
   if (!window || window.isDestroyed() || !server.policy?.isTrusted(window.webContents.getURL())) return;
   if (!pageReady) {
     pageReady = true;
-    updateWindowSurface();
+    updateWindowSurface(true);
     send("linkshell-desktop-window", { fullscreen: isWindowFullScreen() });
   }
   for (const queued of pendingCommands.drain()) send("linkshell-desktop-command", queued);
@@ -569,50 +645,72 @@ function command(detail: PageCommand) {
   if (pageReady) send("linkshell-desktop-command", detail);
   else pendingCommands.push(detail);
 }
-
 function openManagement(page?: string) { command({ command: "manage", ...(page ? { page } : {}) }); }
-
-/** ⌘W closes the page's tab; with no page to ask (loading, error page) it closes the window as the red button does. */
+function openWorkspace() { command({ command: "workspace" }); }
 function closeTab() {
   if (!window || window.isDestroyed()) return;
   if (pageReady && server.policy?.isTrusted(window.webContents.getURL())) command({ command: "close-tab" });
   else window.close();
 }
 
-/** One live notification per id: a newer one for the same session replaces the old. */
-const notifications = new Map<string, Notification>();
-function notify(message: Record<string, unknown>) {
-  const request = parseNotification(message);
-  if (!request) return;
-  const focused = !!window && !window.isDestroyed() && window.isFocused();
-  if (!shouldNotify({ supported: Notification.isSupported(), enabled: settings.get("notifications") !== false, focused, visible })) return;
-  notifications.get(request.id)?.close();
-  const shown = new Notification({ title: request.title, body: request.body, silent: false });
-  notifications.set(request.id, shown);
-  const forget = () => { if (notifications.get(request.id) === shown) notifications.delete(request.id); };
-  shown.on("click", () => {
-    forget();
-    showWindow();
-    command({ command: "open-session", computerKey: request.computerKey, sessionId: request.sessionId });
-  });
-  shown.on("close", forget);
-  shown.show();
-  if (MAC) app.dock?.bounce("informational");
-  else if (WINDOWS && window && !window.isDestroyed()) window.flashFrame(true);
-}
-function openWorkspace() { command({ command: "workspace" }); }
+// ── Sidecar-first management routing (zero child spawns on warm sidecar) ─────────────────
 
-// ── The page's messages ───────────────────────────────────────────────────────────────────
+const ACTION_TIMEOUTS: Record<string, number> = {
+  startup: 60_000, start: 45_000, stop: 45_000, restart: 45_000, logout: 60_000, "connect-gateway": 60_000,
+  "account-refresh": 60_000, "set-gateway": 60_000, "set-password": 45_000, "remove-password": 45_000,
+  "prepare-update": 45_000, "recover-update": 45_000, "stop-update-host": 45_000, pair: 30_000, "pair-qr": 30_000,
+};
+
+async function withSidecarFallback<T>(viaSidecar: () => Promise<T>, viaCli: () => Promise<T>): Promise<T> {
+  try { return await viaSidecar(); }
+  catch (error) {
+    if (error instanceof SidecarUnavailableError) return viaCli();
+    throw error;
+  }
+}
+
+async function runManagementAction(name: string, input?: unknown): Promise<Record<string, unknown>> {
+  if (!(name in ACTION_TIMEOUTS)) throw new Error("不支持的操作");
+  if (name === "logout") {
+    return withSidecarFallback(
+      async () => {
+        await server.logout();
+        return (await server.snapshot({ fresh: true })) ?? management.snapshot();
+      },
+      () => management.action("logout"),
+    );
+  }
+  return withSidecarFallback(
+    () => server.action(name, input, ACTION_TIMEOUTS[name]),
+    () => (name === "startup" ? management.startup() : management.action(name, input)),
+  );
+}
+
+// ── IPC: Native invoke + fire-and-forget shell messages ──────────────────────────────────
 
 ipcMain.on("linkshell:boot", (event) => {
-  event.returnValue = server.policy?.isTrusted(event.senderFrame?.url) ?
-    { appearance: appearance(), visible, platform: process.platform } : undefined;
+  event.returnValue = server.policy?.isTrusted(event.senderFrame?.url)
+    ? { appearance: settings.appearance(), visible, platform: process.platform, opaqueWindow: settings.opaqueWindow() }
+    : undefined;
 });
 
-// Fusion's hidden pages: each hub checks the message is from its own page.
 ipcMain.on("linkshell:fusion-hub", (event, body: unknown) => {
-  if (!body || typeof body !== "object") return;
-  for (const hub of electronHubs.values()) hub.fromPage(event.sender, body as Record<string, unknown>);
+  if (body && typeof body === "object") fusion.fromHubPage(event.sender, body as Record<string, unknown>);
+});
+
+ipcMain.handle("linkshell:invoke", async (event, body: unknown) => {
+  const frame = event.senderFrame;
+  if (!window || event.sender !== window.webContents || !frame || !server.policy?.allowsBridge(frame.url, frame === event.sender.mainFrame)) {
+    return { ok: false, error: "来源不受信任" };
+  }
+  const payload = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+  const method = typeof payload.method === "string" ? payload.method : "";
+  const params = payload.params && typeof payload.params === "object" ? (payload.params as Record<string, unknown>) : {};
+  try {
+    return { ok: true, result: await handle(method, params) };
+  } catch (failure) {
+    return { ok: false, error: failure instanceof Error ? failure.message : String(failure) };
+  }
 });
 
 ipcMain.on("linkshell:message", (event, body: unknown) => {
@@ -621,19 +719,16 @@ ipcMain.on("linkshell:message", (event, body: unknown) => {
   if (!body || typeof body !== "object") return;
   const message = body as Record<string, unknown>;
   switch (message.action) {
-    // The page switches between the workspace and management itself; nothing native follows it.
     case "manage":
     case "workspace": return;
-    case "renderer-ready":
-      markPageReady();
-      return;
+    case "renderer-ready": markPageReady(); return;
     case "appearance":
       if (WorkspacePolicy.validAppearance(message.value)) {
         const changed = settings.get("appearance") !== message.value;
         settings.set("appearance", message.value);
-        if (changed) void saveSettings();
+        if (changed) void settings.save();
         applyAppearance();
-        if (changed) updateTray();
+        if (changed) trayMenu.updateTray();
       }
       return;
     case "external":
@@ -644,24 +739,19 @@ ipcMain.on("linkshell:message", (event, body: unknown) => {
       if (!next || next === locale) return;
       locale = next;
       settings.set("locale", next);
-      void saveSettings();
-      installMenu();
-      updateTray();
+      void settings.save();
+      trayMenu.installMenu();
+      trayMenu.updateTray();
       return;
     }
-    case "closeWindow":
-      window.close();
-      return;
-    case "notify":
-      notify(message);
-      return;
+    case "closeWindow": window.close(); return;
+    case "focusWindow": cameBack(undefined); return;
+    case "notify": trayMenu.notify(message); return;
     case "badge": {
       const count = badgeCount(message.count);
-      // Windows and most Linux desktops have no app badge; Electron answers false there.
       if (count !== undefined) { try { app.setBadgeCount(count); } catch { /* Unsupported here. */ } }
       return;
     }
-    // AppKit gives focus to whichever view was clicked; a DOM blur must not steal it back.
     case "contentFocus": return;
     case "screen": {
       if (!MAC || typeof message.id !== "string") return;
@@ -674,19 +764,14 @@ ipcMain.on("linkshell:message", (event, body: unknown) => {
             return typeof val === "number" && Number.isFinite(val);
           });
         const scaleRect = (raw: Record<string, number>) => ({
-          x: raw.x * zoom,
-          y: raw.y * zoom,
-          width: raw.width * zoom,
-          height: raw.height * zoom,
+          x: raw.x * zoom, y: raw.y * zoom, width: raw.width * zoom, height: raw.height * zoom,
         });
         const adjusted: Record<string, unknown> = { ...message };
         if (isFiniteRect(message.rect)) adjusted.rect = scaleRect(message.rect);
         if (Array.isArray(message.holes)) {
           adjusted.holes = message.holes.slice(0, 64).filter(isFiniteRect).map((hole) => ({
             ...scaleRect(hole),
-            ...(typeof hole.radius === "number" && Number.isFinite(hole.radius) && hole.radius >= 0
-              ? { radius: hole.radius * zoom }
-              : {}),
+            ...(typeof hole.radius === "number" && Number.isFinite(hole.radius) && hole.radius >= 0 ? { radius: hole.radius * zoom } : {}),
           }));
         }
         if ("overlayOpen" in message) adjusted.overlayOpen = Boolean(message.overlayOpen);
@@ -710,71 +795,28 @@ ipcMain.on("linkshell:message", (event, body: unknown) => {
             setNativeScreenShown(false);
           }
         }
-      } catch (error) { setNativeScreenShown(false); send("linkshell-native-screen", { id: message.id, type: "error", error: error instanceof Error ? error.message : String(error) }); }
+      } catch (error) {
+        setNativeScreenShown(false);
+        send("linkshell-native-screen", { id: message.id, type: "error", error: error instanceof Error ? error.message : String(error) });
+      }
       return;
     }
-    // A remote screen has the keys: the menu's shortcuts are the remote computer's while it does.
     case "screenKeys":
       if (typeof message.captured === "boolean") window.webContents.setIgnoreMenuShortcuts(message.captured);
       return;
-    // The terminal's full screen: the window goes full screen and the page fills it; the answer
-    // comes once the window has got there.
-    case "screenFullScreen": {
-      if (!window || typeof message.enabled !== "boolean") return;
-      wantedFullScreen = message.enabled;
-      wantedImmersiveFullScreen = message.enabled && message.immersive === true;
-      reconcileFullScreen();
+    case "screenFullScreen":
+      if (window && typeof message.enabled === "boolean") {
+        wantedFullScreen = message.enabled;
+        wantedImmersiveFullScreen = message.enabled && message.immersive === true;
+        reconcileFullScreen();
+      }
       return;
-    }
-    case "fusionTunnel":
-      handleFusionTunnelMessage(message);
-      return;
-    case "invoke": return void invoke(event.sender, message);
+    case "fusionTunnel": fusion.handleTunnelMessage(message); return;
+    case "invoke": return void legacyInvoke(event.sender, message);
   }
 });
 
-/**
- * A native context menu at the pointer: the page sends the items and
- * gets back the id of the one chosen (none when the menu is dismissed). Shortcuts are shown,
- * not registered: the page owns its keys.
- */
-function contextMenu(raw: unknown, at: unknown): Promise<{ id?: string }> {
-  return new Promise((resolve) => {
-    let count = 0;
-    const build = (items: unknown, depth: number): MenuItemConstructorOptions[] =>
-      (Array.isArray(items) ? items : []).flatMap((item): MenuItemConstructorOptions[] => {
-        if (!item || typeof item !== "object" || ++count > 80) return [];
-        const entry = item as Record<string, unknown>;
-        if (entry.type === "separator") return [{ type: "separator" }];
-        const label = typeof entry.label === "string" ? entry.label.slice(0, 120).replaceAll("&", "&&") : "";
-        if (!label) return [];
-        const enabled = entry.enabled !== false;
-        const accelerator = typeof entry.accelerator === "string" ? entry.accelerator : undefined;
-        if (Array.isArray(entry.submenu) && depth < 2) return [{ label, enabled, submenu: build(entry.submenu, depth + 1) }];
-        const id = typeof entry.id === "string" ? entry.id : undefined;
-        return [{
-          label,
-          enabled: enabled && !!id,
-          ...(typeof entry.checked === "boolean" ? { type: "checkbox" as const, checked: entry.checked } : {}),
-          ...(accelerator ? { accelerator, registerAccelerator: false } : {}),
-          click: () => resolve({ id }),
-        }];
-      });
-    const template = build(raw, 0);
-    if (!template.length || !window) return resolve({});
-    // At the point that was right-clicked (the page's own coordinates, scaled by its zoom), so a
-    // menu opened from the keyboard or a script still lands on its row, not wherever the pointer is.
-    const point = at && typeof at === "object" ? (at as { x?: unknown; y?: unknown }) : {};
-    const zoom = window.webContents.getZoomFactor();
-    const position = typeof point.x === "number" && typeof point.y === "number" && Number.isFinite(point.x) && Number.isFinite(point.y)
-      ? { x: Math.round(point.x * zoom), y: Math.round(point.y * zoom) } : {};
-    // A click arrives after the menu reports it closed; wait a moment before calling it dismissed.
-    Menu.buildFromTemplate(template).popup({ window, ...position, callback: () => setTimeout(() => resolve({}), 100) });
-  });
-}
-
-/** Management requests: each answered once, by id, through the same event channel. */
-async function invoke(sender: WebContents, message: Record<string, unknown>) {
+async function legacyInvoke(sender: WebContents, message: Record<string, unknown>) {
   const id = typeof message.id === "string" ? message.id : undefined;
   const method = typeof message.method === "string" ? message.method : "";
   const params = (message.params && typeof message.params === "object" ? message.params : {}) as Record<string, unknown>;
@@ -783,37 +825,70 @@ async function invoke(sender: WebContents, message: Record<string, unknown>) {
   let error: string | undefined;
   try { result = await handle(method, params); }
   catch (failure) { error = failure instanceof Error ? failure.message : String(failure); }
-  if (sender.isDestroyed()) return;
-  send("linkshell-desktop-reply", { id, result, error });
+  if (!sender.isDestroyed()) send("linkshell-desktop-reply", { id, result, error });
 }
 
 async function handle(method: string, params: Record<string, unknown>): Promise<unknown> {
   switch (method) {
-    case "snapshot": return management.snapshot();
-    case "startup": return management.startup();
-    case "action": return management.action(String(params.name ?? ""), params.input);
-    case "login": return cameBack(await management.signIn());
-    case "loginPassword": return management.signInWithPassword(params.email, params.password);
+    case "snapshot":
+      return withSidecarFallback(() => server.request("GET", "/desktop/snapshot", undefined, 10_000), () => management.snapshot());
+    case "startup":
+      return runManagementAction("startup");
+    case "action":
+      return runManagementAction(String(params.name ?? ""), params.input);
+    case "login":
+      return cameBack(await withSidecarFallback(
+        async () => { await server.login({ method: "web" }, 350_000); return (await server.snapshot({ fresh: true })) ?? management.snapshot(); },
+        () => management.signIn(),
+      ));
+    case "loginPassword":
+      return withSidecarFallback(
+        async () => {
+          await server.login({ method: "password", email: params.email, password: params.password }, 60_000);
+          return (await server.snapshot({ fresh: true })) ?? management.snapshot();
+        },
+        () => management.signInWithPassword(params.email, params.password),
+      );
     case "loginOAuth": {
       const provider = params.provider;
-      return cameBack(await management.signInWithProvider(provider, (url) => send("linkshell-desktop-login", { provider, url })));
+      return cameBack(await withSidecarFallback(
+        async () => {
+          if (provider !== "github" && provider !== "google") throw new Error("不支持的登录方式");
+          await server.login({ method: provider }, 350_000);
+          return (await server.snapshot({ fresh: true })) ?? management.snapshot();
+        },
+        () => management.signInWithProvider(provider, (url) => send("linkshell-desktop-login", { provider, url })),
+      ));
     }
-    case "cancelLogin": management.cancelSignIn(); return {};
-    case "usage": return management.usage(Number(params.days), String(params.agent ?? "all"));
-    case "log": return { text: await management.log(runtime.home), path: join(runtime.home, "host.log") };
-    case "revealLog": shell.showItemInFolder(join(runtime.home, "host.log")); return {};
-    // Standalone installs replace the whole app; npm/Homebrew installs use their CLI updater.
-    case "upgrade": {
-      if (runtime.standalone) { if (WINDOWS) return downloadWindowsUpdate(); nativeModule?.updaterInstall(); return {}; }
+    case "cancelLogin":
+      management.cancelSignIn();
+      await server.cancelLogin().catch(() => undefined);
+      return {};
+    case "usage": {
+      const days = Number(params.days);
+      const agent = String(params.agent ?? "all");
+      return withSidecarFallback(
+        () => server.action("usage", { days, agent }, 125_000),
+        () => management.usage(days, agent),
+      );
+    }
+    case "log":
+      return withSidecarFallback(
+        () => server.log(),
+        async () => ({ text: await management.log(runtime.home), path: join(runtime.home, "host.log") }),
+      );
+    case "revealLog":
+      shell.showItemInFolder(join(runtime.home, "host.log"));
+      return {};
+    case "upgrade":
+      if (runtime.standalone) return updater.install();
       await management.exec(["upgrade"], 240_000).catch(() => { throw new Error("更新未完成，请在终端运行 linkshell upgrade 查看详情。"); });
       return { message: "更新完成。重新打开 LinkShell 可加载新版界面。" };
-    }
-    case "about": return {
-      version: app.getVersion(), electron: process.versions.electron, standalone: runtime.standalone,
-      bundle: runtime.bundle, home: runtime.home, info: await management.standaloneInfo(),
-    };
-    // Windows asks no permission to capture or control an unlocked desktop; the person can still
-    // turn remote screen off, which LinkShell.Screen.exe checks before every capture.
+    case "about":
+      return {
+        version: app.getVersion(), electron: process.versions.electron, standalone: runtime.standalone,
+        bundle: runtime.bundle ?? runtime.folder, home: runtime.home, info: await management.standaloneInfo(),
+      };
     case "permissions": {
       if (!WINDOWS) return nativeModule?.permissions() ?? { recording: false, control: false, unavailable: true };
       const sharing = !existsSync(screenDisabled());
@@ -830,64 +905,42 @@ async function handle(method: string, params: Record<string, unknown>): Promise<
     case "setLoginItem": {
       const enabled = params.enabled === true;
       if (nativeModule) { const failed = nativeModule.setLoginItem(enabled); if (failed) throw new Error(`无法修改开机启动：${failed}`); }
-      // The same Run entry the earlier Windows app wrote, so an upgrade keeps the choice.
       else if (WINDOWS) app.setLoginItemSettings({ openAtLogin: enabled, path: process.execPath, args: ["--hidden"], name: "LinkShell" });
       else app.setLoginItemSettings({ openAtLogin: enabled });
       return nativeModule?.loginItem() ?? { enabled: windowsLoginItem() ?? enabled, approval: false };
     }
     case "openLoginItems": nativeModule?.openLoginItems(); return {};
     case "installCommand": return { path: await installCommand() };
-    // Windows ships linkshell.cmd beside the app and never edits PATH: the path is what to hand out.
     case "copyCommandPath": {
       if (!runtime.folder) throw new Error("当前不是 Windows 安装");
       const path = join(runtime.folder, "linkshell.cmd");
       clipboard.writeText(path);
       return { path };
     }
-    case "settings": return { opaqueWindow: settings.get("opaqueWindow") === true, autoCheck: settings.get("autoCheck") !== false, updateChannel: settings.get("updateChannel") ?? "stable", keepAwake: normalizeKeepAwakeMode(settings.get("keepAwake")), notifications: settings.get("notifications") !== false };
+    case "settings": return settings.snapshot();
     case "setSetting": {
       const key = String(params.key ?? "");
       if (!["opaqueWindow", "autoCheck", "updateChannel", "keepAwake", "notifications"].includes(key)) throw new Error("未知设置");
       if (key === "notifications" && typeof params.value !== "boolean") throw new Error("无效的通知设置");
       if (key === "updateChannel" && !["stable", "beta"].includes(String(params.value))) throw new Error("未知更新通道");
-      if (key === "updateChannel" && WINDOWS && (windowsUpdate.checking || windowsUpdate.installing)) throw new Error("更新正在进行，请稍后再切换通道");
+      if (key === "updateChannel") updater.assertChannelSwitchAllowed();
       if (key === "keepAwake") {
         if (typeof params.value !== "boolean" && !["smart", "always", "off"].includes(String(params.value))) throw new Error("无效的保持唤醒设置");
-        // Kept for older pages only: the Host owns keep-awake now (`machine.keepAwake`), so the
-        // window holds no assertion of its own that could contradict the Host's mode.
         settings.set(key, normalizeKeepAwakeMode(params.value));
       } else {
         settings.set(key, params.value);
       }
-      if (key === "updateChannel" && WINDOWS) {
-        // Invalidate the old channel before yielding to the settings write or another UI request.
-        windowsInstaller = undefined;
-        windowsUpdateEvent({ name: "current", message: t("win.channel") });
-      }
-      await saveSettings();
-      if (key === "opaqueWindow") updateWindowSurface();
-      if (key === "updateChannel") {
-        if (MAC) {
-          macUpdate = { checking: false, installing: false, available: false, message: t("win.channel") };
-          noteUpdate("current");
-        }
-        nativeModule?.updaterChannel(String(params.value));
-      }
+      if (key === "updateChannel") updater.beforeChannelSave();
+      await settings.save();
+      if (key === "opaqueWindow") updateWindowSurface(true);
+      if (key === "updateChannel") updater.afterChannelSave(String(params.value));
       return {};
     }
-    case "checkUpdates": return checkUpdates();
-    case "updateStatus":
-      if (WINDOWS && runtime.standalone) return windowsUpdate;
-      if (MAC && runtime.standalone && (macUpdate.checking || macUpdate.installing || macUpdate.available || macUpdate.checkedAt)) {
-        return macUpdate;
-      }
-      if (MAC && runtime.standalone && updateAvailable !== undefined) {
-        return { checking: false, installing: false, available: true, ...(updateAvailable ? { version: updateAvailable } : {}), message: updateAvailable ? t("mac.available", { version: updateAvailable }) : t("update.found").replace(/…$/, "") };
-      }
-      return undefined;
-    case "installUpdate": if (WINDOWS) return downloadWindowsUpdate(); nativeModule?.updaterInstall(); return {};
+    case "checkUpdates": return updater.check();
+    case "updateStatus": return updater.status();
+    case "installUpdate": return updater.install();
     case "retry": void retry(); return {};
-    case "contextMenu": return contextMenu(params.items, params.at);
+    case "contextMenu": return trayMenu.contextMenu(params.items, params.at);
     case "openPath": return openPath(params);
     case "reveal": {
       const path = typeof params.path === "string" ? params.path : "";
@@ -895,33 +948,26 @@ async function handle(method: string, params: Record<string, unknown>): Promise<
       shell.showItemInFolder(path);
       return {};
     }
-    case "fusionStart": return startFusionMode(params);
-    case "fusionState": return getFusionState(params);
-    case "fusionIcons": return getFusionIcons(params);
-    case "fusionLaunchApp": return controlFusionHub(params, "launchApp");
-    case "fusionQuitApp": return controlFusionHub(params, "quitApp");
-    case "fusionStop": return stopFusionHub(params);
+    case "fusionStart": return fusion.start(params);
+    case "fusionState": return fusion.state(params);
+    case "fusionIcons": return fusion.icons(params);
+    case "fusionLaunchApp": return fusion.control(params, "launchApp");
+    case "fusionQuitApp": return fusion.control(params, "quitApp");
+    case "fusionStop": return fusion.stop(params);
     case "openRemotePortExternal": return openRemotePortExternal(params);
     case "remotePortReply": return remotePortProxies.reply(params);
     case "setSystemShortcutCapture": return setSystemShortcutCaptureEnabled(params.enabled === true);
-    case "startLanDiscovery":
-      mdnsBrowser.start();
-      mdnsBrowser.refresh();
-      return mdnsBrowser.getHosts();
-    case "stopLanDiscovery":
-      await mdnsBrowser.stop();
-      return {};
-    case "getLanHosts":
-      return mdnsBrowser.getHosts();
+    case "startLanDiscovery": mdnsBrowser.start(); mdnsBrowser.refresh(); return mdnsBrowser.getHosts();
+    case "stopLanDiscovery": await mdnsBrowser.stop(); return {};
+    case "getLanHosts": return mdnsBrowser.getHosts();
     default: throw new Error("不支持的操作");
   }
 }
 
-// ── Saving before quitting or reconnecting ────────────────────────────────────────────────
+// ── Saving & clean shutdown ──────────────────────────────────────────────────────────────
 
 function flush(): Promise<boolean> {
   return new Promise((resolve) => {
-    // No workspace document: nothing of the page's is waiting to be saved.
     if (!window || window.isDestroyed() || !server.policy?.isTrusted(window.webContents.getURL())) return resolve(true);
     const nonce = randomUUID();
     const timer = setTimeout(() => { ipcMain.removeListener("linkshell:flushed", done); resolve(false); }, 10_000);
@@ -940,8 +986,7 @@ function flush(): Promise<boolean> {
 async function flushOrConfirm(continuing: string): Promise<boolean> {
   if (await flush()) return true;
   const options = {
-    type: "warning" as const, message: t("flush.message"),
-    detail: t("flush.detail"),
+    type: "warning" as const, message: t("flush.message"), detail: t("flush.detail"),
     buttons: [t("flush.back"), continuing], defaultId: 0, cancelId: 0,
   };
   if (window) showWindow();
@@ -954,37 +999,36 @@ app.on("before-quit", (event) => {
   event.preventDefault();
   if (quitting) return;
   quitting = true;
-  void flushOrConfirm(t("flush.quit")).then((confirmed) => {
+  void flushOrConfirm(t("flush.quit")).then(async (confirmed) => {
     if (!confirmed) { quitting = false; return; }
     quitConfirmed = true;
+    clearTimeout(resumeTimer);
     resetSystemShortcutCapture();
     nativeModule?.setImmersiveFullScreen(false);
     nativeModule?.screenStop();
     nativeScreenShown = false;
     void mdnsBrowser.stop();
-    for (const hub of electronHubs.values()) hub.stop();
-    stopAllFusionTunnels();
+    fusion.stopAll();
     remotePortProxies.stopAll();
-    server.stop();
-    menuBar?.stop();
+    trayMenu.stop();
     rememberBounds();
+    await Promise.all([settings.save(), server.stop()]);
     app.quit();
   });
 });
 
-app.on("activate", () => { showWindow(); maybeAutoCheckUpdates(); });
+app.on("activate", () => { showWindow(); updater.maybeAutoCheck(); });
 app.on("window-all-closed", () => { /* LinkShell stays in the menu bar. */ });
 app.on("will-quit", () => keepAwake.set(false));
 
-// ── Native pieces ─────────────────────────────────────────────────────────────────────────
+// ── Native helpers ───────────────────────────────────────────────────────────────────────
 
-/** "Open in…" for a path on this computer: an absolute path that exists, an editor from the allow-list, never a shell. */
 async function openPath(params: Record<string, unknown>): Promise<{ ok: boolean }> {
   const path = typeof params.path === "string" ? params.path : "";
-  const app = params.app ?? "default";
+  const targetApp = params.app ?? "default";
   if (!isAbsolute(path) || !existsSync(path)) throw new Error("这个位置已经不在了");
-  if (!isOpenPathApp(app)) throw new Error("不支持的打开方式");
-  const plan = openPathPlan(process.platform, app, path);
+  if (!isOpenPathApp(targetApp)) throw new Error("不支持的打开方式");
+  const plan = openPathPlan(process.platform, targetApp, path);
   if (plan.kind === "default") {
     const failed = await shell.openPath(path);
     if (failed) throw new Error(failed);
@@ -994,8 +1038,6 @@ async function openPath(params: Record<string, unknown>): Promise<{ ok: boolean 
     await new Promise<void>((done, fail) => {
       const child = spawn(plan.file, plan.args, { stdio: "ignore", shell: false, windowsHide: true });
       child.once("error", () => fail(new Error("没有找到对应的应用")));
-      // `open -a` returns at once and a non-zero exit means the app isn't installed; a terminal
-      // elsewhere keeps running, so having started is the answer.
       if (MAC) child.once("exit", (code) => (code === 0 ? done() : fail(new Error("没有找到对应的应用"))));
       else child.once("spawn", () => { child.unref(); done(); });
     });
@@ -1009,43 +1051,14 @@ function openSetup(params?: Record<string, unknown>) {
   if (!helper) throw new Error("开发模式下请从 apps/mac 构建的 LinkShell.app 打开权限引导");
   const requested = params?.permission;
   let target: "recording" | "control";
-  if (requested === "recording" || requested === "control") {
-    target = requested;
-  } else {
+  if (requested === "recording" || requested === "control") target = requested;
+  else {
     const current = nativeModule?.permissions();
     target = current && current.recording && !current.control ? "control" : "recording";
   }
-  // Open System Settings directly with the floating drag-and-drop card (no intermediate dialog).
   spawn("/usr/bin/open", ["-n", "-a", helper, "--args", "--guide-permission", target], { stdio: "ignore", detached: true }).unref();
   return {};
 }
-
-type FusionTunnelState = {
-  tunnelId: string;
-  server: NetServer;
-  localPort: number;
-  connections: Map<string, NetSocket>;
-};
-const fusionTunnels = new Map<string, FusionTunnelState>();
-
-function stopAllFusionTunnels() {
-  for (const state of fusionTunnels.values()) {
-    for (const sock of state.connections.values()) sock.destroy();
-    state.connections.clear();
-    state.server.close();
-  }
-  fusionTunnels.clear();
-}
-
-const remotePortProxies = new RemotePortProxyManager({
-  dispatch: (payload) => {
-    if (!pageReady || !window || window.isDestroyed() || !server.policy?.isTrusted(window.webContents.getURL())) {
-      return false;
-    }
-    send("linkshell-desktop-remote-port-req", payload);
-    return true;
-  },
-});
 
 async function openRemotePortExternal(params: Record<string, unknown>): Promise<{ url: string; localPort: number }> {
   const computerKey = typeof params.computerKey === "string" ? params.computerKey.trim() : "";
@@ -1059,370 +1072,6 @@ async function openRemotePortExternal(params: Record<string, unknown>): Promise<
   return { url, localPort };
 }
 
-function handleFusionTunnelMessage(message: Record<string, unknown>) {
-  const tunnelId = typeof message.tunnelId === "string" ? message.tunnelId : "";
-  const connId = typeof message.connId === "string" ? message.connId : "";
-  const type = typeof message.type === "string" ? message.type : "";
-  if (!tunnelId || !connId) return;
-  let owner: FusionTunnelState | undefined;
-  for (const state of fusionTunnels.values()) {
-    if (state.tunnelId === tunnelId) { owner = state; break; }
-  }
-  const sock = owner?.connections.get(connId);
-  if (!sock) return;
-  if (type === "data" && typeof message.data === "string") {
-    sock.write(Buffer.from(message.data, "base64"));
-  } else if (type === "close") {
-    owner?.connections.delete(connId);
-    sock.end();
-  }
-}
-
-async function ensureFusionTunnel(computerKey: string): Promise<FusionTunnelState> {
-  const existing = fusionTunnels.get(computerKey);
-  if (existing && existing.server.listening) return existing;
-  if (existing) {
-    for (const sock of existing.connections.values()) sock.destroy();
-    existing.server.close();
-    fusionTunnels.delete(computerKey);
-  }
-  const tunnelId = randomUUID();
-  const connections = new Map<string, NetSocket>();
-  const tcpServer = createNetServer((sock) => {
-    const connId = randomUUID();
-    connections.set(connId, sock);
-    sock.setNoDelay(true);
-    send("linkshell-fusion-tunnel", { tunnelId, connId, type: "open" });
-    sock.on("data", (chunk: Buffer) => {
-      send("linkshell-fusion-tunnel", { tunnelId, connId, type: "data", data: chunk.toString("base64") });
-    });
-    const closed = () => {
-      if (!connections.delete(connId)) return;
-      send("linkshell-fusion-tunnel", { tunnelId, connId, type: "close" });
-    };
-    sock.once("close", closed);
-    sock.once("error", closed);
-  });
-  await new Promise<void>((resolve, reject) => {
-    tcpServer.once("error", reject);
-    tcpServer.listen(0, "127.0.0.1", () => {
-      tcpServer.removeListener("error", reject);
-      resolve();
-    });
-  });
-  const localPort = (tcpServer.address() as AddressInfo).port;
-  const state: FusionTunnelState = { tunnelId, server: tcpServer, localPort, connections };
-  fusionTunnels.set(computerKey, state);
-  return state;
-}
-
-/** The token goes in the environment: arguments are readable by every local user through `ps`. */
-function spawnFusionLocal(helper: string, args: string[], token: string) {
-  const env: NodeJS.ProcessEnv = { ...process.env, LINKSHELL_HOME: runtime.home, LINKSHELL_FUSION_TOKEN: token };
-  delete env.ELECTRON_RUN_AS_NODE;
-  delete env.ELECTRON_NO_ATTACH_CONSOLE;
-  spawn(helper, args, { detached: true, stdio: "ignore", env }).unref();
-}
-
-/**
- * Which local half shows the remote windows: LinkShell.app's `--fusion-local` and its stubs on a
- * Mac, the desktop app itself (`FusionElectronHub`) on Windows. LINKSHELL_FUSION_HUB=electron
- * runs the Windows one on a Mac, to test it there (docs/v2/fusion.md §8.1).
- */
-const ELECTRON_HUB = WINDOWS || process.env.LINKSHELL_FUSION_HUB === "electron";
-const electronHubs = new Map<string, FusionElectronHub>();
-const electronHubExits = new Map<string, { reason: string; message: string; at: number }>();
-
-function electronHub(computerKey: string, name: string): FusionElectronHub {
-  const existing = electronHubs.get(computerKey);
-  if (existing?.running) return existing;
-  const slug = fusionSlug(computerKey);
-  const hub = new FusionElectronHub({
-    computerKey,
-    name,
-    slug,
-    home: runtime.home,
-    pageURL: () => server.url,
-    preload: join(here, "../preload/fusion-hub.cjs"),
-    relaunch: { executable: process.execPath, args: (bundle) => ["--fusion-connect", computerKey, "--fusion-launch", bundle] },
-    ...(WINDOWS ? { shortcutDir: join(app.getPath("appData"), "Microsoft/Windows/Start Menu/Programs/LinkShell", name.replace(/[\\/:*?"<>|]/g, "_")) } : {}),
-    isTrusted: (url) => server.policy?.isTrusted(url) ?? false,
-    log: (line) => console.log(line),
-  });
-  hub.onExit = (reason, message) => {
-    electronHubExits.set(slug, { reason, message, at: Date.now() });
-    if (electronHubs.get(computerKey) === hub) electronHubs.delete(computerKey);
-  };
-  electronHubs.set(computerKey, hub);
-  return hub;
-}
-
-async function startFusionMode(params: Record<string, unknown>) {
-  if (!ELECTRON_HUB && (!MAC || !runtime.helper || !existsSync(runtime.helper))) {
-    throw new Error("融合模式需要 macOS 或 Windows 桌面版 LinkShell");
-  }
-  const computerKey = typeof params.computerKey === "string" ? params.computerKey : "";
-  const name = typeof params.name === "string" && params.name.trim() ? params.name.trim() : "Remote";
-  const port = Number(params.port);
-  const token = typeof params.token === "string" ? params.token : "";
-  const hosts = Array.isArray(params.hosts) ? params.hosts.filter((h): h is string => typeof h === "string" && h.length > 0) : [];
-  const launchBundle = typeof params.launchBundle === "string" && params.launchBundle ? params.launchBundle : undefined;
-  if (!computerKey || !token || !Number.isInteger(port) || port <= 0 || port > 65535) {
-    throw new Error("远端融合模式连接信息无效");
-  }
-  const directHost = await pickDirectFusionHost(hosts, port);
-  if (ELECTRON_HUB) {
-    const hub = electronHub(computerKey, name);
-    if (directHost) {
-      hub.connect(directHost, port, token, launchBundle);
-      return { mode: "direct" as const, host: directHost, port };
-    }
-    const tunnel = await ensureFusionTunnel(computerKey);
-    hub.connect("127.0.0.1", tunnel.localPort, token, launchBundle);
-    return { mode: "tunnel" as const, tunnelId: tunnel.tunnelId, port: tunnel.localPort };
-  }
-  const helper = runtime.helper;
-  if (!helper) throw new Error("融合模式需要 macOS 或 Windows 桌面版 LinkShell");
-  const extra = launchBundle ? ["--launch", launchBundle] : [];
-  if (directHost) {
-    spawnFusionLocal(helper, [
-      "--fusion-local",
-      "--host", directHost,
-      "--port", String(port),
-      "--name", name,
-      "--computer-key", computerKey,
-      ...extra,
-    ], token);
-    return { mode: "direct" as const, host: directHost, port };
-  }
-  const tunnel = await ensureFusionTunnel(computerKey);
-  spawnFusionLocal(helper, [
-    "--fusion-local",
-    "--host", "127.0.0.1",
-    "--port", String(tunnel.localPort),
-    "--name", name,
-    "--computer-key", computerKey,
-    ...extra,
-  ], token);
-  return { mode: "tunnel" as const, tunnelId: tunnel.tunnelId, port: tunnel.localPort };
-}
-
-/** The hub's key: from `computerKey`, or an already derived `hostSlug`. Never from a display name. */
-function fusionSlugOf(params: Record<string, unknown>): string | undefined {
-  if (typeof params.computerKey === "string" && params.computerKey) return fusionSlug(params.computerKey);
-  return isFusionSlug(params.hostSlug) ? params.hostSlug : undefined;
-}
-
-function mapFusionCategory(raw: string): string {
-  if (raw.includes("developer-tools")) return "开发工具";
-  if (raw.includes("productivity") || raw.includes("finance") || raw.includes("business")) return "效率";
-  if (raw.includes("utilities")) return "实用工具";
-  if (raw.includes("social-networking")) return "社交";
-  if (raw.includes("entertainment") || raw.includes("games") || raw.includes("music") || raw.includes("video")) return "娱乐";
-  if (raw.includes("graphics-design") || raw.includes("photography")) return "创意";
-  return "其他";
-}
-
-function queryFusionSocket(hostSlug: string | undefined, payload: Record<string, unknown>, timeoutMs = 450): Promise<Record<string, unknown> | undefined> {
-  if (!MAC || !isFusionSlug(hostSlug)) return Promise.resolve(undefined);
-  const sockPath = join(runtime.home, `fusion-${hostSlug}.sock`);
-  if (!existsSync(sockPath)) return Promise.resolve(undefined);
-  return new Promise((resolve) => {
-    let settled = false;
-    let buf = "";
-    const sock = createConnection(sockPath);
-    const finish = (value?: Record<string, unknown>) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      sock.destroy();
-      resolve(value);
-    };
-    const timer = setTimeout(() => finish(undefined), timeoutMs);
-    sock.once("connect", () => {
-      sock.write(JSON.stringify(payload) + "\n");
-    });
-    sock.on("data", (chunk: Buffer) => {
-      buf += chunk.toString("utf8");
-      const nl = buf.indexOf("\n");
-      if (nl >= 0) {
-        try {
-          finish(JSON.parse(buf.slice(0, nl)) as Record<string, unknown>);
-        } catch {
-          finish(undefined);
-        }
-      }
-    });
-    sock.once("error", () => finish(undefined));
-    sock.once("end", () => finish(undefined));
-  });
-}
-
-async function readCachedFusionState(name: string, hostSlug: string, computerKey: string) {
-  const { readdir, readFile } = await import("node:fs/promises");
-  const iconDir = join(runtime.home, "fusion-icons", hostSlug);
-  const appsDir = join(app.getPath("home"), "Applications/LinkShell", name);
-  const iconBundles: string[] = [];
-  try {
-    for (const file of await readdir(iconDir)) {
-      if (file.endsWith(".png")) iconBundles.push(file.slice(0, -4));
-    }
-  } catch { /* No icon cache yet. */ }
-
-  const isOwnFusionBundle = (bundle: unknown) =>
-    typeof bundle === "string" && (bundle.startsWith("LinkShell.") || bundle.startsWith("com.bd.linkshell."));
-  try {
-    const raw = JSON.parse(await readFile(join(iconDir, "catalog.json"), "utf8")) as {
-      apps?: Array<Record<string, unknown>>;
-      appsDir?: string;
-    };
-    const filtered = Array.isArray(raw.apps) ? raw.apps.filter((item) => !isOwnFusionBundle(item?.bundle)) : [];
-    if (filtered.length > 0) {
-      return {
-        appsDir: typeof raw.appsDir === "string" && raw.appsDir ? raw.appsDir : appsDir,
-        iconBundles,
-        apps: filtered,
-      };
-    }
-  } catch { /* Fallback to scanning materialized Stub bundles if catalog.json is not written yet. */ }
-
-  const fallbackApps: Array<Record<string, unknown>> = [];
-  try {
-    const entries = await readdir(appsDir);
-    const suffix = ` · ${name}`;
-    for (const entry of entries) {
-      if (!entry.endsWith(".app")) continue;
-      const appPath = join(appsDir, entry);
-      try {
-        const xml = await readFile(join(appPath, "Contents/Info.plist"), "utf8");
-        const field = (key: string) => {
-          const m = new RegExp(`<key>${key}</key>\\s*<string>([^<]*)</string>`).exec(xml);
-          return m?.[1]?.trim() ?? "";
-        };
-        const bundle = field("LSFusionBundleID");
-        if (!bundle || isOwnFusionBundle(bundle)) continue;
-        const display = field("CFBundleDisplayName") || entry.slice(0, -4);
-        const cleanName = display.endsWith(suffix) ? display.slice(0, -suffix.length) : display;
-        const rawCategory = field("LSApplicationCategoryType");
-        fallbackApps.push({
-          name: cleanName,
-          bundle,
-          category: mapFusionCategory(rawCategory),
-          rawCategory,
-          isSystem: false,
-          stubPath: appPath,
-        });
-      } catch { /* Ignore partial bundle. */ }
-    }
-  } catch { /* No Stub directory yet. */ }
-
-  void computerKey;
-  return { appsDir, iconBundles, apps: fallbackApps };
-}
-
-/** Why the last hub exited, written by FusionLocal on its way out. */
-async function readFusionExit(hostSlug: string): Promise<Record<string, unknown> | undefined> {
-  const { readFile } = await import("node:fs/promises");
-  try {
-    const raw = JSON.parse(await readFile(join(runtime.home, `fusion-${hostSlug}.status.json`), "utf8")) as Record<string, unknown>;
-    return raw && typeof raw === "object" ? raw : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-async function getFusionState(params: Record<string, unknown>) {
-  const name = typeof params.name === "string" && params.name.trim() ? params.name.trim() : "Remote";
-  const computerKey = typeof params.computerKey === "string" ? params.computerKey : "";
-  const hostSlug = fusionSlugOf(params) ?? fusionSlug(name);
-  const hub = computerKey ? electronHubs.get(computerKey) : undefined;
-  const live = hub?.running ? hub.status() : await queryFusionSocket(hostSlug, { t: "status" });
-  const lastExit = live ? undefined : (electronHubExits.get(hostSlug) ?? await readFusionExit(hostSlug));
-  const cached = (!live || !Array.isArray(live.apps) || live.apps.length === 0)
-    ? await readCachedFusionState(name, hostSlug, computerKey)
-    : undefined;
-  const liveApps = Array.isArray(live?.apps) && live.apps.length > 0 ? live.apps : (cached?.apps ?? []);
-  const liveIcons = Array.isArray(live?.iconBundles) && live.iconBundles.length > 0 ? live.iconBundles : (cached?.iconBundles ?? []);
-  return {
-    hubRunning: Boolean(live),
-    connected: live?.connected === true,
-    reconnecting: live?.reconnecting === true,
-    rttMs: typeof live?.rttMs === "number" ? live.rttMs : undefined,
-    hostLabel: typeof live?.hostLabel === "string" ? live.hostLabel : name,
-    hostSlug,
-    appsDir: typeof live?.appsDir === "string" ? live.appsDir : (cached?.appsDir ?? join(app.getPath("home"), "Applications/LinkShell", name)),
-    statusText: typeof live?.statusText === "string" ? live.statusText : undefined,
-    activeBundles: Array.isArray(live?.activeBundles) ? live.activeBundles : [],
-    windowCounts: live?.windowCounts && typeof live.windowCounts === "object" ? live.windowCounts : {},
-    iconBundles: liveIcons,
-    apps: liveApps,
-    alerts: Array.isArray(live?.alerts) ? live.alerts : [],
-    lastExit,
-  };
-}
-
-async function getFusionIcons(params: Record<string, unknown>) {
-  if (!MAC && !ELECTRON_HUB) return { icons: {} };
-  const { readFile } = await import("node:fs/promises");
-  const hostSlug = fusionSlugOf(params);
-  if (!hostSlug) return { icons: {} };
-  const bundles = Array.isArray(params.bundles)
-    ? params.bundles.filter((b): b is string => typeof b === "string" && b.length > 0).slice(0, 48)
-    : [];
-  const iconDir = join(runtime.home, "fusion-icons", hostSlug);
-  const icons: Record<string, { src: string; badged: boolean }> = {};
-  for (const bundle of bundles) {
-    const safe = fusionIconFile(bundle);
-    const uiPath = join(iconDir, "ui", `${safe}.png`);
-    try {
-      const bytes = await readFile(uiPath);
-      icons[bundle] = { src: `data:image/png;base64,${bytes.toString("base64")}`, badged: true };
-      continue;
-    } catch { /* Fall back to raw cached PNG if ui thumbnail hasn't been generated yet. */ }
-    const rawPath = join(iconDir, `${safe}.png`);
-    if (existsSync(rawPath)) {
-      try {
-        const img = nativeImage.createFromPath(rawPath);
-        if (!img.isEmpty()) {
-          const resized = img.resize({ width: 144, height: 144, quality: "best" }).toPNG();
-          icons[bundle] = { src: `data:image/png;base64,${resized.toString("base64")}`, badged: false };
-        }
-      } catch { /* Ignore unreadable icon. */ }
-    }
-  }
-  return { icons };
-}
-
-async function controlFusionHub(params: Record<string, unknown>, type: "launchApp" | "quitApp") {
-  const hostSlug = fusionSlugOf(params);
-  const bundle = typeof params.bundle === "string" ? params.bundle : "";
-  if (!bundle) throw new Error("缺少目标应用标识");
-  const hub = typeof params.computerKey === "string" ? electronHubs.get(params.computerKey) : undefined;
-  if (hub?.running) {
-    if (type === "launchApp") hub.launchApp(bundle); else hub.quitApp(bundle, params.force === true);
-    return { ok: true };
-  }
-  const reply = await queryFusionSocket(hostSlug, { t: type, bundle, force: params.force === true });
-  return { ok: Boolean(reply) };
-}
-
-async function stopFusionHub(params: Record<string, unknown>) {
-  const hostSlug = fusionSlugOf(params);
-  const computerKey = typeof params.computerKey === "string" ? params.computerKey : "";
-  const hub = computerKey ? electronHubs.get(computerKey) : undefined;
-  if (hub) { hub.stop(); electronHubs.delete(computerKey); }
-  else await queryFusionSocket(hostSlug, { t: "stopHub" });
-  const tunnel = computerKey ? fusionTunnels.get(computerKey) : undefined;
-  if (tunnel) {
-    for (const sock of tunnel.connections.values()) sock.destroy();
-    tunnel.connections.clear();
-    tunnel.server.close();
-    fusionTunnels.delete(computerKey);
-  }
-  return { ok: true };
-}
-
-/** The file LinkShell.Screen.exe refuses to capture beside (the earlier Windows app's switch). */
 function screenDisabled() { return join(runtime.home, "windows-screen-disabled"); }
 
 async function installCommand(): Promise<string> {
@@ -1435,7 +1084,6 @@ async function installCommand(): Promise<string> {
   await mkdir(directory, { recursive: true });
   const existing = await readlink(link).catch(() => undefined);
   if (existing === target) return link;
-  // A different installation's command is never silently replaced.
   if (existing !== undefined || await lstat(link).then(() => true, () => false)) {
     throw new Error("~/.local/bin/linkshell 已存在，未覆盖。可直接使用 App 内 Contents/MacOS/linkshell-cli。");
   }
@@ -1443,342 +1091,30 @@ async function installCommand(): Promise<string> {
   return link;
 }
 
-/** Whether Windows will start LinkShell at sign-in, by its Run entry; undefined elsewhere. */
 function windowsLoginItem(): boolean | undefined {
   if (!WINDOWS) return undefined;
-  const settings = app.getLoginItemSettings({ path: process.execPath, args: ["--hidden"] });
-  return settings.launchItems?.some((item) => item.name === "LinkShell" && item.enabled) ?? settings.openAtLogin;
-}
-
-type WindowsUpdateState = { checking: boolean; installing: boolean; available: boolean; message: string; version?: string; checkedAt?: number };
-let windowsUpdate: WindowsUpdateState = { checking: false, installing: false, available: false, message: "" };
-let windowsInstaller: WindowsRelease | undefined;
-let windowsDownloaded: DownloadedInstaller | undefined;
-let windowsInstallerChild: ChildProcess | undefined;
-const windowsUpdateCache = () => join(app.getPath("userData"), "windows-updates", runtime.scope);
-
-function windowsUpdateEvent(detail: { name: string; message?: string; version?: string }) {
-  const { name, message, version } = detail;
-  windowsUpdate = { ...windowsUpdate, ...(message === undefined ? {} : { message }), ...(version === undefined ? {} : { version }) };
-  if (name === "checking") windowsUpdate.checking = true;
-  if (name === "available" || name === "current") { windowsUpdate.available = name === "available"; windowsUpdate.checkedAt = Date.now(); }
-  if (name === "current") windowsUpdate.version = undefined;
-  if (name === "installing") windowsUpdate.installing = true;
-  if (name === "finished") { windowsUpdate.checking = false; windowsUpdate.installing = false; }
-  noteUpdate(name, version);
-  send("linkshell-desktop-update", detail);
-}
-
-async function checkWindowsUpdate() {
-  if (windowsUpdate.checking || windowsUpdate.installing) return;
-  windowsUpdateEvent({ name: "checking", message: t("win.checking") });
-  try {
-    const release = await checkWindowsRelease((url, init) => net.fetch(url, init), settings.get("updateChannel") === "beta");
-    windowsInstaller = release && compareVersions(release.version, app.getVersion()) > 0 ? release : undefined;
-    if (windowsInstaller) windowsUpdateEvent({ name: "available", version: windowsInstaller.version, message: t("win.available", { version: windowsInstaller.version }) });
-    else windowsUpdateEvent({ name: "current", message: release ? t("win.current") : t("win.none") });
-  } catch (error) {
-    windowsUpdateEvent({ name: "message", message: t("win.checkFailed", { message: error instanceof Error ? error.message : String(error) }) });
-  } finally { windowsUpdateEvent({ name: "finished" }); }
-}
-
-/** The installer acknowledges its window and mutex before this app releases its workspace. */
-async function launchWindowsInstaller(download: DownloadedInstaller): Promise<void> {
-  if (!runtime.folder) throw new Error("当前不是 Windows 独立安装");
-  if (windowsInstallerChild?.pid && windowsInstallerChild.exitCode === null) throw new Error("安装程序仍在运行，请先回到安装窗口继续或关闭它");
-  const { readFile, rm } = await import("node:fs/promises");
-  const ready = join(download.directory, "ready");
-  // The installer's working directory is the download cache; resolve a relative home before crossing processes.
-  const home = resolve(runtime.home);
-  await rm(ready, { force: true });
-  const child = spawn(download.path, ["--update", "--wait-pid", String(process.pid), "--target", runtime.folder, "--home", home, "--ready", ready], {
-    detached: true, stdio: "ignore", cwd: download.directory, env: { ...process.env, LINKSHELL_HOME: home },
-  });
-  windowsInstallerChild = child;
-  let failed: Error | undefined;
-  const onError = (error: Error) => { failed = error; };
-  child.on("error", onError);
-  try {
-    const deadline = Date.now() + 20_000;
-    while (Date.now() < deadline) {
-      if (failed) throw failed;
-      if (child.exitCode !== null) throw new Error("安装程序已退出，请重试更新");
-      const acknowledged = Number(await readFile(ready, "utf8").catch(() => ""));
-      if (child.pid && acknowledged === child.pid) { child.unref(); return; }
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-    throw new Error("安装程序未能就绪，LinkShell 保持运行；请关闭安装窗口后重试");
-  } finally { child.removeListener("error", onError); }
-}
-
-/** Downloads stay inside the app and are verified before the existing installer transaction runs. */
-function downloadWindowsUpdate() {
-  if (!WINDOWS || !runtime.folder) throw new Error("当前不是 Windows 独立安装");
-  if (!windowsInstaller) throw new Error("请先检查更新");
-  if (windowsInstallerChild?.pid && windowsInstallerChild.exitCode === null) throw new Error("安装程序仍在运行，请先回到安装窗口继续或关闭它");
-  if (windowsUpdate.checking || windowsUpdate.installing) return { started: false };
-  const release = windowsInstaller;
-  windowsUpdateEvent({ name: "installing", message: t("win.downloading") });
-  void (async () => {
-    try {
-      if (windowsDownloaded?.version !== release.version) {
-        if (windowsDownloaded) await import("node:fs/promises").then(({ rm }) => rm(windowsDownloaded!.directory, { recursive: true, force: true }));
-        windowsDownloaded = undefined;
-        windowsDownloaded = await downloadWindowsInstaller(release, windowsUpdateCache(), (url, init) => net.fetch(url, init), (received, total) => {
-          windowsUpdateEvent({ name: "message", message: t("win.progress", { percent: Math.floor(received / total * 100), received: (received / 1048576).toFixed(1), total: (total / 1048576).toFixed(1) }) });
-        });
-      }
-      windowsUpdateEvent({ name: "message", message: t("win.downloaded") });
-      if (!(await flushOrConfirm(t("flush.install")))) {
-        windowsUpdateEvent({ name: "message", message: t("win.postponed") });
-        return;
-      }
-      // A postponed download is checked again: never execute a changed file from the cache.
-      await verifyInstaller(windowsDownloaded);
-      windowsUpdateEvent({ name: "message", message: t("win.launching") });
-      await launchWindowsInstaller(windowsDownloaded);
-      rememberBounds();
-      await saveSettings();
-      quitConfirmed = true;
-      quitting = true;
-      server.stop();
-      menuBar?.stop();
-      app.quit();
-    } catch (error) {
-      // Failed downloads are removed by the downloader; a changed cached file must be fetched again.
-      if (windowsDownloaded && (!windowsInstallerChild?.pid || windowsInstallerChild.exitCode !== null)) {
-        const failed = windowsDownloaded;
-        windowsDownloaded = undefined;
-        await import("node:fs/promises").then(({ rm }) => rm(failed.directory, { recursive: true, force: true })).catch(() => undefined);
-      }
-      windowsUpdateEvent({ name: "message", message: t("win.failed", { message: error instanceof Error ? error.message : String(error) }) });
-    } finally { windowsUpdateEvent({ name: "finished" }); }
-  })();
-  // Native progress events carry long downloads; the renderer's RPC must not wait for the transfer.
-  return { started: true };
-}
-
-let macUpdate: WindowsUpdateState = { checking: false, installing: false, available: false, message: "" };
-let lastUpdateCheck = 0;
-
-function macUpdateBusy(): boolean {
-  return macUpdate.checking || macUpdate.installing;
-}
-
-function recordMacUpdateEvent(name: string, detail: Record<string, unknown>, message: unknown) {
-  const nextMessage = typeof message === "string" ? message : macUpdate.message;
-  const nextVersion = typeof detail.version === "string" ? detail.version : macUpdate.version;
-  macUpdate = { ...macUpdate, message: nextMessage, version: nextVersion };
-  if (name === "checking") macUpdate.checking = true;
-  if (name === "available" || name === "current") { macUpdate.available = name === "available"; macUpdate.checkedAt = Date.now(); }
-  if (name === "current") macUpdate.version = undefined;
-  if (name === "installing") macUpdate.installing = true;
-  if (name === "finished") { macUpdate.checking = false; macUpdate.installing = false; }
-}
-
-function checkUpdates() {
-  lastUpdateCheck = Date.now();
-  if (WINDOWS && runtime.standalone) { void checkWindowsUpdate(); return { started: true }; }
-  if (!nativeModule || !runtime.standalone) return { started: false };
-  nativeModule.updaterCheck();
-  return { started: true };
-}
-
-function maybeAutoCheckUpdates(cooldownMs = AUTO_UPDATE_CHECK_COOLDOWN_MS) {
-  const busy = WINDOWS ? (windowsUpdate.checking || windowsUpdate.installing) : macUpdateBusy();
-  if (!shouldAutoCheckUpdates({
-    enabled: settings.get("autoCheck") !== false,
-    standalone: runtime.standalone,
-    busy,
-    lastCheckAt: lastUpdateCheck,
-    now: Date.now(),
-    cooldownMs,
-  })) return;
-  checkUpdates();
-}
-
-function startUpdater() {
-  if (WINDOWS && runtime.standalone) {
-    void cleanWindowsUpdateDownloads(windowsUpdateCache());
-    setTimeout(() => void cleanWindowsUpdateDownloads(windowsUpdateCache()), 60_000).unref();
-    if (!launch.checkUpdates) setTimeout(() => maybeAutoCheckUpdates(), 3_000).unref();
-    setInterval(() => maybeAutoCheckUpdates(PERIODIC_UPDATE_CHECK_INTERVAL_MS), 60_000).unref();
-    return;
-  }
-  if (!nativeModule || !runtime.standalone) return;
-  const prepare = macUpdatePreparation({
-    prepare: () => management.action("prepare-update"),
-    recover: () => management.action("recover-update"),
-    resume: () => nativeModule?.updaterPrepared(),
-    text: {
-      paused: (why) => t("mac.paused", { message: why }),
-      recover: (why) => t("mac.recoverSentence", { message: why }),
-      get retry() { return t("mac.retry"); },
-    },
-    failed: (message) => {
-      recordMacUpdateEvent("message", {}, message);
-      recordMacUpdateEvent("finished", {}, undefined);
-      send("linkshell-desktop-update", { name: "message", message });
-      send("linkshell-desktop-update", { name: "finished" });
-    },
-  });
-  nativeModule.updaterStart({
-    event: (name, detail) => {
-      if (name === "prepare") {
-        // Sparkle is about to relaunch: the CLI stops this app's Host first, then Sparkle continues.
-        void prepare();
-        return;
-      }
-      if (name === "recover") {
-        void management.action("recover-update").catch((error: unknown) => {
-          send("linkshell-desktop-update", { name: "message", message: t("mac.recover", { message: error instanceof Error ? error.message : String(error) }) });
-        });
-      }
-      const localizedMessage = "message" in detail ? localizeUpdaterMessage(locale, detail.message) : undefined;
-      recordMacUpdateEvent(name, detail, localizedMessage);
-      noteUpdate(name, detail?.version);
-      send("linkshell-desktop-update", { name, ...detail, ...("message" in detail ? { message: localizedMessage } : {}) });
-    },
-  }, String(settings.get("updateChannel") ?? "stable"));
-  if (!launch.checkUpdates) setTimeout(() => maybeAutoCheckUpdates(), 3_000).unref();
-  setInterval(() => maybeAutoCheckUpdates(PERIODIC_UPDATE_CHECK_INTERVAL_MS), 60_000).unref();
-}
-
-/** A found update is named in the menu bar item's menu, so it can be installed without opening the window first. */
-let updateAvailable: string | undefined;
-function noteUpdate(name: string, version?: unknown) {
-  const next = updateFound(updateAvailable, name, version);
-  if (next === updateAvailable) return;
-  updateAvailable = next;
-  updateTray();
-}
-
-const trayItems = (): MenuBarEntry[] => [
-  { id: "open", label: t("tray.open") },
-  { id: "manage", label: t("tray.settings") },
-  { id: "update", label: updateLabel(updateAvailable, { check: t("update.check"), to: (version) => t("update.to", { version }), found: t("update.found") }) },
-  { separator: true },
-  { id: "quit", label: t("menu.quit") },
-];
-
-function trayClicked(id: string) {
-  if (id === "open") { openWorkspace(); showWindow(); }
-  else if (id === "manage") { openManagement("settings"); showWindow(); }
-  else if (id === "update") { openManagement("updates"); showWindow(); if (updateAvailable === undefined) checkUpdates(); }
-  else if (id === "quit") app.quit();
-}
-
-function updateTray() {
-  const items = trayItems();
-  menuBar?.show("LinkShell", items);
-  if (!tray) return;
-  tray.setContextMenu(Menu.buildFromTemplate(items.map((entry): MenuItemConstructorOptions =>
-    "separator" in entry ? { type: "separator" } : { label: entry.label, click: () => trayClicked(entry.id) })));
-}
-
-/** Clicked in the menu bar process: LinkShell isn't the active app, so it takes the focus to come forward. */
-function menuBarEvent(event: MenuBarEvent) {
-  if (event.t === "click" && event.id === "quit") { app.quit(); return; }
-  app.focus({ steal: true });
-  if (event.t === "click") trayClicked(event.id);
-  else showWindow();
-}
-
-function installMenu() {
-  // Windows has no menu bar: the page owns its shortcuts there (desktop-commands.ts), and
-  // Chromium's own (reload, developer tools) stay out of a shipped window.
-  if (!MAC) { Menu.setApplicationMenu(null); return; }
-  const template: MenuItemConstructorOptions[] = [
-    { label: "LinkShell", submenu: [
-      { label: t("menu.about"), role: "about" },
-      { type: "separator" },
-      { label: t("menu.settings"), accelerator: "CmdOrCtrl+,", click: () => { openManagement("settings"); showWindow(); } },
-      { label: t("menu.checkUpdates"), click: () => { openManagement("updates"); showWindow(); checkUpdates(); } },
-      { type: "separator" },
-      { label: t("menu.hide"), role: "hide" },
-      { label: t("menu.hideOthers"), role: "hideOthers" },
-      { label: t("menu.showAll"), role: "unhide" },
-      { type: "separator" },
-      // The page's tab, not the window: the window closes from its red button or `closeWindow`.
-      { label: t("menu.closeTab"), accelerator: "CmdOrCtrl+W", click: () => closeTab() },
-      { label: t("menu.quit"), accelerator: "CmdOrCtrl+Q", click: () => app.quit() },
-    ] },
-    { label: t("menu.edit"), submenu: [
-      { label: t("menu.undo"), role: "undo" }, { label: t("menu.redo"), role: "redo" }, { type: "separator" },
-      { label: t("menu.cut"), role: "cut" }, { label: t("menu.copy"), role: "copy" }, { label: t("menu.paste"), role: "paste" },
-      { label: t("menu.pasteMatch"), role: "pasteAndMatchStyle" }, { label: t("menu.selectAll"), role: "selectAll" },
-    ] },
-    { label: t("menu.view"), submenu: [
-      { label: t("menu.resetZoom"), role: "resetZoom" }, { label: t("menu.zoomIn"), role: "zoomIn" }, { label: t("menu.zoomOut"), role: "zoomOut" },
-      { type: "separator" },
-      { label: t("menu.fullScreen"), accelerator: "Ctrl+Command+F", click: () => toggleWindowFullScreen() },
-      ...(app.isPackaged ? [] : [{ type: "separator" as const }, { label: t("menu.devTools"), role: "toggleDevTools" as const }]),
-    ] },
-    { label: t("menu.window"), role: "windowMenu", submenu: [
-      { label: t("menu.minimize"), role: "minimize" }, { label: t("menu.zoom"), role: "zoom" }, { type: "separator" }, { label: t("menu.front"), role: "front" },
-    ] },
-  ];
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
-}
-
-// ── Settings: one small JSON file in Electron's userData, not the Host's directory ────────
-
-async function loadSettings() {
-  const { readFile } = await import("node:fs/promises");
-  try {
-    const parsed = JSON.parse(await readFile(join(app.getPath("userData"), "desktop.json"), "utf8")) as Record<string, unknown>;
-    for (const [key, value] of Object.entries(parsed)) settings.set(key, value);
-  } catch { /* First run: defaults. */ }
-}
-
-let saving = Promise.resolve();
-function saveSettings(): Promise<void> {
-  saving = saving.then(async () => {
-    const { writeFile, rename, mkdir } = await import("node:fs/promises");
-    const directory = app.getPath("userData");
-    await mkdir(directory, { recursive: true });
-    const file = join(directory, "desktop.json");
-    await writeFile(file + ".tmp", JSON.stringify(Object.fromEntries(settings), null, 2), { mode: 0o600 });
-    await rename(file + ".tmp", file);
-  }).catch((error: unknown) => console.error("[settings]", error));
-  return saving;
+  const info = app.getLoginItemSettings({ path: process.execPath, args: ["--hidden"] });
+  return info.launchItems?.some((item) => item.name === "LinkShell" && item.enabled) ?? info.openAtLogin;
 }
 
 async function ready() {
-  await loadSettings();
+  await settings.load();
   locale = normalizeMainLocale(process.env.LINKSHELL_LOCALE) ?? normalizeMainLocale(settings.get("locale")) ?? (/^ja/i.test(app.getLocale()) ? "ja" : /^zh/i.test(app.getLocale()) ? "zh" : app.getLocale() ? "en" : "zh");
-  // The Host holds the wake assertion (`machine.keepAwake`); a hold left by an older window is released.
   keepAwake.set("off");
-  // Sparkle relaunches with no arguments: keep the chosen state directory, never credentials.
-  if (launch.home) { settings.set("home", launch.home); void saveSettings(); }
+  if (launch.home) { settings.set("home", launch.home); void settings.save(); }
   else if (typeof settings.get("home") === "string" && runtime.standalone) process.env.LINKSHELL_HOME = settings.get("home") as string;
-  nativeTheme.themeSource = appearance();
+  nativeTheme.themeSource = settings.appearance();
   nativeModule = native(runtime.bundle, app.getAppPath());
-  installMenu();
-  // From a checkout the Dock would show Electron's icon; a bundle has ours (AppIcon.icns, same picture).
-  if (process.platform === "darwin" && !runtime.bundle) {
+  if (MAC && !runtime.bundle) {
     const dockIcon = join(app.getAppPath(), "../mac/assets/icon.png");
     if (existsSync(dockIcon)) app.dock?.setIcon(dockIcon);
   }
-  // A template the menu bar tints on the Mac; the coloured mark in Windows' notification area.
-  const iconPath = join(app.getAppPath(), MAC ? "assets/trayTemplate.png" : "assets/tray.png");
-  if (MAC && runtime.bundle) {
-    menuBar = new MenuBar(runtime.bundle, menuBarEvent, (message) => console.error(message));
-    menuBar.start();
-    updateTray();
-  } else if (existsSync(iconPath)) {
-    const icon = nativeImage.createFromPath(iconPath);
-    if (MAC) icon.setTemplateImage(true);
-    tray = new Tray(icon);
-    tray.setToolTip("LinkShell");
-    // Windows opens an app from its tray icon with a click; the menu is on the right button.
-    if (!MAC) tray.on("click", () => showWindow());
-    updateTray();
-  }
+  trayMenu.start();
   createWindow();
-  // "Follow the system": the opaque ground and Windows' caption buttons follow it too.
   nativeTheme.on("updated", updateWindowSurface);
-  startUpdater();
-  if (launch.checkUpdates) { openManagement("updates"); checkUpdates(); }
+  powerMonitor.on("resume", onSystemResume);
+  powerMonitor.on("unlock-screen", onSystemResume);
+  updater.start(launch.checkUpdates);
+  if (launch.checkUpdates) { openManagement("updates"); updater.check(); }
   if (launch.fusionConnect) command({ command: "fusion", computerKey: launch.fusionConnect, launchBundle: launch.fusionLaunch });
 }

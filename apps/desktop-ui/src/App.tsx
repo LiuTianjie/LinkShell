@@ -15,6 +15,7 @@ import {
   attachRouterListeners,
   engine,
   I18nProvider,
+  isStorageBootstrapped,
   localeStore,
   pollManagementInBackground,
   readLocal,
@@ -87,9 +88,10 @@ function DesktopWorkspaceRoot() {
     startManagement();
     const stopManagementPoll = pollManagementInBackground();
     // The menu bar, tray and native dialogs are drawn by the main process: it follows the page's language.
+    // Wait for storage bootstrap before syncing so an unbootstrapped system default cannot overwrite the saved locale.
     const sendLocale = () =>
       postDesktopMessage({ action: "locale", value: localeStore.getState().locale });
-    sendLocale();
+    if (isStorageBootstrapped()) sendLocale();
 
     // ⌘W closes the inspector's tab when it has one; unclaimed, the shell closes the dock or window.
     const onCloseTab = (event: Event) => {
@@ -115,6 +117,7 @@ function DesktopWorkspaceRoot() {
     const stopAttention = startSessionAttention();
     const detachStorageTheme = subscribeStorageReady(() => {
       applyDesktopAppearance(resolveStoredAppearance());
+      sendLocale();
     });
 
     const onShellAppearance = (event: Event) => {

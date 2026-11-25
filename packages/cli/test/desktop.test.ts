@@ -161,6 +161,35 @@ describe("native desktop snapshots", () => {
     vi.mocked(withRunningHost).mockImplementation(async (use) => use({ call } as never));
     const value = await desktopSnapshot("1.0.0");
     expect(value).toMatchObject({ status: "running", hasMoreSessions: true, sessions: [{ id: "running" }], gateway: { status: "off" } });
+    expect(call).not.toHaveBeenCalledWith("screen.access", expect.anything(), expect.anything());
+  });
+  it("omits sessions when includeSessions is false and performs combined startup in one pass", async () => {
+    const call = vi.fn(async (method: string) =>
+      method === "machine.info" ? { hostVersion: "1.0.0" }
+        : method === "gateway.status" ? { status: "off", devices: [] }
+          : method === "access.status" ? { password: true }
+            : { sessions: [] },
+    );
+    vi.mocked(readPid).mockReturnValue(null);
+    vi.mocked(withRunningHost)
+      .mockResolvedValueOnce(undefined)
+      .mockImplementationOnce(async (use) => use({ call } as never));
+    const out = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    await runDesktop("1.0.0", "startup");
+    expect(ensureHostRunning).toHaveBeenCalledTimes(1);
+    const snapshot = JSON.parse(String(out.mock.calls[0]![0]));
+    expect(snapshot).toMatchObject({ status: "running", access: { password: true } });
+    expect(snapshot).not.toHaveProperty("sessions");
+    expect(call).not.toHaveBeenCalledWith("sessions.list", expect.anything(), expect.anything());
+    expect(call).not.toHaveBeenCalledWith("screen.access", expect.anything(), expect.anything());
+  });
+  it("startup leaves an unreachable host untouched instead of spawning a second daemon", async () => {
+    vi.mocked(withRunningHost).mockResolvedValue(undefined);
+    vi.mocked(readPid).mockReturnValue(456);
+    const out = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    await runDesktop("1.0.0", "startup");
+    expect(ensureHostRunning).not.toHaveBeenCalled();
+    expect(JSON.parse(String(out.mock.calls[0]![0]))).toMatchObject({ status: "unreachable" });
   });
   it("reports a failed query as unknown instead of reusing a green snapshot", async () => {
     vi.mocked(withRunningHost).mockRejectedValue(new Error("RPC disconnected"));

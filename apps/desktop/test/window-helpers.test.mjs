@@ -1,10 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { restoreWindowBounds } from "../dist/main/window-bounds.js";
 import { CommandQueue } from "../dist/main/command-queue.js";
 import { badgeCount, parseNotification, shouldNotify } from "../dist/main/notify.js";
 import { localizeUpdaterMessage, normalizeMainLocale, translateMain } from "../dist/main/locale.js";
 import { isOpenPathApp, openPathPlan } from "../dist/main/open-path.js";
+import { SettingsStore } from "../dist/main/settings-store.js";
+import { SidecarUnavailableError } from "../dist/main/workspace.js";
 
 const MIN = { width: 940, height: 640 };
 const FALLBACK = { width: 1280, height: 820 };
@@ -89,4 +94,50 @@ test("open-in-editor never goes through a shell and accepts only the allow-liste
   assert.deepEqual(openPathPlan("linux", "vscode", "/tmp/a b"), { kind: "url", url: "vscode://file/tmp/a%20b" });
   assert.deepEqual(openPathPlan("win32", "vscode", "C:\\Users\\a b\\x"), { kind: "url", url: "vscode://file/C:/Users/a%20b/x" });
   assert.throws(() => openPathPlan("win32", "xcode", "C:\\x"));
+});
+
+test("SettingsStore serializes atomic writes and restores defaults cleanly", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "linkshell-settings-"));
+  try {
+    const store = new SettingsStore(() => dir);
+    await store.load();
+    assert.equal(store.appearance(), "dark");
+    assert.equal(store.opaqueWindow(), false);
+    assert.equal(store.autoCheck(), true);
+    assert.equal(store.updateChannel(), "stable");
+    assert.equal(store.notifications(), true);
+
+    store.set("appearance", "light");
+    store.set("opaqueWindow", true);
+    store.set("updateChannel", "beta");
+    store.set("notifications", false);
+    await Promise.all([store.save(), store.save(), store.save()]);
+
+    const files = await readdir(dir);
+    assert.deepEqual(files, ["desktop.json"]);
+
+    const reloaded = new SettingsStore(() => dir);
+    await reloaded.load();
+    assert.equal(reloaded.appearance(), "light");
+    assert.equal(reloaded.opaqueWindow(), true);
+    assert.equal(reloaded.updateChannel(), "beta");
+    assert.equal(reloaded.notifications(), false);
+    assert.deepEqual(reloaded.snapshot(), {
+      opaqueWindow: true,
+      autoCheck: true,
+      updateChannel: "beta",
+      keepAwake: "smart",
+      notifications: false,
+    });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("SidecarUnavailableError distinguishes transport fallback failures from real action errors", () => {
+  const err = new SidecarUnavailableError("sidecar down");
+  assert.equal(err instanceof Error, true);
+  assert.equal(err instanceof SidecarUnavailableError, true);
+  assert.equal(err.name, "SidecarUnavailableError");
+  assert.equal(err.message, "sidecar down");
 });

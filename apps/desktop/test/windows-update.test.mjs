@@ -6,8 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cleanWindowsUpdateDownloads, downloadWindowsInstaller, verifyInstaller, windowsRelease } from "../dist/main/windows-update.js";
 
-const release = (version, bytes = Buffer.from("installer")) => {
-  const name = `LinkShell-Setup-${version}-windows-x64.exe`;
+const release = (version, bytes = Buffer.from("installer"), arch = "x64") => {
+  const name = `LinkShell-Setup-${version}-windows-${arch}.exe`;
   const url = `https://github.com/LiuTianjie/LinkShell/releases/download/desktop-v${version}/${name}`;
   return { tag_name: `desktop-v${version}`, prerelease: version.includes("-"), assets: [
     { name, browser_download_url: url, size: bytes.length },
@@ -20,6 +20,8 @@ test("Windows updates pick the newest compatible official release and respect pr
   assert.equal(windowsRelease(releases, false)?.version, "1.0.4");
   assert.equal(windowsRelease(releases, true)?.version, "1.1.0-beta.10");
   assert.equal(windowsRelease([...releases, release("1.1.0")], true)?.version, "1.1.0");
+  assert.equal(windowsRelease(releases, false, "arm64"), undefined);
+  assert.equal(windowsRelease([...releases, release("1.0.5", Buffer.from("arm"), "arm64")], false, "arm64")?.name, "LinkShell-Setup-1.0.5-windows-arm64.exe");
   const malicious = release("9.0.0");
   malicious.assets[0].browser_download_url = "https://github.com/another/project/releases/download/desktop-v9.0.0/installer.exe";
   const noChecksum = release("8.0.0"); noChecksum.assets.pop();

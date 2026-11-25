@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { emptyView } from "@linkshell/client-core";
 import type { SessionNotice, SessionSummary } from "@linkshell/wire";
-import { DESKTOP_SHORTCUTS, FOCUS_COMPOSER_EVENT, matchesShortcut } from "@/bridge";
-import { useT } from "@/core";
+import { DESKTOP_LOCAL, DESKTOP_SHORTCUTS, FOCUS_COMPOSER_EVENT, matchesShortcut } from "@/bridge";
+import { isLocalHostUnavailable, useManagement, useT } from "@/core";
 import { DesktopIcon } from "@/icons";
 import { ErrorBoundary, IconButton, Input, isImeComposing } from "@/primitives";
+import { LocalHostRecovery } from "../shell/LocalHostRecovery";
 import { SessionComposer } from "./SessionComposer";
 import { TimelineView } from "./TimelineView";
 import {
@@ -30,6 +31,7 @@ export function SessionWorkspace({
 }: SessionWorkspaceProps) {
   const t = useT();
   const copy = useSessionCopy();
+  const mgmt = useManagement();
   const connection = useSessionConnection(computerKey);
   const sessionKey = sessionKeyOf(computerKey, sessionId);
   const ui = useSessionUi(computerKey, sessionId);
@@ -135,6 +137,17 @@ export function SessionWorkspace({
   };
 
   if (!connection || !fallbackSession) {
+    if (!connection && computerKey === DESKTOP_LOCAL && isLocalHostUnavailable(mgmt)) {
+      return (
+        <div
+          className="ls-session-workspace"
+          style={{ alignItems: "center", justifyContent: "center", padding: 24 }}
+        >
+          <LocalHostRecovery compact />
+        </div>
+      );
+    }
+
     return (
       <div
         className="ls-session-workspace"

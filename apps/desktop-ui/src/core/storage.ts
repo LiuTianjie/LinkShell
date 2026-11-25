@@ -298,6 +298,13 @@ function updateCachedAccount(next: DesktopSidecarAccount): DesktopSidecarAccount
   return next;
 }
 
+/** Applies a sidecar-pushed account update atomically, invalidating any older in-flight fetch. */
+export function applySidecarAccountPush(next: DesktopSidecarAccount): DesktopSidecarAccount {
+  accountGeneration++;
+  accountRequest = undefined;
+  return updateCachedAccount(next);
+}
+
 export function fetchDesktopAccount(): Promise<DesktopSidecarAccount> {
   if (!hasSidecarCapability()) return Promise.resolve(cachedAccount);
   if (accountRequest) return accountRequest;

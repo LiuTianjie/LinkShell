@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
 import type { SessionSummary, WorktreeEntry } from "@linkshell/wire";
+import { DESKTOP_LOCAL } from "../../bridge";
 import type { Connection } from "../../core/connections";
+import { isLocalHostUnavailable } from "../../core/local-host-phase";
+import { useManagement } from "../../core/management-store";
 import { routerStore, useRouter } from "../../core/router-store";
 import {
   Badge,
@@ -15,6 +18,7 @@ import {
   useDialogs,
   type DataTableColumn,
 } from "../../primitives";
+import { LocalHostRecovery } from "../shell/LocalHostRecovery";
 import { FilesPanel } from "./FilesPanel";
 import { FileViewerTabPanel, parseFileSpec } from "./FileViewerTabPanel";
 import { useInspectorI18n } from "./i18n-inspector";
@@ -354,9 +358,12 @@ export function StandaloneToolWorkspace({
   computerKey,
 }: StandaloneToolWorkspaceProps): JSX.Element {
   const { t } = useInspectorI18n();
+  const mgmt = useManagement();
   const activeRoute = useRouter((s) => s.activeRoute);
   const { connection, online, machine, sessionsMap, agents } =
     useInspectorConnection({ computerKey, withSessionsMap: true });
+  const localUnavailable =
+    !connection && computerKey === DESKTOP_LOCAL && isLocalHostUnavailable(mgmt);
 
   const sectionLabel = useMemo(() => {
     switch (mode) {
@@ -404,7 +411,19 @@ export function StandaloneToolWorkspace({
     >
       <div className="inspector-standalone-body">
         <ErrorBoundary resetKeys={[mode, computerKey]}>
-          {mode === "terminals" ? (
+          {localUnavailable ? (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flex: 1,
+                padding: 24,
+              }}
+            >
+              <LocalHostRecovery compact />
+            </div>
+          ) : mode === "terminals" ? (
             <TerminalStageHost
               stageKey={`standalone:${computerKey || "default"}`}
               computerKey={computerKey || "default"}

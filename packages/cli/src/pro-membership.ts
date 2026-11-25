@@ -13,12 +13,12 @@ export interface DesktopMembership {
 
 const unknownMembership: DesktopMembership = { plan: "unknown", planExpiresAt: null, tier: null };
 const changedAccount = "登录账号已变更，请刷新账号后重试";
-const cachePath = () => join(linkshellDir(), "account-pro.json");
+const cachePath = (dir = linkshellDir()) => join(dir, "account-pro.json");
 
 /** Snapshot polling stays offline; the dashboard refreshes this account-scoped cache separately. */
-export function cachedMembership(userId: string): DesktopMembership {
+export function cachedMembership(userId: string, dir = linkshellDir()): DesktopMembership {
   try {
-    const value = JSON.parse(readFileSync(cachePath(), "utf8"));
+    const value = JSON.parse(readFileSync(cachePath(dir), "utf8"));
     if (value.userId !== userId || !["pro", "free", "unknown"].includes(value.plan)) return { ...unknownMembership };
     const expiry = typeof value.planExpiresAt === "string" && Number.isFinite(Date.parse(value.planExpiresAt)) ? value.planExpiresAt : null;
     if (value.plan === "pro" && !expiry) return { ...unknownMembership };

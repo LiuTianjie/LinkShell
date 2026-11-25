@@ -30,6 +30,7 @@ export class Management {
     return new Promise((resolve, reject) => {
       const child = this.runtime.spawnCLI(args);
       let out = "";
+      let err = "";
       let scanned = 0;
       let settled = false;
       const finish = (error?: Error, value?: Record<string, unknown>) => {
@@ -56,7 +57,8 @@ export class Management {
           } catch { /* Not an event line. */ }
         }
       });
-      child.stderr?.resume();
+      child.stderr?.setEncoding("utf8");
+      child.stderr?.on("data", (chunk: string) => { err = (err + chunk).slice(-4096); });
       child.on("error", (error) => finish(error));
       child.on("close", (code) => {
         let parsed: Record<string, unknown> | undefined;
@@ -65,7 +67,20 @@ export class Management {
           try { parsed = JSON.parse(out.trimEnd().split("\n").at(-1) ?? "") as Record<string, unknown>; } catch { /* reported below */ }
         }
         if (code === 0 && parsed) return finish(undefined, parsed);
-        const message = typeof parsed?.error === "string" ? parsed.error : "无法运行 CLI。请确认已安装新版 LinkShell，或从终端执行 linkshell app。";
+        const stderrDetail = err
+          .trim()
+          .split(/\r?\n/)
+          .filter(Boolean)
+          .slice(-2)
+          .join(" ")
+          .replace(/desktop=[A-Za-z0-9_-]+/g, "desktop=[已隐藏]")
+          .replace(/Bearer\s+\S+/gi, "Bearer [已隐藏]")
+          .slice(0, 240);
+        const message = typeof parsed?.error === "string"
+          ? parsed.error
+          : stderrDetail
+            ? `无法运行 CLI（${stderrDetail}）。请确认已安装新版 LinkShell，或从终端执行 linkshell app。`
+            : "无法运行 CLI。请确认已安装新版 LinkShell，或从终端执行 linkshell app。";
         finish(new Error(message));
       });
       if (options.input !== undefined) child.stdin?.end(JSON.stringify(options.input));
@@ -77,6 +92,11 @@ export class Management {
 
   /** Recover updates first; never replace a running or temporarily unreachable host. */
   async startup() {
+    try {
+      return await this.run(["desktop", "--action", "startup"], { timeout: 60_000 });
+    } catch (error) {
+      if (!(error instanceof Error) || !/Unknown desktop action/i.test(error.message)) throw error;
+    }
     const recovered = await this.run(["desktop", "--action", "recover-update"], { timeout: 45_000 })
       .catch((error: Error) => { throw new Error(`服务恢复需要处理：${error.message}`); });
     if (recovered.status !== "stopped") return recovered;

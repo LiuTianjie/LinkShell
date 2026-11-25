@@ -1,6 +1,6 @@
 import {
-  healthy,
   newVersion,
+  resolveLocalHostPhase,
   useI18n,
   useManagement,
   useRouter,
@@ -17,26 +17,27 @@ export function LocalHostCapsule({ onActionDone }: LocalHostCapsuleProps) {
   const mgmt = useManagement();
   const openSystemModal = useRouter((s) => s.openSystemModal);
 
-  const isHealthy = healthy(mgmt);
+  const phase = resolveLocalHostPhase(mgmt);
   const hasUpdate = newVersion(mgmt);
   const keepAwakeOn = Boolean(mgmt.settings.keepAwake && mgmt.settings.keepAwake !== "off");
 
   const statusTone =
-    mgmt.starting || mgmt.busy
+    phase === "starting" || mgmt.busy
       ? "waiting"
-      : isHealthy
+      : phase === "running"
         ? "online"
-        : mgmt.snapshot?.status === "stopped"
+        : phase === "stopped"
           ? "offline"
-          : mgmt.problem
-            ? "danger"
-            : "neutral";
+          : "danger";
 
-  const statusWord = isHealthy
-    ? t("desktop.manage.serviceRunning")
-    : mgmt.snapshot?.status === "stopped"
-      ? t("desktop.manage.serviceStopped")
-      : t("desktop.manage.serviceUnreachable");
+  const statusWord =
+    phase === "running"
+      ? t("desktop.manage.serviceRunning")
+      : phase === "starting"
+        ? t("desktop.manage.serviceConnecting")
+        : phase === "stopped"
+          ? t("desktop.manage.serviceStopped")
+          : t("desktop.manage.serviceUnreachable");
 
   return (
     <footer className="desktop-sidebar-footer">

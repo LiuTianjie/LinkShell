@@ -38,7 +38,7 @@ program.command("desktop-workspace", { hidden: true })
   .action(async (options) => {
     const { runDesktopWorkspace } = await import("./commands/desktop-workspace.js");
     try {
-      await runDesktopWorkspace(options.assets);
+      await runDesktopWorkspace(options.assets, process.stdin, pkg.version);
       // This owned command has flushed persistent writes and closed its servers. Legacy
       // account/Host probes may still hold sockets; none should outlive the desktop UI.
       process.exit(0);

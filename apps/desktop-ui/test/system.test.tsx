@@ -1289,4 +1289,134 @@ describe("Slice 2B-5: Non-Unmounting SystemHostModal, SignInPairModal & LocalPai
     expect(serviceLabel(currentSnapshot, undefined)).toBe("実行中");
     setDesktopLocalePreference("zh");
   });
+
+  it("cancels in-flight sign-in when SystemHostModal closes, refreshes computers from SignInPairModal, shows Free membership CTA, and normalizes Windows hostOwner paths", async () => {
+    // 1. Closing SystemHostModal via close button cancels an active sign-in instead of leaving a hung CLI process.
+    managementStore.setState({ signingIn: true, signInMethod: "web" });
+    act(() => {
+      routerStore.getState().openSystemModal("overview");
+      root.render(
+        <I18nProvider>
+          <SystemHostModal />
+        </I18nProvider>,
+      );
+    });
+    await flushAsync();
+    const closeBtn = container.querySelector<HTMLButtonElement>(".management-back")!;
+    act(() => closeBtn.click());
+    await flushAsync();
+    expect(invokeCalls.some((c) => c.method === "cancelLogin")).toBe(true);
+    expect(routerStore.getState().systemModal.open).toBe(false);
+
+    // 2. Windows hostOwner vs about.bundle ignores case and slash differences so built-in host isn't misflagged as external CLI.
+    currentSnapshot = makeBaseSnapshot({ hostOwner: "c:/program files/linkshell" });
+    managementStore.setState({
+      signingIn: false,
+      about: { version: "2.4.0", standalone: true, bundle: "C:\\Program Files\\LinkShell\\", home: "C:\\Users\\dev\\.linkshell" },
+      snapshot: currentSnapshot,
+    });
+    act(() => {
+      routerStore.getState().openSystemModal("overview");
+      root.render(
+        <I18nProvider>
+          <SystemHostModal />
+        </I18nProvider>,
+      );
+    });
+    await flushAsync();
+    expect(container.textContent).not.toContain("当前后台服务由外部 CLI 启动");
+
+    // 3. SignInPairModal signed-in panel refreshes remote computers and displays Free membership status + CTA.
+    const connectSpy = vi.spyOn(engine, "connectAccount").mockResolvedValue();
+    const refreshSpy = vi.spyOn(engine, "refreshComputers").mockResolvedValue();
+    const realFetch = globalThis.fetch;
+    const prevCap = sessionStorage.getItem("linkshell.desktop.capability");
+    sessionStorage.setItem("linkshell.desktop.capability", "test-cap-token");
+    vi.stubGlobal("fetch", async (input: string | URL, init?: RequestInit) => {
+      if (String(input).startsWith("/desktop/membership")) {
+        return new Response(JSON.stringify({ plan: "free", tier: null, expiresAt: null }), { status: 200 });
+      }
+      if (String(input).startsWith("/desktop/referral")) {
+        return new Response(JSON.stringify({ code: "TESTCODE", invited: 0, rewarded: 0, earnedDays: 0, shareUrl: "https://itool.tech" }), { status: 200 });
+      }
+      return realFetch(input, init);
+    });
+    const onOpenChange = vi.fn();
+    try {
+      engine.state.setState({ account: "free@example.com", accountUserId: "user-free" });
+      act(() => {
+        root.render(
+          <I18nProvider>
+            <SignInPairModal open onOpenChange={onOpenChange} />
+          </I18nProvider>,
+        );
+      });
+      await flushAsync(6);
+      expect(container.textContent).toContain("未开通");
+      expect(container.textContent).toContain("开通会员");
+
+      const refreshBtn = Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find((b) =>
+        b.textContent?.includes("刷新远端电脑列表"),
+      )!;
+      act(() => refreshBtn.click());
+      await flushAsync(6);
+      expect(connectSpy).toHaveBeenCalledTimes(1);
+      expect(refreshSpy).toHaveBeenCalledTimes(1);
+      expect(onOpenChange).toHaveBeenCalledWith(false);
+    } finally {
+      connectSpy.mockRestore();
+      refreshSpy.mockRestore();
+      vi.stubGlobal("fetch", realFetch);
+      if (prevCap === null) sessionStorage.removeItem("linkshell.desktop.capability");
+      else sessionStorage.setItem("linkshell.desktop.capability", prevCap);
+      engine.state.setState({ account: undefined, accountUserId: undefined });
+    }
+  });
+
+  it("applies real-time SSE pairing.done and incremental log chunks and renders unified LocalHostRecovery actions", async () => {
+    const {
+      applyPushedPairingDone,
+      appendHostLog,
+      createLocalPairingOffer,
+      setHostLog,
+    } = await import("../src/core");
+    const { LocalHostRecovery } = await import("../src/features/shell");
+
+    // 1. Pushed pairing.done retires active pairing offer immediately without waiting for snapshot poll.
+    await createLocalPairingOffer();
+    expect(managementStore.getState().pairingOffer?.code).toBe("482910");
+    applyPushedPairingDone({ id: "dev-live", name: "iPhone 17" });
+    expect(managementStore.getState().pairingOffer).toBeUndefined();
+    expect(managementStore.getState().pairedDevice?.name).toBe("iPhone 17");
+
+    // 2. Live SSE log helpers populate and append cleanly.
+    setHostLog("line 1\n", "/tmp/host.log");
+    appendHostLog("line 2\n");
+    expect(managementStore.getState().log).toBe("line 1\nline 2\n");
+    expect(managementStore.getState().logPath).toBe("/tmp/host.log");
+
+    // 3. LocalHostRecovery shows Start on stopped, Restart on unreachable, Retry on error.
+    managementStore.setState({ starting: false, snapshot: makeBaseSnapshot({ status: "stopped" }), problem: undefined });
+    act(() => {
+      root.render(
+        <I18nProvider>
+          <LocalHostRecovery computerName="Studio" showConnect />
+        </I18nProvider>,
+      );
+    });
+    await flushAsync();
+    expect(container.textContent).toContain("启动服务");
+    expect(container.textContent).toContain("连接电脑");
+
+    managementStore.setState({ starting: false, snapshot: makeBaseSnapshot({ status: "unreachable" }), problem: undefined });
+    act(() => {
+      root.render(
+        <I18nProvider>
+          <LocalHostRecovery computerName="Studio" compact />
+        </I18nProvider>,
+      );
+    });
+    await flushAsync();
+    expect(container.textContent).toContain("重启服务");
+  });
 });

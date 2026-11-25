@@ -1,17 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ClientState } from "@linkshell/client-core";
 import type { AgentInfo, GitInfo, ProjectSummary } from "@linkshell/wire";
+import { DESKTOP_LOCAL } from "@/bridge";
 import {
   composerDrafts,
   configToCreate,
   creationOptions,
   draftKeyFor,
+  isLocalHostUnavailable,
   modelToCreate,
   reportDesktopError,
   routerStore,
   sessionPreferences,
   useAgentModels,
   useComposerDraft,
+  useManagement,
   useT,
   type PastedTextBlock,
 } from "@/core";
@@ -24,6 +27,7 @@ import {
   MenuRadioItem,
   Tooltip,
 } from "@/primitives";
+import { LocalHostRecovery } from "../shell/LocalHostRecovery";
 import { ApprovalCard } from "./ApprovalQuestionCards";
 import { ComposerBox } from "./ComposerBox";
 import { DirectoryPickerDialog } from "./DirectoryPickerDialog";
@@ -71,6 +75,7 @@ export function NewSessionWorkspace({
 }: NewSessionWorkspaceProps) {
   const t = useT();
   const copy = useSessionCopy();
+  const mgmt = useManagement();
   const newSessionCommandItems = useMemo(() => newSessionCommands(copy), [copy]);
   const connection = useSessionConnection(computerKey);
 
@@ -366,6 +371,17 @@ export function NewSessionWorkspace({
   };
 
   const recentProjects = useMemo(() => projects.slice(0, 6), [projects]);
+
+  if (!connection && computerKey === DESKTOP_LOCAL && isLocalHostUnavailable(mgmt)) {
+    return (
+      <div
+        className="ls-new-session"
+        style={{ alignItems: "center", justifyContent: "center", padding: 24 }}
+      >
+        <LocalHostRecovery compact />
+      </div>
+    );
+  }
 
   return (
     <div className="ls-new-session">

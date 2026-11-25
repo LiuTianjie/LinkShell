@@ -2150,4 +2150,69 @@ describe("Slice 2B-1 DesktopAppShell, Chrome Geometry, Sidebar E2E Hooks & Comma
     });
     expect(entityGroup().dataset.open).toBe("true");
   });
+
+  it("shows connecting capsule on cold start, local recovery CTAs even when activeComputer is undefined, and isolates workspace shortcuts behind open modal dialogs", () => {
+    engine.state.setState({
+      computers: [],
+      localComputer: undefined,
+      connection: undefined,
+      locked: false,
+    });
+    routerStore.getState().navigate({ kind: "home" });
+    management.setState({
+      starting: true,
+      busy: true,
+      snapshot: undefined,
+      problem: undefined,
+    });
+
+    mount(<DesktopAppShell platformOverride="macos" />);
+
+    // 1. Cold-start capsule shows "正在连接", never "无法连接".
+    const capsule = host.querySelector(".local-host-capsule__status") as HTMLElement;
+    expect(capsule.textContent).toContain("正在连接");
+    expect(capsule.textContent).not.toContain("无法连接");
+
+    // 2. When local Host is stopped with no activeComputer yet, Home hub renders immediate Start Service CTA.
+    act(() => {
+      management.setState({
+        starting: false,
+        busy: false,
+        snapshot: { status: "stopped" },
+        problem: undefined,
+      });
+    });
+    expect(host.querySelector(".desktop-main")?.textContent).toContain("本机服务已停止");
+    expect(host.querySelector(".desktop-main")?.textContent).toContain("启动服务");
+    expect(host.querySelector(".desktop-sidebar .sidebar-empty-hint")?.textContent).toContain("本机服务已停止");
+
+    // 3. When local Host is unreachable, Home hub renders Restart Service CTA instead of spinning forever.
+    act(() => {
+      management.setState({
+        starting: false,
+        busy: false,
+        snapshot: { status: "unreachable" },
+        problem: undefined,
+      });
+    });
+    expect(host.querySelector(".desktop-main")?.textContent).toContain("本机服务无响应");
+    expect(host.querySelector(".desktop-main")?.textContent).toContain("重启服务");
+
+    // 4. Open <dialog open> blocks workspace shortcuts like Mod+B and bare `?`.
+    const openDialog = document.createElement("dialog");
+    openDialog.setAttribute("open", "");
+    document.body.appendChild(openDialog);
+    try {
+      const hiddenBefore = routerStore.getState().sidebarHidden;
+      const sheetBefore = routerStore.getState().shortcutSheetOpen;
+      act(() => {
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: "b", code: "KeyB", metaKey: true, bubbles: true, cancelable: true }));
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: "?", bubbles: true, cancelable: true }));
+      });
+      expect(routerStore.getState().sidebarHidden).toBe(hiddenBefore);
+      expect(routerStore.getState().shortcutSheetOpen).toBe(sheetBefore);
+    } finally {
+      openDialog.remove();
+    }
+  });
 });

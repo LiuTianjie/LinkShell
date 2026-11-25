@@ -19,6 +19,8 @@ export * from "./port-tabs";
 export * from "./mcp-bridge";
 export * from "./screen-client";
 export * from "./fusion-store";
+export * from "./local-host-phase";
 export * from "./management-store";
+export * from "./sidecar-events";
 export * from "./router-store";
 export * from "./attention";

@@ -1,6 +1,21 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { dateLocaleTag } from "@linkshell/client-core";
-import { parseHostLog, readLog, revealLog, useManagement } from "../../core";
+import {
+  DESKTOP_VISIBILITY_EVENT,
+  getDesktopCapability,
+  getShellVisible,
+  isElectronDesktop,
+  openDesktopEventStream,
+  type DesktopEventStreamHandle,
+} from "../../bridge";
+import {
+  appendHostLog,
+  parseHostLog,
+  readLog,
+  revealLog,
+  setHostLog,
+  useManagement,
+} from "../../core";
 import { DesktopIcon } from "../../icons";
 import { Button, CopyButton, IconButton, Input, Select } from "../../primitives";
 import { useSystemI18n } from "./system-i18n";
@@ -29,9 +44,109 @@ export function SystemLogPage() {
   const [query, setQuery] = useState("");
 
   useEffect(() => {
-    void readLog();
-    const timer = setInterval(() => void readLog(), LOG_REFRESH_MS);
-    return () => clearInterval(timer);
+    const isVisible = () =>
+      (typeof document === "undefined" || document.visibilityState !== "hidden") &&
+      getShellVisible();
+    const canStream = isElectronDesktop && Boolean(getDesktopCapability());
+
+    let disposed = false;
+    let visible = isVisible();
+    let stream: DesktopEventStreamHandle | undefined;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+    let pollTimer: ReturnType<typeof setInterval> | undefined;
+
+    const closeStream = () => {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = undefined;
+      const current = stream;
+      stream = undefined;
+      current?.close();
+    };
+
+    const stopFallbackPoll = () => {
+      clearInterval(pollTimer);
+      pollTimer = undefined;
+    };
+
+    const startFallbackPoll = () => {
+      if (pollTimer) return;
+      pollTimer = setInterval(() => {
+        if (visible && !stream) void readLog();
+      }, LOG_REFRESH_MS);
+    };
+
+    const openStream = () => {
+      if (disposed || !visible || !canStream || stream) return;
+      clearTimeout(reconnectTimer);
+      reconnectTimer = undefined;
+      const next = openDesktopEventStream("/desktop/log/stream", {
+        onOpen: () => {
+          if (stream === next) stopFallbackPoll();
+        },
+        onEvent: (event, data) => {
+          if (stream !== next || !data || typeof data !== "object") return;
+          if (event === "init" || event === "reset") {
+            const payload = data as { text?: unknown; path?: unknown };
+            if (typeof payload.text === "string") {
+              setHostLog(
+                payload.text,
+                typeof payload.path === "string" ? payload.path : undefined,
+              );
+            }
+          } else if (event === "append") {
+            const payload = data as { chunk?: unknown };
+            if (typeof payload.chunk === "string") appendHostLog(payload.chunk);
+          }
+        },
+        onClose: () => {
+          if (stream !== next) return;
+          stream = undefined;
+          if (disposed || !visible) return;
+          void readLog();
+          startFallbackPoll();
+          reconnectTimer = setTimeout(() => {
+            reconnectTimer = undefined;
+            openStream();
+          }, 2_500);
+        },
+      });
+      stream = next;
+    };
+
+    if (visible) {
+      if (canStream) openStream();
+      else {
+        void readLog();
+        startFallbackPoll();
+      }
+    }
+
+    const onVisibility = (event?: Event) => {
+      const detail = (event as CustomEvent<{ visible?: boolean }> | undefined)?.detail;
+      const next = detail ? detail.visible !== false : isVisible();
+      if (next === visible) return;
+      visible = next;
+      if (visible) {
+        if (canStream) openStream();
+        else {
+          void readLog();
+          startFallbackPoll();
+        }
+      } else {
+        closeStream();
+        stopFallbackPoll();
+      }
+    };
+    const onDocVisibility = () => onVisibility();
+    window.addEventListener(DESKTOP_VISIBILITY_EVENT, onVisibility);
+    document.addEventListener("visibilitychange", onDocVisibility);
+    return () => {
+      disposed = true;
+      closeStream();
+      stopFallbackPoll();
+      window.removeEventListener(DESKTOP_VISIBILITY_EVENT, onVisibility);
+      document.removeEventListener("visibilitychange", onDocVisibility);
+    };
   }, []);
 
   const entries = useMemo(() => (rawLog ? parseHostLog(rawLog) : []), [rawLog]);

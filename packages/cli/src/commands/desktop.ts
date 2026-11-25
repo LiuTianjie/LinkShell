@@ -25,22 +25,34 @@ function desktopAccount() {
 }
 
 /** A versioned, read-only snapshot. Missing sections stay unknown, never healthy. */
-export async function desktopSnapshot(version: string) {
+export async function desktopSnapshot(version: string, options: { includeSessions?: boolean } = {}) {
   let executable = process.argv[1]!;
   try { executable = realpathSync(executable); } catch { /* Retain the launch path for diagnosis. */ }
   const account = desktopAccount();
-  const access = { password: await accessPasswordEnabled().catch(() => false) };
-  const base = { account, access, schema: 1, cliVersion: version, home: linkshellDir(), source: standaloneBundle() ? "standalone" : installationSource(executable), executable, hostOwner: readPid("host") ? readHostOwner(readPid("host")!) ?? "external" : "none", appBundle: standaloneBundle() };
+  const pid = readPid("host");
+  const includeSessions = options.includeSessions !== false;
+  let liveAccess: { password?: boolean } | undefined;
   const result = await withRunningHost(async (client) => {
-    const machine = await client.call("machine.info", {}, 5000);
-    const [gateway, sessions] = await Promise.all([
+    const [machine, gateway, accessResult, sessions] = await Promise.all([
+      client.call("machine.info", {}, 5000),
       client.call("gateway.status", {}, 5000),
-      client.call("sessions.list", { limit: 200 }, 5000),
+      client.call("access.status", {}, 5000).catch(() => undefined),
+      includeSessions ? client.call("sessions.list", { limit: 200 }, 5000) : Promise.resolve(undefined),
     ]);
-    const screen = process.platform === "win32" ? await client.call("screen.access", { ask: false }, 8000).catch(() => undefined) : undefined;
-    return { machine, gateway, sessions: sessions.sessions, hasMoreSessions: Boolean(sessions.nextBefore), ...(screen ? { screen } : {}) };
+    liveAccess = accessResult;
+    return {
+      machine,
+      gateway,
+      ...(sessions ? { sessions: sessions.sessions, hasMoreSessions: Boolean(sessions.nextBefore) } : {}),
+    };
   });
-  return result ? { ...base, status: "running", ...result } : { ...base, status: readPid("host") ? "unreachable" : "stopped" };
+  const access = {
+    password: typeof liveAccess?.password === "boolean"
+      ? liveAccess.password
+      : await accessPasswordEnabled({ live: false }).catch(() => false),
+  };
+  const base = { account, access, schema: 1, cliVersion: version, home: linkshellDir(), source: standaloneBundle() ? "standalone" : installationSource(executable), executable, hostOwner: pid ? readHostOwner(pid) ?? "external" : "none", appBundle: standaloneBundle() };
+  return result ? { ...base, status: "running", ...result } : { ...base, status: pid ? "unreachable" : "stopped" };
 }
 
 /** The new password, as JSON on stdin (never on the command line, where `ps` shows it). */
@@ -177,6 +189,20 @@ export async function runDesktop(version: string, action: string, input: AsyncIt
     else if (action === "prepare-update") { await prepareDesktopUpdate(); }
     else if (action === "recover-update") { await recoverDesktopUpdate(version); }
     else if (action === "stop-update-host") { await stopDesktopUpdateHost(); }
+    else if (action === "startup") {
+      // Combine update recovery, stopped-host auto-start and initial snapshot into one process spawn.
+      try { await recoverDesktopUpdate(version); }
+      catch (error) { throw new Error(`服务恢复需要处理：${error instanceof Error ? error.message : String(error)}`); }
+      const current = await desktopSnapshot(version, { includeSessions: false });
+      if (current.status !== "stopped") {
+        process.stdout.write(`${JSON.stringify(current)}\n`);
+        return;
+      }
+      try { await ensureHostRunning(); }
+      catch (error) { throw new Error(`后台服务启动失败：${error instanceof Error ? error.message : String(error)}`); }
+      process.stdout.write(`${JSON.stringify(await desktopSnapshot(version, { includeSessions: false }))}\n`);
+      return;
+    }
     else if (action === "start") await ensureHostRunning();
     else if (action === "stop" || action === "restart") {
       const pid = readPid("host");

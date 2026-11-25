@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtemp, mkdir, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, stat, symlink, writeFile, appendFile } from "node:fs/promises";
 import { createServer, request } from "node:http";
 import { spawn } from "node:child_process";
 import { createServer as createSocketServer, type Socket } from "node:net";
@@ -111,6 +111,56 @@ async function connected(url: string, origin: string): Promise<WebSocket> {
 
 function nextMessage(socket: WebSocket) {
   return once(socket, "message").then(([value]) => JSON.parse(String(value)));
+}
+
+async function openSse(
+  origin: string,
+  path: string,
+  headers: Record<string, string>,
+): Promise<{ events: Array<{ event: string; data: unknown }>; close: () => Promise<void> }> {
+  const controller = new AbortController();
+  const events: Array<{ event: string; data: unknown }> = [];
+  const res = await fetch(`${origin}${path}`, { headers, signal: controller.signal });
+  expect(res.status).toBe(200);
+  expect(res.headers.get("content-type")).toContain("text/event-stream");
+  const reader = res.body!.getReader();
+  const pump = (async () => {
+    const decoder = new TextDecoder();
+    let buffer = "";
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true }).replace(/\r\n?/g, "\n");
+        let idx = buffer.indexOf("\n\n");
+        while (idx !== -1) {
+          const block = buffer.slice(0, idx);
+          buffer = buffer.slice(idx + 2);
+          let event = "message";
+          const dataLines: string[] = [];
+          for (const line of block.split("\n")) {
+            if (!line || line.startsWith(":")) continue;
+            if (line.startsWith("event:")) event = line.slice(6).trim();
+            else if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
+          }
+          if (dataLines.length > 0) {
+            const raw = dataLines.join("\n");
+            let data: unknown = raw;
+            try { data = JSON.parse(raw); } catch { /* plain text */ }
+            events.push({ event, data });
+          }
+          idx = buffer.indexOf("\n\n");
+        }
+      }
+    } catch { /* aborted on close */ }
+  })();
+  const close = async () => {
+    controller.abort();
+    await reader.cancel().catch(() => undefined);
+    await pump;
+  };
+  cleanups.push(close);
+  return { events, close };
 }
 
 describe("native desktop workspace service", () => {
@@ -356,6 +406,45 @@ describe("native desktop workspace service", () => {
     await vi.waitFor(() => expect(host.peers.clients.size).toBe(0));
   });
 
+  it("serves read-only management snapshots on the warm sidecar without sessions or screen probing", async () => {
+    const host = await fakeHost("relay-snap-id");
+    const server = await startDesktopWorkspace({ assets, home, hostSocket, version: "0.10.99" });
+    cleanups.push(() => server.stop());
+    const url = new URL(server.url);
+    const token = new URLSearchParams(url.hash.slice(1)).get("desktop")!;
+    const headers = { authorization: `Bearer ${token}`, origin: url.origin };
+
+    expect((await fetch(`${url.origin}/desktop/snapshot`)).status).toBe(401);
+    const previewHeaders = { host: url.host.replace("127.0.0.1", "localhost"), ...headers };
+    expect((await http(url.origin, "/desktop/snapshot", previewHeaders)).status).toBe(404);
+
+    const liveRes = await fetch(`${url.origin}/desktop/snapshot`, { headers });
+    expect(liveRes.status).toBe(200);
+    const live = await liveRes.json();
+    expect(live).toMatchObject({
+      schema: 1,
+      status: "running",
+      cliVersion: "0.10.99",
+      home,
+      account: { state: "signed-out" },
+      machine: { machineId: "this-mac", hostVersion: "1.0.0" },
+      gateway: { status: "online", machine: { id: "relay-snap-id" } },
+    });
+    expect(live).not.toHaveProperty("sessions");
+    expect(live).not.toHaveProperty("screen");
+    expect(host.received.some((item) => item.method === "sessions.list")).toBe(false);
+    expect(host.received.some((item) => item.method === "screen.access")).toBe(false);
+  });
+
+  it("reports a stopped host cleanly from /desktop/snapshot when no host answers", async () => {
+    const server = await workspace();
+    const res = await fetch(`${server.origin}/desktop/snapshot`, { headers: server.headers });
+    expect(res.status).toBe(200);
+    const snap = await res.json();
+    expect(snap).toMatchObject({ schema: 1, status: "stopped", home, account: { state: "signed-out" }, access: { password: false } });
+    expect((await readdir(home)).sort()).toEqual(["desktop-client.json"]);
+  });
+
   it("discovers the host's separate relay identity without replacing its local machine UUID", async () => {
     await fakeHost("signing-identity-id");
     const server = await workspace();
@@ -424,6 +513,153 @@ describe("native desktop workspace service", () => {
     await server.stop();
     await pending;
     await vi.waitFor(() => expect(sockets.size).toBe(0));
+  });
+
+  it("streams real-time snapshot, local, gateway.changed and pairing.done events over /desktop/events and releases the watcher when idle", async () => {
+    let gatewayStatus: "online" | "offline" = "online";
+    const serverHttp = createServer();
+    const peers = new WebSocketServer({ server: serverHttp });
+    peers.on("connection", (client) => client.on("message", (raw) => {
+      const msg = JSON.parse(raw.toString());
+      const result = msg.method === "machine.info"
+        ? { machineId: "mac-sse", hostname: "Studio.local", platform: "darwin", hostVersion: "1.2.3", agents: [] }
+        : msg.method === "gateway.status"
+          ? { status: gatewayStatus, devices: [], machine: { id: "relay-sse", name: "Studio" } }
+          : msg.method === "access.status"
+            ? { password: false }
+            : {};
+      client.send(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result }));
+    }));
+    await new Promise<void>((resolve) => serverHttp.listen(hostSocket, resolve));
+    cleanups.push(async () => {
+      for (const client of peers.clients) client.terminate();
+      await Promise.all([
+        new Promise<void>((resolve) => peers.close(() => resolve())),
+        new Promise<void>((resolve) => serverHttp.close(() => resolve())),
+      ]);
+    });
+
+    const server = await workspace();
+    // Demand-driven watcher holds zero sockets before any SSE subscriber attaches.
+    expect(peers.clients.size).toBe(0);
+
+    const sse = await openSse(server.origin, "/desktop/events", server.headers);
+    await vi.waitFor(() => {
+      expect(sse.events.some((e) => e.event === "snapshot")).toBe(true);
+      expect(sse.events.some((e) => e.event === "local")).toBe(true);
+      expect(sse.events.some((e) => e.event === "account")).toBe(true);
+    });
+    expect(peers.clients.size).toBe(1);
+
+    // Host emits pairing.done -> sidecar forwards immediately over SSE.
+    for (const peer of peers.clients) {
+      peer.send(JSON.stringify({
+        jsonrpc: "2.0",
+        method: "pairing.done",
+        params: { device: { id: "dev-99", name: "iPhone 17 Pro" } },
+      }));
+    }
+    await vi.waitFor(() => {
+      expect(sse.events.some((e) =>
+        e.event === "pairing.done" &&
+        (e.data as { device?: { id?: string; name?: string } })?.device?.id === "dev-99",
+      )).toBe(true);
+    });
+
+    // Host emits gateway.changed -> watcher applies pushed payload and broadcasts updated snapshot over SSE.
+    gatewayStatus = "offline";
+    for (const peer of peers.clients) {
+      peer.send(JSON.stringify({
+        jsonrpc: "2.0",
+        method: "gateway.changed",
+        params: { status: "offline", devices: [], machine: { id: "relay-sse", name: "Studio" } },
+      }));
+    }
+    await vi.waitFor(() => {
+      expect(sse.events.some((e) =>
+        e.event === "snapshot" &&
+        (e.data as { gateway?: { status?: string } })?.gateway?.status === "offline",
+      )).toBe(true);
+    });
+
+    // Closing the last SSE subscriber shuts down the persistent HostControlWatcher socket.
+    await sse.close();
+    await vi.waitFor(() => expect(peers.clients.size).toBe(0));
+  });
+
+  it("streams incremental host.log updates and log rotation resets over /desktop/log/stream", async () => {
+    await mkdir(home, { recursive: true });
+    const logFile = join(home, "host.log");
+    await writeFile(logFile, "2026-11-25T00:00:01.000Z [host] boot\n");
+
+    const server = await workspace();
+    const tail = await (await fetch(`${server.origin}/desktop/log`, { headers: server.headers })).json();
+    expect(tail).toMatchObject({ path: logFile, text: expect.stringContaining("[host] boot") });
+
+    const sse = await openSse(server.origin, "/desktop/log/stream", server.headers);
+    await vi.waitFor(() => {
+      expect(sse.events.some((e) =>
+        e.event === "init" && (e.data as { text?: string })?.text?.includes("[host] boot"),
+      )).toBe(true);
+    });
+
+    await appendFile(logFile, "2026-11-25T00:00:02.000Z [gateway] online\n");
+    await vi.waitFor(() => {
+      expect(sse.events.some((e) =>
+        e.event === "append" && (e.data as { chunk?: string })?.chunk?.includes("[gateway] online"),
+      )).toBe(true);
+    }, { timeout: 5_000 });
+
+    // Truncate file to simulate rotation -> emits `reset`.
+    await writeFile(logFile, "2026-11-25T00:00:03.000Z [host] rotated\n");
+    await vi.waitFor(() => {
+      expect(sse.events.some((e) =>
+        e.event === "reset" && (e.data as { text?: string })?.text?.includes("[host] rotated"),
+      )).toBe(true);
+    }, { timeout: 5_000 });
+
+    await sse.close();
+  });
+
+  it("broadcasts OAuth login lifecycle over SSE and guards /desktop/action", async () => {
+    vi.mocked(loadAuth).mockReturnValue({ userId: "u-sse", email: "sse@example.com", accessToken: "tok-sse", refreshToken: "ref", expiresAt: Date.now() + 60_000 });
+    vi.mocked(getValidToken).mockResolvedValue("tok-sse");
+    vi.mocked(loginWithOAuth).mockImplementation(async ({ open }) => {
+      await open?.("https://example.supabase.co/auth/v1/authorize?provider=github");
+      return { success: true, userId: "u-sse", email: "sse@example.com", accessToken: "tok-sse", plan: "pro" };
+    });
+
+    const server = await workspace();
+    const sse = await openSse(server.origin, "/desktop/events", server.headers);
+    await vi.waitFor(() => expect(sse.events.some((e) => e.event === "snapshot")).toBe(true));
+
+    const loginRes = await fetch(`${server.origin}/desktop/login`, {
+      method: "POST",
+      headers: { ...server.headers, "content-type": "application/json" },
+      body: JSON.stringify({ method: "github" }),
+    });
+    expect(loginRes.status).toBe(200);
+    await vi.waitFor(() => {
+      const loginEvents = sse.events.filter((e) => e.event === "login").map((e) => e.data as { state?: string; url?: string });
+      expect(loginEvents.some((e) => e.state === "authorize" && e.url?.includes("provider=github"))).toBe(true);
+      expect(loginEvents.some((e) => e.state === "done")).toBe(true);
+    });
+
+    // /desktop/action requires capability & exact Origin and rejects unknown actions with 409.
+    expect((await fetch(`${server.origin}/desktop/action`, { method: "POST" })).status).toBe(401);
+    expect((await fetch(`${server.origin}/desktop/action`, {
+      method: "POST",
+      headers: { authorization: server.headers.authorization, "content-type": "application/json" },
+      body: JSON.stringify({ name: "unknown" }),
+    })).status).toBe(403);
+    const badAction = await fetch(`${server.origin}/desktop/action`, {
+      method: "POST",
+      headers: { ...server.headers, "content-type": "application/json" },
+      body: JSON.stringify({ name: "does-not-exist" }),
+    });
+    expect(badAction.status).toBe(409);
+
+    await sse.close();
   });
 });
 

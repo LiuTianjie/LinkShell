@@ -51,8 +51,10 @@ export function compareVersions(a: string, b: string): number {
   return 0;
 }
 
+export type WindowsArch = "x64" | "arm64";
+
 /** Only the matching installer and checksum on this project's official release may be executed. */
-export function windowsRelease(releases: unknown, beta: boolean): WindowsRelease | undefined {
+export function windowsRelease(releases: unknown, beta: boolean, arch: WindowsArch = "x64"): WindowsRelease | undefined {
   if (!Array.isArray(releases)) throw new Error("GitHub 版本信息无效");
   const candidates: WindowsRelease[] = [];
   for (const raw of releases) {
@@ -64,7 +66,7 @@ export function windowsRelease(releases: unknown, beta: boolean): WindowsRelease
     const version = tag.slice("desktop-v".length);
     const parsed = versionParts(version);
     if (!parsed || (!beta && parsed.prerelease.length) || !Array.isArray(release.assets)) continue;
-    const name = `LinkShell-Setup-${version}-windows-x64.exe`;
+    const name = `LinkShell-Setup-${version}-windows-${arch}.exe`;
     const asset = release.assets.find((entry: { name?: unknown }) => entry?.name === name);
     const checksum = release.assets.find((entry: { name?: unknown }) => entry?.name === name + ".sha256");
     const url = `${DOWNLOADS}${tag}/${name}`;
@@ -75,10 +77,10 @@ export function windowsRelease(releases: unknown, beta: boolean): WindowsRelease
   return candidates.sort((a, b) => compareVersions(b.version, a.version))[0];
 }
 
-export async function checkWindowsRelease(fetch: Fetch, beta: boolean): Promise<WindowsRelease | undefined> {
+export async function checkWindowsRelease(fetch: Fetch, beta: boolean, arch: WindowsArch = "x64"): Promise<WindowsRelease | undefined> {
   const response = await fetch(RELEASES, { headers: { accept: "application/vnd.github+json" }, cache: "no-store", signal: AbortSignal.timeout(20_000) });
   if (!response.ok) throw new Error(`GitHub ${response.status}`);
-  return windowsRelease(await response.json(), beta);
+  return windowsRelease(await response.json(), beta, arch);
 }
 
 export async function verifyInstaller(download: DownloadedInstaller): Promise<void> {

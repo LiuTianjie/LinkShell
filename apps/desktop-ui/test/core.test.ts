@@ -1100,4 +1100,173 @@ describe("Slice 2A-4 Core Engine, Fusion, Management, Screen & Unified Router", 
       vi.resetModules();
     }
   });
+
+  it("aborts a stale pre-startup local probe on DESKTOP_HOST_EVENT and reconnects on DESKTOP_RESUME_EVENT", async () => {
+    vi.resetModules();
+    const fakeWindow = Object.assign(new EventTarget(), {
+      linkshellDesktop: { shell: "electron" as const, platform: "darwin", postMessage: vi.fn() },
+    });
+    vi.stubGlobal("window", fakeWindow);
+    vi.stubGlobal("location", {
+      hash: "#desktop=test-token",
+      pathname: "/",
+      search: "",
+      origin: "http://127.0.0.1:4567",
+      protocol: "http:",
+    });
+    const localSignals: AbortSignal[] = [];
+    let localCalls = 0;
+    const { createIdentity } = await import("@linkshell/wire");
+    const identity = createIdentity();
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+      const path = String(url);
+      if (path === "/desktop/bootstrap") {
+        return new Response(JSON.stringify({ identity, storage: {} }), { status: 200 });
+      }
+      if (path === "/desktop/account") {
+        return new Response(JSON.stringify({}), { status: 200 });
+      }
+      if (path === "/desktop/local") {
+        localCalls++;
+        const signal = (init as RequestInit | undefined)?.signal;
+        if (signal) localSignals.push(signal);
+        if (localCalls === 1) {
+          return new Promise<Response>((_resolve, reject) => {
+            signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
+          });
+        }
+        return new Response(
+          JSON.stringify({
+            computer: {
+              key: "desktop:local",
+              gateway: "desktop:local",
+              machine: { id: "local-1", name: "Studio", platform: "darwin", signKey: "", boxKey: "", online: true, via: "paired" },
+            },
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response(JSON.stringify({}), { status: 200 });
+    });
+
+    const { DesktopEngine } = await import("../src/core/engine");
+    const { DESKTOP_HOST_EVENT, DESKTOP_RESUME_EVENT } = await import("../src/bridge/desktop-bridge");
+    const storage = await import("../src/core/storage");
+    storage.resetDesktopStorageForTests();
+    const testEngine = new DesktopEngine();
+    const selectSpy = vi.spyOn(testEngine, "select").mockImplementation(() => {});
+    const reconnectSpy = vi.spyOn(testEngine, "reconnect");
+    try {
+      await testEngine.start();
+      await vi.waitFor(() => expect(localCalls).toBe(1));
+
+      // Startup finishes while the first local probe is still stuck: host event aborts the stale probe immediately.
+      fakeWindow.dispatchEvent(new CustomEvent(DESKTOP_HOST_EVENT));
+      await vi.waitFor(() => expect(localCalls).toBe(2));
+      expect(localSignals[0]?.aborted).toBe(true);
+      await vi.waitFor(() => expect(testEngine.state.getState().localComputer?.machine.name).toBe("Studio"));
+      expect(testEngine.state.getState().localError).toBeUndefined();
+
+      // System wake / screen unlock triggers immediate reconnect.
+      fakeWindow.dispatchEvent(new CustomEvent(DESKTOP_RESUME_EVENT, { detail: { at: Date.now() } }));
+      expect(reconnectSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      selectSpy.mockRestore();
+      reconnectSpy.mockRestore();
+      testEngine.stop();
+      fetchSpy.mockRestore();
+      vi.unstubAllGlobals();
+      vi.resetModules();
+    }
+  });
+
+  it("derives canonical local-host phases across starting, running, stopped, unreachable, and error states", async () => {
+    const { resolveLocalHostPhase, isLocalHostUnavailable } = await import("../src/core/local-host-phase");
+    expect(resolveLocalHostPhase({ starting: true, snapshot: undefined, problem: undefined })).toBe("starting");
+    expect(isLocalHostUnavailable({ starting: true, snapshot: undefined, problem: undefined })).toBe(false);
+    expect(resolveLocalHostPhase({ starting: false, snapshot: undefined, problem: undefined })).toBe("starting");
+    expect(isLocalHostUnavailable({ starting: false, snapshot: undefined, problem: undefined })).toBe(false);
+
+    expect(resolveLocalHostPhase({ starting: false, snapshot: { status: "running" }, problem: undefined })).toBe("running");
+    expect(isLocalHostUnavailable({ starting: false, snapshot: { status: "running" }, problem: undefined })).toBe(false);
+
+    expect(resolveLocalHostPhase({ starting: false, snapshot: { status: "stopped" }, problem: undefined })).toBe("stopped");
+    expect(isLocalHostUnavailable({ starting: false, snapshot: { status: "stopped" }, problem: undefined })).toBe(true);
+
+    expect(resolveLocalHostPhase({ starting: false, snapshot: { status: "unreachable" }, problem: undefined })).toBe("unreachable");
+    expect(isLocalHostUnavailable({ starting: false, snapshot: { status: "unreachable" }, problem: undefined })).toBe(true);
+
+    expect(resolveLocalHostPhase({ starting: false, snapshot: { status: "running" }, problem: "启动失败" })).toBe("error");
+    expect(isLocalHostUnavailable({ starting: false, snapshot: { status: "running" }, problem: "启动失败" })).toBe(true);
+  });
+
+  it("prefers native bridge.invoke in desktopInvoke and parses authenticated SSE streams in openDesktopEventStream", async () => {
+    vi.resetModules();
+    const nativeInvoke = vi.fn(async (method: string, params?: Record<string, unknown>) => ({
+      via: "native",
+      method,
+      params,
+    }));
+    const legacyPostMessage = vi.fn();
+    vi.stubGlobal("window", Object.assign(new EventTarget(), {
+      linkshellDesktop: {
+        shell: "electron" as const,
+        platform: "darwin",
+        invoke: nativeInvoke,
+        postMessage: legacyPostMessage,
+      },
+    }));
+    vi.stubGlobal("location", { hash: "#desktop=sse-secret-token", pathname: "/", search: "" });
+
+    const encoder = new TextEncoder();
+    const chunks = [
+      ": keepalive\n\nevent: snapshot\ndata: {\"status\":\"run",
+      "ning\"}\n\nevent: pairing.done\ndata: {\"device\":{\"id\":\"p1\",\"name\":\"iPhone\"}}\n\n",
+    ];
+    let seenAuthHeader: string | null = null;
+    let seenUrl = "";
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      seenUrl = String(input);
+      seenAuthHeader = new Headers((init as RequestInit)?.headers).get("authorization");
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
+          controller.close();
+        },
+      });
+      return new Response(stream, { status: 200, headers: { "content-type": "text/event-stream" } });
+    });
+
+    try {
+      const bridge = await import("../src/bridge/desktop-bridge");
+      const res = await bridge.desktopInvoke("snapshot", { fast: true });
+      expect(res).toEqual({ via: "native", method: "snapshot", params: { fast: true } });
+      expect(nativeInvoke).toHaveBeenCalledWith("snapshot", { fast: true });
+      expect(legacyPostMessage).not.toHaveBeenCalled();
+
+      let opened = false;
+      let closed = false;
+      const received: Array<{ event: string; data: unknown }> = [];
+      const handle = bridge.openDesktopEventStream("/desktop/events", {
+        onOpen: () => { opened = true; },
+        onEvent: (event, data) => { received.push({ event, data }); },
+        onClose: () => { closed = true; },
+      });
+
+      await vi.waitFor(() => expect(closed).toBe(true));
+      expect(opened).toBe(true);
+      expect(seenUrl).toBe("/desktop/events");
+      expect(seenUrl).not.toContain("sse-secret-token");
+      expect(seenAuthHeader).toBe("Bearer sse-secret-token");
+      expect(received).toEqual([
+        { event: "snapshot", data: { status: "running" } },
+        { event: "pairing.done", data: { device: { id: "p1", name: "iPhone" } } },
+      ]);
+      handle.close();
+    } finally {
+      fetchSpy.mockRestore();
+      vi.unstubAllGlobals();
+      vi.resetModules();
+    }
+  });
 });

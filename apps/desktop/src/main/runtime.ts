@@ -97,8 +97,8 @@ export class Runtime {
       env.LINKSHELL_WINDOWS_HELPER = join(this.folder, "LinkShell.Screen.exe");
       return spawn(join(this.folder, "runtime/node.exe"), [join(this.folder, "runtime/cli/dist/cli/src/index.js"), ...args], { env, stdio, windowsHide: true });
     }
-    if (this.launch.cliNode && this.launch.cliScript) return spawn(this.launch.cliNode, [...this.launch.cliArgs, this.launch.cliScript, ...args], { env, stdio });
-    if (this.checkout) return spawn(process.env.LINKSHELL_DEV_NODE ?? "node", [join(this.checkout, "packages/cli/dist/cli/src/index.js"), ...args], { env, stdio });
+    if (this.launch.cliNode && this.launch.cliScript) return spawn(this.launch.cliNode, [...this.launch.cliArgs, this.launch.cliScript, ...args], { env, stdio, windowsHide: true });
+    if (this.checkout) return spawn(process.env.LINKSHELL_DEV_NODE ?? "node", [join(this.checkout, "packages/cli/dist/cli/src/index.js"), ...args], { env, stdio, windowsHide: true });
     if (process.platform === "win32") throw new Error("请使用 LinkShell 安装包，或从源码目录启动");
     return spawn("/bin/zsh", ["-lc", 'exec linkshell "$@"', "linkshell-desktop", ...args], { env, stdio });
   }

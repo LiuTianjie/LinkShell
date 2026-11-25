@@ -31,6 +31,8 @@ export interface ElectronPreloadBridge {
   readonly platform: string;
   appearance?(): string | undefined;
   visible?(): boolean;
+  opaqueWindow?(): boolean;
+  invoke?<T = unknown>(method: string, params?: Record<string, unknown>): Promise<T>;
   postMessage(message: Record<string, unknown>): void;
   setFlush?(fn: (() => Promise<DesktopFlushResult>) | null): void;
   setSystemShortcutCapture?(enabled: boolean): Promise<boolean>;
@@ -78,6 +80,7 @@ export const DESKTOP_FUSION_TUNNEL_EVENT = "linkshell-fusion-tunnel";
 export const DESKTOP_ACCOUNT_EVENT = "linkshell-desktop-account";
 export const DESKTOP_ERROR_EVENT = "linkshell-desktop-error";
 export const DESKTOP_HOST_EVENT = "linkshell-desktop-host";
+export const DESKTOP_RESUME_EVENT = "linkshell-desktop-resume";
 export const DESKTOP_LAN_HOSTS_EVENT = "linkshell-desktop-lan-hosts";
 export const DESKTOP_SHORTCUT_CAPTURE_EVENT = "linkshell-desktop-shortcut-capture";
 
@@ -224,6 +227,11 @@ export function getShellVisible(): boolean {
   return window.__LINKSHELL_DESKTOP_VISIBLE__ !== false;
 }
 
+export function getShellOpaqueWindow(): boolean {
+  if (typeof window === "undefined") return false;
+  return getPreloadBridge()?.opaqueWindow?.() === true;
+}
+
 export function postDesktopMessage(message: Record<string, unknown>): boolean {
   if (typeof window === "undefined") return false;
   const bridge = getPreloadBridge();
@@ -279,10 +287,36 @@ export function desktopInvoke<T = unknown>(
   if (!bridge) {
     return Promise.reject(new Error("本机管理需要 LinkShell 桌面版"));
   }
-  ensureReplyListener();
-  const id = crypto.randomUUID();
   const effectiveTimeout =
     timeoutMs ?? (method === "login" ? 400_000 : 130_000);
+  if (typeof bridge.invoke === "function") {
+    return new Promise<T>((resolve, reject) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        reject(new Error("操作超时，请重试"));
+      }, effectiveTimeout);
+      bridge
+        .invoke!<T>(method, params)
+        .then(
+          (value) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            resolve(value);
+          },
+          (error: unknown) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            reject(error instanceof Error ? error : new Error(String(error)));
+          },
+        );
+    });
+  }
+  ensureReplyListener();
+  const id = crypto.randomUUID();
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
       pendingReplies.delete(id);
@@ -390,6 +424,135 @@ export async function desktopFetch<T = unknown>(
     throw new Error(data.error || "桌面服务暂时不可用，请重试");
   }
   return data;
+}
+
+export interface DesktopEventStreamHandle {
+  close(): void;
+}
+
+export interface DesktopEventStreamHandlers {
+  onOpen?: () => void;
+  onEvent: (event: string, data: unknown) => void;
+  onClose?: (error?: Error) => void;
+}
+
+/**
+ * Opens an authenticated Server-Sent Events stream against the local desktop sidecar using
+ * `fetch` + `Authorization: Bearer <capability>` so the capability token never enters URLs.
+ */
+export function openDesktopEventStream(
+  path: string,
+  handlers: DesktopEventStreamHandlers,
+): DesktopEventStreamHandle {
+  const token = getDesktopCapability();
+  if (!token) {
+    queueMicrotask(() => {
+      handlers.onClose?.(new Error("桌面工作台尚未连接，请重新打开窗口"));
+    });
+    return { close() {} };
+  }
+  if (!/^\/desktop\/[a-z-]+(?:\/[a-z-]+)*(?:\?[a-zA-Z0-9_=&%.-]+)?$/.test(path)) {
+    queueMicrotask(() => {
+      handlers.onClose?.(new Error("无效的桌面事件流请求"));
+    });
+    return { close() {} };
+  }
+
+  const controller = new AbortController();
+  let closed = false;
+
+  const dispatchBlock = (rawBlock: string) => {
+    if (closed || !rawBlock) return;
+    let eventName = "message";
+    const dataLines: string[] = [];
+    for (const line of rawBlock.split("\n")) {
+      if (!line || line.startsWith(":")) continue;
+      const colon = line.indexOf(":");
+      const field = colon === -1 ? line : line.slice(0, colon);
+      const rawValue = colon === -1 ? "" : line.slice(colon + 1);
+      const value = rawValue.startsWith(" ") ? rawValue.slice(1) : rawValue;
+      if (field === "event") {
+        eventName = value || "message";
+      } else if (field === "data") {
+        dataLines.push(value);
+      }
+    }
+    if (dataLines.length === 0) return;
+    const rawData = dataLines.join("\n");
+    let parsed: unknown = rawData;
+    try {
+      parsed = JSON.parse(rawData);
+    } catch {
+      // Keep plain string payload when the event data is not JSON.
+    }
+    handlers.onEvent(eventName, parsed);
+  };
+
+  void (async () => {
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+    try {
+      const response = await fetch(path, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "text/event-stream",
+        },
+        credentials: "omit",
+        cache: "no-store",
+        redirect: "error",
+        signal: controller.signal,
+      });
+      if (!response.ok || !response.body) {
+        throw new Error(`桌面事件流不可用 (${response.status})`);
+      }
+      if (closed) {
+        void response.body.cancel().catch(() => undefined);
+        return;
+      }
+      handlers.onOpen?.();
+
+      reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (!closed) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value) {
+          buffer += decoder.decode(value, { stream: true }).replace(/\r\n?/g, "\n");
+          let splitAt = buffer.indexOf("\n\n");
+          while (splitAt !== -1 && !closed) {
+            const block = buffer.slice(0, splitAt);
+            buffer = buffer.slice(splitAt + 2);
+            dispatchBlock(block);
+            splitAt = buffer.indexOf("\n\n");
+          }
+        }
+      }
+
+      if (!closed) {
+        const tail = (buffer + decoder.decode()).replace(/\r\n?/g, "\n").trim();
+        if (tail) dispatchBlock(tail);
+        handlers.onClose?.();
+      }
+    } catch (error) {
+      if (!closed) {
+        handlers.onClose?.(error instanceof Error ? error : new Error(String(error)));
+      }
+    } finally {
+      if (reader) {
+        void reader.cancel().catch(() => undefined);
+      }
+    }
+  })();
+
+  return {
+    close() {
+      if (closed) return;
+      closed = true;
+      controller.abort();
+    },
+  };
 }
 
 export function desktopHostWsUrl(): string | undefined {
