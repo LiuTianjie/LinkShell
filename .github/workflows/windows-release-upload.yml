@@ -60,18 +60,24 @@ jobs:
               sha256sum -c "LinkShell-Setup-${VERSION}-windows-${arch}.exe.sha256"
               sha256sum -c "LinkShell-${VERSION}-windows-${arch}.zip.sha256"
               ZIP="LinkShell-${VERSION}-windows-${arch}.zip"
-              STANDALONE_VER="$(unzip -p "$ZIP" standalone.json | jq -r '.version')"
-              STANDALONE_ARCH="$(unzip -p "$ZIP" standalone.json | jq -r '.arch')"
-              APP_VER="$(unzip -p "$ZIP" resources/app/package.json | jq -r '.version')"
-              CLI_VER="$(unzip -p "$ZIP" runtime/cli/package.json | jq -r '.version')"
-              echo "standalone.json: version=$STANDALONE_VER arch=$STANDALONE_ARCH"
-              echo "resources/app/package.json: version=$APP_VER"
-              echo "runtime/cli/package.json: version=$CLI_VER"
-              test "$STANDALONE_VER" = "$VERSION"
-              test "$STANDALONE_ARCH" = "$arch"
-              test "$APP_VER" = "$VERSION"
-              test "$CLI_VER" = "$VERSION"
-              unzip -l "$ZIP" | grep -q "runtime/cli/dist/cli/src/index.js"
+              python3 - "$ZIP" "$VERSION" "$arch" <<'PY'
+import json, sys, zipfile
+zip_path, version, arch = sys.argv[1:4]
+with zipfile.ZipFile(zip_path) as zf:
+    entries = {name.replace("\\", "/").lstrip("./"): name for name in zf.namelist()}
+    standalone = json.loads(zf.read(entries["standalone.json"]))
+    app_pkg = json.loads(zf.read(entries["resources/app/package.json"]))
+    cli_pkg = json.loads(zf.read(entries["runtime/cli/package.json"]))
+    print(f"standalone.json: version={standalone['version']} arch={standalone['arch']}")
+    print(f"resources/app/package.json: version={app_pkg['version']}")
+    print(f"runtime/cli/package.json: version={cli_pkg['version']}")
+    assert standalone["version"] == version, standalone
+    assert standalone["arch"] == arch, standalone
+    assert app_pkg["version"] == version, app_pkg
+    assert cli_pkg["version"] == version, cli_pkg
+    assert "runtime/cli/dist/cli/src/index.js" in entries, "missing CLI entrypoint"
+    assert "LinkShell.exe" in entries and "LinkShell.Screen.exe" in entries, "missing binaries"
+PY
             )
           done
 
