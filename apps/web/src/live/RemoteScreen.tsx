@@ -690,7 +690,32 @@ export function RemoteScreen({ title, active = true, back, uploadDir }: { title:
         handleDropFiles(event.dataTransfer.files);
       }}
     >
-      {shown && !barVisible && <div className="remote-screen-pull" aria-hidden="true" />}
+      {shown && !barVisible && (
+        <button
+          type="button"
+          className="remote-screen-pull"
+          aria-label="展开全屏菜单或退出全屏"
+          title="悬停展开菜单 · 点击退出全屏"
+          onPointerEnter={() => {
+            barHovered.current = true;
+            clearTimeout(barHideTimer.current);
+            setBarVisible(true);
+          }}
+          onPointerLeave={() => {
+            barHovered.current = false;
+            scheduleBarHide(400);
+          }}
+          onClick={() => {
+            barHovered.current = true;
+            clearTimeout(barHideTimer.current);
+            setBarVisible(true);
+          }}
+        >
+          <Minimize size={12} />
+          <span>退出全屏</span>
+          <ChevronDown size={12} />
+        </button>
+      )}
       {toolbar}
       <div
         ref={stage}

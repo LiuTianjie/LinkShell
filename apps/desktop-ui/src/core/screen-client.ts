@@ -439,6 +439,7 @@ export interface NativeScreenStatus {
   displayFps?: number;
   pacing?: "smooth" | "immediate";
   exitFullScreen?: boolean;
+  hudAction?: "toggleControl" | "toggleAudio" | "reconnect" | "disconnect";
 }
 
 export interface NativeScreenEvent {

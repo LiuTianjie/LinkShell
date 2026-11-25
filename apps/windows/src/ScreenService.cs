@@ -155,6 +155,34 @@ namespace LinkShell.Windows {
             return Path.Combine(home, "windows-service-token");
         }
 
+        static string UserServiceErrorPath(string home) {
+            return Path.Combine(home, "windows-service-last-error.txt");
+        }
+
+        static void ClearServiceLastError(string home) {
+            try {
+                if (String.IsNullOrEmpty(home)) return;
+                string path = UserServiceErrorPath(home);
+                if (File.Exists(path)) File.Delete(path);
+            } catch { }
+        }
+
+        static void WriteServiceLastError(string home, string message) {
+            try {
+                if (String.IsNullOrEmpty(home) || String.IsNullOrEmpty(message)) return;
+                Directory.CreateDirectory(home);
+                File.WriteAllText(UserServiceErrorPath(home), message, new UTF8Encoding(false));
+            } catch { }
+        }
+
+        static void LogServiceEvent(string message) {
+            try {
+                string path = Path.Combine(ServiceDataDir(), "service.log");
+                if (File.Exists(path) && new FileInfo(path).Length > 65536) File.WriteAllText(path, "", new UTF8Encoding(false));
+                File.AppendAllText(path, DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture) + " " + message + "\r\n", new UTF8Encoding(false));
+            } catch { }
+        }
+
         static string CurrentExePath() {
             return Process.GetCurrentProcess().MainModule.FileName;
         }
@@ -183,6 +211,19 @@ namespace LinkShell.Windows {
             int diff = 0;
             for (int i = 0; i < a.Length; i++) diff |= a[i] ^ b[i];
             return diff == 0;
+        }
+
+        static void ApplyServiceBinaryDirectoryAcl(string dir) {
+            var sec = new DirectorySecurity();
+            sec.SetAccessRuleProtection(true, false);
+            var systemSid = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
+            var adminsSid = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
+            var usersSid = new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null);
+            sec.AddAccessRule(new FileSystemAccessRule(systemSid, FileSystemRights.FullControl, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
+            sec.AddAccessRule(new FileSystemAccessRule(adminsSid, FileSystemRights.FullControl, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
+            // Users may read/hash the service binary to verify up-to-date status, but can never modify it.
+            sec.AddAccessRule(new FileSystemAccessRule(usersSid, FileSystemRights.ReadAndExecute, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
+            Directory.SetAccessControl(dir, sec);
         }
 
         static void ApplyAdminOnlyDirectoryAcl(string dir) {
@@ -306,7 +347,7 @@ namespace LinkShell.Windows {
                 }
 
                 Directory.CreateDirectory(installDir);
-                ApplyAdminOnlyDirectoryAcl(installDir);
+                ApplyServiceBinaryDirectoryAcl(installDir);
                 if (!String.Equals(Path.GetFullPath(sourceExe), Path.GetFullPath(targetExe), StringComparison.OrdinalIgnoreCase)) {
                     for (int attempt = 0; attempt < 10; attempt++) {
                         try { File.Copy(sourceExe, targetExe, true); break; }
@@ -427,12 +468,14 @@ namespace LinkShell.Windows {
             }
 
             protected override void OnStart(string[] args) {
+                LogServiceEvent("service starting");
                 stopping = false;
                 serverThread = new Thread(AcceptLoop) { IsBackground = true };
                 serverThread.Start();
             }
 
             protected override void OnStop() {
+                LogServiceEvent("service stopping");
                 stopping = true;
                 try {
                     using (var wake = new NamedPipeClientStream(".", ElevatedPipeName, PipeDirection.InOut)) {

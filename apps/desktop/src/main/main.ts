@@ -1,7 +1,7 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, powerMonitor, powerSaveBlocker, screen, shell, type WebContents } from "electron";
 import { randomUUID } from "node:crypto";
 import { execFile, spawn } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -1185,18 +1185,26 @@ async function setWindowsElevatedService(enable: boolean): Promise<WindowsElevat
     throw new Error("未找到 LinkShell.Screen.exe，请重新安装 Windows 桌面版");
   }
   const cleanHome = runtime.home.replace(/[\\]+$/, "");
+  const errFile = join(runtime.home, "windows-service-last-error.txt");
+  rmSync(errFile, { force: true });
   const helperArgs = enable
     ? ["--install-service", await currentWindowsUserSid(), cleanHome]
     : ["--uninstall-service", cleanHome];
   const argArray = helperArgs.map(psSingleQuote).join(", ");
-  const script = `$p = Start-Process -FilePath ${psSingleQuote(helper)} -ArgumentList @(${argArray}) -Verb RunAs -Wait -PassThru -WindowStyle Hidden; exit $p.ExitCode`;
+  const script = `$p = Start-Process -FilePath ${psSingleQuote(helper)} -ArgumentList @(${argArray}) -Verb RunAs -Wait -PassThru -WindowStyle Hidden; if ($null -eq $p) { exit 1 }; exit $p.ExitCode`;
+  const encoded = Buffer.from(script, "utf16le").toString("base64");
   try {
-    await execFileAsync("powershell.exe", ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", script], {
+    await execFileAsync("powershell.exe", ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-EncodedCommand", encoded], {
       windowsHide: true,
       timeout: 60_000,
       encoding: "utf8",
     });
   } catch (error) {
+    let detail = "";
+    try {
+      if (existsSync(errFile)) detail = readFileSync(errFile, "utf8").trim();
+    } catch { /* Ignore unreadable error file. */ }
+    if (detail) throw new Error(`系统控制服务操作失败：${detail}`);
     const text = error instanceof Error ? `${error.message} ${String((error as { stderr?: string }).stderr ?? "")}` : String(error);
     if (/canceled by the user|被用户取消|1223/i.test(text)) {
       throw new Error("已取消管理员授权，未更改系统控制服务");

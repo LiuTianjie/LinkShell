@@ -65,8 +65,9 @@
 
   /* Full screen: the picture alone, the bar over it on demand. */
   .remote-screen-fullscreen { position: fixed; inset: 0; z-index: 60; background: #000; }
-  /* Subtle center pull cue in the top bezel/notch zone; pointer-events stay off so status icons below remain clickable. */
-  .remote-screen-pull { position: absolute; top: 3px; left: 50%; z-index: 3; width: 38px; height: 4px; border-radius: 999px; transform: translateX(-50%); background: rgb(255 255 255 / .34); box-shadow: 0 1px 3px rgb(0 0 0 / .55); pointer-events: none; transition: opacity 160ms var(--ease-out, ease-out); }
+  /* Persistent semi-transparent floating capsule in fullscreen; hovering reveals the full toolbar. */
+  .remote-screen-pull { appearance: none; position: absolute; top: 10px; left: 50%; z-index: 4; height: 28px; padding: 0 10px 0 11px; border-radius: 999px; border: 1px solid rgb(255 255 255 / .18); transform: translateX(-50%); background: rgb(22 24 30 / .78); -webkit-backdrop-filter: blur(14px) saturate(1.4); backdrop-filter: blur(14px) saturate(1.4); box-shadow: 0 6px 20px rgb(0 0 0 / .38); color: rgb(255 255 255 / .92); font-size: 12px; font-weight: 500; line-height: 1; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; cursor: pointer; opacity: 0.36; transition: opacity 150ms var(--ease-out, ease-out), background-color 150ms var(--ease-out, ease-out); }
+  .remote-screen-pull:hover, .remote-screen-pull:focus-visible { opacity: 0.92; background: rgb(28 30 38 / .9); outline: none; }
   /* Over the picture, which is often black too: a lighter glass and a drawn edge keep it apart. */
   .remote-screen-fullscreen > .remote-screen-bar { position: absolute; top: 8px; left: 50%; width: auto; max-width: calc(100% - 24px); height: 40px; padding: 0 6px 0 4px; border: 0; border-radius: var(--radius-card); transform: translateX(-50%); color: #fff; background: rgb(44 44 48 / .84); -webkit-backdrop-filter: blur(24px) saturate(1.6); backdrop-filter: blur(24px) saturate(1.6); box-shadow: inset 0 0 0 1px rgb(255 255 255 / .16), 0 12px 32px -8px rgb(0 0 0 / .7); transition: transform 220ms var(--ease-out, ease-out), opacity 180ms var(--ease-out, ease-out); }
   /* The icon sits as far in from the left edge as the last button's pill does from the right. */

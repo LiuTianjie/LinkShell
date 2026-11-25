@@ -33,6 +33,7 @@ final class NativeScreen: NSObject {
   private var fullScreen = false
   private var fullScreenOverlay: DesktopFullScreenOverlay?
   private var wantedControl = false
+  private var wantedAudioMuted = true
   private var wantedSmooth: Bool
   private var systemShortcutCaptureEnabled: Bool
   private var startup: DispatchWorkItem?
@@ -61,6 +62,7 @@ final class NativeScreen: NSObject {
     self.holes = holes
     self.overlayOpen = overlayOpen
     self.wantedSmooth = smooth
+    self.wantedAudioMuted = audioMuted
     self.fullScreen = fullScreen
     self.systemShortcutCaptureEnabled = systemShortcutCapture
     self.callback = callback
@@ -224,7 +226,11 @@ final class NativeScreen: NSObject {
         MainActor.assumeIsolated { syncFullScreenOverlay() }
       }
     case "control":
-      if let enabled = DesktopScreenBridge.boolean(value["enabled"]) { wantedControl = enabled; if ready { pipe.send(["type": "control", "enabled": enabled]) } }
+      if let enabled = DesktopScreenBridge.boolean(value["enabled"]) {
+        wantedControl = enabled
+        MainActor.assumeIsolated { fullScreenOverlay?.updateState(control: wantedControl, audioMuted: wantedAudioMuted) }
+        if ready { pipe.send(["type": "control", "enabled": enabled]) }
+      }
     case "pacing":
       if let smooth = DesktopScreenBridge.boolean(value["smooth"]) {
         wantedSmooth = smooth
@@ -236,6 +242,12 @@ final class NativeScreen: NSObject {
         _ = setSystemShortcutCapture(enabled)
       }
     case "mute", "audio":
+      if let muted = DesktopScreenBridge.boolean(value["muted"]) {
+        wantedAudioMuted = muted
+      } else if let enabled = DesktopScreenBridge.boolean(value["enabled"]) {
+        wantedAudioMuted = !enabled
+      }
+      MainActor.assumeIsolated { fullScreenOverlay?.updateState(control: wantedControl, audioMuted: wantedAudioMuted) }
       if ready { pipe.send(value) }
       else if pending.count < 128 { pending.append(value) }
     case "signal":
@@ -308,11 +320,18 @@ final class NativeScreen: NSObject {
     let showing = fullScreen && visible && !clip.isHidden && !closed
     if showing {
       if fullScreenOverlay == nil {
-        fullScreenOverlay = DesktopFullScreenOverlay { [weak self] in
-          guard let self, !self.closed else { return }
-          self.callback.call(["id": self.id, "type": "status", "status": ["exitFullScreen": true]])
-        }
+        fullScreenOverlay = DesktopFullScreenOverlay(
+          onExit: { [weak self] in
+            guard let self, !self.closed else { return }
+            self.callback.call(["id": self.id, "type": "status", "status": ["exitFullScreen": true]])
+          },
+          onAction: { [weak self] action in
+            guard let self, !self.closed else { return }
+            self.callback.call(["id": self.id, "type": "status", "status": ["hudAction": action]])
+          }
+        )
       }
+      fullScreenOverlay?.updateState(control: wantedControl, audioMuted: wantedAudioMuted)
       fullScreenOverlay?.attach(to: clip)
     } else {
       fullScreenOverlay?.detach()

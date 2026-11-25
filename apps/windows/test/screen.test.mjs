@@ -113,3 +113,34 @@ test('disabling sharing stops an idle input helper without waiting for another e
   try { assert.equal((await exited)[0], 1); assert.ok(disabled); }
   finally { child.stdin.end(); rmSync(home, { recursive: true, force: true }); }
 });
+
+test('elevated screen service installs, starts as LocalSystem, reports running status, and uninstalls cleanly when admin', { skip: !supported, timeout: 30_000 }, (context) => {
+  let sid = '';
+  try {
+    const out = execFileSync('whoami.exe', ['/user', '/fo', 'csv', '/nh'], { windowsHide: true, encoding: 'utf8', stdio: 'pipe' });
+    sid = /"(S-1-[0-9-]+)"/.exec(out)?.[1] ?? '';
+    // Check if running elevated (GitHub Actions windows-latest runners are elevated administrators).
+    const isAdmin = execFileSync('powershell.exe', ['-NoProfile', '-Command', '([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)'], { windowsHide: true, encoding: 'utf8', stdio: 'pipe' }).trim();
+    if (isAdmin.toLowerCase() !== 'true' || !sid) {
+      context.skip('Not running as Administrator');
+      return;
+    }
+  } catch {
+    context.skip('Cannot check Windows admin privileges');
+    return;
+  }
+  const home = mkdtempSync(join(tmpdir(), 'linkshell-service-test-'));
+  const env = { ...process.env, LINKSHELL_HOME: home };
+  try {
+    execFileSync(helper, ['--install-service', sid, home], { windowsHide: true, env, stdio: 'pipe' });
+    const status = JSON.parse(execFileSync(helper, ['--service-status'], { windowsHide: true, env, encoding: 'utf8', stdio: 'pipe' }));
+    assert.deepEqual(status, { installed: true, running: true, authorized: true, outdated: false });
+    assert.ok(existsSync(join(home, 'windows-service-token')));
+  } finally {
+    try { execFileSync(helper, ['--uninstall-service', home], { windowsHide: true, env, stdio: 'pipe' }); } catch {}
+    rmSync(home, { recursive: true, force: true });
+  }
+  const after = JSON.parse(execFileSync(helper, ['--service-status'], { windowsHide: true, env, encoding: 'utf8', stdio: 'pipe' }));
+  assert.equal(after.installed, false);
+  assert.equal(after.running, false);
+});

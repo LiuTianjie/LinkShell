@@ -387,6 +387,95 @@ describe("AgyDriver registration & protocol parity", () => {
     }
   });
 
+  it("treats EPERM from process.kill(pid, 0) as alive and falls back past stale language_server.log ports", async () => {
+    const home = makeTempDir("ls-desktop-eperm-hub-");
+    const data = join(home, ".gemini", "antigravity");
+    const logDir = process.platform === "darwin" ? join(home, "Library", "Logs", "Antigravity") : join(home, ".config", "Antigravity", "logs");
+    mkdirSync(logDir, { recursive: true });
+    mkdirSync(join(data, "brain", "existing"), { recursive: true });
+    mkdirSync(join(data, "daemon"), { recursive: true });
+    // Stale log announces an old dead port while the real running hub is an elevated process (kill -> EPERM).
+    writeFileSync(join(logDir, "language_server.log"), "Language server listening on random port at 55401 for HTTP\n");
+    writeFileSync(
+      join(data, "daemon", "hub_55401.json"),
+      JSON.stringify({ pid: 99999998, httpPort: 55401, csrfToken: "stale-token" }),
+      { mode: 0o600 },
+    );
+    writeFileSync(
+      join(data, "daemon", "hub_55402.json"),
+      JSON.stringify({ pid: 424242, httpPort: 55402, csrfToken: "elevated-token", lsVersion: "2.35.1" }),
+      { mode: 0o600 },
+    );
+    writeFileSync(join(data, "antigravity_state.pbtxt"), "last_selected_agent_model: MODEL_TEST\n");
+    const driver = new AntigravityDriver({
+      hostVersion: "test",
+      env: { PATH: "", HOME: home, LINKSHELL_HOME: home, ANTIGRAVITY_APP_DATA_DIR: data },
+    });
+    const { host } = makeMockHost();
+    const realKill = process.kill.bind(process);
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(((pid: number, signal?: number | NodeJS.Signals) => {
+      if (pid === 424242 && signal === 0) {
+        const err = new Error("kill EPERM") as NodeJS.ErrnoException;
+        err.code = "EPERM";
+        throw err;
+      }
+      return realKill(pid, signal as never);
+    }) as typeof process.kill);
+    const request = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+      expect(new URL(String(url)).port).toBe("55402");
+      expect(new Headers(init?.headers).get("x-codeium-csrf-token")).toBe("elevated-token");
+      if (String(url).endsWith("/StartCascade")) return Response.json({ cascadeId: "eperm-win-session" });
+      return Response.json({});
+    });
+    try {
+      await driver.start(host);
+      const created = await driver.createSession({ cwd: home });
+      expect(created.nativeId).toBe("eperm-win-session");
+    } finally {
+      await driver.stop();
+      killSpy.mockRestore();
+      request.mockRestore();
+    }
+  });
+
+  it("auto-launches Antigravity Desktop when closed and completes createSession once the hub comes online", async () => {
+    const home = makeTempDir("ls-desktop-autolaunch-");
+    const data = join(home, ".gemini", "antigravity");
+    mkdirSync(join(data, "daemon"), { recursive: true });
+    writeFileSync(join(data, "antigravity_state.pbtxt"), "last_selected_agent_model: MODEL_TEST\n");
+    const launcher = join(home, "fake-antigravity.sh");
+    writeFileSync(
+      launcher,
+      `#!/bin/sh\ncat > "${join(data, "daemon", "hub_55499.json")}" <<'EOF'\n{"pid":${process.pid},"httpPort":55499,"csrfToken":"autolaunch-token","lsVersion":"2.35.1"}\nEOF\n`,
+      { mode: 0o755 },
+    );
+    const driver = new AntigravityDriver({
+      hostVersion: "test",
+      env: {
+        PATH: "",
+        HOME: home,
+        LINKSHELL_HOME: home,
+        ANTIGRAVITY_APP_DATA_DIR: data,
+        LINKSHELL_ANTIGRAVITY_APP_PATH: launcher,
+      },
+    });
+    const { host } = makeMockHost();
+    const request = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+      expect(new URL(String(url)).port).toBe("55499");
+      expect(new Headers(init?.headers).get("x-codeium-csrf-token")).toBe("autolaunch-token");
+      if (String(url).endsWith("/StartCascade")) return Response.json({ cascadeId: "autolaunched-session" });
+      return Response.json({});
+    });
+    try {
+      await driver.start(host);
+      const created = await driver.createSession({ cwd: home });
+      expect(created.nativeId).toBe("autolaunched-session");
+    } finally {
+      await driver.stop();
+      request.mockRestore();
+    }
+  });
+
   it("registers agy separately from antigravity desktop with no login gate", () => {
     const byId = new Map(ACP_AGENTS.map((spec) => [spec.id, spec]));
     expect(byId.has("antigravity")).toBe(true);

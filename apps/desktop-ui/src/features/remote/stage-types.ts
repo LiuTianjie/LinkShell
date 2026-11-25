@@ -61,6 +61,7 @@ export interface SharedStageProps {
   revision: number;
   onDisplayChange: (display: number) => void;
   onExitFullScreen: () => void;
+  onHudAction?: (action: "toggleControl" | "toggleAudio" | "reconnect" | "disconnect") => void;
   onStatusChange: (status: RemoteStageStatus) => void;
   onFallback?: (reason: string) => void;
   onRegisterAudioUnlock?: (unlock: (() => void) | undefined) => void;

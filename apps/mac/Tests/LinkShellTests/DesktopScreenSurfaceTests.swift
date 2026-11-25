@@ -173,12 +173,15 @@ final class DesktopScreenSurfaceTests: XCTestCase {
 
     overlay.bar.reveal(false)
     XCTAssertFalse(overlay.bar.isRevealed)
-    XCTAssertFalse(overlay.handle.isHidden, "Persistent handle pill appears when exit bar collapses")
-    XCTAssertEqual(overlay.handle.alphaValue, 0.48, accuracy: 0.001)
-    XCTAssertEqual(overlay.handle.frame, CGRect(x: 732, y: 6, width: 48, height: 5))
+    XCTAssertFalse(overlay.handle.isHidden, "Persistent translucent floating capsule appears when exit menu collapses")
+    XCTAssertEqual(overlay.handle.alphaValue, DesktopFullScreenHandle.restingAlpha, accuracy: 0.001)
+    XCTAssertEqual(overlay.handle.frame.minY, DesktopFullScreenHandle.topOffset, accuracy: 0.5)
+    XCTAssertEqual(overlay.handle.frame.height, DesktopFullScreenHandle.height, accuracy: 0.5)
+    XCTAssertGreaterThanOrEqual(overlay.handle.frame.width, 104)
+    XCTAssertEqual(overlay.handle.frame.midX, container.bounds.midX, accuracy: 1.0)
 
     overlay.triggerHandle()
-    XCTAssertTrue(overlay.bar.isRevealed, "Hovering or clicking the handle reveals the exit bar")
+    XCTAssertTrue(overlay.bar.isRevealed, "Hovering or clicking the floating capsule reveals the full menu bar")
     XCTAssertTrue(overlay.handle.isHidden)
     overlay.bar.onExit?()
     XCTAssertEqual(exited, 1)
@@ -286,11 +289,11 @@ final class DesktopScreenSurfaceTests: XCTestCase {
       clip.overlayOpen = true
       XCTAssertNil(clip.hitTest(hostPoint(400, 300)))
 
-      // Native fullscreen handle/exit bar remains clickable even while overlayOpen is true.
+      // Native fullscreen floating capsule/exit bar remains clickable even while overlayOpen is true.
       let overlay = DesktopFullScreenOverlay {}
       overlay.attach(to: clip)
       overlay.bar.reveal(false)
-      let handlePointInHost = hostPoint(240 + 480, 42 + 8)
+      let handlePointInHost = hostPoint(240 + 480, 42 + 18)
       XCTAssertTrue(clip.hitTest(handlePointInHost) === overlay.handle)
       overlay.detach()
 

@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { accessSync, closeSync, constants, existsSync, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -93,6 +93,7 @@ export interface ResolvedAntigravityLaunch {
 
 export interface ResolvedAntigravityDesktop {
   dataDir: string;
+  appPath?: string;
   languageServerPath?: string;
   logPath?: string;
   version: string;
@@ -247,12 +248,23 @@ interface ValidatedHubDescriptor {
   mtimeMs: number;
 }
 
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM (common on Windows when Antigravity runs elevated or with a restricted DACL, and on
+    // Unix across privilege boundaries) proves the PID is alive; only ESRCH means it exited.
+    return (error as NodeJS.ErrnoException | undefined)?.code === "EPERM";
+  }
+}
+
 function readHubDescriptor(filePath: string, expectedPort?: number): ValidatedHubDescriptor | undefined {
   let fd: number | undefined;
   try {
     fd = openSync(filePath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
     const file = fstatSync(fd);
-    if (!file.isFile() || file.size > 4096 || (process.getuid && (file.uid !== process.getuid() || (file.mode & 0o077) !== 0))) {
+    if (!file.isFile() || file.size > 4096 || (process.getuid && (file.uid !== process.getuid() || (file.mode & 0o022) !== 0))) {
       return undefined;
     }
     const hub = JSON.parse(readFileSync(fd, "utf8")) as {
@@ -274,7 +286,7 @@ function readHubDescriptor(filePath: string, expectedPort?: number): ValidatedHu
     ) {
       return undefined;
     }
-    process.kill(hub.pid as number, 0); // A descriptor can outlive its desktop.
+    if (!isProcessAlive(hub.pid as number)) return undefined; // A descriptor can outlive its desktop.
     return {
       httpPort,
       pid: hub.pid as number,
@@ -358,6 +370,8 @@ export function resolveAntigravityDesktop(env: NodeJS.ProcessEnv = process.env):
     env.XDG_CONFIG_HOME ?? "",
     env.ANTIGRAVITY_APP_DATA_DIR ?? "",
     env.ANTIGRAVITY_LOG_PATH ?? "",
+    env.LINKSHELL_ANTIGRAVITY_APP_PATH ?? "",
+    env.PATH ?? "",
   ].join("\n");
   if (desktopCache && desktopCache.key === key && Date.now() - desktopCache.at < DESKTOP_CACHE_MS) return desktopCache.value;
   const value = resolveAntigravityDesktopUncached(env);
@@ -380,6 +394,26 @@ function resolveAntigravityDesktopUncached(env: NodeJS.ProcessEnv): ResolvedAnti
   const appData = env.APPDATA?.trim() || join(home, "AppData", "Roaming");
   const programFiles = env.ProgramFiles?.trim() || "C:\\Program Files";
 
+  const explicitApp = env.LINKSHELL_ANTIGRAVITY_APP_PATH?.trim();
+  let appPath: string | undefined;
+  if (explicitApp && existsSync(explicitApp)) {
+    appPath = explicitApp;
+  } else if (env.PATH !== "") {
+    if (process.platform === "darwin") {
+      appPath = ["/Applications/Antigravity.app", join(home, "Applications", "Antigravity.app")].find((candidate) =>
+        existsSync(candidate),
+      );
+    } else if (process.platform === "win32") {
+      appPath = [
+        join(localAppData, "Programs", "Antigravity", "Antigravity.exe"),
+        join(localAppData, "Antigravity", "Antigravity.exe"),
+        join(programFiles, "Antigravity", "Antigravity.exe"),
+      ].find((candidate) => isExecutable(candidate));
+    } else if (env.DISPLAY || env.WAYLAND_DISPLAY) {
+      appPath = findOnPath(["antigravity", "Antigravity"], env);
+    }
+  }
+
   const lsCandidates =
     process.platform === "darwin"
       ? [
@@ -394,7 +428,7 @@ function resolveAntigravityDesktopUncached(env: NodeJS.ProcessEnv): ResolvedAnti
           ]
         : [];
   const languageServerPath = lsCandidates.find((candidate) => isExecutable(candidate));
-  if (!dataDir && !languageServerPath) return undefined;
+  if (!dataDir && !languageServerPath && !appPath) return undefined;
 
   const explicitLog = env.ANTIGRAVITY_LOG_PATH?.trim();
   const logCandidates = [
@@ -442,6 +476,7 @@ function resolveAntigravityDesktopUncached(env: NodeJS.ProcessEnv): ResolvedAnti
 
   return {
     dataDir: resolvedDataDir,
+    ...(appPath ? { appPath } : {}),
     languageServerPath,
     logPath,
     version,
@@ -1380,14 +1415,74 @@ async function lsAnswers(conn: LanguageServerConnection): Promise<boolean> {
   }
 }
 
-async function findRunningLanguageServer(desktop: ResolvedAntigravityDesktop | undefined): Promise<LanguageServerConnection | undefined> {
+const AUTO_LAUNCH_TIMEOUT_MS = 20_000;
+const AUTO_LAUNCH_POLL_MS = 400;
+let autoLaunchInFlight: Promise<LanguageServerConnection | undefined> | undefined;
+
+async function findRunningLanguageServer(
+  desktop: ResolvedAntigravityDesktop | undefined,
+  options?: { force?: boolean },
+): Promise<LanguageServerConnection | undefined> {
   if (!desktop) return undefined;
   const cacheKey = `${desktop.dataDir}\n${desktop.logPath ?? ""}`;
-  if (lsCache && lsCache.logPath === cacheKey && Date.now() - lsCache.at < LS_CACHE_MS) return lsCache.conn;
+  if (!options?.force && lsCache && lsCache.logPath === cacheKey && Date.now() - lsCache.at < LS_CACHE_MS) {
+    return lsCache.conn;
+  }
+  if (options?.force) lsCache = undefined;
   lsLookup ??= lookupLanguageServer(desktop, cacheKey).finally(() => {
     lsLookup = undefined;
   });
   return lsLookup;
+}
+
+async function launchAntigravityApp(appPath: string): Promise<boolean> {
+  try {
+    if (process.platform === "darwin" && appPath.endsWith(".app")) {
+      // `-g` keeps it in the background without stealing focus; `-j` starts it hidden.
+      await execFileAsync("open", ["-gj", appPath], { timeout: 5000 });
+      return true;
+    }
+    const child = spawn(appPath, [], {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    child.unref();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function ensureDesktopLanguageServer(
+  desktop: ResolvedAntigravityDesktop | undefined,
+  env: NodeJS.ProcessEnv,
+  log?: (message: string) => void,
+): Promise<{ conn?: LanguageServerConnection; autoLaunchAttempted: boolean }> {
+  const existing = await findRunningLanguageServer(desktop);
+  if (existing) return { conn: existing, autoLaunchAttempted: false };
+  if (!desktop?.appPath || env.LINKSHELL_NO_AUTO_LAUNCH_ANTIGRAVITY === "1") {
+    return { autoLaunchAttempted: false };
+  }
+  autoLaunchInFlight ??= (async () => {
+    // Re-check once right before launching in case another caller just brought it up.
+    const fresh = await findRunningLanguageServer(desktop, { force: true });
+    if (fresh) return fresh;
+    log?.(`[antigravity] desktop not running; auto-launching ${desktop.appPath}`);
+    const launched = await launchAntigravityApp(desktop.appPath!);
+    if (!launched) return undefined;
+    const deadline = Date.now() + AUTO_LAUNCH_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, AUTO_LAUNCH_POLL_MS));
+      const conn = await findRunningLanguageServer(desktop, { force: true });
+      if (conn) return conn;
+    }
+    return undefined;
+  })().finally(() => {
+    autoLaunchInFlight = undefined;
+  });
+  const conn = await autoLaunchInFlight;
+  return { conn, autoLaunchAttempted: true };
 }
 
 async function listProcessCommandLines(): Promise<string[]> {
@@ -1417,6 +1512,7 @@ async function listProcessCommandLines(): Promise<string[]> {
 }
 
 async function lookupLanguageServer(desktop: ResolvedAntigravityDesktop, cacheKey: string): Promise<LanguageServerConnection | undefined> {
+  const triedPorts = new Set<number>();
   const logPath = desktop.logPath && existsSync(desktop.logPath) ? desktop.logPath : undefined;
   if (logPath) {
     // The log starts over with each launch; if it was appended to instead, check both head and tail so the latest port wins.
@@ -1424,45 +1520,46 @@ async function lookupLanguageServer(desktop: ResolvedAntigravityDesktop, cacheKe
     const tailPorts = [...readTail(logPath, 256 * 1024).matchAll(/listening on \w+ port at (\d+) for HTTP\b/gi)].map((match) => Number(match[1]));
     const httpPort = tailPorts.at(-1) ?? headPorts.at(-1);
     if (httpPort) {
-      // The desktop and other Google apps can publish hubs in the same directory. Only use
-      // the descriptor for the HTTP listener announced by *this desktop's* launch log.
+      triedPorts.add(httpPort);
+      // Prefer the descriptor matching the port announced in this desktop's launch log,
+      // confirming it answers GetStatus before trusting it; if stale, fall through to live daemon hubs.
       const descriptor = join(desktop.dataDir, "daemon", `hub_${httpPort}.json`);
       if (existsSync(descriptor)) {
         const hub = readHubDescriptor(descriptor, httpPort);
         if (hub) {
           const conn = { httpPort: hub.httpPort, csrfToken: hub.csrfToken };
-          lsCache = { logPath: cacheKey, at: Date.now(), conn };
-          return conn;
+          if (await lsAnswers(conn)) {
+            lsCache = { logPath: cacheKey, at: Date.now(), conn };
+            return conn;
+          }
         }
-        lsCache = undefined;
-        return undefined;
-      }
-      // Older desktops did not publish a per-user hub descriptor.
-      const tokens: string[] = [];
-      const lines = (await listProcessCommandLines()).filter((line) => line.includes("language_server") && line.includes("--csrf_token"));
-      const own = (line: string) => (desktop.languageServerPath && line.includes(desktop.languageServerPath) ? 1 : 0);
-      lines.sort((a, b) => own(b) - own(a));
-      for (const line of lines) {
-        const token = /--csrf_token[=\s]+([^\s"']+)/.exec(line)?.[1];
-        if (token && !tokens.includes(token)) tokens.push(token);
-      }
-      for (const csrfToken of tokens) {
-        const conn = { httpPort, csrfToken };
-        if (tokens.length === 1 || (await lsAnswers(conn))) {
-          lsCache = { logPath: cacheKey, at: Date.now(), conn };
-          return conn;
+      } else {
+        // Older desktops did not publish a per-user hub descriptor.
+        const tokens: string[] = [];
+        const lines = (await listProcessCommandLines()).filter((line) => line.includes("language_server") && line.includes("--csrf_token"));
+        const own = (line: string) => (desktop.languageServerPath && line.includes(desktop.languageServerPath) ? 1 : 0);
+        lines.sort((a, b) => own(b) - own(a));
+        for (const line of lines) {
+          const token = /--csrf_token[=\s]+([^\s"']+)/.exec(line)?.[1];
+          if (token && !tokens.includes(token)) tokens.push(token);
+        }
+        for (const csrfToken of tokens) {
+          const conn = { httpPort, csrfToken };
+          if (await lsAnswers(conn)) {
+            lsCache = { logPath: cacheKey, at: Date.now(), conn };
+            return conn;
+          }
         }
       }
-      lsCache = undefined;
-      return undefined;
     }
   }
 
-  // On Windows (or custom Electron log layouts where language_server.log is in another location),
-  // fall back to live verified hub descriptors inside Antigravity's own `daemon/` directory
-  // and confirm the local Connect-RPC service answers GetStatus.
+  // Fall back to live verified hub descriptors inside Antigravity's own `daemon/` directory
+  // (covers rotated/large logs, Windows/custom log layouts, and stale log ports), confirming
+  // each candidate answers GetStatus on loopback.
   const liveHubs = listLiveHubDescriptors(desktop.dataDir);
   for (const hub of liveHubs) {
+    if (triedPorts.has(hub.httpPort)) continue;
     const conn = { httpPort: hub.httpPort, csrfToken: hub.csrfToken };
     if (await lsAnswers(conn)) {
       lsCache = { logPath: cacheKey, at: Date.now(), conn };
@@ -1785,8 +1882,20 @@ export class AntigravityDriver extends AcpDriver {
   }
 
   private async requireConnection(action = "继续"): Promise<LanguageServerConnection> {
-    const conn = await this.languageServer();
-    if (!conn) throw RpcError.app("agent_unavailable", `请先在电脑上打开 Antigravity 桌面端应用，再${action}`);
+    const env = this.options.env ?? process.env;
+    const { conn, autoLaunchAttempted } = await ensureDesktopLanguageServer(
+      this.desktop(),
+      env,
+      (message) => this.host?.log(message),
+    );
+    if (!conn) {
+      throw RpcError.app(
+        "agent_unavailable",
+        autoLaunchAttempted
+          ? `自动启动 Antigravity 桌面端超时，请先在电脑上手动打开 Antigravity，再${action}`
+          : `请先在电脑上打开 Antigravity 桌面端应用，再${action}`,
+      );
+    }
     return conn;
   }
 

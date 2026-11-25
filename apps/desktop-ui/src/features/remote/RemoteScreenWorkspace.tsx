@@ -193,6 +193,7 @@ export function RemoteScreenWorkspace({
   const dockHideTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
+  const dockHoveredRef = useRef(false);
 
   const localEnv = resolveLocalDesktopEnv();
   const isMacClient =
@@ -390,24 +391,32 @@ export function RemoteScreenWorkspace({
     [localEnv.localPlatform, remotePlatform],
   );
 
-  // Briefly reveal the top fullscreen HUD dock on entry, and allow Esc / F11 / Ctrl+Cmd+F exit.
+  // Briefly show the expanded floating menu on fullscreen entry, then settle into the resting
+  // semi-transparent floating pill until hovered.
+  const scheduleDockCollapse = useCallback((delayMs: number) => {
+    clearTimeout(dockHideTimerRef.current);
+    dockHideTimerRef.current = setTimeout(() => {
+      if (dockHoveredRef.current || hasOpenOverlay()) {
+        scheduleDockCollapse(400);
+        return;
+      }
+      setFullscreenDockRevealed(false);
+    }, delayMs);
+  }, []);
+
   useEffect(() => {
     if (!fullscreen) {
       clearTimeout(dockHideTimerRef.current);
+      dockHoveredRef.current = false;
       setFullscreenDockRevealed(false);
       return undefined;
     }
     setFullscreenDockRevealed(true);
-    clearTimeout(dockHideTimerRef.current);
-    dockHideTimerRef.current = setTimeout(() => {
-      if (!hasOpenOverlay()) {
-        setFullscreenDockRevealed(false);
-      }
-    }, 1_800);
+    scheduleDockCollapse(1_800);
     return () => {
       clearTimeout(dockHideTimerRef.current);
     };
-  }, [fullscreen]);
+  }, [fullscreen, scheduleDockCollapse]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !isRouteActive) return undefined;
@@ -1106,15 +1115,26 @@ export function RemoteScreenWorkspace({
         />
       ) : null}
 
-      <IconButton
-        size="icon-sm"
-        icon={fullscreen ? "minimize" : "maximize"}
-        label={
-          fullscreen ? copy.screenFullscreenExit : copy.screenFullscreenEnter
-        }
-        shortcut={fullscreenShortcut}
-        onClick={() => setFullscreenEnabled(!fullscreen)}
-      />
+      {fullscreen ? (
+        <Button
+          size="sm"
+          variant="secondary"
+          leadingIcon="minimize"
+          aria-label={copy.screenFullscreenExit}
+          title={`${copy.screenFullscreenExit} (${fullscreenShortcut})`}
+          onClick={() => setFullscreenEnabled(false)}
+        >
+          <span>{copy.screenFullscreenExit}</span>
+        </Button>
+      ) : (
+        <IconButton
+          size="icon-sm"
+          icon="maximize"
+          label={copy.screenFullscreenEnter}
+          shortcut={fullscreenShortcut}
+          onClick={() => setFullscreenEnabled(true)}
+        />
+      )}
 
       {started ? (
         <IconButton
@@ -1166,18 +1186,15 @@ export function RemoteScreenWorkspace({
       data-fullscreen-stage={fullscreen ? "true" : undefined}
       className="ls-remote-workspace"
       onPointerMove={(event) => {
-        if (!fullscreen) return;
-        const nearTop = event.clientY <= 36;
-        if (nearTop) {
+        if (!fullscreen || nativeOwnsFullscreenHud) return;
+        const rect = event.currentTarget.getBoundingClientRect();
+        const relY = event.clientY - rect.top;
+        const distFromCenter = Math.abs(event.clientX - (rect.left + rect.width / 2));
+        if (relY >= 0 && relY <= 18 && distFromCenter <= 140) {
           clearTimeout(dockHideTimerRef.current);
           setFullscreenDockRevealed(true);
-        } else if (fullscreenDockRevealed && !hasOpenOverlay()) {
-          clearTimeout(dockHideTimerRef.current);
-          dockHideTimerRef.current = setTimeout(() => {
-            if (!hasOpenOverlay()) {
-              setFullscreenDockRevealed(false);
-            }
-          }, 900);
+        } else if (fullscreenDockRevealed && !dockHoveredRef.current && !hasOpenOverlay()) {
+          scheduleDockCollapse(420);
         }
       }}
     >
@@ -1255,14 +1272,23 @@ export function RemoteScreenWorkspace({
           {renderToolbarActions()}
         </div>
       ) : !nativeOwnsFullscreenHud ? (
-        <>
+        <div
+          data-revealed={fullscreenDockRevealed ? "true" : undefined}
+          className="ls-screen-fullscreen-dock"
+        >
           <button
             type="button"
             className="ls-screen-fullscreen-handle"
             aria-label={copy.screenFullscreenExit}
+            title={`${copy.screenFullscreenExit} (${fullscreenShortcut})`}
             onPointerEnter={() => {
+              dockHoveredRef.current = true;
               clearTimeout(dockHideTimerRef.current);
               setFullscreenDockRevealed(true);
+            }}
+            onPointerLeave={() => {
+              dockHoveredRef.current = false;
+              scheduleDockCollapse(320);
             }}
             onClick={() => {
               if (fullscreenDockRevealed) {
@@ -1271,22 +1297,32 @@ export function RemoteScreenWorkspace({
                 setFullscreenDockRevealed(true);
               }
             }}
-          />
-          <div
-            data-revealed={fullscreenDockRevealed ? "true" : undefined}
-            className="ls-screen-fullscreen-dock"
           >
-            <div className="ls-screen-fullscreen-bar">
-              <span className="ls-remote-subbar__computer ls-remote-subbar__computer--always">
-                <DesktopIcon name={platformIcon} size="xs" />
-                <span className="ls-remote-subbar__computer-name">
-                  {displayName}
-                </span>
+            <DesktopIcon name="minimize" size="xs" />
+            <span>{copy.screenFullscreenExit}</span>
+            <DesktopIcon name="chevron-down" size="xs" />
+          </button>
+          <div
+            className="ls-screen-fullscreen-bar"
+            onPointerEnter={() => {
+              dockHoveredRef.current = true;
+              clearTimeout(dockHideTimerRef.current);
+              setFullscreenDockRevealed(true);
+            }}
+            onPointerLeave={() => {
+              dockHoveredRef.current = false;
+              scheduleDockCollapse(320);
+            }}
+          >
+            <span className="ls-remote-subbar__computer ls-remote-subbar__computer--always">
+              <DesktopIcon name={platformIcon} size="xs" />
+              <span className="ls-remote-subbar__computer-name">
+                {displayName}
               </span>
-              {renderToolbarActions()}
-            </div>
+            </span>
+            {renderToolbarActions()}
           </div>
-        </>
+        </div>
       ) : null}
 
       <div
@@ -1341,6 +1377,12 @@ export function RemoteScreenWorkspace({
                 prefs.setComputerDisplay(computerKey, nextDisplay)
               }
               onExitFullScreen={() => setFullscreenEnabled(false)}
+              onHudAction={(action) => {
+                if (action === "toggleControl") prefs.setControl(!prefs.control);
+                else if (action === "toggleAudio") handleToggleAudio();
+                else if (action === "reconnect") handleReconnect();
+                else if (action === "disconnect") handleDisconnect();
+              }}
               onStatusChange={setStageStatus}
               onFallback={(reason) => setFallbackReason(reason)}
             />
@@ -1365,6 +1407,12 @@ export function RemoteScreenWorkspace({
                 prefs.setComputerDisplay(computerKey, nextDisplay)
               }
               onExitFullScreen={() => setFullscreenEnabled(false)}
+              onHudAction={(action) => {
+                if (action === "toggleControl") prefs.setControl(!prefs.control);
+                else if (action === "toggleAudio") handleToggleAudio();
+                else if (action === "reconnect") handleReconnect();
+                else if (action === "disconnect") handleDisconnect();
+              }}
               onStatusChange={setStageStatus}
               onRegisterAudioUnlock={handleRegisterAudioUnlock}
             />

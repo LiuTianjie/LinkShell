@@ -85,8 +85,14 @@ namespace LinkShell.Windows {
         [StructLayout(LayoutKind.Sequential)] struct KEYBDINPUT { public ushort vk, scan; public uint flags, time; public UIntPtr extra; }
 
         [STAThread] static int Main(string[] args) {
-            Console.InputEncoding = new UTF8Encoding(false);
-            Console.OutputEncoding = new UTF8Encoding(false);
+            bool isServiceMode = args.Length >= 1 && (args[0] == "--service" || args[0] == "--service-worker");
+            if (!isServiceMode) {
+                // Services and Session-N detached workers have no console handle; SetConsoleCP throws IOException there.
+                try {
+                    Console.InputEncoding = new UTF8Encoding(false);
+                    Console.OutputEncoding = new UTF8Encoding(false);
+                } catch { }
+            }
             dryRun = args.Contains("--dry-run");
             try { SetProcessDpiAwarenessContext(new IntPtr(-4)); } catch (EntryPointNotFoundException) { SetProcessDPIAware(); }
             try {
@@ -100,11 +106,25 @@ namespace LinkShell.Windows {
                     return 0;
                 }
                 if (args.Length >= 2 && args[0] == "--install-service") {
-                    InstallElevatedService(args[1], args.Length >= 3 ? args[2] : UserHomeDir());
+                    string targetHome = args.Length >= 3 ? args[2] : UserHomeDir();
+                    try {
+                        ClearServiceLastError(targetHome);
+                        InstallElevatedService(args[1], targetHome);
+                    } catch (Exception err) {
+                        WriteServiceLastError(targetHome, err.Message);
+                        throw;
+                    }
                     return 0;
                 }
                 if (args.Length >= 1 && args[0] == "--uninstall-service") {
-                    UninstallElevatedService(args.Length >= 2 ? args[1] : UserHomeDir());
+                    string targetHome = args.Length >= 2 ? args[1] : UserHomeDir();
+                    try {
+                        ClearServiceLastError(targetHome);
+                        UninstallElevatedService(targetHome);
+                    } catch (Exception err) {
+                        WriteServiceLastError(targetHome, err.Message);
+                        throw;
+                    }
                     return 0;
                 }
                 if (args.Length == 1 && args[0] == "--service-status") {

@@ -62,6 +62,7 @@ export function NativeMetalStage({
   revision,
   onDisplayChange,
   onExitFullScreen,
+  onHudAction,
   onStatusChange,
   onFallback,
 }: SharedStageProps): JSX.Element {
@@ -107,6 +108,7 @@ export function NativeMetalStage({
   const callbacksRef = useRef({
     onDisplayChange,
     onExitFullScreen,
+    onHudAction,
     onFallback,
     autoWidth: widthChoice === "auto",
     hasOverlay,
@@ -116,6 +118,7 @@ export function NativeMetalStage({
   callbacksRef.current = {
     onDisplayChange,
     onExitFullScreen,
+    onHudAction,
     onFallback,
     autoWidth: widthChoice === "auto",
     hasOverlay,
@@ -399,6 +402,10 @@ export function NativeMetalStage({
         const next = detail.status;
         if (next.exitFullScreen === true) {
           callbacksRef.current.onExitFullScreen();
+          return;
+        }
+        if (next.hudAction) {
+          callbacksRef.current.onHudAction?.(next.hudAction);
           return;
         }
         if (typeof next.displayFps === "number" && next.displayFps > 0) {
