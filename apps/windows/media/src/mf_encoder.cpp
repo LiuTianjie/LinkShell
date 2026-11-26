@@ -7,7 +7,6 @@
 #include <cstring>
 
 #include "api/video/encoded_image.h"
-#include "api/video_codecs/builtin_video_encoder_factory.h"
 #include "api/video_codecs/h264_profile_level_id.h"
 #include "common.hpp"
 #include "modules/video_coding/include/video_codec_interface.h"
@@ -744,7 +743,6 @@ ScreenVideoEncoderFactory::ScreenVideoEncoderFactory(
     MediaFoundationVideoEncoder::LogFn log)
     : d3d_(std::move(d3d)),
       log_(std::move(log)),
-      builtin_(webrtc::CreateBuiltinVideoEncoderFactory()),
       hevc_available_(d3d_ && !d3d_->is_warp() && MediaFoundationVideoEncoder::HasHardwareMft(/*hevc=*/true)) {}
 
 std::vector<webrtc::SdpVideoFormat> ScreenVideoEncoderFactory::GetSupportedFormats() const {
@@ -772,23 +770,16 @@ std::vector<webrtc::SdpVideoFormat> ScreenVideoEncoderFactory::GetSupportedForma
                                      {"level-id", "153"},
                                      {"tx-mode", "SRST"}});
   }
-
-  // Keep built-in VP8/VP9/AV1 fallback codecs for non-H.264/HEVC peers.
-  if (builtin_) {
-    for (const auto& f : builtin_->GetSupportedFormats()) {
-      if (f.name != "H264" && f.name != "H265") formats.push_back(f);
-    }
-  }
   return formats;
 }
 
 std::unique_ptr<webrtc::VideoEncoder> ScreenVideoEncoderFactory::Create(
-    const webrtc::Environment& env,
+    const webrtc::Environment&,
     const webrtc::SdpVideoFormat& format) {
   if (format.name == "H264" || format.name == "H265" || format.name == "HEVC") {
     return std::make_unique<MediaFoundationVideoEncoder>(d3d_, format, log_);
   }
-  return builtin_ ? builtin_->Create(env, format) : nullptr;
+  return nullptr;
 }
 
 }  // namespace linkshell

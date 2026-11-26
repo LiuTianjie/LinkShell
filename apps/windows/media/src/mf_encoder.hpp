@@ -111,7 +111,6 @@ class ScreenVideoEncoderFactory : public webrtc::VideoEncoderFactory {
  private:
   std::shared_ptr<D3DContext> d3d_;
   MediaFoundationVideoEncoder::LogFn log_;
-  std::unique_ptr<webrtc::VideoEncoderFactory> builtin_;
   bool hevc_available_ = false;
 };
 

@@ -14,8 +14,8 @@
 #include "api/audio_codecs/builtin_audio_encoder_factory.h"
 #include "api/create_peerconnection_factory.h"
 #include "api/environment/environment_factory.h"
-#include "api/field_trials.h"
-#include "api/video_codecs/builtin_video_decoder_factory.h"
+#include "api/field_trials_view.h"
+#include "api/video_codecs/video_decoder_factory.h"
 #include "common.hpp"
 #include "d3d_context.hpp"
 #include "display_info.hpp"
@@ -59,6 +59,29 @@ json VddStatusJson() {
   };
 }
 
+class LinkShellFieldTrials : public webrtc::FieldTrialsView {
+ public:
+  std::string Lookup(absl::string_view key) const override {
+    if (key == "WebRTC-ForceSendPlayoutDelay") return "min_ms:0,max_ms:0";
+    if (key == "WebRTC-FlexFEC-03-Advertised") return "Enabled";
+    if (key == "WebRTC-FlexFEC-03") return "Enabled";
+    return "";
+  }
+  std::unique_ptr<webrtc::FieldTrialsView> CreateCopy() const override {
+    return std::make_unique<LinkShellFieldTrials>();
+  }
+};
+
+class NullVideoDecoderFactory : public webrtc::VideoDecoderFactory {
+ public:
+  std::vector<webrtc::SdpVideoFormat> GetSupportedFormats() const override { return {}; }
+  std::unique_ptr<webrtc::VideoDecoder> Create(
+      const webrtc::Environment&,
+      const webrtc::SdpVideoFormat&) override {
+    return nullptr;
+  }
+};
+
 struct WebRtcRuntime {
   std::unique_ptr<webrtc::Thread> network;
   std::unique_ptr<webrtc::Thread> worker;
@@ -73,10 +96,7 @@ struct WebRtcRuntime {
     if (!network->Start() || !worker->Start() || !signaling->Start()) return false;
 
     // Exact Mac-parity low-latency field trials: zero jitter buffer playout delay + FlexFEC.
-    auto trials = webrtc::FieldTrials::Create(
-        "WebRTC-ForceSendPlayoutDelay/min_ms:0,max_ms:0/"
-        "WebRTC-FlexFEC-03-Advertised/Enabled/"
-        "WebRTC-FlexFEC-03/Enabled/");
+    auto trials = std::make_unique<LinkShellFieldTrials>();
 
     auto adm = webrtc::CreateAudioDeviceModule(
         webrtc::CreateEnvironment(),
@@ -92,7 +112,7 @@ struct WebRtcRuntime {
         std::make_unique<ScreenVideoEncoderFactory>(
             std::move(d3d),
             [ipc](const std::string& m) { if (ipc) ipc->Log(m); }),
-        webrtc::CreateBuiltinVideoDecoderFactory(),
+        std::make_unique<NullVideoDecoderFactory>(),
         nullptr,
         nullptr,
         nullptr,
