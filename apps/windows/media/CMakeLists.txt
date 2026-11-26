@@ -101,6 +101,7 @@ target_compile_options(LinkShell.Media PRIVATE
   /EHsc
   /bigobj
   /W3
+  /wd4068
   /wd4100
   /wd4244
   /wd4267

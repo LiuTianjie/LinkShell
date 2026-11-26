@@ -1,5 +1,6 @@
 #pragma once
 
+#include <strmif.h>
 #include <codecapi.h>
 #include <mfapi.h>
 #include <mfidl.h>
@@ -18,6 +19,7 @@
 #include "api/video_codecs/video_encoder_factory.h"
 #include "d3d_context.hpp"
 #include "lan_floor.hpp"
+#include "modules/video_coding/codecs/h264/include/h264_globals.h"
 
 namespace linkshell {
 

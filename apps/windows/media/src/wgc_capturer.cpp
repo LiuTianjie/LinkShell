@@ -53,9 +53,9 @@ ComPtr<WGD3D::IDirect3DDevice> WrapD3D11Device(ID3D11Device* device) {
 }
 
 template <typename T>
-HRESULT ActivateFactory(const wchar_t* class_name, ComPtr<T>* out) {
-  HStringReference hstr(class_name);
-  return RoGetActivationFactory(hstr.Get(), IID_PPV_ARGS(out->ReleaseAndGetAddressOf()));
+HRESULT ActivateFactory(const wchar_t* class_name, ComPtr<T>& out) {
+  HStringReference hstr(class_name, static_cast<unsigned int>(wcslen(class_name)));
+  return RoGetActivationFactory(hstr.Get(), IID_PPV_ARGS(out.ReleaseAndGetAddressOf()));
 }
 
 }  // namespace
@@ -76,7 +76,7 @@ struct WgcCapturer::Impl {
 bool WgcCapturer::IsSupported() {
   if (!LoadCreateD3D11DeviceFn()) return false;
   ComPtr<WGC::IGraphicsCaptureSessionStatics> statics;
-  if (FAILED(ActivateFactory(RuntimeClass_Windows_Graphics_Capture_GraphicsCaptureSession, &statics)) || !statics) {
+  if (FAILED(ActivateFactory(RuntimeClass_Windows_Graphics_Capture_GraphicsCaptureSession, statics)) || !statics) {
     return false;
   }
   boolean supported = FALSE;
@@ -98,7 +98,7 @@ bool WgcCapturer::StartMonitor(HMONITOR hmonitor, std::string* error) {
     return false;
   }
   ComPtr<IGraphicsCaptureItemInterop> interop;
-  HRESULT hr = ActivateFactory(RuntimeClass_Windows_Graphics_Capture_GraphicsCaptureItem, &interop);
+  HRESULT hr = ActivateFactory(RuntimeClass_Windows_Graphics_Capture_GraphicsCaptureItem, interop);
   if (FAILED(hr) || !interop) {
     if (error) *error = "WGC GraphicsCaptureItem activation failed";
     return false;
@@ -119,7 +119,7 @@ bool WgcCapturer::StartWindow(HWND hwnd, std::string* error) {
     return false;
   }
   ComPtr<IGraphicsCaptureItemInterop> interop;
-  HRESULT hr = ActivateFactory(RuntimeClass_Windows_Graphics_Capture_GraphicsCaptureItem, &interop);
+  HRESULT hr = ActivateFactory(RuntimeClass_Windows_Graphics_Capture_GraphicsCaptureItem, interop);
   if (FAILED(hr) || !interop) {
     if (error) *error = "WGC GraphicsCaptureItem activation failed";
     return false;
@@ -156,7 +156,7 @@ bool WgcCapturer::StartWithItem(void* raw_item_unknown, std::string* error) {
   impl->pool_size = size;
 
   ComPtr<WGC::IDirect3D11CaptureFramePoolStatics2> pool_statics2;
-  HRESULT hr = ActivateFactory(RuntimeClass_Windows_Graphics_Capture_Direct3D11CaptureFramePool, &pool_statics2);
+  HRESULT hr = ActivateFactory(RuntimeClass_Windows_Graphics_Capture_Direct3D11CaptureFramePool, pool_statics2);
   if (FAILED(hr) || !pool_statics2) {
     if (error) *error = "WGC Direct3D11CaptureFramePoolStatics2 unavailable (requires Win10 1903+)";
     return false;
