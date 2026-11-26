@@ -131,11 +131,12 @@ bool ScreenVideoTrackSource::StartWindow(
 
 void ScreenVideoTrackSource::Stop() {
   running_.store(false);
+  // Join worker before tearing down WGC so WorkerLoop never races on wgc_.
+  if (worker_.joinable()) worker_.join();
   if (wgc_) {
     wgc_->Stop();
     wgc_.reset();
   }
-  if (worker_.joinable()) worker_.join();
   std::lock_guard<std::mutex> lock(latest_mu_);
   latest_nv12_.Reset();
   latest_w_ = 0;

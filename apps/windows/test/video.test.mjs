@@ -56,6 +56,15 @@ test('native media engine speaks JSON-lines status/displays protocol and exits c
     child.stdin.write(`${JSON.stringify({ t: 'displays' })}\n`);
     const displays = await next(msg => msg.t === 'displays');
     assert.ok(Array.isArray(displays.list));
+    if (displays.list.length > 0) {
+      // Verify libwebrtc initializes WinSock2 and gathers real UDP ICE candidates + valid SDP offer.
+      child.stdin.write(`${JSON.stringify({ t: 'rtc.open', v: 'ci-ice', screen: 0, maxWidth: 1280, maxFps: 30, iceServers: [] })}\n`);
+      const offer = await next(msg => msg.t === 'rtc.offer' && msg.v === 'ci-ice', 10_000);
+      assert.match(offer.sdp, /m=video /);
+      const udpIce = await next(msg => msg.t === 'rtc.ice' && msg.v === 'ci-ice' && /\budp\b/i.test(String(msg.candidate || '')), 10_000);
+      assert.match(udpIce.candidate, /\budp\b/i);
+      child.stdin.write(`${JSON.stringify({ t: 'rtc.close', v: 'ci-ice' })}\n`);
+    }
     child.stdin.write(`${JSON.stringify({ t: 'quit' })}\n`);
   } finally {
     child.stdin.end();

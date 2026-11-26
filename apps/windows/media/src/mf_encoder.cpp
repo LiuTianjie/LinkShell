@@ -374,6 +374,7 @@ void MediaFoundationVideoEncoder::DestroyMft() {
   mft_.Reset();
   is_async_ = false;
   is_hardware_ = false;
+  pending_need_input_ = 0;
 }
 
 void MediaFoundationVideoEncoder::SetRates(const RateControlParameters& parameters) {
@@ -514,26 +515,26 @@ int32_t MediaFoundationVideoEncoder::Encode(
   int64_t encode_start_ms = NowMillis();
 
   if (is_async_) {
-    // Wait for METransformNeedInput (draining any pending output events along the way).
-    bool fed = false;
-    for (int tries = 0; tries < 64 && !fed; ++tries) {
+    // Wait for METransformNeedInput (preserving any extra NeedInput tokens received during output drain).
+    for (int tries = 0; tries < 64 && pending_need_input_ <= 0; ++tries) {
       ComPtr<IMFMediaEvent> ev;
       HRESULT hr = event_gen_->GetEvent(0, &ev);
       if (FAILED(hr) || !ev) return WEBRTC_VIDEO_CODEC_ERROR;
       MediaEventType type = MEUnknown;
       ev->GetType(&type);
       if (type == METransformNeedInput) {
-        if (FAILED(mft_->ProcessInput(0, in_sample.Get(), 0))) return WEBRTC_VIDEO_CODEC_ERROR;
-        fed = true;
+        pending_need_input_ += 1;
       } else if (type == METransformHaveOutput) {
         DrainAsyncOutput(frame, fusion_layout, requested_key, encode_start_ms);
       } else if (type == MEError) {
         return WEBRTC_VIDEO_CODEC_ERROR;
       }
     }
-    if (!fed) return WEBRTC_VIDEO_CODEC_ERROR;
+    if (pending_need_input_ <= 0) return WEBRTC_VIDEO_CODEC_ERROR;
+    pending_need_input_ -= 1;
+    if (FAILED(mft_->ProcessInput(0, in_sample.Get(), 0))) return WEBRTC_VIDEO_CODEC_ERROR;
 
-    // Wait for METransformHaveOutput (low-latency 1-in-1-out).
+    // Wait for METransformHaveOutput (low-latency 1-in-1-out; remember extra METransformNeedInput tokens!).
     for (int tries = 0; tries < 32; ++tries) {
       ComPtr<IMFMediaEvent> ev;
       HRESULT hr = event_gen_->GetEvent(0, &ev);
@@ -544,7 +545,8 @@ int32_t MediaFoundationVideoEncoder::Encode(
         DrainAsyncOutput(frame, fusion_layout, requested_key, encode_start_ms);
         break;
       } else if (type == METransformNeedInput) {
-        // Rare 1-frame pipeline prime on very first frame: return OK and let next frame produce output.
+        pending_need_input_ += 1;
+        // 1-frame pipeline prime on very first frame: return OK and keep the credit for the next Encode().
         break;
       } else if (type == MEError) {
         return WEBRTC_VIDEO_CODEC_ERROR;

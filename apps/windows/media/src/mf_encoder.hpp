@@ -78,6 +78,7 @@ class MediaFoundationVideoEncoder : public webrtc::VideoEncoder {
   bool is_async_ = false;
   bool is_hardware_ = false;
   bool output_provides_samples_ = false;
+  int pending_need_input_ = 0;
   DWORD output_buffer_size_ = 0;
   std::string impl_name_ = "LinkShellMF";
 

@@ -1,3 +1,4 @@
+#include <winsock2.h>
 #include <mfapi.h>
 #include <objbase.h>
 #include <roapi.h>
@@ -135,6 +136,15 @@ int main(int argc, char** argv) {
   // Per-monitor V2 DPI awareness ensures physical pixel coordinates for capture & input on 4K/HiDPI screens.
   SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
   SetConsoleOutputCP(CP_UTF8);
+
+  // libwebrtc's PhysicalSocketServer requires WinSock 2.2 initialized before creating its network thread;
+  // without WSAStartup, UDP socket creation fails with WSANOTINITIALISED and no UDP ICE candidates are gathered.
+  WSADATA wsa_data{};
+  const bool wsa_ok = (WSAStartup(MAKEWORD(2, 2), &wsa_data) == 0);
+  struct WsaGuard {
+    bool active;
+    ~WsaGuard() { if (active) WSACleanup(); }
+  } wsa_guard{wsa_ok};
 
   RoInitialize(RO_INIT_MULTITHREADED);
   MFStartup(MF_VERSION);
