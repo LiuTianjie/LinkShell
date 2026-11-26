@@ -423,6 +423,13 @@ void ScreenSession::HandleConfigure(const json& msg) {
   input_->SetSuspended(true);
   input_->ReleaseAll();
 
+  const int prev_screen = requested_screen_;
+  const int prev_pic_w = pic_w_;
+  const int prev_pic_h = pic_h_;
+  const int prev_disp_w = display_.width;
+  const int prev_disp_h = display_.height;
+  const bool prev_active_mon = display_.has_active_monitor;
+
   requested_screen_ = next_screen;
   max_width_ = next_max_w;
   max_fps_ = next_max_fps;
@@ -440,16 +447,26 @@ void ScreenSession::HandleConfigure(const json& msg) {
   input_->SetDisplay(display_);
   input_->SetGeneration(next_gen);
 
+  const bool geometry_changed = (prev_screen != requested_screen_ || prev_pic_w != pic_w_ || prev_pic_h != pic_h_ ||
+                                 prev_disp_w != display_.width || prev_disp_h != display_.height ||
+                                 prev_active_mon != display_.has_active_monitor);
+
   paused_.store(next_paused);
   if (next_paused) {
     source_->SetPaused(true);
     awake_.reset();
   } else {
     awake_ = std::make_unique<AwakeGuard>();
-    std::string cap_err;
-    if (!source_->StartDisplay(display_, pic_w_, pic_h_, frame_rate_, &cap_err)) {
-      ipc_->Emit({{"t", "rtc.configure.error"}, {"v", viewer_id_}, {"requestId", req_id}, {"message", "屏幕捕获失败：" + cap_err}});
-      return;
+    if (geometry_changed) {
+      std::string cap_err;
+      if (!source_->StartDisplay(display_, pic_w_, pic_h_, frame_rate_, &cap_err)) {
+        ipc_->Emit({{"t", "rtc.configure.error"}, {"v", viewer_id_}, {"requestId", req_id}, {"message", "屏幕捕获失败：" + cap_err}});
+        return;
+      }
+    } else {
+      source_->SetTargetFps(frame_rate_);
+      source_->SetPaused(false);
+      source_->ResendLatest();
     }
     ApplySenderParameters();
     input_->SetSuspended(false);

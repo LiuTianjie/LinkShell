@@ -87,7 +87,7 @@ class ScreenSession {
   bool audio_enabled_ = false;
   int ice_restarts_ = 0;
   int64_t offer_sent_ms_ = 0;
-  int64_t last_activity_ms_ = 0;
+  int64_t last_activity_ms_ = -10'000;
   std::string last_path_desc_;
   int cursor_seq_ = 0;
 

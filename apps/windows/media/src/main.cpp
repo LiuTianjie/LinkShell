@@ -337,11 +337,9 @@ int main(int argc, char** argv) {
     if (type == "status") {
       emit_status();
     } else if (type == "displays") {
-      // Ensure cold-boot headless PC wakes virtual display if VDD is installed and 0 displays exist.
-      if (EnumerateDisplays().empty()) {
-        VddController vdd([&ipc](const std::string& m) { ipc.Log(m); });
-        vdd.EnsureHeadlessDisplay();
-      }
+      // Wake virtual display if headless PC has no active monitor and MttVDD is installed.
+      VddController vdd([&ipc](const std::string& m) { ipc.Log(m); });
+      vdd.EnsureHeadlessDisplay();
       ipc.Emit({{"t", "displays"}, {"list", DisplaysJson()}});
     } else if (type == "rtc.open") {
       std::string v = msg.value("v", std::string{});

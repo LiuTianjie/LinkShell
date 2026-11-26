@@ -448,7 +448,10 @@ ComPtr<ID3D11Texture2D> D3DContext::UploadBgraToNv12(
     int src_h,
     int stride,
     int dst_w,
-    int dst_h) {
+    int dst_h,
+    bool canvas_paste,
+    int paste_w,
+    int paste_h) {
   if (!bgra_pixels || src_w <= 0 || src_h <= 0) return nullptr;
   {
     std::lock_guard<std::mutex> lock(gpu_mu_);
@@ -477,7 +480,7 @@ ComPtr<ID3D11Texture2D> D3DContext::UploadBgraToNv12(
     }
     context_->UpdateSubresource(cpu_upload_bgra_.Get(), 0, nullptr, bgra_pixels, static_cast<UINT>(stride), 0);
   }
-  return ConvertBgraToNv12(cpu_upload_bgra_.Get(), src_w, src_h, dst_w, dst_h);
+  return ConvertBgraToNv12(cpu_upload_bgra_.Get(), src_w, src_h, dst_w, dst_h, canvas_paste, paste_w, paste_h);
 }
 
 webrtc::scoped_refptr<webrtc::VideoFrameBuffer> D3DContext::UploadBgraToFrame(
@@ -487,16 +490,19 @@ webrtc::scoped_refptr<webrtc::VideoFrameBuffer> D3DContext::UploadBgraToFrame(
     int stride,
     int dst_w,
     int dst_h,
-    const std::string& fusion_layout) {
+    const std::string& fusion_layout,
+    bool canvas_paste,
+    int paste_w,
+    int paste_h) {
   dst_w = Even(dst_w);
   dst_h = Even(dst_h);
   if (!is_warp_) {
-    auto nv12 = UploadBgraToNv12(bgra_pixels, src_w, src_h, stride, dst_w, dst_h);
+    auto nv12 = UploadBgraToNv12(bgra_pixels, src_w, src_h, stride, dst_w, dst_h, canvas_paste, paste_w, paste_h);
     if (nv12) {
       return webrtc::make_ref_counted<D3D11TextureBuffer>(shared_from_this(), std::move(nv12), dst_w, dst_h, fusion_layout);
     }
   }
-  auto i420 = BgraBytesToI420(bgra_pixels, src_w, src_h, stride, dst_w, dst_h, false, 0, 0);
+  auto i420 = BgraBytesToI420(bgra_pixels, src_w, src_h, stride, dst_w, dst_h, canvas_paste, paste_w, paste_h);
   if (!i420) return nullptr;
   return webrtc::make_ref_counted<D3D11TextureBuffer>(std::move(i420), fusion_layout);
 }

@@ -126,11 +126,11 @@ bool ScreenVideoTrackSource::StartWindow(
       });
   if (!wgc_->StartWindow(hwnd, &wgc_err)) {
     wgc_.reset();
-    running_.store(false);
-    if (error) *error = wgc_err;
-    return false;
-  }
-  if (log_) {
+    if (log_) {
+      log_("WGC window capture unavailable (" + wgc_err + "); falling back to PrintWindow for hwnd=" +
+           std::to_string(reinterpret_cast<uintptr_t>(hwnd)));
+    }
+  } else if (log_) {
     log_("GPU WGC window capture started (hwnd=" + std::to_string(reinterpret_cast<uintptr_t>(hwnd)) +
          ", canvas=" + std::to_string(dst_w_) + "x" + std::to_string(dst_h_) + ")");
   }
@@ -254,6 +254,9 @@ void ScreenVideoTrackSource::WorkerLoop() {
   bool using_gdi = false;
   bool using_secure = false;
   bool wgc_gdi_assist = false;
+  int gdi_timing_samples = 0;
+  int64_t gdi_cap_ms_sum = 0;
+  int64_t gdi_up_ms_sum = 0;
   std::vector<uint8_t> cpu_bgra;
 
   while (running_.load()) {
@@ -326,18 +329,54 @@ void ScreenVideoTrackSource::WorkerLoop() {
 
     // 3. WGC active: monitor watchdog for headless/static screens + Mac-parity settle/idle repeats.
     if (wgc_ && wgc_->running()) {
-      if (!is_window && wgc_frames_.load() == 0 && (now_ms - started_ms) > 1000) {
+      const int64_t wait_threshold_ms = is_window ? 250 : (display.has_active_monitor ? 1000 : 120);
+      if (wgc_frames_.load() == 0 && (now_ms - started_ms) >= wait_threshold_ms) {
         if (!wgc_gdi_assist) {
           wgc_gdi_assist = true;
-          if (log_) log_("WGC produced 0 frames after 1.0s; streaming GDI live assist while keeping WGC armed");
+          if (log_) {
+            log_(std::string("WGC produced 0 frames after ") + std::to_string(wait_threshold_ms) +
+                 "ms; streaming " + (is_window ? "PrintWindow" : "GDI") + " live assist while keeping WGC armed");
+          }
         }
+        int64_t t0 = NowMillis();
+        const uint8_t* ptr = nullptr;
         int gw = 0, gh = 0;
-        if (gdi_secure.CaptureGdi(display.bounds, &cpu_bgra, &gw, &gh)) {
-          auto buf = d3d_->UploadBgraToFrame(cpu_bgra.data(), gw, gh, gw * 4, dst_w, dst_h, layout);
-          if (buf) EmitFrame(std::move(buf), true);
+        if (is_window) {
+          HWND win = nullptr;
+          {
+            std::lock_guard<std::mutex> lock(state_mu_);
+            win = hwnd_;
+          }
+          if (!win || !IsWindow(win)) {
+            if (running_.exchange(false) && on_stop_) on_stop_("window closed");
+            break;
+          }
+          if (gdi_secure.CaptureWindowDirect(win, &ptr, &gw, &gh) && ptr) {
+            auto buf = d3d_->UploadBgraToFrame(ptr, gw, gh, gw * 4, dst_w, dst_h, layout, true, gw, gh);
+            if (buf) EmitFrame(std::move(buf), true);
+          }
+        } else {
+          if (gdi_secure.CaptureGdiDirect(display.bounds, &ptr, &gw, &gh) && ptr) {
+            int64_t t1 = NowMillis();
+            auto buf = d3d_->UploadBgraToFrame(ptr, gw, gh, gw * 4, dst_w, dst_h, layout);
+            int64_t t2 = NowMillis();
+            if (gdi_timing_samples < 20) {
+              gdi_cap_ms_sum += (t1 - t0);
+              gdi_up_ms_sum += (t2 - t1);
+              gdi_timing_samples += 1;
+              if (gdi_timing_samples == 20 && log_) {
+                log_("GDI live assist avg (20 frames): capture=" +
+                     std::to_string(gdi_cap_ms_sum / 20) + "ms upload+nv12=" +
+                     std::to_string(gdi_up_ms_sum / 20) + "ms (" + std::to_string(gw) + "x" + std::to_string(gh) + ")");
+              }
+            }
+            if (buf) EmitFrame(std::move(buf), true);
+          }
         }
-        int fps = std::clamp(target_fps_.load(), 1, 30);
-        std::this_thread::sleep_for(std::chrono::milliseconds(std::max(16, 1000 / fps)));
+        int fps = std::clamp(target_fps_.load(), 1, 60);
+        int elapsed = static_cast<int>(NowMillis() - t0);
+        int sleep_ms = std::max(1, (1000 / fps) - elapsed);
+        std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms));
         continue;
       }
 
@@ -362,7 +401,30 @@ void ScreenVideoTrackSource::WorkerLoop() {
       continue;
     }
 
-    if (is_window || !running_.load()) {
+    if (is_window) {
+      int64_t t0 = NowMillis();
+      HWND win = nullptr;
+      {
+        std::lock_guard<std::mutex> lock(state_mu_);
+        win = hwnd_;
+      }
+      if (!win || !IsWindow(win)) {
+        if (running_.exchange(false) && on_stop_) on_stop_("window closed");
+        break;
+      }
+      const uint8_t* ptr = nullptr;
+      int gw = 0, gh = 0;
+      if (gdi_secure.CaptureWindowDirect(win, &ptr, &gw, &gh) && ptr) {
+        auto buf = d3d_->UploadBgraToFrame(ptr, gw, gh, gw * 4, dst_w, dst_h, layout, true, gw, gh);
+        if (buf) EmitFrame(std::move(buf), true);
+      }
+      int fps = std::clamp(target_fps_.load(), 1, 60);
+      int elapsed = static_cast<int>(NowMillis() - t0);
+      std::this_thread::sleep_for(std::chrono::milliseconds(std::max(1, (1000 / fps) - elapsed)));
+      continue;
+    }
+
+    if (!running_.load()) {
       std::this_thread::sleep_for(std::chrono::milliseconds(50));
       continue;
     }
@@ -410,15 +472,16 @@ void ScreenVideoTrackSource::WorkerLoop() {
         if (log_) log_("DXGI duplication lost (" + std::to_string(hr) + "); switching to GDI");
       }
     } else if (using_gdi) {
-      int fps = std::clamp(target_fps_.load(), 1, 30);
+      int fps = std::clamp(target_fps_.load(), 1, 60);
       int64_t frame_start = NowMillis();
+      const uint8_t* ptr = nullptr;
       int gw = 0, gh = 0;
-      if (gdi_secure.CaptureGdi(display.bounds, &cpu_bgra, &gw, &gh)) {
-        auto buf = d3d_->UploadBgraToFrame(cpu_bgra.data(), gw, gh, gw * 4, dst_w, dst_h, layout);
+      if (gdi_secure.CaptureGdiDirect(display.bounds, &ptr, &gw, &gh) && ptr) {
+        auto buf = d3d_->UploadBgraToFrame(ptr, gw, gh, gw * 4, dst_w, dst_h, layout);
         if (buf) EmitFrame(std::move(buf), true);
       }
       int elapsed = static_cast<int>(NowMillis() - frame_start);
-      int sleep_ms = std::max(5, (1000 / fps) - elapsed);
+      int sleep_ms = std::max(1, (1000 / fps) - elapsed);
       std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms));
     }
   }

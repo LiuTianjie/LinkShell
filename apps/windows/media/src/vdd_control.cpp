@@ -121,20 +121,28 @@ bool VddController::CallServiceVdd(const std::string& mode, int width, int heigh
 }
 
 bool VddController::EnsureHeadlessDisplay() {
+  auto has_active_monitor = [](const std::vector<DisplayInfo>& list) {
+    for (const auto& d : list) {
+      if (d.has_active_monitor) return true;
+    }
+    return false;
+  };
   auto displays = EnumerateDisplays();
-  if (!displays.empty()) return true;
+  if (has_active_monitor(displays)) return true;
   auto st = QueryStatus();
-  if (!st.installed) return false;
-  if (log_) log_("0 displays detected on headless host; waking Virtual Display Driver (1920x1080@60)");
-  if (!CallServiceVdd("vdd-enable", 1920, 1080, 60, 1)) return false;
+  if (!st.installed) return !displays.empty();
+  if (log_) {
+    log_("no active monitor detected on headless host; waking Virtual Display Driver (1920x1080@60) for GPU WGC");
+  }
+  if (!CallServiceVdd("vdd-enable", 1920, 1080, 60, 1)) return !displays.empty();
   for (int i = 0; i < 20; ++i) {
     std::this_thread::sleep_for(std::chrono::milliseconds(150));
-    if (!EnumerateDisplays().empty()) {
+    if (has_active_monitor(EnumerateDisplays())) {
       enabled_vdd_for_session_ = true;
       return true;
     }
   }
-  return false;
+  return !EnumerateDisplays().empty();
 }
 
 bool VddController::SaveTopology() {
@@ -276,12 +284,12 @@ void VddController::EndMatch() {
   enabled_vdd_for_session_ = false;
   RestoreTopology();
   if (should_disable_vdd) {
-    // Only disable the on-demand virtual display if physical monitors exist so a headless PC isn't left blind.
-    int physical = 0;
+    // Only disable the on-demand virtual display if an active physical monitor exists so a headless PC isn't left blind.
+    int physical_active = 0;
     for (const auto& d : EnumerateDisplays()) {
-      if (!d.is_virtual) physical += 1;
+      if (!d.is_virtual && d.has_active_monitor) physical_active += 1;
     }
-    if (physical > 0) {
+    if (physical_active > 0) {
       CallServiceVdd("vdd-disable", 0, 0, 0, 0);
     }
   }

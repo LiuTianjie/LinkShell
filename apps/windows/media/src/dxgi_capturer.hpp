@@ -43,6 +43,12 @@ class GdiAndSecureCapturer {
   GdiAndSecureCapturer();
   ~GdiAndSecureCapturer();
 
+  // Zero-extra-copy GDI capture into persistent DIBSection; out_ptr remains valid until next Capture* call.
+  bool CaptureGdiDirect(const RECT& bounds, const uint8_t** out_ptr, int* out_w, int* out_h);
+
+  // Zero-extra-copy headless window capture via PrintWindow(PW_RENDERFULLCONTENT) for Fusion fallback.
+  bool CaptureWindowDirect(HWND hwnd, const uint8_t** out_ptr, int* out_w, int* out_h);
+
   // Captures current default desktop via GDI BitBlt into out_bgra (top-down 32-bit BGRA).
   bool CaptureGdi(const RECT& bounds, std::vector<uint8_t>* out_bgra, int* out_w, int* out_h);
 

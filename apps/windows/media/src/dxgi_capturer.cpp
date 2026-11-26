@@ -159,10 +159,10 @@ GdiAndSecureCapturer::~GdiAndSecureCapturer() {
   if (mem_dc_) DeleteDC(mem_dc_);
 }
 
-bool GdiAndSecureCapturer::CaptureGdi(const RECT& bounds, std::vector<uint8_t>* out_bgra, int* out_w, int* out_h) {
+bool GdiAndSecureCapturer::CaptureGdiDirect(const RECT& bounds, const uint8_t** out_ptr, int* out_w, int* out_h) {
   int w = bounds.right - bounds.left;
   int h = bounds.bottom - bounds.top;
-  if (w <= 0 || h <= 0) return false;
+  if (w <= 0 || h <= 0 || !out_ptr) return false;
 
   HDC screen_dc = GetDC(nullptr);
   if (!screen_dc) return false;
@@ -189,10 +189,10 @@ bool GdiAndSecureCapturer::CaptureGdi(const RECT& bounds, std::vector<uint8_t>* 
   bool ok = false;
   if (mem_dc_ && dib_ && dib_bits_) {
     HGDIOBJ old = SelectObject(mem_dc_, dib_);
-    if (BitBlt(mem_dc_, 0, 0, w, h, screen_dc, bounds.left, bounds.top, SRCCOPY | CAPTUREBLT)) {
-      size_t bytes = static_cast<size_t>(w) * static_cast<size_t>(h) * 4;
-      out_bgra->resize(bytes);
-      std::memcpy(out_bgra->data(), dib_bits_, bytes);
+    // Plain SRCCOPY avoids DWM's synchronous CAPTUREBLT layered-compose stall (3-5x faster on 4K headless).
+    if (BitBlt(mem_dc_, 0, 0, w, h, screen_dc, bounds.left, bounds.top, SRCCOPY)) {
+      GdiFlush();
+      *out_ptr = static_cast<const uint8_t*>(dib_bits_);
       if (out_w) *out_w = w;
       if (out_h) *out_h = h;
       ok = true;
@@ -201,6 +201,66 @@ bool GdiAndSecureCapturer::CaptureGdi(const RECT& bounds, std::vector<uint8_t>* 
   }
   ReleaseDC(nullptr, screen_dc);
   return ok;
+}
+
+bool GdiAndSecureCapturer::CaptureWindowDirect(HWND hwnd, const uint8_t** out_ptr, int* out_w, int* out_h) {
+  if (!hwnd || !IsWindow(hwnd) || !out_ptr) return false;
+  RECT rc{};
+  if (!GetWindowRect(hwnd, &rc)) return false;
+  int w = rc.right - rc.left;
+  int h = rc.bottom - rc.top;
+  if (w <= 0 || h <= 0 || w > 7680 || h > 4320) return false;
+
+  HDC screen_dc = GetDC(nullptr);
+  if (!screen_dc) return false;
+
+  if (!mem_dc_) mem_dc_ = CreateCompatibleDC(screen_dc);
+  if (!dib_ || dib_w_ != w || dib_h_ != h) {
+    if (dib_) {
+      DeleteObject(dib_);
+      dib_ = nullptr;
+      dib_bits_ = nullptr;
+    }
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = w;
+    bmi.bmiHeader.biHeight = -h;  // top-down
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+    dib_ = CreateDIBSection(screen_dc, &bmi, DIB_RGB_COLORS, &dib_bits_, nullptr, 0);
+    dib_w_ = w;
+    dib_h_ = h;
+  }
+
+  bool ok = false;
+  if (mem_dc_ && dib_ && dib_bits_) {
+    HGDIOBJ old = SelectObject(mem_dc_, dib_);
+    // PW_RENDERFULLCONTENT (0x2) captures DWM/DirectComposition/WinForms/Chromium windows even headless.
+    constexpr UINT kRenderFullContent = 0x00000002;
+    if (PrintWindow(hwnd, mem_dc_, kRenderFullContent) || PrintWindow(hwnd, mem_dc_, 0)) {
+      GdiFlush();
+      *out_ptr = static_cast<const uint8_t*>(dib_bits_);
+      if (out_w) *out_w = w;
+      if (out_h) *out_h = h;
+      ok = true;
+    }
+    SelectObject(mem_dc_, old);
+  }
+  ReleaseDC(nullptr, screen_dc);
+  return ok;
+}
+
+bool GdiAndSecureCapturer::CaptureGdi(const RECT& bounds, std::vector<uint8_t>* out_bgra, int* out_w, int* out_h) {
+  const uint8_t* ptr = nullptr;
+  int w = 0, h = 0;
+  if (!CaptureGdiDirect(bounds, &ptr, &w, &h) || !ptr) return false;
+  size_t bytes = static_cast<size_t>(w) * static_cast<size_t>(h) * 4;
+  out_bgra->resize(bytes);
+  std::memcpy(out_bgra->data(), ptr, bytes);
+  if (out_w) *out_w = w;
+  if (out_h) *out_h = h;
+  return true;
 }
 
 bool GdiAndSecureCapturer::OpenSecurePipe(int screen, int width, int height, int fps) {

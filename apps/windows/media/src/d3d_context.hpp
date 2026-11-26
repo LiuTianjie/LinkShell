@@ -67,14 +67,17 @@ class D3DContext : public std::enable_shared_from_this<D3DContext> {
       int paste_w = 0,
       int paste_h = 0);
 
-  // Uploads CPU BGRA pixels (GDI / UAC Secure Desktop / selftest) to GPU NV12 texture.
+  // Uploads CPU BGRA pixels (GDI / UAC Secure Desktop / PrintWindow / selftest) to GPU NV12 texture.
   ComPtr<ID3D11Texture2D> UploadBgraToNv12(
       const uint8_t* bgra_pixels,
       int src_w,
       int src_h,
       int stride,
       int dst_w,
-      int dst_h);
+      int dst_h,
+      bool canvas_paste = false,
+      int paste_w = 0,
+      int paste_h = 0);
 
   // Uploads CPU BGRA pixels to a VideoFrameBuffer (GPU zero-copy NV12 preferred, libyuv I420 fallback).
   webrtc::scoped_refptr<webrtc::VideoFrameBuffer> UploadBgraToFrame(
@@ -84,7 +87,10 @@ class D3DContext : public std::enable_shared_from_this<D3DContext> {
       int stride,
       int dst_w,
       int dst_h,
-      const std::string& fusion_layout = {});
+      const std::string& fusion_layout = {},
+      bool canvas_paste = false,
+      int paste_w = 0,
+      int paste_h = 0);
 
   // GPU NV12 -> NV12 crop and scale (used by D3D11TextureBuffer::CropAndScale).
   ComPtr<ID3D11Texture2D> ScaleNv12(
