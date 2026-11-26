@@ -42,9 +42,7 @@ jobs:
             cp dist/x64/* dist/arm64/* upload/
           else
             ZIP=$(ls dist/x64/LinkShell-*-windows-x64.zip | head -n 1)
-            mkdir -p stage
-            unzip -oq "$ZIP" LinkShell.Media.exe LinkShell.Screen.exe WEBRTC-LICENSE.md 'vdd/*' -d stage
-            (cd stage && zip -qr ../upload/LinkShell-native-x64-e2e.zip .)
+            python3 -c "import sys,zipfile; wanted={'LinkShell.Media.exe','LinkShell.Screen.exe','WEBRTC-LICENSE.md'}; s=zipfile.ZipFile(sys.argv[1]); d=zipfile.ZipFile('upload/LinkShell-native-x64-e2e.zip','w',zipfile.ZIP_DEFLATED); [d.writestr(r,s.read(i)) for i in s.infolist() for r in [i.filename.lstrip('./').replace('\\\\','/')] if r and not i.is_dir() and (r in wanted or r.startswith('vdd/'))]; d.close(); s.close()" "$ZIP"
           fi
           ls -lh upload/
 
