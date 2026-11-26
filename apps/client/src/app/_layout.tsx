@@ -197,7 +197,19 @@ export default function RootLayout() {
                 <Stack.Screen name="archived" options={{ title: t("nav.archived") }} />
                 <Stack.Screen name="rename-computer" options={{ presentation: "formSheet", sheetGrabberVisible: true, sheetAllowedDetents: [0.5], sheetCornerRadius: radius.panel, contentStyle: sheetContent, headerShown: true }} />
                 <Stack.Screen name="unlock" options={{ presentation: "formSheet", sheetGrabberVisible: true, sheetAllowedDetents: [0.5], sheetCornerRadius: radius.panel, contentStyle: sheetContent, headerShown: true }} />
-                <Stack.Screen name="screen" options={{ title: t("nav.screen") }} />
+                <Stack.Screen
+                  name="screen"
+                  options={{
+                    title: t("nav.screen"),
+                    headerTransparent: true,
+                    headerStyle: { backgroundColor: Platform.OS === "ios" ? "transparent" : "#000000" },
+                    headerShadowVisible: false,
+                    headerTintColor: "#ffffff",
+                    headerTitleStyle: { color: "#ffffff" },
+                    contentStyle: { backgroundColor: "#000000" },
+                    ...(Platform.OS === "ios" ? { unstable_nativeProps: { headerConfig: { experimental_userInterfaceStyle: "dark" } } } : {}),
+                  }}
+                />
                 <Stack.Screen
                   name="ports"
                   options={{

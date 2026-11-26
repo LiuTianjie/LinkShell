@@ -279,7 +279,10 @@ export function ScreenScreen() {
             </View>
           ),
           headerTintColor: "#ffffff",
-          ...(Platform.OS === "ios" ? {} : { headerStyle: { backgroundColor: "#000000" } }),
+          headerTitleStyle: { color: "#ffffff" },
+          headerStyle: { backgroundColor: Platform.OS === "ios" ? "transparent" : "#000000" },
+          contentStyle: { backgroundColor: "#000000" },
+          ...(Platform.OS === "ios" ? { unstable_nativeProps: { headerConfig: { experimental_userInterfaceStyle: "dark" } } } : {}),
           headerShadowVisible: false,
           // Keep the live surface in one coordinate space while the system controls come and go.
           headerTransparent: true,

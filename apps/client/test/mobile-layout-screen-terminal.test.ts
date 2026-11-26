@@ -348,4 +348,20 @@ describe("Mobile layout & navigation invariants", () => {
       expect(content, `${rel} must specify supportedOrientations`).toContain("supportedOrientations=");
     }
   });
+
+  it("overrides root light headerStyle on the remote screen with a transparent dark iOS navigation bar", () => {
+    const layout = readFileSync(resolve(CLIENT_ROOT, "src/app/_layout.tsx"), "utf8");
+    const screen = readFileSync(resolve(CLIENT_ROOT, "src/screens/screen-screen.tsx"), "utf8");
+    for (const [label, source] of [["_layout.tsx", layout], ["screen-screen.tsx", screen]] as const) {
+      expect(source, `${label} must override headerStyle for screen`).toContain(
+        'headerStyle: { backgroundColor: Platform.OS === "ios" ? "transparent" : "#000000" }',
+      );
+      expect(source, `${label} must set dark black contentStyle for screen`).toContain(
+        'contentStyle: { backgroundColor: "#000000" }',
+      );
+      expect(source, `${label} must force dark navigationBar style on iOS`).toContain(
+        'experimental_userInterfaceStyle: "dark"',
+      );
+    }
+  });
 });
