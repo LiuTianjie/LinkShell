@@ -40,6 +40,7 @@ class ScreenVideoTrackSource : public webrtc::AdaptedVideoTrackSource {
   void SetFusionLayout(const std::string& layout_json);
   void SetTargetFps(int fps);
   void SetPaused(bool paused);
+  void ResendLatest();
   void Stop();
 
   void SetOnStop(StopFn on_stop) { on_stop_ = std::move(on_stop); }
@@ -52,7 +53,7 @@ class ScreenVideoTrackSource : public webrtc::AdaptedVideoTrackSource {
 
  private:
   void OnWgcFrame(ID3D11Texture2D* tex, int content_w, int content_h);
-  void EmitNv12(Microsoft::WRL::ComPtr<ID3D11Texture2D> nv12, int width, int height, bool fresh_capture);
+  void EmitFrame(webrtc::scoped_refptr<webrtc::VideoFrameBuffer> buf, bool fresh_capture);
   void WorkerLoop();
 
   std::shared_ptr<D3DContext> d3d_;
@@ -70,6 +71,8 @@ class ScreenVideoTrackSource : public webrtc::AdaptedVideoTrackSource {
   std::atomic<bool> running_{false};
   std::atomic<uint64_t> captured_frames_{0};
   std::atomic<uint64_t> wgc_frames_{0};
+  std::atomic<bool> logged_first_frame_{false};
+  std::atomic<bool> logged_convert_err_{false};
   std::string backend_name_ = "none";
   std::string fusion_layout_;
 
@@ -77,11 +80,9 @@ class ScreenVideoTrackSource : public webrtc::AdaptedVideoTrackSource {
   std::thread worker_;
 
   std::mutex latest_mu_;
-  Microsoft::WRL::ComPtr<ID3D11Texture2D> latest_nv12_;
-  int latest_w_ = 0;
-  int latest_h_ = 0;
+  webrtc::scoped_refptr<webrtc::VideoFrameBuffer> latest_frame_;
   int64_t last_fresh_ms_ = 0;
-  int64_t last_emit_ms_ = 0;
+  int64_t last_emit_us_ = 0;
 };
 
 }  // namespace linkshell

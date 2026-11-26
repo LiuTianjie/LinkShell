@@ -31,6 +31,16 @@ void ScreenVideoTrackSource::SetPaused(bool paused) {
   paused_.store(paused);
 }
 
+void ScreenVideoTrackSource::ResendLatest() {
+  if (!running_.load() || paused_.load()) return;
+  webrtc::scoped_refptr<webrtc::VideoFrameBuffer> buf;
+  {
+    std::lock_guard<std::mutex> lock(latest_mu_);
+    buf = latest_frame_;
+  }
+  if (buf) EmitFrame(std::move(buf), false);
+}
+
 bool ScreenVideoTrackSource::StartDisplay(
     const DisplayInfo& display,
     int dst_w,
@@ -50,9 +60,10 @@ bool ScreenVideoTrackSource::StartDisplay(
   target_fps_.store(std::clamp(target_fps, tuning::kMinFps, tuning::kMaxFps));
   paused_.store(false);
   wgc_frames_.store(0);
+  logged_first_frame_.store(false);
+  logged_convert_err_.store(false);
   running_.store(true);
 
-  bool started_wgc = false;
   if (WgcCapturer::IsSupported() && display.hmonitor && IsDefaultDesktopActive()) {
     std::string wgc_err;
     wgc_ = std::make_unique<WgcCapturer>(
@@ -62,7 +73,6 @@ bool ScreenVideoTrackSource::StartDisplay(
           if (log_) log_("WGC monitor closed: " + reason);
         });
     if (wgc_->StartMonitor(display.hmonitor, &wgc_err)) {
-      started_wgc = true;
       std::lock_guard<std::mutex> lock(state_mu_);
       backend_name_ = "wgc";
       if (log_) {
@@ -77,10 +87,7 @@ bool ScreenVideoTrackSource::StartDisplay(
     }
   }
 
-  worker_ = std::thread([this, started_wgc]() {
-    (void)started_wgc;
-    WorkerLoop();
-  });
+  worker_ = std::thread([this]() { WorkerLoop(); });
   return true;
 }
 
@@ -106,6 +113,8 @@ bool ScreenVideoTrackSource::StartWindow(
   target_fps_.store(std::clamp(target_fps, tuning::kMinFps, tuning::kMaxFps));
   paused_.store(false);
   wgc_frames_.store(0);
+  logged_first_frame_.store(false);
+  logged_convert_err_.store(false);
   running_.store(true);
 
   std::string wgc_err;
@@ -138,62 +147,72 @@ void ScreenVideoTrackSource::Stop() {
     wgc_.reset();
   }
   std::lock_guard<std::mutex> lock(latest_mu_);
-  latest_nv12_.Reset();
-  latest_w_ = 0;
-  latest_h_ = 0;
+  latest_frame_ = nullptr;
 }
 
 void ScreenVideoTrackSource::OnWgcFrame(ID3D11Texture2D* tex, int content_w, int content_h) {
   if (!running_.load() || paused_.load() || !tex || !d3d_) return;
   wgc_frames_.fetch_add(1);
 
-  int64_t now_ms = NowMillis();
+  // Microsecond-accurate pacing avoids beat-frequency judder at 60/120 Hz on 120/144/240 Hz panels.
+  int64_t now_us = NowMicros();
   int fps = target_fps_.load();
-  // Pace with Mac-parity 1.1x slack so 60fps targets do not fall short on 120/144Hz panels.
-  double min_gap_ms = 1000.0 / (std::max(1, fps) * 1.12);
+  double min_gap_us = 1'000'000.0 / (std::max(1, fps) * 1.12);
   {
     std::lock_guard<std::mutex> lock(latest_mu_);
-    if (last_emit_ms_ > 0 && static_cast<double>(now_ms - last_emit_ms_) < min_gap_ms * 0.85) {
+    if (last_emit_us_ > 0 && static_cast<double>(now_us - last_emit_us_) < min_gap_us * 0.85) {
       return;
     }
   }
 
   bool is_win = false;
   int dst_w = 0, dst_h = 0;
+  std::string layout;
   {
     std::lock_guard<std::mutex> lock(state_mu_);
     is_win = window_mode_;
     dst_w = dst_w_;
     dst_h = dst_h_;
-  }
-
-  ComPtr<ID3D11Texture2D> nv12 = d3d_->ConvertBgraToNv12(
-      tex, content_w, content_h, dst_w, dst_h,
-      is_win, content_w, content_h);
-  if (!nv12) return;
-  EmitNv12(std::move(nv12), dst_w, dst_h, true);
-}
-
-void ScreenVideoTrackSource::EmitNv12(ComPtr<ID3D11Texture2D> nv12, int width, int height, bool fresh_capture) {
-  if (!running_.load() || paused_.load() || !nv12) return;
-
-  std::string layout;
-  {
-    std::lock_guard<std::mutex> lock(state_mu_);
     layout = fusion_layout_;
   }
 
+  auto buf = d3d_->ConvertBgraToFrame(
+      tex, content_w, content_h, dst_w, dst_h,
+      layout, is_win, content_w, content_h);
+  if (!buf) {
+    if (!logged_convert_err_.exchange(true) && log_) {
+      log_("WGC BGRA->NV12 convert failed: " + d3d_->last_error());
+    }
+    return;
+  }
+  EmitFrame(std::move(buf), true);
+}
+
+void ScreenVideoTrackSource::EmitFrame(webrtc::scoped_refptr<webrtc::VideoFrameBuffer> buf, bool fresh_capture) {
+  if (!running_.load() || paused_.load() || !buf) return;
+
+  int width = buf->width();
+  int height = buf->height();
   int64_t now_us = NowMicros();
   int64_t now_ms = now_us / 1000;
   {
     std::lock_guard<std::mutex> lock(latest_mu_);
     if (fresh_capture) {
-      latest_nv12_ = nv12;
-      latest_w_ = width;
-      latest_h_ = height;
+      latest_frame_ = buf;
       last_fresh_ms_ = now_ms;
     }
-    last_emit_ms_ = now_ms;
+    last_emit_us_ = now_us;
+  }
+
+  if (!logged_first_frame_.exchange(true) && log_) {
+    bool is_gpu = (buf->type() == webrtc::VideoFrameBuffer::Type::kNative)
+                      ? static_cast<D3D11TextureBuffer*>(buf.get())->is_gpu()
+                      : false;
+    std::string be = active_backend();
+    std::string err = d3d_ ? d3d_->last_error() : "";
+    log_("first frame captured: backend=" + be + " " + std::to_string(width) + "x" +
+         std::to_string(height) + " gpu=" + (is_gpu ? "true" : "false") +
+         (err.empty() ? "" : (" (note: " + err + ")")));
   }
 
   int out_w = width, out_h = height, crop_w = width, crop_h = height, crop_x = 0, crop_y = 0;
@@ -201,10 +220,9 @@ void ScreenVideoTrackSource::EmitNv12(ComPtr<ID3D11Texture2D> nv12, int width, i
     return;
   }
 
-  auto buffer = webrtc::make_ref_counted<D3D11TextureBuffer>(d3d_, std::move(nv12), width, height, std::move(layout));
-  webrtc::scoped_refptr<webrtc::VideoFrameBuffer> final_buf = buffer;
+  webrtc::scoped_refptr<webrtc::VideoFrameBuffer> final_buf = buf;
   if (out_w != width || out_h != height || crop_w != width || crop_h != height) {
-    auto scaled = buffer->CropAndScale(crop_x, crop_y, crop_w, crop_h, out_w, out_h);
+    auto scaled = buf->CropAndScale(crop_x, crop_y, crop_w, crop_h, out_w, out_h);
     if (scaled) final_buf = std::move(scaled);
   }
 
@@ -235,7 +253,7 @@ void ScreenVideoTrackSource::WorkerLoop() {
   bool using_dxgi = false;
   bool using_gdi = false;
   bool using_secure = false;
-  bool wgc_fallback_checked = !wgc_;
+  bool wgc_gdi_assist = false;
   std::vector<uint8_t> cpu_bgra;
 
   while (running_.load()) {
@@ -245,6 +263,11 @@ void ScreenVideoTrackSource::WorkerLoop() {
     }
 
     int64_t now_ms = NowMillis();
+    std::string layout;
+    {
+      std::lock_guard<std::mutex> lock(state_mu_);
+      layout = fusion_layout_;
+    }
 
     // 1. Check for Secure Desktop (UAC / Lock Screen) transition on display capture.
     if (!is_window) {
@@ -276,14 +299,13 @@ void ScreenVideoTrackSource::WorkerLoop() {
               });
           if (wgc_->StartMonitor(display.hmonitor, &err)) {
             wgc_frames_.store(0);
-            wgc_fallback_checked = false;
+            wgc_gdi_assist = false;
             std::lock_guard<std::mutex> lock(state_mu_);
             backend_name_ = "wgc";
             if (log_) log_("restored GPU WGC capture after returning from secure desktop");
             NudgeDesktopForCapture();
           } else {
             wgc_.reset();
-            wgc_fallback_checked = true;
           }
         }
       }
@@ -293,8 +315,8 @@ void ScreenVideoTrackSource::WorkerLoop() {
     if (using_secure) {
       int sw = 0, sh = 0;
       if (gdi_secure.ReadSecureFrame(&cpu_bgra, &sw, &sh)) {
-        auto nv12 = d3d_->UploadBgraToNv12(cpu_bgra.data(), sw, sh, sw * 4, dst_w, dst_h);
-        if (nv12) EmitNv12(std::move(nv12), dst_w, dst_h, true);
+        auto buf = d3d_->UploadBgraToFrame(cpu_bgra.data(), sw, sh, sw * 4, dst_w, dst_h, layout);
+        if (buf) EmitFrame(std::move(buf), true);
       } else {
         using_secure = false;
         std::this_thread::sleep_for(std::chrono::milliseconds(150));
@@ -302,46 +324,45 @@ void ScreenVideoTrackSource::WorkerLoop() {
       continue;
     }
 
-    // 3. If WGC is active, check 1.8s first-frame watchdog (e.g. completely static desktop or broken driver)
-    //    and perform Mac-parity settle (100ms) / idle (500ms) frame repeats so PLI and text sharpening work immediately.
+    // 3. WGC active: monitor watchdog for headless/static screens + Mac-parity settle/idle repeats.
     if (wgc_ && wgc_->running()) {
-      if (!wgc_fallback_checked && wgc_frames_.load() == 0 && (now_ms - started_ms) > 1200) {
-        if (!is_window) {
-          // Static monitor: seed one GDI frame so the viewer gets an instant picture even before any pixel changes.
-          int gw = 0, gh = 0;
-          if (gdi_secure.CaptureGdi(display.bounds, &cpu_bgra, &gw, &gh)) {
-            auto nv12 = d3d_->UploadBgraToNv12(cpu_bgra.data(), gw, gh, gw * 4, dst_w, dst_h);
-            if (nv12) EmitNv12(std::move(nv12), dst_w, dst_h, true);
-          }
+      if (!is_window && wgc_frames_.load() == 0 && (now_ms - started_ms) > 1000) {
+        if (!wgc_gdi_assist) {
+          wgc_gdi_assist = true;
+          if (log_) log_("WGC produced 0 frames after 1.0s; streaming GDI live assist while keeping WGC armed");
         }
-        wgc_fallback_checked = true;
+        int gw = 0, gh = 0;
+        if (gdi_secure.CaptureGdi(display.bounds, &cpu_bgra, &gw, &gh)) {
+          auto buf = d3d_->UploadBgraToFrame(cpu_bgra.data(), gw, gh, gw * 4, dst_w, dst_h, layout);
+          if (buf) EmitFrame(std::move(buf), true);
+        }
+        int fps = std::clamp(target_fps_.load(), 1, 30);
+        std::this_thread::sleep_for(std::chrono::milliseconds(std::max(16, 1000 / fps)));
+        continue;
       }
 
-      ComPtr<ID3D11Texture2D> repeat_tex;
-      int rw = 0, rh = 0;
+      webrtc::scoped_refptr<webrtc::VideoFrameBuffer> repeat_buf;
       bool should_repeat = false;
       {
         std::lock_guard<std::mutex> lock(latest_mu_);
-        if (latest_nv12_) {
+        if (latest_frame_) {
           int64_t since_fresh = now_ms - last_fresh_ms_;
-          int64_t since_emit = now_ms - last_emit_ms_;
+          int64_t since_emit = now_ms - (last_emit_us_ / 1000);
           int interval = since_fresh < tuning::kSettleWindowMs ? tuning::kSettleRepeatMs : tuning::kIdleRepeatMs;
           if (since_emit >= interval) {
-            repeat_tex = latest_nv12_;
-            rw = latest_w_;
-            rh = latest_h_;
+            repeat_buf = latest_frame_;
             should_repeat = true;
           }
         }
       }
-      if (should_repeat && repeat_tex) {
-        EmitNv12(std::move(repeat_tex), rw, rh, false);
+      if (should_repeat && repeat_buf) {
+        EmitFrame(std::move(repeat_buf), false);
       }
       std::this_thread::sleep_for(std::chrono::milliseconds(20));
       continue;
     }
 
-    if (is_window) {
+    if (is_window || !running_.load()) {
       std::this_thread::sleep_for(std::chrono::milliseconds(50));
       continue;
     }
@@ -369,20 +390,17 @@ void ScreenVideoTrackSource::WorkerLoop() {
       int tw = 0, th = 0;
       HRESULT hr = dxgi.Acquire(wait_ms, &tex, &tw, &th);
       if (SUCCEEDED(hr) && tex) {
-        auto nv12 = d3d_->ConvertBgraToNv12(tex.Get(), tw, th, dst_w, dst_h);
-        if (nv12) EmitNv12(std::move(nv12), dst_w, dst_h, true);
+        auto buf = d3d_->ConvertBgraToFrame(tex.Get(), tw, th, dst_w, dst_h, layout);
+        if (buf) EmitFrame(std::move(buf), true);
       } else if (hr == DXGI_ERROR_WAIT_TIMEOUT) {
-        ComPtr<ID3D11Texture2D> repeat_tex;
-        int rw = 0, rh = 0;
+        webrtc::scoped_refptr<webrtc::VideoFrameBuffer> repeat_buf;
         {
           std::lock_guard<std::mutex> lock(latest_mu_);
-          if (latest_nv12_ && (NowMillis() - last_emit_ms_) >= tuning::kIdleRepeatMs) {
-            repeat_tex = latest_nv12_;
-            rw = latest_w_;
-            rh = latest_h_;
+          if (latest_frame_ && (NowMillis() - (last_emit_us_ / 1000)) >= tuning::kIdleRepeatMs) {
+            repeat_buf = latest_frame_;
           }
         }
-        if (repeat_tex) EmitNv12(std::move(repeat_tex), rw, rh, false);
+        if (repeat_buf) EmitFrame(std::move(repeat_buf), false);
       } else {
         dxgi.Close();
         using_dxgi = false;
@@ -396,8 +414,8 @@ void ScreenVideoTrackSource::WorkerLoop() {
       int64_t frame_start = NowMillis();
       int gw = 0, gh = 0;
       if (gdi_secure.CaptureGdi(display.bounds, &cpu_bgra, &gw, &gh)) {
-        auto nv12 = d3d_->UploadBgraToNv12(cpu_bgra.data(), gw, gh, gw * 4, dst_w, dst_h);
-        if (nv12) EmitNv12(std::move(nv12), dst_w, dst_h, true);
+        auto buf = d3d_->UploadBgraToFrame(cpu_bgra.data(), gw, gh, gw * 4, dst_w, dst_h, layout);
+        if (buf) EmitFrame(std::move(buf), true);
       }
       int elapsed = static_cast<int>(NowMillis() - frame_start);
       int sleep_ms = std::max(5, (1000 / fps) - elapsed);

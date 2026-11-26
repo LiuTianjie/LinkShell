@@ -194,8 +194,10 @@ int MediaFoundationVideoEncoder::InitEncode(
   send_queue_.Reset();
   send_queue_.SetEncoderRate(static_cast<double>(bitrate_bps_), NowSeconds());
   queue_skipped_ = 0;
+  queue_consecutive_skips_ = 0;
   queue_longest_ = 0.0;
   queue_since_ = 0.0;
+  pending_meta_.clear();
 
   bool ok = false;
   if (d3d_ && !d3d_->is_warp()) {
@@ -283,9 +285,11 @@ bool MediaFoundationVideoEncoder::ConfigureMft(int width, int height, int fps, i
     SetCodecBool(codec_api_.Get(), CODECAPI_AVLowLatencyMode, true);
     SetCodecU32(codec_api_.Get(), CODECAPI_AVEncCommonRateControlMode, eAVEncCommonRateControlMode_CBR);
     SetCodecU32(codec_api_.Get(), CODECAPI_AVEncCommonMeanBitRate, static_cast<UINT32>(bitrate_bps));
-    SetCodecU32(codec_api_.Get(), CODECAPI_AVEncCommonBufferSize, static_cast<UINT32>(std::max(65536, bitrate_bps / 4)));
+    // Tight 125 ms VBV prevents burst spikes from saturating Wi-Fi/WAN queues.
+    SetCodecU32(codec_api_.Get(), CODECAPI_AVEncCommonBufferSize, static_cast<UINT32>(std::max(65536, bitrate_bps / 8)));
     SetCodecU32(codec_api_.Get(), CODECAPI_AVEncMPVDefaultBPictureCount, 0);
-    SetCodecU32(codec_api_.Get(), CODECAPI_AVEncMPVGOPSize, static_cast<UINT32>(fps * 10));
+    // Infinite GOP (PLI-driven IDR only, matching Mac VideoToolbox & Parsec/Sunshine) eliminates periodic 10s IDR hitches.
+    SetCodecU32(codec_api_.Get(), CODECAPI_AVEncMPVGOPSize, 0xFFFFFFFFu);
     SetCodecU32(codec_api_.Get(), CODECAPI_AVEncCommonQualityVsSpeed, 33);
     if (!hevc_) {
       SetCodecBool(codec_api_.Get(), CODECAPI_AVEncH264CABACEnable, h264_profile_ != eAVEncH264VProfile_Base);
@@ -309,14 +313,17 @@ bool MediaFoundationVideoEncoder::ConfigureMft(int width, int height, int fps, i
   }
 
   HRESULT hr = mft_->SetOutputType(0, out_type.Get(), 0);
-  if (FAILED(hr) && !hevc_) {
+  if (FAILED(hr)) {
     // Retry without explicit profile if vendor driver prefers default Main profile.
     out_type->DeleteItem(MF_MT_MPEG2_PROFILE);
     hr = mft_->SetOutputType(0, out_type.Get(), 0);
   }
-  if (FAILED(hr)) return false;
+  if (FAILED(hr)) {
+    if (log_) log_(impl_name_ + " SetOutputType failed hr=" + std::to_string(hr));
+    return false;
+  }
 
-  // Input type: NV12 with BT.709 color tags.
+  // Input type: NV12 with BT.709 color tags (fallback to minimal NV12 if driver rejects color tags).
   ComPtr<IMFMediaType> in_type;
   if (FAILED(MFCreateMediaType(&in_type))) return false;
   in_type->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
@@ -331,7 +338,17 @@ bool MediaFoundationVideoEncoder::ConfigureMft(int width, int height, int fps, i
   MFSetAttributeRatio(in_type.Get(), MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
 
   hr = mft_->SetInputType(0, in_type.Get(), 0);
-  if (FAILED(hr)) return false;
+  if (FAILED(hr)) {
+    in_type->DeleteItem(MF_MT_YUV_MATRIX);
+    in_type->DeleteItem(MF_MT_VIDEO_PRIMARIES);
+    in_type->DeleteItem(MF_MT_TRANSFER_FUNCTION);
+    in_type->DeleteItem(MF_MT_VIDEO_NOMINAL_RANGE);
+    hr = mft_->SetInputType(0, in_type.Get(), 0);
+  }
+  if (FAILED(hr)) {
+    if (log_) log_(impl_name_ + " SetInputType failed hr=" + std::to_string(hr));
+    return false;
+  }
 
   MFT_OUTPUT_STREAM_INFO out_stream_info{};
   if (SUCCEEDED(mft_->GetOutputStreamInfo(0, &out_stream_info))) {
@@ -375,13 +392,14 @@ void MediaFoundationVideoEncoder::DestroyMft() {
   is_async_ = false;
   is_hardware_ = false;
   pending_need_input_ = 0;
+  pending_meta_.clear();
 }
 
 void MediaFoundationVideoEncoder::SetRates(const RateControlParameters& parameters) {
   std::lock_guard<std::mutex> lock(mu_);
   uint32_t total_bps = parameters.bitrate.get_sum_bps();
   if (total_bps == 0) return;
-  int next_bps = std::clamp(static_cast<int>(total_bps), 200'000, 35'000'000);
+  int next_bps = std::clamp(static_cast<int>(total_bps), 200'000, 50'000'000);
   int next_fps = std::clamp(static_cast<int>(parameters.framerate_fps > 0 ? parameters.framerate_fps : fps_), 1, 120);
   bitrate_bps_ = next_bps;
   fps_ = next_fps;
@@ -390,7 +408,7 @@ void MediaFoundationVideoEncoder::SetRates(const RateControlParameters& paramete
   // Live in-place rate change: ZERO encoder restart, ZERO freeze!
   if (codec_api_) {
     SetCodecU32(codec_api_.Get(), CODECAPI_AVEncCommonMeanBitRate, static_cast<UINT32>(next_bps));
-    SetCodecU32(codec_api_.Get(), CODECAPI_AVEncCommonBufferSize, static_cast<UINT32>(std::max(65536, next_bps / 4)));
+    SetCodecU32(codec_api_.Get(), CODECAPI_AVEncCommonBufferSize, static_cast<UINT32>(std::max(65536, next_bps / 8)));
   }
 }
 
@@ -407,13 +425,16 @@ int32_t MediaFoundationVideoEncoder::Encode(
     }
   }
 
-  // Mac-parity SendQueue admission: skip encoding while earlier frames wait > 50 ms in libwebrtc pacer.
+  // Mac-parity bounded SendQueue admission: skip at most kSendQueueMaxConsecutiveSkips frames so
+  // bursts never starve GCC or trigger prolonged freezes.
   double now_sec = NowSeconds();
   double wait_sec = send_queue_.WaitSeconds(now_sec);
-  if (wait_sec * 1000.0 > tuning::kSendQueueAdmitMs) {
+  bool over_budget = wait_sec * 1000.0 > tuning::kSendQueueAdmitMs;
+  if (over_budget && queue_consecutive_skips_ < tuning::kSendQueueMaxConsecutiveSkips) {
     if (requested_key) key_wanted_ = true;
     if (queue_skipped_ == 0) queue_since_ = now_sec;
     queue_skipped_ += 1;
+    queue_consecutive_skips_ += 1;
     queue_longest_ = std::max(queue_longest_, wait_sec);
     if (now_sec - queue_since_ >= 5.0) {
       if (log_) {
@@ -428,6 +449,7 @@ int32_t MediaFoundationVideoEncoder::Encode(
     }
     return WEBRTC_VIDEO_CODEC_OK;
   }
+  queue_consecutive_skips_ = 0;
 
   // Handle dynamic resolution change cleanly (e.g. libwebrtc VideoStreamAdapter scale-down).
   if (frame.width() != width_ || frame.height() != height_) {
@@ -512,7 +534,15 @@ int32_t MediaFoundationVideoEncoder::Encode(
   }
   key_wanted_ = false;
 
-  int64_t encode_start_ms = NowMillis();
+  FrameMeta meta{
+      frame.rtp_timestamp(),
+      frame.render_time_ms(),
+      frame.ntp_time_ms(),
+      frame.rotation(),
+      fusion_layout,
+      requested_key,
+      NowMillis(),
+  };
 
   if (is_async_) {
     // Wait for METransformNeedInput (preserving any extra NeedInput tokens received during output drain).
@@ -525,7 +555,7 @@ int32_t MediaFoundationVideoEncoder::Encode(
       if (type == METransformNeedInput) {
         pending_need_input_ += 1;
       } else if (type == METransformHaveOutput) {
-        DrainAsyncOutput(frame, fusion_layout, requested_key, encode_start_ms);
+        DrainAsyncOutput();
       } else if (type == MEError) {
         return WEBRTC_VIDEO_CODEC_ERROR;
       }
@@ -533,6 +563,9 @@ int32_t MediaFoundationVideoEncoder::Encode(
     if (pending_need_input_ <= 0) return WEBRTC_VIDEO_CODEC_ERROR;
     pending_need_input_ -= 1;
     if (FAILED(mft_->ProcessInput(0, in_sample.Get(), 0))) return WEBRTC_VIDEO_CODEC_ERROR;
+    // Queue metadata in strict FIFO order so primed async MFT outputs keep exact timestamps & Fusion SEI.
+    pending_meta_.push_back(std::move(meta));
+    while (pending_meta_.size() > 8) pending_meta_.pop_front();
 
     // Wait for METransformHaveOutput (low-latency 1-in-1-out; remember extra METransformNeedInput tokens!).
     for (int tries = 0; tries < 32; ++tries) {
@@ -542,7 +575,7 @@ int32_t MediaFoundationVideoEncoder::Encode(
       MediaEventType type = MEUnknown;
       ev->GetType(&type);
       if (type == METransformHaveOutput) {
-        DrainAsyncOutput(frame, fusion_layout, requested_key, encode_start_ms);
+        DrainAsyncOutput();
         break;
       } else if (type == METransformNeedInput) {
         pending_need_input_ += 1;
@@ -558,6 +591,10 @@ int32_t MediaFoundationVideoEncoder::Encode(
   // Synchronous MFT path (Microsoft SW H.264 encoder).
   HRESULT hr = mft_->ProcessInput(0, in_sample.Get(), 0);
   if (FAILED(hr) && hr != MF_E_NOTACCEPTING) return WEBRTC_VIDEO_CODEC_ERROR;
+  if (SUCCEEDED(hr)) {
+    pending_meta_.push_back(std::move(meta));
+    while (pending_meta_.size() > 8) pending_meta_.pop_front();
+  }
 
   for (;;) {
     MFT_OUTPUT_DATA_BUFFER out_buf{};
@@ -582,18 +619,19 @@ int32_t MediaFoundationVideoEncoder::Encode(
     }
     if (FAILED(ohr)) break;
     if (out_buf.pSample) {
-      EmitSample(out_buf.pSample, frame, fusion_layout, requested_key, encode_start_ms);
+      FrameMeta out_meta{};
+      if (!pending_meta_.empty()) {
+        out_meta = std::move(pending_meta_.front());
+        pending_meta_.pop_front();
+      }
+      EmitSample(out_buf.pSample, out_meta);
       if (output_provides_samples_) out_buf.pSample->Release();
     }
   }
   return WEBRTC_VIDEO_CODEC_OK;
 }
 
-bool MediaFoundationVideoEncoder::DrainAsyncOutput(
-    const webrtc::VideoFrame& frame,
-    const std::string& fusion_layout,
-    bool requested_key,
-    int64_t encode_start_ms) {
+bool MediaFoundationVideoEncoder::DrainAsyncOutput() {
   MFT_OUTPUT_DATA_BUFFER out_buf{};
   ComPtr<IMFSample> alloc_sample;
   if (!output_provides_samples_) {
@@ -614,7 +652,12 @@ bool MediaFoundationVideoEncoder::DrainAsyncOutput(
     return false;
   }
   if (FAILED(hr) || !out_buf.pSample) return false;
-  bool emitted = EmitSample(out_buf.pSample, frame, fusion_layout, requested_key, encode_start_ms);
+  FrameMeta out_meta{};
+  if (!pending_meta_.empty()) {
+    out_meta = std::move(pending_meta_.front());
+    pending_meta_.pop_front();
+  }
+  bool emitted = EmitSample(out_buf.pSample, out_meta);
   if (output_provides_samples_) out_buf.pSample->Release();
   return emitted;
 }
@@ -651,12 +694,7 @@ void MediaFoundationVideoEncoder::CacheParameterSets(
   *out_has_ps = has_vps && has_sps && has_pps;
 }
 
-bool MediaFoundationVideoEncoder::EmitSample(
-    IMFSample* sample,
-    const webrtc::VideoFrame& frame,
-    const std::string& fusion_layout,
-    bool requested_key,
-    int64_t encode_start_ms) {
+bool MediaFoundationVideoEncoder::EmitSample(IMFSample* sample, const FrameMeta& meta) {
   ComPtr<IMFMediaBuffer> buf;
   if (FAILED(sample->ConvertToContiguousBuffer(&buf)) || !buf) return false;
   BYTE* ptr = nullptr;
@@ -675,8 +713,8 @@ bool MediaFoundationVideoEncoder::EmitSample(
   out.reserve(len + 256);
 
   // Prefix Fusion layout SEI ahead of the access unit when present.
-  if (!fusion_layout.empty()) {
-    auto sei = BuildFusionSeiNal(fusion_layout, hevc_);
+  if (!meta.fusion_layout.empty()) {
+    auto sei = BuildFusionSeiNal(meta.fusion_layout, hevc_);
     out.insert(out.end(), sei.begin(), sei.end());
   }
 
@@ -693,9 +731,9 @@ bool MediaFoundationVideoEncoder::EmitSample(
   int64_t encode_finish_ms = NowMillis();
   send_queue_.Made(out.size(), NowSeconds());
 
-  if (is_key && requested_key && log_) {
+  if (is_key && meta.requested_key && log_) {
     log_("key frame: " + std::to_string(out.size() / 1024) + " KB (" +
-         std::to_string(encode_finish_ms - encode_start_ms) + " ms, " +
+         std::to_string(encode_finish_ms - meta.encode_start_ms) + " ms, " +
          (hevc_ ? "HEVC" : "H264") + ")");
   }
 
@@ -703,13 +741,13 @@ bool MediaFoundationVideoEncoder::EmitSample(
   image.SetEncodedData(webrtc::EncodedImageBuffer::Create(out.data(), out.size()));
   image._encodedWidth = static_cast<uint32_t>(width_);
   image._encodedHeight = static_cast<uint32_t>(height_);
-  image.SetRtpTimestamp(frame.rtp_timestamp());
-  image.capture_time_ms_ = frame.render_time_ms();
-  image.ntp_time_ms_ = frame.ntp_time_ms();
-  image.rotation_ = frame.rotation();
+  image.SetRtpTimestamp(meta.rtp_timestamp);
+  image.capture_time_ms_ = meta.render_time_ms;
+  image.ntp_time_ms_ = meta.ntp_time_ms;
+  image.rotation_ = meta.rotation;
   image._frameType = is_key ? webrtc::VideoFrameType::kVideoFrameKey : webrtc::VideoFrameType::kVideoFrameDelta;
   image.content_type_ = webrtc::VideoContentType::SCREENSHARE;
-  image.SetEncodeTime(encode_start_ms, encode_finish_ms);
+  image.SetEncodeTime(meta.encode_start_ms, encode_finish_ms);
 
   webrtc::CodecSpecificInfo info{};
   if (hevc_) {

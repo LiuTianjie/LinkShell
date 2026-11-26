@@ -16,6 +16,7 @@
 #include "api/create_peerconnection_factory.h"
 #include "api/environment/environment_factory.h"
 #include "api/field_trials_view.h"
+#include "api/video/video_frame.h"
 #include "api/video_codecs/video_decoder_factory.h"
 #include "common.hpp"
 #include "d3d_context.hpp"
@@ -64,8 +65,8 @@ class LinkShellFieldTrials : public webrtc::FieldTrialsView {
  public:
   std::string Lookup(absl::string_view key) const override {
     if (key == "WebRTC-ForceSendPlayoutDelay") return "min_ms:0,max_ms:0";
-    if (key == "WebRTC-FlexFEC-03-Advertised") return "Enabled";
-    if (key == "WebRTC-FlexFEC-03") return "Enabled";
+    if (key == "WebRTC-FlexFEC-03-Advertised") return "Disabled";
+    if (key == "WebRTC-FlexFEC-03") return "Disabled";
     return "";
   }
   std::unique_ptr<webrtc::FieldTrialsView> CreateCopy() const override {
@@ -172,14 +173,101 @@ int main(int argc, char** argv) {
     bool wgc_ok = WgcCapturer::IsSupported();
     bool hw_h264 = MediaFoundationVideoEncoder::HasHardwareMft(false);
     bool hw_hevc = MediaFoundationVideoEncoder::HasHardwareMft(true);
+
+    bool nv12_ok = false;
+    bool nv12_gpu = false;
+    std::string nv12_err;
+    json h264_enc = {{"ok", false}, {"bytes", 0}, {"impl", ""}, {"hw", false}};
+    json hevc_enc = {{"ok", false}, {"bytes", 0}, {"impl", ""}, {"hw", false}};
+
+    if (d3d) {
+      constexpr int kW = 640, kH = 360;
+      std::vector<uint8_t> bgra(static_cast<size_t>(kW) * kH * 4);
+      for (int y = 0; y < kH; ++y) {
+        for (int x = 0; x < kW; ++x) {
+          size_t idx = (static_cast<size_t>(y) * kW + x) * 4;
+          bgra[idx + 0] = static_cast<uint8_t>((x * 255) / kW);
+          bgra[idx + 1] = static_cast<uint8_t>((y * 255) / kH);
+          bgra[idx + 2] = static_cast<uint8_t>(((x + y) * 127) / (kW + kH));
+          bgra[idx + 3] = 255;
+        }
+      }
+      auto frame_buf = d3d->UploadBgraToFrame(bgra.data(), kW, kH, kW * 4, kW, kH);
+      nv12_err = d3d->last_error();
+      if (frame_buf) {
+        nv12_ok = true;
+        nv12_gpu = (frame_buf->type() == webrtc::VideoFrameBuffer::Type::kNative) &&
+                   static_cast<D3D11TextureBuffer*>(frame_buf.get())->is_gpu();
+
+        auto test_codec = [&](const webrtc::SdpVideoFormat& fmt, webrtc::VideoCodecType ctype) -> json {
+          struct Sink : public webrtc::EncodedImageCallback {
+            size_t total_bytes = 0;
+            int frames = 0;
+            Result OnEncodedImage(const webrtc::EncodedImage& img, const webrtc::CodecSpecificInfo*) override {
+              total_bytes += img.size();
+              frames += 1;
+              return Result(Result::OK);
+            }
+          } sink;
+          std::vector<std::string> enc_logs;
+          MediaFoundationVideoEncoder enc(d3d, fmt, [&](const std::string& m) { enc_logs.push_back(m); });
+          webrtc::VideoCodec vc{};
+          vc.codecType = ctype;
+          vc.width = kW;
+          vc.height = kH;
+          vc.maxFramerate = 60;
+          vc.startBitrate = 2000;
+          vc.maxBitrate = 4000;
+          vc.minBitrate = 500;
+          webrtc::VideoEncoder::Settings st(webrtc::VideoEncoder::Capabilities(false), 2, 1200);
+          int rc = enc.InitEncode(&vc, st);
+          if (rc == 0) {
+            enc.RegisterEncodeCompleteCallback(&sink);
+            std::vector<webrtc::VideoFrameType> key_types = {webrtc::VideoFrameType::kVideoFrameKey};
+            for (int i = 0; i < 3; ++i) {
+              webrtc::VideoFrame vf = webrtc::VideoFrame::Builder()
+                                          .set_video_frame_buffer(frame_buf)
+                                          .set_timestamp_us(1000000 + i * 16667)
+                                          .build();
+              enc.Encode(vf, i == 0 ? &key_types : nullptr);
+            }
+          }
+          auto info = enc.GetEncoderInfo();
+          enc.Release();
+          return {
+              {"ok", rc == 0 && sink.total_bytes > 0},
+              {"initRc", rc},
+              {"frames", sink.frames},
+              {"bytes", sink.total_bytes},
+              {"impl", info.implementation_name},
+              {"hw", info.is_hardware_accelerated},
+              {"logs", enc_logs},
+          };
+        };
+
+        h264_enc = test_codec(
+            webrtc::SdpVideoFormat("H264", {{"profile-level-id", "640c34"}, {"packetization-mode", "1"}}),
+            webrtc::kVideoCodecH264);
+        if (hw_hevc && !d3d->is_warp()) {
+          hevc_enc = test_codec(webrtc::SdpVideoFormat("H265", {{"profile-id", "1"}}), webrtc::kVideoCodecH265);
+        }
+      }
+    }
+
     WebRtcRuntime rtc;
     bool rtc_ok = d3d && rtc.Init(d3d, nullptr);
+    bool all_ok = d3d != nullptr && rtc_ok && nv12_ok && h264_enc.value("ok", false);
     json out = {
-        {"ok", d3d != nullptr && rtc_ok},
+        {"ok", all_ok},
         {"adapter", d3d ? d3d->adapter_name() : ""},
         {"vendorId", d3d ? d3d->vendor_id() : 0},
         {"warp", d3d ? d3d->is_warp() : true},
         {"d3dError", d3d_err},
+        {"nv12Ok", nv12_ok},
+        {"nv12Gpu", nv12_gpu},
+        {"nv12Error", nv12_err},
+        {"h264Encode", h264_enc},
+        {"hevcEncode", hevc_enc},
         {"wgcSupported", wgc_ok},
         {"hwH264", hw_h264},
         {"hwHevc", hw_hevc},
@@ -191,7 +279,7 @@ int main(int argc, char** argv) {
     rtc.Shutdown();
     MFShutdown();
     RoUninitialize();
-    return (d3d != nullptr && rtc_ok) ? 0 : 1;
+    return all_ok ? 0 : 1;
   }
 
   // Persistent JSON-lines engine mode (--engine): exact same architecture as LinkShell.app on macOS.

@@ -385,7 +385,14 @@ void FusionSession::OnIceCandidate(const webrtc::IceCandidate* c) {
 
 void FusionSession::OnConnectionState(webrtc::PeerConnectionInterface::PeerConnectionState state) {
   if (closed_.load()) return;
-  connected_.store(state == webrtc::PeerConnectionInterface::PeerConnectionState::kConnected);
+  bool is_conn = (state == webrtc::PeerConnectionInterface::PeerConnectionState::kConnected);
+  connected_.store(is_conn);
+  if (is_conn) {
+    std::lock_guard<std::mutex> lock(mu_);
+    for (auto& [k, entry] : streams_) {
+      if (entry.source) entry.source->ResendLatest();
+    }
+  }
   ipc_->Emit({{"t", "fusion.state"}, {"id", session_id_}, {"connection", PcStateName(state)}});
 }
 

@@ -16,6 +16,9 @@ test('native C++20 libwebrtc media engine passes --selftest and reports encoder 
   const result = JSON.parse(stdout.trim());
   assert.equal(result.ok, true, stdout);
   assert.equal(result.webrtcReady, true, stdout);
+  assert.equal(result.nv12Ok, true, stdout);
+  assert.equal(result.h264Encode?.ok, true, stdout);
+  assert.ok(result.h264Encode?.bytes > 0, stdout);
   assert.equal(typeof result.hwH264, 'boolean');
   assert.equal(typeof result.hwHevc, 'boolean');
   assert.equal(typeof result.wgcSupported, 'boolean');
