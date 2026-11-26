@@ -1,0 +1,60 @@
+name: Publish Windows CI assets to Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Windows desktop workflow run ID to pull artifacts from
+        required: true
+        type: string
+      tag:
+        description: Target GitHub Release tag (created as draft if absent)
+        required: true
+        type: string
+      mode:
+        description: full (x64+arm64 installers & zips) or native-only (compact Media/Screen/VDD bundle for E2E)
+        required: false
+        default: full
+        type: choice
+        options:
+          - full
+          - native-only
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download Windows artifacts inside GitHub datacenter
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.run_id }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          mkdir -p dist upload
+          gh run download "$RUN_ID" -R "${{ github.repository }}" -n LinkShell-Windows-x64-unsigned -D dist/x64
+          if [ "$MODE" = "full" ]; then
+            gh run download "$RUN_ID" -R "${{ github.repository }}" -n LinkShell-Windows-arm64-unsigned -D dist/arm64
+            cp dist/x64/* dist/arm64/* upload/
+          else
+            ZIP=$(ls dist/x64/LinkShell-*-windows-x64.zip | head -n 1)
+            mkdir -p stage
+            unzip -oq "$ZIP" LinkShell.Media.exe LinkShell.Screen.exe WEBRTC-LICENSE.md 'vdd/*' -d stage
+            (cd stage && zip -qr ../upload/LinkShell-native-x64-e2e.zip .)
+          fi
+          ls -lh upload/
+
+      - name: Upload assets to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          if ! gh release view "$TAG" -R "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release create "$TAG" --draft --prerelease --latest=false --title "$TAG" --notes "Staged Windows CI assets from run ${{ inputs.run_id }}" -R "${{ github.repository }}"
+          fi
+          gh release upload "$TAG" upload/* --clobber -R "${{ github.repository }}"
