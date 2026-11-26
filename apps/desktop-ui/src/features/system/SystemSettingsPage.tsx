@@ -20,6 +20,7 @@ import {
   serviceAction,
   setDesktopSetting,
   setElevatedScreenService,
+  setVirtualDisplay,
   setKeepAwakeMode,
   setLaunchAtLogin,
   setScreenSharing,
@@ -411,6 +412,70 @@ export function SystemSettingsPage() {
                   </div>
                 </div>
               ) : null}
+              {permissions.virtualDisplay ? (
+                <div className="ls-system-row">
+                  <div className="ls-system-row__copy">
+                    <span className="ls-system-row__title">
+                      {ts("settings.winVdd")}
+                    </span>
+                    <span className="ls-system-row__detail">
+                      {ts("settings.winVddDesc")}
+                    </span>
+                  </div>
+                  <div className="ls-system-row__controls">
+                    {permissions.virtualDisplay.installed ? (
+                      <>
+                        <Badge
+                          tone={permissions.virtualDisplay.enabled ? "ok" : "neutral"}
+                          dot={permissions.virtualDisplay.enabled ? "ok" : undefined}
+                        >
+                          {permissions.virtualDisplay.enabled
+                            ? ts("settings.winVddEnabled")
+                            : ts("settings.winVddStandby")}
+                        </Badge>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          loading={state.virtualDisplayBusy}
+                          disabled={state.virtualDisplayBusy}
+                          onClick={() =>
+                            void setVirtualDisplay(
+                              permissions.virtualDisplay?.enabled ? "disable" : "enable",
+                            )
+                          }
+                        >
+                          {permissions.virtualDisplay.enabled
+                            ? ts("settings.winVddDisableBtn")
+                            : ts("settings.winVddEnableBtn")}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          disabled={state.virtualDisplayBusy}
+                          onClick={() => void setVirtualDisplay("uninstall")}
+                        >
+                          {ts("settings.winVddRemoveBtn")}
+                        </Button>
+                      </>
+                    ) : (
+                      <>
+                        <Badge tone="neutral">{ts("settings.winVddOff")}</Badge>
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          loading={state.virtualDisplayBusy}
+                          disabled={state.virtualDisplayBusy || !permissions.virtualDisplay.driverBundled}
+                          onClick={() => void setVirtualDisplay("install")}
+                        >
+                          {state.virtualDisplayBusy
+                            ? ts("settings.winVddBusy")
+                            : ts("settings.winVddInstallBtn")}
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ) : null}
             </>
           ) : (
             <>
@@ -454,6 +519,11 @@ export function SystemSettingsPage() {
         {isWin && state.elevatedServiceMessage ? (
           <p className="ls-system-note" role="status">
             {tm(state.elevatedServiceMessage)}
+          </p>
+        ) : null}
+        {isWin && state.virtualDisplayMessage ? (
+          <p className="ls-system-note" role="status">
+            {tm(state.virtualDisplayMessage)}
           </p>
         ) : null}
         {isWin ? (

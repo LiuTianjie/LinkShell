@@ -52,7 +52,7 @@ namespace LinkShell.Windows {
                         Extract(zip, scratch, total, progress, token);
                     }
                 }
-                foreach (string file in new[] { "LinkShell.exe", "resources/app/package.json", "LinkShell.Screen.exe", "standalone.json", "runtime/node.exe", "runtime/cli/dist/cli/src/index.js" }) {
+                foreach (string file in new[] { "LinkShell.exe", "resources/app/package.json", "LinkShell.Screen.exe", "LinkShell.Media.exe", "standalone.json", "runtime/node.exe", "runtime/cli/dist/cli/src/index.js" }) {
                     if (!File.Exists(IOPath(Path.Combine(scratch, file)))) throw new InvalidDataException("安装包不完整，缺少 " + file + "。请重新下载安装包。");
                 }
                 token.ThrowIfCancellationRequested();
@@ -272,6 +272,7 @@ namespace LinkShell.Windows {
             };
             start.EnvironmentVariables["LINKSHELL_APP_BUNDLE"] = root;
             start.EnvironmentVariables["LINKSHELL_WINDOWS_HELPER"] = Path.Combine(root, "LinkShell.Screen.exe");
+            start.EnvironmentVariables["LINKSHELL_WINDOWS_MEDIA"] = Path.Combine(root, "LinkShell.Media.exe");
             if (home != null) start.EnvironmentVariables["LINKSHELL_HOME"] = home;
             using (var child = Process.Start(start)) {
                 var output = child.StandardOutput.ReadToEndAsync(); var errors = child.StandardError.ReadToEndAsync();

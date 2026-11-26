@@ -13,6 +13,7 @@ import { LADDER, Pacer, RELAY_LEVEL, rung } from "./screen-pacer.js";
 import { SCREEN_IDLE, SCREEN_TAKEN, viewerPage } from "./screen-viewer.js";
 import { screenMeasurementLog } from "./screen-metrics.js";
 import { captureWindows, configureWindowsCapture, WindowsFrameSplitter, windowsDisplays, windowsHelper, windowsProfile } from "./windows-screen.js";
+import { closeWindowsMediaEngine, windowsMediaEngine } from "./windows-media.js";
 import { WindowsVideoSession, windowsMedia, type ScreenVideoSession } from "./windows-video.js";
 import { fallbackProfile, fallbackSize, SCREEN_RETAIN_MS, screenConfiguration, screenIdleMs, type ScreenConfiguration } from "./screen-session.js";
 
@@ -410,7 +411,18 @@ export class ScreenShare {
   }
 
   private async listDisplays(): Promise<Capturable[]> {
-    if (process.platform === "win32") return (await windowsDisplays()).map(({ screen, name, w, h }) => ({ index: screen, screen, name, w, h }));
+    if (process.platform === "win32") {
+      const native = windowsMediaEngine(this.log);
+      if (native) {
+        try {
+          const list = await native.displays();
+          if (list.length > 0) return list.map(({ screen, name, w, h }) => ({ index: screen, screen, name, w, h }));
+        } catch (error) {
+          this.log(`[screen] native Windows media display list fell back: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+      return (await windowsDisplays()).map(({ screen, name, w, h }) => ({ index: screen, screen, name, w, h }));
+    }
     if (process.platform === "darwin") {
       const app = inputApp(this.log);
       if (!app) throw RpcError.app("not_supported", NO_APP);
@@ -697,48 +709,133 @@ export class ScreenShare {
    * app without the media engine): the picture then goes down the socket.
    */
   private async offerVideo(screen: number, maxWidth: number | undefined, maxFps: number | undefined, diagnostics: boolean, codec: "hevc" | undefined, turn: boolean, viewer: VideoViewer): Promise<ScreenVideoSession | "refused" | undefined> {
-    if (process.platform === "win32" && process.env.LINKSHELL_SCREEN_VIDEO !== "off" && windowsMedia()) {
-      // The native guard checks the selected desktop and the local opt-out throughout capture.
-      const lending = turn ? this.lendRelay() : undefined;
-      await windowsDisplays();
-      if (viewer.closed()) return "refused";
-      viewer.claim();
-      this.video?.taken();
-      const holder = this.holder;
-      if (holder) {
-        this.holder = undefined; holder.end(); holder.on.exit(SCREEN_TAKEN);
-        await captureReleased(holder);
-      }
-      if (viewer.closed()) return "refused";
-      const relay = await lending;
-      if (viewer.closed()) return "refused";
-      const iceServers = this.servers(relay);
-      viewer.tell({ rtc: { t: "config", iceServers } });
-      const session = new WindowsVideoSession(
-        { screen, iceServers, maxWidth, maxFps, ...(viewer.audio ? { audio: true } : {}), ...(relay?.maxKbps ? { relayKbps: relay.maxKbps } : {}) },
-        { tell: message => viewer.tell({ rtc: message }), input: viewer.input, lost: viewer.lost, log: this.log, path: viewer.path },
-        { displaySize: s => this.displays.find(d => d.screen === s) },
-      );
-      const mine = { id: session.id, taken: () => {
-        if (this.video === mine) this.video = undefined;
-        session.end(); viewer.refuse(SCREEN_TAKEN);
-      } };
-      this.video = mine;
-      const cancelled = setInterval(() => { if (viewer.closed()) session.end(); }, 100);
-      try {
-        await session.offer();
-        if (viewer.closed() || this.video !== mine) {
-          session.end();
-          if (this.video === mine) this.video = undefined;
-          return "refused";
+    if (process.platform === "win32" && process.env.LINKSHELL_SCREEN_VIDEO !== "off") {
+      const nativeEngine = windowsMediaEngine(this.log);
+      if (nativeEngine) {
+        const status = await nativeEngine.status().catch((error: unknown) => {
+          this.log(`[screen] native Windows media engine unavailable: ${String(error)}`);
+          return undefined;
+        });
+        if (status?.video) {
+          const lending = turn ? this.lendRelay() : undefined;
+          if (viewer.closed()) return "refused";
+          viewer.claim();
+          this.video?.taken();
+          const holder = this.holder;
+          if (holder) {
+            this.holder = undefined; holder.end(); holder.on.exit(SCREEN_TAKEN);
+            await captureReleased(holder);
+          }
+          if (viewer.closed()) return "refused";
+          const id = `win-video-${randomBytes(6).toString("hex")}`;
+          const mine = {
+            id,
+            taken: () => {
+              if (this.video === mine) this.video = undefined;
+              nativeEngine.endVideo(id);
+              viewer.refuse(SCREEN_TAKEN);
+            },
+          };
+          this.video = mine;
+          let reached: unknown;
+          let lastStats = 0;
+          const relay = await lending;
+          if (viewer.closed() || this.video !== mine) {
+            if (this.video === mine) this.video = undefined;
+            return "refused";
+          }
+          const iceServers = this.servers(relay);
+          viewer.tell({ rtc: { t: "config", iceServers } });
+          const fps = Number(process.env.LINKSHELL_SCREEN_FPS);
+          await nativeEngine.offerVideo(id, {
+            screen,
+            iceServers,
+            ...(relay?.maxKbps ? { relayKbps: relay.maxKbps } : {}),
+            ...(fps >= 1 && fps <= 120 ? { fps } : {}),
+            ...(maxWidth ? { maxWidth } : {}),
+            ...(maxFps ? { maxFps } : {}),
+            ...(codec ? { codec } : {}),
+            ...(viewer.match ? { match: viewer.match } : {}),
+            ...(viewer.audio ? { audio: true } : {}),
+          }, (message) => {
+            if (this.video !== mine) return;
+            const kind = String(message.t);
+            if (kind === "gone" || kind === "rtc.error") {
+              this.log(`[screen] Windows video track ended: ${kind === "gone" ? "LinkShell.Media exited" : String(message.message)}`);
+              viewer.lost();
+            } else if (kind === "rtc.path") {
+              viewer.path(message.relayed === true);
+            } else if (kind === "rtc.activity") {
+              viewer.activity();
+            } else if (kind === "rtc.offer" || kind === "rtc.ice" || kind === "rtc.state" || (kind === "rtc.stats" && diagnostics && Date.now() - lastStats >= 5000)) {
+              if (kind === "rtc.stats") lastStats = Date.now();
+              if (kind === "rtc.state" && message.connection !== reached) {
+                reached = message.connection;
+                if (reached === "connected") this.log("[screen] Windows native libwebrtc video track connected");
+              }
+              const { v: _viewer, t: _kind, ...rest } = message;
+              viewer.tell({ rtc: { ...rest, t: kind.slice(4) } });
+            }
+          });
+          if (viewer.closed() || this.video !== mine) {
+            nativeEngine.endVideo(id);
+            if (this.video === mine) this.video = undefined;
+            return "refused";
+          }
+          return {
+            id,
+            reconfigure: status.videoReconfigure === true,
+            keys: status.keys === true,
+            configure: configuration => nativeEngine.configureVideo(id, configuration),
+            signal: message => nativeEngine.signal(id, message),
+            setAudio: enabled => nativeEngine.setAudio(id, enabled),
+            end: () => nativeEngine.endVideo(id),
+          };
         }
-        return session;
       }
-      catch (error) {
-        session.end(); if (this.video === mine) this.video = undefined;
-        this.log(`[screen] Windows video could not start: ${String(error)}`);
-        return undefined;
-      } finally { clearInterval(cancelled); }
+      if (windowsMedia()) {
+        // Legacy fallback path (used only when LinkShell.Media.exe is absent and explicit FFmpeg is provided).
+        const lending = turn ? this.lendRelay() : undefined;
+        await windowsDisplays();
+        if (viewer.closed()) return "refused";
+        viewer.claim();
+        this.video?.taken();
+        const holder = this.holder;
+        if (holder) {
+          this.holder = undefined; holder.end(); holder.on.exit(SCREEN_TAKEN);
+          await captureReleased(holder);
+        }
+        if (viewer.closed()) return "refused";
+        const relay = await lending;
+        if (viewer.closed()) return "refused";
+        const iceServers = this.servers(relay);
+        viewer.tell({ rtc: { t: "config", iceServers } });
+        const session = new WindowsVideoSession(
+          { screen, iceServers, maxWidth, maxFps, ...(viewer.audio ? { audio: true } : {}), ...(relay?.maxKbps ? { relayKbps: relay.maxKbps } : {}) },
+          { tell: message => viewer.tell({ rtc: message }), input: viewer.input, lost: viewer.lost, log: this.log, path: viewer.path },
+          { displaySize: s => this.displays.find(d => d.screen === s) },
+        );
+        const mine = { id: session.id, taken: () => {
+          if (this.video === mine) this.video = undefined;
+          session.end(); viewer.refuse(SCREEN_TAKEN);
+        } };
+        this.video = mine;
+        const cancelled = setInterval(() => { if (viewer.closed()) session.end(); }, 100);
+        try {
+          await session.offer();
+          if (viewer.closed() || this.video !== mine) {
+            session.end();
+            if (this.video === mine) this.video = undefined;
+            return "refused";
+          }
+          return session;
+        }
+        catch (error) {
+          session.end(); if (this.video === mine) this.video = undefined;
+          this.log(`[screen] Windows video could not start: ${String(error)}`);
+          return undefined;
+        } finally { clearInterval(cancelled); }
+      }
     }
     // LINKSHELL_SCREEN_VIDEO=off: every viewer gets the picture down the socket (to compare the two, or should the track ever misbehave).
     const app = process.platform === "darwin" && process.env.LINKSHELL_SCREEN_VIDEO !== "off" ? inputApp(this.log) : undefined;
@@ -1255,6 +1352,7 @@ export class ScreenShare {
     for (const control of this.controls) control.stop();
     this.controls.clear();
     closeInputApp();
+    closeWindowsMediaEngine();
     this.server?.close();
     this.server = undefined;
     this.listening = undefined;

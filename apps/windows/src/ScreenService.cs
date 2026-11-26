@@ -568,6 +568,17 @@ namespace LinkShell.Windows {
                 if (!ConstantTimeEquals(Str(req, "token"), auth.Token)) return;
 
                 string mode = Str(req, "mode");
+                if (mode == "vdd-enable" || mode == "vdd-disable" || mode == "vdd-configure") {
+                    int vw = Math.Max(0, Math.Min(3840, (int)Number(req, "w")));
+                    int vh = Math.Max(0, Math.Min(2400, (int)Number(req, "h")));
+                    int vhz = Math.Max(0, Math.Min(144, (int)Number(req, "fps")));
+                    int vcnt = Math.Max(0, Math.Min(2, (int)Number(req, "count")));
+                    bool ok = ConfigureVddFromService(mode, vw, vh, vhz, vcnt);
+                    byte[] resp = Encoding.UTF8.GetBytes(ok ? "{\"ok\":true}\n" : "{\"ok\":false}\n");
+                    clientPipe.Write(resp, 0, resp.Length);
+                    clientPipe.Flush();
+                    return;
+                }
                 if (mode != "displays" && mode != "control" && mode != "capture-raw" && mode != "capture-jpeg") return;
                 int screen = Math.Max(0, Math.Min(15, (int)Number(req, "screen")));
                 int w = Math.Max(320, Math.Min(3840, (int)Number(req, "w")));

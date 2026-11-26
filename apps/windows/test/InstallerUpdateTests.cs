@@ -111,7 +111,7 @@ internal static class InstallerUpdateTests {
             string executable = Assembly.GetExecutingAssembly().Location, ready = Path.Combine(Path.GetDirectoryName(executable), "ready");
             if (File.Exists(ready)) File.Delete(ready);
             Directory.CreateDirectory(directory);
-            foreach (string file in new[] { "LinkShell.exe", "resources/app/package.json", "LinkShell.Screen.exe", "standalone.json", "runtime/node.exe", "runtime/cli/dist/cli/src/index.js" }) {
+            foreach (string file in new[] { "LinkShell.exe", "resources/app/package.json", "LinkShell.Screen.exe", "LinkShell.Media.exe", "standalone.json", "runtime/node.exe", "runtime/cli/dist/cli/src/index.js" }) {
                 string path = Path.Combine(target, file); Directory.CreateDirectory(Path.GetDirectoryName(path));
                 if (file == "LinkShell.exe") File.Copy(executable, path, true); else File.WriteAllText(path, "fixture");
             }

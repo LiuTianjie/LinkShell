@@ -244,6 +244,18 @@ test('Windows native helpers maintain multi-GPU, dynamic display, monotonic tick
   assert.match(screenService, /\bApplyAdminOnlyDirectoryAcl\b/);
   assert.match(screenService, /\bCreateProcessAsUser\b/);
   assert.match(screenService, /\bServiceAttachActiveDesktop\b/);
+  assert.match(screenService, /vdd-enable/);
+  assert.match(screenService, /vdd-disable/);
+  assert.match(screenService, /vdd-configure/);
+
+  const virtualDisplay = read('VirtualDisplay.cs');
+  assert.match(virtualDisplay, /Root\\MttVDD/);
+  assert.match(virtualDisplay, /StoreName\.TrustedPublisher/);
+  assert.doesNotMatch(virtualDisplay, /StoreName\.Root/);
+  assert.match(virtualDisplay, /\bUpdateDriverForPlugAndPlayDevices\b/);
+  assert.match(virtualDisplay, /\bpnputil\.exe\b/);
+  assert.match(virtualDisplay, /\bCM_Enable_DevNode\b/);
+  assert.match(virtualDisplay, /\bCM_Disable_DevNode\b/);
 
   const dxgi = read('DesktopDuplication.cs');
   assert.match(dxgi, /\bCreateDXGIFactory1\b/);
@@ -258,6 +270,8 @@ test('Windows native helpers maintain multi-GPU, dynamic display, monotonic tick
   const installerEngine = read('InstallerEngine.cs');
   assert.match(installerEngine, /\bQueryFullProcessImageNameW\b/);
   assert.match(installerEngine, /catch\s*\(Win32Exception\)/);
+  assert.match(installerEngine, /LinkShell\.Media\.exe/);
+  assert.match(installerEngine, /LINKSHELL_WINDOWS_MEDIA/);
 
   const manifest = read('app.manifest');
   assert.match(manifest, /PerMonitorV2/);

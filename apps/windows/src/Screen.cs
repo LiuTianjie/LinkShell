@@ -151,6 +151,39 @@ namespace LinkShell.Windows {
                     PrintElevatedServiceStatus();
                     return 0;
                 }
+                if (args.Length == 1 && args[0] == "--vdd-status") {
+                    PrintVddStatus();
+                    return 0;
+                }
+                if (args.Length >= 1 && args[0] == "--install-vdd") {
+                    string vddDir = args.Length >= 2 ? args[1] : null;
+                    string targetHome = args.Length >= 3 ? args[2] : UserHomeDir();
+                    try {
+                        ClearServiceLastError(targetHome);
+                        InstallVddDriver(vddDir);
+                    } catch (Exception err) {
+                        WriteServiceLastError(targetHome, err.Message);
+                        throw;
+                    }
+                    return 0;
+                }
+                if (args.Length >= 1 && args[0] == "--uninstall-vdd") {
+                    string targetHome = args.Length >= 2 ? args[1] : UserHomeDir();
+                    try {
+                        ClearServiceLastError(targetHome);
+                        UninstallVddDriver();
+                    } catch (Exception err) {
+                        WriteServiceLastError(targetHome, err.Message);
+                        throw;
+                    }
+                    return 0;
+                }
+                if (args.Length >= 1 && (args[0] == "--enable-vdd" || args[0] == "--disable-vdd")) {
+                    bool en = args[0] == "--enable-vdd";
+                    if (!IsRunningAsAdministrator()) throw new InvalidOperationException("切换虚拟显示器状态需要管理员权限");
+                    SetVddNodeEnabled(en);
+                    return 0;
+                }
 
                 // Helpers launched by background consoles may inherit a non-input desktop.
                 // Never switch the user's desktop or attach to Winlogon/UAC unless the elevated service handles it.

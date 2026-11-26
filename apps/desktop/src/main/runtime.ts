@@ -92,9 +92,10 @@ export class Runtime {
       return spawn(join(this.bundle, "Contents/MacOS/node"), [join(this.bundle, "Contents/Resources/runtime/cli/dist/cli/src/index.js"), ...args], { env, stdio });
     }
     if (this.folder) {
-      // What linkshell.cmd sets: the CLI finds the install and the host its screen helper.
+      // What linkshell.cmd sets: the CLI finds the install and the host its screen helper and native media engine.
       env.LINKSHELL_APP_BUNDLE = this.folder;
       env.LINKSHELL_WINDOWS_HELPER = join(this.folder, "LinkShell.Screen.exe");
+      env.LINKSHELL_WINDOWS_MEDIA = join(this.folder, "LinkShell.Media.exe");
       return spawn(join(this.folder, "runtime/node.exe"), [join(this.folder, "runtime/cli/dist/cli/src/index.js"), ...args], { env, stdio, windowsHide: true });
     }
     if (this.launch.cliNode && this.launch.cliScript) return spawn(this.launch.cliNode, [...this.launch.cliArgs, this.launch.cliScript, ...args], { env, stdio, windowsHide: true });

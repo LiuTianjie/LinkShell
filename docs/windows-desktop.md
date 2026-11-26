@@ -2,7 +2,7 @@
 
 Windows 桌面端复用现有 Host / Gateway / 手机协议，窗口与 macOS 是同一个 Electron 应用（`apps/desktop`）：工作台、本机管理和系统托盘。内置 Node、CLI、Host、工作台资源与屏幕组件；Agent 仍由用户自行安装并登录。
 
-安装包沿用 macOS 的运行时精简规则：保留 Claude SDK 和 ACP 适配器，排除不会使用的内置 Claude 程序，继续调用用户已安装的 Claude。打包同时清理 ARM64 终端文件、调试符号、类型声明、source map 和 node-pty 构建源码，并覆盖复用暂存目录的情况；x64 终端运行库、可执行 JS、许可证与可替换的 FFmpeg DLL 保留。包内 smoke 验证外部 Agent 调用与真实 ConPTY 进程。
+安装包沿用 macOS 的运行时精简规则：保留 Claude SDK 和 ACP 适配器，排除不会使用的内置 Claude 程序，继续调用用户已安装的 Claude。打包同时清理非目标架构的终端文件、调试符号、类型声明、source map 和 node-pty 构建源码，并覆盖复用暂存目录的情况；目标架构（x64 / ARM64）的终端运行库、可执行 JS、原生 C++20 `libwebrtc` 媒体引擎 `LinkShell.Media.exe`、开源 SignPath 签名虚拟显示器驱动（`vdd/`）与许可证保留，不再随包附带约 60 MB 的 FFmpeg 运行库。包内 smoke 验证原生媒体引擎 `--selftest`、虚拟显示器驱动探测、外部 Agent 调用与真实 ConPTY 进程。
 
 ## 桌面体验
 
@@ -23,7 +23,7 @@ Windows 桌面端复用现有 Host / Gateway / 手机协议，窗口与 macOS �
 ## 系统与安装
 
 - Windows 10 1809 或更新版本、Windows 11，x64 与 ARM64（已接入 CI 与打包脚本；ARM64 实机仍待验证）；屏幕组件和安装器需要 .NET Framework 4.8。窗口自带 Chromium，不需要 WebView2 Runtime。
-- 在 Windows 上运行 `pnpm --filter @linkshell/windows build:standalone`（或指定 `--arch arm64` / `LINKSHELL_WINDOWS_ARCH=arm64`），生成 `artifacts/LinkShell-Setup-<版本>-windows-<arch>.exe` 与 ZIP 便携包。打包流程支持按 `x64` / `arm64` 解析对应 Node 与 LGPL FFmpeg 运行时并保留对应架构的 `node-pty` / `sharp` 预编译二进制。
+- 在 Windows 上运行 `pnpm --filter @linkshell/windows build:standalone`（或指定 `--arch arm64` / `LINKSHELL_WINDOWS_ARCH=arm64`），生成 `artifacts/LinkShell-Setup-<版本>-windows-<arch>.exe` 与 ZIP 便携包。打包流程按 `x64` / `arm64` 编译原生 C++20 `LinkShell.Media.exe`（基于官方 Google `libwebrtc` M150 静态库），拉取对应架构的 Node 与 SignPath 签名 MIT `MttVDD`（IddCx）驱动文件，并保留对应架构的 `node-pty` / `sharp` 预编译二进制。
 - 手动安装默认安装到当前用户的 `%LOCALAPPDATA%\Programs\LinkShell`；应用内更新沿用当前安装目录，也支持 ZIP 解压的自定义目录。创建开始菜单入口，不需要管理员权限。当前构建与 CI 保持未签名发布流程（暂不启用 Authenticode / Trusted Signing 代码签名）；未在 Windows CI 配置签名凭据时输出未签名安装包与 ZIP。请从官方 Release 下载并核对随包提供的 SHA-256。
 - 安装器提供独立窗口，显示安装位置、解压百分比、已处理容量 / 文件数、服务恢复与开始菜单阶段。解压按实际读取的字节推进；替换文件与恢复服务期间禁止关闭，完成后可直接启动应用。解压时取消会清理暂存文件，失败会显示原因并允许重试。应用与安装器统一使用圆角矩形图标。
 - ZIP 解压后运行 `LinkShell.exe`。`linkshell.cmd` 为同一运行环境的 CLI 入口；不会修改系统 PATH。
@@ -37,11 +37,13 @@ Windows 桌面端复用现有 Host / Gateway / 手机协议，窗口与 macOS �
 
 ## 屏幕与控制
 
-Windows 屏幕组件在已登录、已解锁的交互桌面中运行，按远程请求启动，支持多显示器与 DPI 缩放。手机和 Web 工作区继续使用现有屏幕查看页、配对权限及端到端加密通道。
+Windows 屏幕与 Fusion 媒体由独立原生 C++20 引擎 **`LinkShell.Media.exe`** 驱动（与 macOS `LinkShell.app` 对齐，彻底移除 FFmpeg 管道和 Node.js `werift` 视频转发）：
 
-优先走 DXGI Desktop Duplication / Windows.Graphics.Capture（`gfxcapture` 内置 GPU bicubic 缩放）→ 硬件 H.264 → WebRTC 视频直连，复用 Mac 的 SDP/ICE 协商与 iOS 原生、Android 原生、WebView、Web 接收端。未检测到活跃物理显示器（拔掉显示器、息屏或合盖等无头场景）或 DXGI 2.2 秒无首帧时，自动无缝切换至 `gfxcapture`（NVIDIA 零拷贝直连 NVENC，AMD/Intel/通用 GPU 走 `hwdownload`→硬件 H.264），进一步兜底至 `gdigrab` + 硬件/软件 Media Foundation H.264 与 GDI JPEG，无需强依赖虚拟显示器驱动即可开箱捕获。Node 发送端采用 `setImmediate` 批发送（避免 Windows 15.6 ms `setTimeout(1)` 定时器拖慢关键帧）、收紧 VBV 缓冲与 2 秒 GOP，并在 ICE 建连阶段缓存首个 GOP 实现静态无头桌面毫秒级出首帧。能力上限支持至原生 4K（3840×2160、60 fps、最高 24 Mbps），TURN 中继场景自动限帧至 30 fps 以保证单帧清晰度。已补齐 Win32 光标形状同步、WASAPI loopback 系统音频采集及 Fusion 文件剪贴板。
-
-设置可关闭远程屏幕，拒绝后续采集与输入。**可选 `LinkShellScreenService` 系统控制服务**：在首次安装完成页或桌面版「总览 / 通用设置」中一键授权一次后，将极简纯 C# 组件 `LinkShell.Screen.exe` 安装到受系统保护的 `%ProgramFiles%\LinkShell\ScreenService\` 并以 `LocalSystem` 运行（Node/Electron/FFmpeg 绝不以 SYSTEM 运行，Named Pipe 同时校检用户 SID DACL 与 256 位随机密钥），从而支持直接操控管理员 PowerShell / 任务管理器等高权限窗口，并在现有 WebRTC/JPEG 通道内实时查看与点击 UAC 安全桌面弹窗及锁屏。未安装系统服务时，弹出 UAC 仅暂停采集而不断开会话。无物理显示器的无头 Windows 主机需插接 HDMI/DP 欺骗器或安装开源虚拟显示器驱动（Virtual Display Driver）以启用硬件加速捕获。
+- **原生 GPU 零拷贝采集与硬件编码**：默认走 `Windows.Graphics.Capture`（WGC，支持显示器及 Fusion 单窗口）→ D3D11 VideoProcessor GPU NV12 缩放与色彩转换（BT.709）→ **Windows Media Foundation 硬件 MFT 编码（H.264 High/Main/Baseline L5.2 与 H.265/HEVC Main L5.1，原生支持 NVIDIA NVENC / AMD AMF / Intel QSV / Qualcomm 硬件编码器）**，异常时自动回退 DXGI Desktop Duplication 与安全桌面/GDI 采集。
+- **原生 `libwebrtc` 传输与 Mac 对齐体验**：内置 Google `libwebrtc` M150（`WebRTC-ForceSendPlayoutDelay/min_ms:0,max_ms:0` + `FlexFEC-03`）、动态码率零重启更新（`SetRates` 直接调编码器，不中断画面）、PLI 即时关键帧、Mac 对齐的 `LanFloor` / `FrameRateController` / `SendQueue` 拥塞与帧率调度，最高支持 4K 与 120 fps、在线切换显示器/分辨率/暂停而不断开连接（`rtc.configure`）、物理键扫描码（`keydown`/`keyup`、`keys: true`）、60 Hz 光标同步与 5 Hz 光标形状捕获，以及 WASAPI Loopback 48 kHz 立体声系统音频。
+- **Windows Fusion 原生多流**：通过同一 `LinkShell.Media.exe` 的多 Transceiver `libwebrtc` 连接直接推送 WGC 窗口流与显示器流，GPU 固定画布零拷贝绘制并在 H.264/HEVC 码流中直接写入 `LinkShellFusion1` SEI 元数据。
+- **内置可一键安装的虚拟显示器驱动（无显示器 / 合盖 / 分辨率自适应）**：安装包内置经过 SignPath 签名的 MIT 开源 IddCx 驱动（`VirtualDrivers/Virtual-Display-Driver` `MttVDD`，约 300 KB，覆盖 x64 与 ARM64，仅信任发布者证书而不安装任何 Root CA）。用户可在桌面端「设置 → 虚拟显示器驱动」中一键离线安装、启用、待机或卸载；无物理显示器开机时自动唤醒虚拟屏，远程连接时支持与接收端匹配的分辨率切换（`ScreenMatch`）并在断开后自动恢复。
+- **可选 `LinkShellScreenService` 系统控制服务**：在首次安装完成页或桌面版「总览 / 通用设置」中一键授权一次后，将极简纯 C# 组件 `LinkShell.Screen.exe` 安装到受系统保护的 `%ProgramFiles%\LinkShell\ScreenService\` 并以 `LocalSystem` 运行（`LinkShell.Media.exe` / Node / Electron 绝不以 SYSTEM 运行，Named Pipe 同时校验用户 SID DACL 与 256 位随机密钥），支持操控管理员高权限窗口、实时查看与点击 UAC 安全桌面及锁屏，并在远程连接时免 UAC 自动唤醒/调整虚拟显示器。未安装系统服务时，弹出 UAC 仅暂停采集而不断开会话。设置页可随时关闭远程屏幕，拒绝后续采集与输入。
 
 ## 更新与卸载
 

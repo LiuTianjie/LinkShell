@@ -4,7 +4,8 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { dirname, join, sep } from 'node:path';
 import { resolveElectronTarget } from '../scripts/electron.mjs';
-import { resolveMediaRelease } from '../scripts/media-runtime.mjs';
+import { resolveWebRtcSdk } from '../scripts/webrtc-sdk.mjs';
+import { resolveVddRelease } from '../scripts/vdd-runtime.mjs';
 import { parseShasums, resolveNodeBinarySpec, resolveWindowsArch, windowsArtifactNames } from '../scripts/package.mjs';
 import { pruneRuntime } from '../scripts/prune-runtime.mjs';
 
@@ -42,21 +43,30 @@ test('windowsArtifactNames and resolveNodeBinarySpec produce arch-qualified outp
   assert.equal(parseShasums(shasums, 'win-x64/node.exe'), '47cd67453da180a39cdf5daedb89862667b8e627e60c116607874633450cd30d');
 });
 
-test('electron and media runtime resolve native win32-x64 and win32-arm64 targets with verified SHA-256 sums', () => {
+test('electron, libwebrtc SDK, and MttVDD runtime resolve native win32-x64 and win32-arm64 targets with verified SHA-256 sums', () => {
   const x64Electron = resolveElectronTarget('x64');
   const arm64Electron = resolveElectronTarget('arm64');
   assert.deepEqual(x64Electron.electronDistArgs.slice(-2), ['x64', 'win32']);
   assert.deepEqual(arm64Electron.electronDistArgs.slice(-2), ['arm64', 'win32']);
   assert.equal(arm64Electron.rceditAsset, 'rcedit-x64.exe');
 
-  const x64Media = resolveMediaRelease('x64');
-  const arm64Media = resolveMediaRelease('arm64');
-  assert.match(x64Media.name, /win64-lgpl-shared-8\.1$/);
-  assert.match(arm64Media.name, /winarm64-lgpl-shared-8\.1$/);
-  assert.match(x64Media.sha256, /^[0-9a-f]{64}$/);
-  assert.match(arm64Media.sha256, /^[0-9a-f]{64}$/);
-  assert.notEqual(x64Media.sha256, arm64Media.sha256);
-  assert.notEqual(x64Media.targetDir, arm64Media.targetDir);
+  const x64Rtc = resolveWebRtcSdk('x64');
+  const arm64Rtc = resolveWebRtcSdk('arm64');
+  assert.equal(x64Rtc.subdir, 'win-x64-release');
+  assert.equal(arm64Rtc.subdir, 'win-arm64-release');
+  assert.match(x64Rtc.sha256, /^[0-9a-f]{64}$/);
+  assert.match(arm64Rtc.sha256, /^[0-9a-f]{64}$/);
+  assert.notEqual(x64Rtc.sha256, arm64Rtc.sha256);
+  assert.notEqual(x64Rtc.rootDir, arm64Rtc.rootDir);
+
+  const x64Vdd = resolveVddRelease('x64');
+  const arm64Vdd = resolveVddRelease('arm64');
+  assert.match(x64Vdd.url, /VirtualDisplayDriver-x86\.Driver\.Only\.zip$/);
+  assert.match(arm64Vdd.url, /VirtualDisplayDriver-ARM64\.Driver\.Only\.zip$/);
+  assert.match(x64Vdd.sha256, /^[0-9a-f]{64}$/);
+  assert.match(arm64Vdd.sha256, /^[0-9a-f]{64}$/);
+  assert.notEqual(x64Vdd.sha256, arm64Vdd.sha256);
+  assert.notEqual(x64Vdd.targetDir, arm64Vdd.targetDir);
 });
 
 test('pruneRuntime for arm64 retains win32-arm64 node-pty and sharp modules while removing x64 binaries', () => {

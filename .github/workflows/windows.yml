@@ -29,13 +29,19 @@ jobs:
         with:
           node-version: '22'
           cache: pnpm
+      - uses: actions/cache@v4
+        with:
+          path: apps/windows/build/webrtc-cache
+          key: linkshell-libwebrtc-a545de4-${{ matrix.arch }}
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
+        env:
+          LINKSHELL_WINDOWS_ARCH: ${{ matrix.arch }}
       - run: pnpm typecheck
       - if: matrix.arch == 'x64'
-        run: pnpm --filter @linkshell/host exec vitest run test/codex-installation.test.ts test/windows.test.ts test/windows-viewer.test.ts test/windows-video.test.ts test/windows-screen-session.test.ts test/screen-session.test.ts test/screen-viewer-session.test.ts test/dev-port.e2e.test.ts test/screen-viewer.test.ts test/screen-pacer.test.ts test/screen-fallback.test.ts test/screen.test.ts test/screen-platform.test.ts test/screen-native-controls.test.ts test/screen-metrics.test.ts test/fusion.test.ts test/fusion-remote.test.ts
+        run: pnpm --filter @linkshell/host exec vitest run test/codex-installation.test.ts test/windows.test.ts test/windows-viewer.test.ts test/windows-video.test.ts test/windows-media.test.ts test/windows-screen-session.test.ts test/screen-session.test.ts test/screen-viewer-session.test.ts test/dev-port.e2e.test.ts test/screen-viewer.test.ts test/screen-pacer.test.ts test/screen-fallback.test.ts test/screen.test.ts test/screen-platform.test.ts test/screen-native-controls.test.ts test/screen-metrics.test.ts test/fusion.test.ts test/fusion-remote.test.ts
       - if: matrix.arch == 'arm64'
-        run: pnpm --filter @linkshell/host exec vitest run test/windows.test.ts test/windows-viewer.test.ts test/windows-video.test.ts test/windows-screen-session.test.ts test/fusion.test.ts test/fusion-remote.test.ts
+        run: pnpm --filter @linkshell/host exec vitest run test/windows.test.ts test/windows-viewer.test.ts test/windows-video.test.ts test/windows-media.test.ts test/windows-screen-session.test.ts test/fusion.test.ts test/fusion-remote.test.ts
       - if: matrix.arch == 'x64'
         run: pnpm --filter linkshell-cli exec vitest run test/desktop.test.ts test/desktop-update.test.ts test/desktop-workspace.test.ts test/daemon.test.ts test/auth.test.ts test/pro-membership.test.ts
       - if: matrix.arch == 'x64'

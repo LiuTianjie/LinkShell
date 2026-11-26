@@ -4,7 +4,7 @@ import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, rea
 import { dirname, join, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildInstaller } from './installer.mjs';
-import { ensureMedia } from './media-runtime.mjs';
+import { ensureVdd } from './vdd-runtime.mjs';
 import { assembleElectron } from './electron.mjs';
 import { isRuntimeDependency, isRuntimePath, normalizeWindowsArch, pruneRuntime } from './prune-runtime.mjs';
 import { signWindowsBinaries } from './sign.mjs';
@@ -90,7 +90,7 @@ async function runPackage() {
   };
   const pnpm = process.env.npm_execpath;
   if (!pnpm || !/pnpm\.(?:c?js)$/.test(pnpm)) throw new Error('Run through pnpm: pnpm --filter @linkshell/windows build:standalone');
-  run(process.execPath, [join(app, 'scripts/build.mjs')]);
+  run(process.execPath, [join(app, 'scripts/build.mjs'), `--arch=${arch}`]);
   run(process.execPath, [pnpm, '--filter', '@linkshell/desktop-ui', 'build']);
   run(process.execPath, [pnpm, '--filter', '@linkshell/desktop', 'exec', 'tsc', '-p', 'tsconfig.json']);
   mkdirSync(runtime, { recursive: true });
@@ -167,18 +167,28 @@ async function runPackage() {
   }
   cpSync(nodeLicense, join(runtime, 'NODE-LICENSE.txt'));
   cpSync(join(app, 'build/LinkShell.Screen.exe'), join(bundle, 'LinkShell.Screen.exe'));
-  // A reused staging directory may still hold the earlier WebView2 window's loader.
+  const mediaExe = arch !== 'x64' && existsSync(join(app, `build/LinkShell.Media-${arch}.exe`))
+    ? join(app, `build/LinkShell.Media-${arch}.exe`)
+    : join(app, 'build/LinkShell.Media.exe');
+  if (!existsSync(mediaExe)) throw new Error(`Missing native media engine: ${mediaExe}`);
+  cpSync(mediaExe, join(bundle, 'LinkShell.Media.exe'));
+  const webrtcLicense = join(app, 'build/WEBRTC-LICENSE.md');
+  if (existsSync(webrtcLicense)) cpSync(webrtcLicense, join(bundle, 'WEBRTC-LICENSE.md'));
+  // A reused staging directory may still hold the earlier WebView2 loader or legacy FFmpeg media directory.
   for (const file of ['Microsoft.Web.WebView2.Core.dll', 'Microsoft.Web.WebView2.Wpf.dll', 'WebView2Loader.dll', 'WEBVIEW2-LICENSE.txt', 'WEBVIEW2-NOTICE.txt']) rmSync(join(bundle, file), { force: true });
+  rmSync(join(bundle, 'media'), { recursive: true, force: true });
   await assembleElectron(bundle, version, arch);
-  signWindowsBinaries([join(bundle, 'LinkShell.exe'), join(bundle, 'LinkShell.Screen.exe')]);
+  signWindowsBinaries([join(bundle, 'LinkShell.exe'), join(bundle, 'LinkShell.Screen.exe'), join(bundle, 'LinkShell.Media.exe')]);
   // Delete only the owned staged assets so an upgrade never carries stale web bundles.
   const workspaceAssets = join(bundle, 'workspace');
   rmSync(workspaceAssets, { recursive: true, force: true });
   cpSync(join(root, 'apps/desktop-ui/dist'), workspaceAssets, { recursive: true });
-  cpSync(await ensureMedia(arch), join(bundle, 'media'), { recursive: true });
+  const vddAssets = join(bundle, 'vdd');
+  rmSync(vddAssets, { recursive: true, force: true });
+  cpSync(await ensureVdd(arch), vddAssets, { recursive: true });
   cpSync(join(root, 'LICENSE'), join(bundle, 'LICENSE'));
   writeFileSync(join(bundle, 'standalone.json'), JSON.stringify({ version, nodeVersion: process.versions.node, platform: 'win32', arch }, null, 2));
-  writeFileSync(join(bundle, 'linkshell.cmd'), '@echo off\r\nsetlocal\r\nset "LINKSHELL_APP_BUNDLE=%~dp0"\r\nset "LINKSHELL_WINDOWS_HELPER=%~dp0LinkShell.Screen.exe"\r\n"%~dp0runtime\\node.exe" "%~dp0runtime\\cli\\dist\\cli\\src\\index.js" %*\r\nexit /b %errorlevel%\r\n');
+  writeFileSync(join(bundle, 'linkshell.cmd'), '@echo off\r\nsetlocal\r\nset "LINKSHELL_APP_BUNDLE=%~dp0"\r\nset "LINKSHELL_WINDOWS_HELPER=%~dp0LinkShell.Screen.exe"\r\nset "LINKSHELL_WINDOWS_MEDIA=%~dp0LinkShell.Media.exe"\r\n"%~dp0runtime\\node.exe" "%~dp0runtime\\cli\\dist\\cli\\src\\index.js" %*\r\nexit /b %errorlevel%\r\n');
   if (arch === process.arch) {
     run(join(runtime, 'node.exe'), [join(cli, 'dist/cli/src/index.js'), '--version']);
     run(process.execPath, [join(app, 'scripts/smoke.mjs'), bundle]);

@@ -320,6 +320,14 @@ export interface WindowsElevatedServiceStatus {
   outdated: boolean;
 }
 
+export interface WindowsVirtualDisplayStatus {
+  installed: boolean;
+  enabled: boolean;
+  active: boolean;
+  virtualMonitors: number;
+  driverBundled: boolean;
+}
+
 export interface ManagementState {
   snapshot?: DesktopSnapshot;
   problem?: string;
@@ -340,9 +348,12 @@ export interface ManagementState {
     control: boolean;
     sharing?: boolean;
     elevatedService?: WindowsElevatedServiceStatus;
+    virtualDisplay?: WindowsVirtualDisplayStatus;
   };
   elevatedServiceBusy: boolean;
   elevatedServiceMessage: ManagementMessage;
+  virtualDisplayBusy: boolean;
+  virtualDisplayMessage: ManagementMessage;
   loginItem: { enabled: boolean; approval: boolean };
   loginItemMessage: ManagementMessage;
   activity: { at: number; text: ManagementMessage }[];
@@ -394,6 +405,8 @@ const INITIAL_MANAGEMENT_STATE: ManagementState = {
   permissions: { known: false, recording: false, control: false },
   elevatedServiceBusy: false,
   elevatedServiceMessage: "",
+  virtualDisplayBusy: false,
+  virtualDisplayMessage: "",
   loginItem: { enabled: false, approval: false },
   loginItemMessage: "",
   activity: [],
@@ -726,6 +739,7 @@ async function refreshPermissions() {
       unavailable?: boolean;
       sharing?: boolean;
       elevatedService?: WindowsElevatedServiceStatus;
+      virtualDisplay?: WindowsVirtualDisplayStatus;
     }>("permissions", {}, 15_000);
     set({
       permissions: {
@@ -734,6 +748,7 @@ async function refreshPermissions() {
         control: value.control,
         sharing: value.sharing,
         elevatedService: value.elevatedService,
+        virtualDisplay: value.virtualDisplay,
       },
     });
   } catch {
@@ -1333,6 +1348,36 @@ export async function setElevatedScreenService(enabled: boolean): Promise<boolea
     return true;
   } catch (error) {
     set({ elevatedServiceBusy: false, elevatedServiceMessage: messageOf(error) });
+    await refreshPermissions();
+    return false;
+  }
+}
+
+export async function setVirtualDisplay(action: "install" | "uninstall" | "enable" | "disable"): Promise<boolean> {
+  if (get().virtualDisplayBusy) return false;
+  set({ virtualDisplayBusy: true, virtualDisplayMessage: "" });
+  try {
+    await desktopInvoke<{ virtualDisplay?: WindowsVirtualDisplayStatus }>(
+      "setVirtualDisplay",
+      { action },
+      95_000,
+    );
+    await refreshPermissions();
+    const messageKey =
+      action === "install"
+        ? "settings.winVddInstalled"
+        : action === "uninstall"
+          ? "settings.winVddRemoved"
+          : action === "enable"
+            ? "settings.winVddEnabledMsg"
+            : "settings.winVddDisabledMsg";
+    set({
+      virtualDisplayBusy: false,
+      virtualDisplayMessage: { key: messageKey },
+    });
+    return true;
+  } catch (error) {
+    set({ virtualDisplayBusy: false, virtualDisplayMessage: messageOf(error) });
     await refreshPermissions();
     return false;
   }

@@ -16,7 +16,14 @@ const manifest = JSON.parse(readFileSync(join(bundle, 'standalone.json')));
 const require = createRequire(cli);
 const home = mkdtempSync(join(tmpdir(), 'linkshell-bundle-test-'));
 const run = promisify(execFile);
-const env = { ...process.env, LINKSHELL_HOME: home, LINKSHELL_GATEWAY: 'off', LINKSHELL_WINDOWS_HELPER: join(bundle, 'LinkShell.Screen.exe'), LINKSHELL_APP_BUNDLE: bundle };
+const env = {
+  ...process.env,
+  LINKSHELL_HOME: home,
+  LINKSHELL_GATEWAY: 'off',
+  LINKSHELL_WINDOWS_HELPER: join(bundle, 'LinkShell.Screen.exe'),
+  LINKSHELL_WINDOWS_MEDIA: join(bundle, 'LinkShell.Media.exe'),
+  LINKSHELL_APP_BUNDLE: bundle,
+};
 let host;
 
 /**
@@ -107,13 +114,20 @@ async function windowSmoke() {
 
 try {
   assert.equal((await run(node, [cli, '--version'], { env, windowsHide: true })).stdout.trim(), manifest.version);
-  // The first load of the copied shared runtime can exceed five seconds on a fresh runner.
+  // Verify the native C++20 libwebrtc media engine and bundled IddCx Virtual Display Driver;
+  // legacy FFmpeg binaries must no longer ship in the bundle.
+  assert.ok(!existsSync(join(bundle, 'media/ffmpeg.exe')), 'Legacy FFmpeg runtime must not ship in the native Windows bundle');
   const mediaStarted = Date.now();
-  const media = await run(join(bundle, 'media/ffmpeg.exe'), ['-hide_banner', '-version'], { windowsHide: true, timeout: 30_000 });
-  console.log(`Packaged FFmpeg version probe completed in ${Date.now() - mediaStarted} ms.`);
-  assert.match(media.stdout, /ffmpeg version/);
-  assert.ok(!media.stdout.includes('--enable-gpl'), 'The Windows media runtime must remain the LGPL build');
-  assert.match(readFileSync(join(bundle, 'media/LICENSE.txt'), 'utf8'), /LESSER GENERAL PUBLIC LICENSE/);
+  const selftestRaw = await run(join(bundle, 'LinkShell.Media.exe'), ['--selftest'], { env, windowsHide: true, timeout: 30_000 });
+  console.log(`Packaged LinkShell.Media.exe --selftest completed in ${Date.now() - mediaStarted} ms: ${selftestRaw.stdout.trim()}`);
+  const selftest = JSON.parse(selftestRaw.stdout.trim());
+  assert.equal(selftest.ok, true, `LinkShell.Media.exe selftest failed: ${selftestRaw.stdout}`);
+  assert.equal(selftest.webrtcReady, true, 'libwebrtc PeerConnectionFactory must initialize');
+  for (const file of ['LinkShell.Media.exe', 'WEBRTC-LICENSE.md', 'vdd/MttVDD.inf', 'vdd/mttvdd.cat', 'vdd/MttVDD.dll', 'vdd/vdd_settings.xml', 'vdd/LINKSHELL-VDD-NOTICE.txt']) {
+    assert.ok(existsSync(join(bundle, file)), `Missing native media or VDD file: ${file}`);
+  }
+  const vddStatus = JSON.parse((await run(join(bundle, 'LinkShell.Screen.exe'), ['--vdd-status'], { env, windowsHide: true, timeout: 10_000 })).stdout.trim());
+  assert.equal(vddStatus.driverBundled, true, 'LinkShell.Screen.exe must discover the bundled MttVDD driver');
   const { startHost } = await import(pathToFileURL(require.resolve('@linkshell/host')).href);
   host = await startHost({ home, version: 'packaged-smoke', drivers: () => [], iceServers: false, log: () => {} });
   const snapshot = JSON.parse((await run(node, [cli, 'desktop', '--action', 'snapshot'], { env, windowsHide: true, timeout: 30_000 })).stdout.trim());
@@ -162,7 +176,7 @@ try {
     pty.onData(data => { output += data; if (output.includes('PACKAGED_PTY_READY')) pty.write('done\r'); });
     pty.onExit(({ exitCode }) => { clearTimeout(timer); if (exitCode === 0 && output.includes('PACKAGED_PTY_READY')) resolve(); else reject(new Error(`Packaged ConPTY exited ${exitCode}`)); });
   });
-  console.log(`Verified Windows bundle ${manifest.version}: CLI, named-pipe RPC, SQLite, sharp, ConPTY, FFmpeg, Claude SDK/external executable, workspace assets/sidecar, the Electron window and its bridge, and standalone identity.`);
+  console.log(`Verified Windows bundle ${manifest.version}: CLI, named-pipe RPC, SQLite, sharp, ConPTY, native libwebrtc media engine, bundled MttVDD driver, Claude SDK/external executable, workspace assets/sidecar, the Electron window and its bridge, and standalone identity.`);
 } finally {
   let timer;
   try {

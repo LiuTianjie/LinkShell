@@ -47,7 +47,7 @@ const env = { ...process.env, LINKSHELL_HOME: home, LINKSHELL_GATEWAY: 'off', LI
   LINKSHELL_LOCALE: 'zh',
   CODEX_HOME: join(work, 'agent-codex'), CLAUDE_CONFIG_DIR: join(work, 'agent-claude'),
   LINKSHELL_QA_ROOT: work, LINKSHELL_QA_PROFILE: profile, LINKSHELL_QA_TOKEN: token,
-  LINKSHELL_APP_BUNDLE: target, LINKSHELL_WINDOWS_HELPER: join(target, 'LinkShell.Screen.exe'), LINKSHELL_MACHINE_NAME: 'Windows Update QA' };
+  LINKSHELL_APP_BUNDLE: target, LINKSHELL_WINDOWS_HELPER: join(target, 'LinkShell.Screen.exe'), LINKSHELL_WINDOWS_MEDIA: join(target, 'LinkShell.Media.exe'), LINKSHELL_MACHINE_NAME: 'Windows Update QA' };
 delete env.ELECTRON_RUN_AS_NODE;
 const log = message => console.log(`[windows-update-e2e] ${message}`);
 const check = async (name, fn) => {

@@ -12,6 +12,7 @@ import {
   FUSION_PROTO,
 } from "@linkshell/wire";
 import { FusionNodeMedia, type FusionLayout } from "./media.js";
+import { WindowsNativeFusionMedia, windowsMediaEngine } from "../windows-media.js";
 import type { FusionClip, FusionPlatform, FusionWindowInfo } from "./platform.js";
 import { listenFusion, type FusionConnection, type FusionMessage } from "./wire.js";
 
@@ -224,7 +225,7 @@ export class FusionNodeSession {
   private readonly stagingDirs = new Set<string>();
   private outgoingFileEpoch = 0;
   private outgoingFileQueue: Promise<void> = Promise.resolve();
-  private media?: FusionNodeMedia;
+  private media?: FusionNodeMedia | WindowsNativeFusionMedia;
   private displays: LocalDisplay[] = [];
   private localPlatform = "macos";
   private readonly windows = new Map<number, WindowState>();
@@ -603,12 +604,25 @@ export class FusionNodeSession {
 
   private startMedia(): void {
     this.media?.end();
-    const media = new FusionNodeMedia(this.ice.flatMap(weriftServer), {
-      signal: (payload) => { this.trace("→", payload); this.send({ t: "rtc", m: payload }); },
-      input: (key, event) => this.input(key, event),
-      error: (key, message) => this.send({ t: "alert", kind: "webrtc", subject: key, message }),
+    const events = {
+      signal: (payload: Record<string, unknown>) => { this.trace("→", payload); this.send({ t: "rtc", m: payload }); },
+      input: (key: string, event: Record<string, unknown>) => this.input(key, event),
+      error: (key: string, message: string) => this.send({ t: "alert", kind: "webrtc", subject: key, message }),
       log: this.log,
-    });
+    };
+    const nativeEngine = this.platform.platform === "windows" ? windowsMediaEngine(this.log) : undefined;
+    if (nativeEngine) {
+      const nativeMedia = new WindowsNativeFusionMedia(nativeEngine, events);
+      this.media = nativeMedia;
+      nativeMedia.start(this.ice);
+      for (const mon of this.platform.monitors()) {
+        const width = Math.min(1920, mon.rect.w || 1920);
+        nativeMedia.openMonitor(`d${mon.index}`, mon.index, width, 30, 1_500_000, () => this.popupLayout(mon.index));
+      }
+      for (const state of this.windows.values()) if (state.streamed) this.openStream(state);
+      return;
+    }
+    const media = new FusionNodeMedia(this.ice.flatMap(weriftServer), events);
     this.media = media;
     media.start(this.ice);
     for (const mon of this.platform.monitors()) {
@@ -745,6 +759,10 @@ export class FusionNodeSession {
     // As LinkShell.Screen.exe clamps it: even, and no larger than 4K.
     const canvas = { w: Math.min(3840, monitor?.rect.w ?? 1920) & ~1, h: Math.min(2160, monitor?.rect.h ?? 1080) & ~1 };
     state.canvas = canvas;
+    if (this.media instanceof WindowsNativeFusionMedia) {
+      this.media.openWindow(`w${info.id}`, info.id, canvas, 60, 8_000_000, () => this.windowLayout(info.id, canvas));
+      return;
+    }
     this.media?.open(`w${info.id}`,
       (onUnit, onEnd) => this.platform.windowVideo(info.id, canvas, 60, 8_000_000, onUnit, onEnd),
       () => this.windowLayout(info.id, canvas));
@@ -798,6 +816,7 @@ export class FusionNodeSession {
     const text = JSON.stringify(windows);
     if (text === this.lastLayout) return;
     this.lastLayout = text;
+    if (this.media instanceof WindowsNativeFusionMedia) this.media.syncLayouts();
     this.send({ t: "layout", windows });
   }
 

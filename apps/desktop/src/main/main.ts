@@ -933,7 +933,8 @@ async function handle(method: string, params: Record<string, unknown>): Promise<
       if (!WINDOWS) return nativeModule?.permissions() ?? { recording: false, control: false, unavailable: true };
       const sharing = !existsSync(screenDisabled());
       const elevatedService = await queryWindowsElevatedService();
-      return { recording: sharing, control: sharing, notNeeded: true, sharing, elevatedService };
+      const virtualDisplay = await queryWindowsVirtualDisplay();
+      return { recording: sharing, control: sharing, notNeeded: true, sharing, elevatedService, virtualDisplay };
     }
     case "setScreenSharing": {
       if (!WINDOWS) throw new Error("不支持的操作");
@@ -945,6 +946,15 @@ async function handle(method: string, params: Record<string, unknown>): Promise<
       if (!WINDOWS) throw new Error("不支持的操作");
       const elevatedService = await setWindowsElevatedService(params.enabled === true);
       return { elevatedService };
+    }
+    case "setVirtualDisplay": {
+      if (!WINDOWS) throw new Error("不支持的操作");
+      const action = String(params.action ?? "");
+      if (action !== "install" && action !== "uninstall" && action !== "enable" && action !== "disable") {
+        throw new Error("未知的虚拟显示器操作");
+      }
+      const virtualDisplay = await setWindowsVirtualDisplay(action);
+      return { virtualDisplay };
     }
     case "openSetup": return openSetup(params);
     case "loginItem": return nativeModule?.loginItem() ?? { enabled: windowsLoginItem() ?? app.getLoginItemSettings().openAtLogin, approval: false };
@@ -1143,6 +1153,14 @@ interface WindowsElevatedServiceStatus {
   outdated: boolean;
 }
 
+interface WindowsVirtualDisplayStatus {
+  installed: boolean;
+  enabled: boolean;
+  active: boolean;
+  virtualMonitors: number;
+  driverBundled: boolean;
+}
+
 function psSingleQuote(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
@@ -1215,6 +1233,71 @@ async function setWindowsElevatedService(enable: boolean): Promise<WindowsElevat
   if (!next) throw new Error("无法确认系统控制服务状态，请重试");
   if (enable && (!next.installed || !next.running || !next.authorized)) {
     throw new Error("系统控制服务未能启动，请在管理员权限下重试");
+  }
+  return next;
+}
+
+async function queryWindowsVirtualDisplay(): Promise<WindowsVirtualDisplayStatus | undefined> {
+  if (!WINDOWS || !runtime.helper || !existsSync(runtime.helper)) return undefined;
+  try {
+    const { stdout } = await execFileAsync(runtime.helper, ["--vdd-status"], {
+      windowsHide: true,
+      timeout: 5_000,
+      encoding: "utf8",
+      env: { ...process.env, LINKSHELL_HOME: runtime.home, ...(runtime.folder ? { LINKSHELL_APP_BUNDLE: runtime.folder } : {}) },
+    });
+    const parsed = JSON.parse(stdout.trim()) as Partial<WindowsVirtualDisplayStatus>;
+    return {
+      installed: parsed.installed === true,
+      enabled: parsed.enabled === true,
+      active: parsed.active === true,
+      virtualMonitors: typeof parsed.virtualMonitors === "number" ? parsed.virtualMonitors : 0,
+      driverBundled: parsed.driverBundled === true,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+async function setWindowsVirtualDisplay(action: "install" | "uninstall" | "enable" | "disable"): Promise<WindowsVirtualDisplayStatus> {
+  const helper = runtime.helper;
+  if (!WINDOWS || !helper || !existsSync(helper)) {
+    throw new Error("未找到 LinkShell.Screen.exe，请重新安装 Windows 桌面版");
+  }
+  const cleanHome = runtime.home.replace(/[\\]+$/, "");
+  const errFile = join(runtime.home, "windows-service-last-error.txt");
+  rmSync(errFile, { force: true });
+  const vddDir = runtime.folder ? join(runtime.folder, "vdd") : join(dirname(helper), "vdd");
+  const helperArgs = action === "install"
+    ? ["--install-vdd", vddDir, cleanHome]
+    : action === "uninstall"
+      ? ["--uninstall-vdd", cleanHome]
+      : [action === "enable" ? "--enable-vdd" : "--disable-vdd"];
+  const argArray = helperArgs.map(psSingleQuote).join(", ");
+  const script = `$p = Start-Process -FilePath ${psSingleQuote(helper)} -ArgumentList @(${argArray}) -Verb RunAs -Wait -PassThru -WindowStyle Hidden; if ($null -eq $p) { exit 1 }; exit $p.ExitCode`;
+  const encoded = Buffer.from(script, "utf16le").toString("base64");
+  try {
+    await execFileAsync("powershell.exe", ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-EncodedCommand", encoded], {
+      windowsHide: true,
+      timeout: 90_000,
+      encoding: "utf8",
+    });
+  } catch (error) {
+    let detail = "";
+    try {
+      if (existsSync(errFile)) detail = readFileSync(errFile, "utf8").trim();
+    } catch { /* Ignore unreadable error file. */ }
+    if (detail) throw new Error(`虚拟显示器操作失败：${detail}`);
+    const text = error instanceof Error ? `${error.message} ${String((error as { stderr?: string }).stderr ?? "")}` : String(error);
+    if (/canceled by the user|被用户取消|1223/i.test(text)) {
+      throw new Error("已取消管理员授权，未更改虚拟显示器驱动");
+    }
+    throw new Error(`虚拟显示器操作失败：${error instanceof Error ? error.message : String(error)}`);
+  }
+  const next = await queryWindowsVirtualDisplay();
+  if (!next) throw new Error("无法确认虚拟显示器状态，请重试");
+  if (action === "install" && !next.installed) {
+    throw new Error("虚拟显示器驱动未能完成安装，请检查系统权限后重试");
   }
   return next;
 }
