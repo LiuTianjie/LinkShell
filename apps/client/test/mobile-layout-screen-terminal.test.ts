@@ -48,7 +48,7 @@ const { isTransientMetricsCompatible, resolveLayoutMetrics } = await import("../
 const { workspaceLayout } = await import("../src/lib/workspace-layout");
 const { sheetBottom } = await import("../src/lib/sheet-bottom");
 const { fixedHeaderFontSize } = await import("../src/components/headers");
-const { screenAppStateAction } = await import("../src/lib/screen-session");
+const { advanceScreenConnectStage, screenAppStateAction } = await import("../src/lib/screen-session");
 const {
   chunkRawTerminalData,
   encodeTerminalKeySequence,
@@ -138,13 +138,33 @@ describe("Android header font scaling consistency", () => {
   });
 });
 
-describe("ScreenSessionProvider AppState lifecycle policy", () => {
+describe("ScreenSessionProvider AppState lifecycle & connecting UX invariants", () => {
   it("pauses on transient inactive states and only resets on background", () => {
     expect(screenAppStateAction("active")).toBe("resume");
     expect(screenAppStateAction("inactive")).toBe("pause");
     expect(screenAppStateAction("extension")).toBe("pause");
     expect(screenAppStateAction("unknown")).toBe("pause");
     expect(screenAppStateAction("background")).toBe("reset");
+  });
+
+  it("advances connecting stage strictly monotonically so users never see backwards jumps", () => {
+    expect(advanceScreenConnectStage("connecting", "connecting")).toBe("connecting");
+    expect(advanceScreenConnectStage("connecting", "receiving")).toBe("receiving");
+    expect(advanceScreenConnectStage("receiving", "connecting")).toBe("receiving");
+    expect(advanceScreenConnectStage("receiving", "live")).toBe("live");
+    expect(advanceScreenConnectStage("live", "connecting")).toBe("live");
+    expect(advanceScreenConnectStage("live", "receiving")).toBe("live");
+  });
+
+  it("never stalls 3 seconds on bulk stream setup and keeps exit/back always reachable while connecting", () => {
+    const sessionSource = readFileSync(resolve(CLIENT_ROOT, "src/lib/screen-session.tsx"), "utf8");
+    const screenSource = readFileSync(resolve(CLIENT_ROOT, "src/screens/screen-screen.tsx"), "utf8");
+    const loadingSource = readFileSync(resolve(CLIENT_ROOT, "src/components/screen-connection-loading.tsx"), "utf8");
+    expect(sessionSource).not.toMatch(/setTimeout\(start,\s*3000\)/);
+    expect(screenSource).toContain("resolveScreenHeaderInset");
+    expect(screenSource).toContain("screenGestureEnabled");
+    expect(screenSource).toContain("nativeLoading: true");
+    expect(loadingSource).toContain("onCancel");
   });
 });
 

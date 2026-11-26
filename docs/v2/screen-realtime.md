@@ -1,8 +1,8 @@
 # 远程桌面技术架构：Mac → iOS、WebRTC 与兼容回退
 
-> 现状核对：2026-10-19，按当前源码梳理。本文描述已实现的路径、配置和边界；不代表所有已安装版本均具备相同能力，也不把构建通过当作性能验收。
+> 现状核对：2026-11-26，按当前源码梳理（详见文末 2026-11-26 全链路低延迟重构记录）。本文描述已实现的路径、配置和边界；不代表所有已安装版本均具备相同能力，也不把构建通过当作跨设备真机性能验收。
 >
-> 主路线：**ScreenCaptureKit → VideoToolbox 低延迟 H.264 → WebRTC 视频直连 → iOS 原生解码 → Metal 显示**。iOS 的透明 WebView 保留工具栏、手势和光标；失败依次回退网页 WebRTC 和强制 RPC 字节流。
+> 主路线：**ScreenCaptureKit / WGC → 低延迟硬件 H.264 / HEVC → WebRTC 视频直连（默认关闭 FlexFEC，强制 0/0 playout-delay）→ 原生硬解 → Metal / SurfaceView / WebGPU 显示**。iOS / Android 的透明 WebView 保留工具栏、手势和光标；失败依次回退网页 WebRTC 和强制 RPC 字节流。
 
 ## 1. 组件与完整链路
 
@@ -545,3 +545,38 @@ Mac 桌面恢复 `DesktopScreen.tsx` 的界面与信令桥接。`LinkShell --des
 - **Windows 光标形状与 macOS 系统快捷键捕获**：Windows `Screen.cs` / `Fusion.cs` 捕获指针图形并同步至 `shape` DataChannel；macOS 桌面版新增受辅助功能、钥匙窗口与控件焦点门控的 `CGEventTap` 系统快捷键捕获开关（`SystemShortcutCapture.swift`），始终放行本地 `⌃⌘F` 与 `⌃⌥⌘Esc`，并在失焦/断开时立即销毁 tap 与释放修饰键。
 - **Linux Wayland 与纯 Node mDNS**：`packages/host/src/linux-screen.ts` 新增 Wayland 检测（`wf-recorder` / `gst-launch-1.0`）与 `xdotool` / `ydotool` / `dotool` / `wtype` 输入映射；`packages/host/src/mdns.ts` 内置零依赖 UDP 多播 `PureMdnsResponder`（Windows/Linux 原生，macOS 异常回退），移动端（iOS `NWBrowser` / Android `NsdManager`）与桌面端（`mdns-browser.ts`）可自动发现同局域网主机。
 - **验证边界（本轮仅完成单测与本地编译，以下仍待真机验收）**：Windows `.NET Framework 4.8` `csc.exe` 编译与 GPU/WASAPI/ARM64 实机、Android `expo prebuild` 后的完整 Gradle 构建与真机 MediaCodec/AudioTrack/NsdManager、iOS 真机屏幕音频与 `NWBrowser`/本地审批通知、Linux Wayland 实机捕获与输入、以及 Intel Mac 真机链路均尚未在物理目标设备上端到端实测。
+
+### 2026-11-26：全链路低延迟重构、移动端连接体验修复与实机回环对照
+
+对照前序退化排查（桌面端默认改为 `smooth` 导致多 18–72 ms 抖动缓冲、FlexFEC 默认开启占用发包配额、旧 `SendQueue` 50 ms 无上限跳过导致掉帧与 GCC 饿死、初始 2 Mbps + 8 Mbps 局域网下限导致前 5 秒低码率糊屏、桌面/手机编码与解码路径存在多处额外拷贝与三缓冲排队、以及移动端连接态回跳与退出被遮挡问题），全端完成以下架构级优化：
+
+- **传输与码率控制（Mac `Tuning.swift` / `LowLatencyEncoder.swift` / `VideoCompressor.swift` 与 Windows `apps/windows/media/` 同步对齐）**：
+  - 默认关闭 `WebRTC-FlexFEC-03`（`Engine.flexfec = false`，保留 `--flexfec` 实验开关；iOS/Android/Web 接收端均过滤 `flexfec-03`），消除低丢包局域网下约 15–30% 的无谓冗余发包与 pacer 排队。
+  - 初始带宽估计 `startBitrate` 提至 `6 Mbps`，局域网下限 `lanFloor` 提至 `16 Mbps`（收敛窗口 `2 s`、冷静期 `20 s`、最多抬升 `6` 次），分辨率码率上限按 `10 / 16 / 32 Mbps`（1080p30/60/120 & 4K60）扩展至最高 `50 Mbps`。
+  - `SendQueue` 准入阈值经实机回环标定为 `75 ms` 且增加 `sendQueueMaxConsecutiveSkips = 2` 硬上限：正常局域网爆发不误跳帧，突发 10× 带宽骤降时立即泄压而不进入多帧死锁。
+  - Mac `VideoCompressor` 在罕见关键帧超预算锁 QP 时改用 `VTCompressionSessionCompleteFrames(..., untilPresentationTimeStamp:)` 同步排空该帧并在编码线程立刻恢复 `Min/MaxAllowedFrameQP = 1..51`，消除后续 P 帧被误锁粗 QP 的竞态且不阻塞 VT 回调线程；关键帧最粗 QP 从 `46` 收紧至 `36`，预算窗口设为 `0.16 s`；连接就绪瞬间主动 `resendLatest()` 消除静态桌面首帧等待；静止补帧周期由 `0.5 s` 缩短至 `0.25 s`，光标采样频率升至 `120 Hz`。
+  - Windows 原生 C++20 `LinkShell.Media.exe`（`mf_encoder.cpp`、`capture_source.cpp`、`screen_session.cpp`）同步对齐上述全部常量，并为 1 帧预热的异步 MFT 引入 FIFO `pending_meta_` 队列修复时间戳与 Fusion SEI 错配，设置无限 GOP（`CODECAPI_AVEncMPVGOPSize = 0xFFFFFFFFu`）消除每 10 秒周期性 IDR 卡顿，VBV 缓冲收紧为 `bitrate / 8`，WGC 节拍升级为微秒时钟并在 `kConnected` 时立刻补发首帧。
+- **接收、解码、呈现与输入低延迟**：
+  - **桌面端默认节奏回归极速直出**：`apps/desktop-ui` 默认 `pacing` 由 `"smooth"` 改回 `"immediate"`（保留 `"smooth"` 手动选项），并将 `pacingChoice` 透传到 `WebRtcScreenStage` → `ScreenReceiver`。
+  - **单遍零中间拷贝解码**：iOS `HEVCDecoder.swift` 与 Mac `DesktopScreenDecoder.swift` 改为单遍扫描 Annex-B NALU 范围后直接写入 `CMBlockBufferGetDataPointer`，每帧省去两次整帧内存拷贝。
+  - **双缓冲透明合成消除**：iOS `ScreenMetalView.swift` 与 Mac `DesktopScreenSurface.swift` 统一采用 `maximumDrawableCount = 2`、单在途 GPU 信号量（`inFlight = 1`），iOS 设 `isOpaque = true` 并以 `expectedPresentation ?? deadline` 精确对齐 `CAMetalDisplayLink`，`CVMetalTextureCacheFlush` 移至 `command.commit()` 之后。
+  - **Android 原生能力校验**：`ScreenConnectionAndroid.kt` 在请求 `?codec=hevc` 前检查 `DefaultVideoDecoderFactory(eglContext).supportedCodecs`，避免无 H.265 硬解的机型回退软解，并完整解析 `pacing=smooth` 与过滤 `flexfec-03`。
+  - **首动零等待输入**：`packages/host/src/screen-viewer/controls-script.ts`、`apps/desktop-ui/src/core/screen-client.ts` 与 `apps/web/src/live/screen-receiver.ts` 将实时指针移动升级为「首动立即发送 + rAF 尾沿合并」，首动延迟最多减少 16 ms，同时保持点击前定位单包走可靠通道。
+- **移动端连接状态机与退出阻塞彻底修复**：
+  - 删除 `apps/client/src/lib/screen-session.tsx` 中 `path === "connecting"` 时的 3000 ms 人工死等；原生 iOS/Android `link-screen` 在设置 URL/挂载后立即并行启动 WebRTC 协商，不再串行阻塞等待 WebView 加载完成，提前到达的统计和画面状态排队回放。
+  - 建立单调推进的阶段状态机（`connecting` → `receiving` → `live`，`advanceScreenConnectStage`），由 `ScreenSessionProvider` 统一持有唯一加载遮罩直至首帧真正渲染，观看页在 `chrome.nativeLoading: true` 下通过 `html.app-managed-loading` 隐藏重复 `#note` 文案，杜绝连接态闪烁/回跳。
+  - `screen-screen.tsx` 通过 `resolveScreenHeaderInset`（至少 `safeTop + 56`）避免 iOS 26 透明导航栏高度偏小导致覆盖层遮挡返回按钮，移除 iOS 透明栏冲突底色，放开连接中的右滑返回手势（`screenGestureEnabled`），并在加载卡片上提供常驻可用的「返回」按钮（立即调用 `cancel()` 并退出页面）。
+
+**实机回环对照（2026-11-26，同一台 Mac，5120×2880 显示器采集 1920×1080@60 fps 动态画面，`apps/mac/tools/loopback.mjs`）**：
+
+| 场景与指标 | 优化前基线 | 优化后（`sendQueueAdmitMs=75 ms`） |
+|---|---|---|
+| H.264 正常动态：发送码率 / 估计带宽 | `7.71` / `11.19 Mbit/s`（爬坡 5 s） | **`15.50` / `22.18 Mbit/s`**（3 s 达 `11.55`、5 s 满载 `16.00`） |
+| H.264 正常动态：编码 / 解码耗时 | `10.1` / `2.7 ms/frame` | **`9.6` / `2.6 ms/frame`** |
+| H.264 正常动态：时钟条清晰可读率 | `72.6%`（304/419） | **`89.8%`**（430/479，画质锐度显著提升） |
+| H.264 正常动态：glass → decoded 延迟 / CPU | `p50 4 ms, p95 13 ms` / `ps 30.0%` | **`p50 4 ms, p95 16 ms`**（空载试跑低至 `p50 1 ms, p95 11 ms`）/ **`ps 22.4%`** |
+| H.264 正常动态：FlexFEC / 丢帧 / 冻结 | `negotiated` / `0` / `0` | **`not-offered`** / `0` / `0` |
+| 10× 带宽骤降（→1.8 Mbps）：6s 延迟 / 发包排队 | 基线低码率起跑 `p50 2.9 ms` | `180 ms` 试跑骤降瞬间 `unsent 143 ms / p50 172 ms` → **收紧至 `75 ms` 后降至 `unsent 34 ms`（-76%）、6s `p50 4 ms`（-98%）、全程 `p50 3.0 ms`、`60.0 fps` 零丢帧** |
+| HEVC 单遍零中间拷贝动态（1920×1080@60） | 未作本轮基线 | **`15.47 Mbit/s`，`LinkShellHEVC` 解码仅 `1.4 ms/frame`，`0 dropped / 0 freezes`** |
+
+- **验证范围与诚实边界**：全工作区 `pnpm build`（含 Universal `LinkShell.app`）、`pnpm typecheck`、`@linkshell/client` lint、全量 JS/TS 单元测试、`apps/mac` 247 项 Swift 单测、`link-screen` 18 项 Swift 单测及上述 Mac 实机回环均已通过；Windows 原生 C++20 `LinkShell.Media.exe`（x64 + ARM64）已完成 CI 编译与 `--selftest`，并在无显示器 RTX 4060 真机（`Kosuke-Win`，提交 `e4a3934f`）通过端到端实测（GPU 零拷贝 NV12、NVIDIA H.264/HEVC MFT 关键帧编码 1–5 ms、同连接 `rtc.configure` 1080p↔720p 热切换、pause/resume、Fusion 窗口采集 + SEI 与 5 条 DataChannel 全通）。物理 iPhone（ProMotion 120 Hz、iOS 26 导航栏手势与退回、公网弱网）、物理 Android 真机（MediaCodec H.265 探测与 `LinkScreenView` 并行建连）、Intel Mac、Windows ARM64 真机以及 AMD/Intel Windows 显卡仍待目标设备验收。

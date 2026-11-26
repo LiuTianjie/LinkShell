@@ -46,15 +46,28 @@ export interface ScreenPageMessage {
   pacing?: unknown;
   reason?: string;
   text?: unknown;
+  phase?: string;
+  nativeLoading?: boolean;
   session?: { t?: string; configure?: boolean; pause?: boolean; paused?: boolean; version?: number };
 }
 
 export interface ScreenPresentation {
   viewport: ScreenViewport | null;
   clipInsets: { top: number; left: number; right: number };
+  bottomInset?: number;
   chrome: string;
   keyboardLift: ComponentProps<typeof Animated.View>["style"];
   onMessage(message: ScreenPageMessage, generation: number): void;
+  onCancel?: () => void;
+}
+
+export type ScreenConnectStage = "connecting" | "receiving" | "live";
+
+const STAGE_RANK: Record<ScreenConnectStage, number> = { connecting: 0, receiving: 1, live: 2 };
+
+/** Connection feedback only advances forward within one attempt so users never see backwards jumps. */
+export function advanceScreenConnectStage(current: ScreenConnectStage, next: ScreenConnectStage): ScreenConnectStage {
+  return STAGE_RANK[next] > STAGE_RANK[current] ? next : current;
 }
 
 interface Viewer {
@@ -73,6 +86,8 @@ interface Viewer {
 interface ScreenSessionContextValue {
   viewer: Viewer | null;
   preparing: boolean;
+  connectStage: ScreenConnectStage;
+  pictureReady: boolean;
   generation: number;
   failure: string | null;
   display: number | null;
@@ -89,6 +104,7 @@ interface ScreenSessionContextValue {
   setAudio(enabled: boolean): void;
   toggleAudio(): void;
   retry(): void;
+  cancel(): void;
 }
 
 /** The host's words when another device takes the screen (screen-viewer.ts SCREEN_TAKEN). */
@@ -120,8 +136,7 @@ export function ScreenSessionProvider({ children }: { children: ReactNode }) {
   const snapshot = lease.getSnapshot();
   const [foreground, setForeground] = useState(AppState.currentState === "active");
   const [failure, setFailure] = useState<string | null>(null);
-  const [preparingGeneration, setPreparingGeneration] = useState<number | null>(null);
-  const [readyGeneration, setReadyGeneration] = useState<number | null>(null);
+  const [stageState, setStageState] = useState<{ generation: number; stage: ScreenConnectStage }>({ generation: snapshot.generation, stage: "connecting" });
   const [display, setDisplay] = useState<number | null>(null);
   const [width, setWidth] = useState(loadScreenWidth);
   const [mode, setMode] = useState(loadScreenMode);
@@ -153,11 +168,21 @@ export function ScreenSessionProvider({ children }: { children: ReactNode }) {
   const sendChrome = useCallback(() => {
     if (route.current) web.current?.injectJavaScript(`window.linkshellChrome && window.linkshellChrome(${route.current.chrome}); true;`);
   }, []);
+  const advanceStage = useCallback((generation: number, next: ScreenConnectStage) => {
+    setStageState((previous) => {
+      const current = previous.generation === generation ? previous.stage : "connecting";
+      const updated = advanceScreenConnectStage(current, next);
+      if (previous.generation === generation && previous.stage === updated) return previous;
+      return { generation, stage: updated };
+    });
+  }, []);
+
   const reset = useCallback(() => {
     pauseWatchdog.clear();
     configurable.current = null;
     setNativeAudioAvailable(undefined);
     lease.reset();
+    setStageState({ generation: lease.getSnapshot().generation, stage: "connecting" });
   }, [lease, pauseWatchdog]);
 
   useLayoutEffect(() => {
@@ -265,54 +290,53 @@ export function ScreenSessionProvider({ children }: { children: ReactNode }) {
     reset();
   }, [reset]);
 
+  const cancel = useCallback(() => {
+    setFailure(null);
+    reset();
+  }, [reset]);
+
   useEffect(() => {
     if (!snapshot.active || snapshot.resource || failure || !foreground || status !== "online") return;
     const generation = snapshot.generation;
-    const start = () => {
-      if (starting.current === generation || !lease.isCurrent(generation) || !lease.getSnapshot().active) return;
-      starting.current = generation;
-      const via = playback === "relay" || path !== "direct" ? "relay" : "direct";
-      void link.call("screen.start", {}, 20_000).then(async ({ port, token, displays }) => {
-        if (!lease.isCurrent(generation)) return;
-        setPreparingGeneration(generation);
-        const forward = await forwardPort(streams, port, { direct: playback !== "relay" });
-        const targetDisplay = displays.some((entry) => entry.index === desired.current.display) ? desired.current.display! : displays[0]?.index ?? 0;
-        const target = { active: true, display: targetDisplay, width: desired.current.width, maxFps: 120 };
-        // These are the initial target only. The immutable source object survives every later
-        // configuration, including the native receiver which starts before the page bridge.
-        const query = buildScreenViewerQuery({
-          token,
-          playback,
-          display: targetDisplay,
-          width: target.width,
-          mode: desired.current.mode,
-          via,
-          isDirectComputer: computer.kind === "direct",
-          pacing: pacing.current,
-          audio: audioRef.current,
-        });
-        const initialChrome = route.current?.chrome ?? "{}";
-        const viewer: Viewer = {
-          link, accountId, generation, forward, displays, playback, via, initialTarget: { display: targetDisplay, width: target.width },
-          source: { uri: `${forward.url}?${query.toString()}` },
-          bootstrap: `window.__linkshellChrome = ${initialChrome}; window.__linkshellSession = ${JSON.stringify(target)}; true;`,
-        };
-        if (lease.install(generation, viewer)) {
-          desired.current.display = targetDisplay;
-          setDisplay(targetDisplay);
-        }
-      }).catch((reason: unknown) => {
-        if (lease.isCurrent(generation)) setFailure(describeActionError(reason));
+    if (starting.current === generation || !lease.isCurrent(generation) || !lease.getSnapshot().active) return;
+    starting.current = generation;
+    const via = playback === "relay" || path !== "direct" ? "relay" : "direct";
+    // Start immediately without stalling on the unrelated bulk DataChannel: screen.start is tiny JSON
+    // over the open RPC tunnel and native WebRTC opens its own direct media transport in parallel.
+    void link.call("screen.start", {}, 20_000).then(async ({ port, token, displays }) => {
+      if (!lease.isCurrent(generation)) return;
+      advanceStage(generation, "receiving");
+      const forward = await forwardPort(streams, port, { direct: playback !== "relay" });
+      if (!lease.isCurrent(generation)) { forward.stop(); return; }
+      const targetDisplay = displays.some((entry) => entry.index === desired.current.display) ? desired.current.display! : displays[0]?.index ?? 0;
+      const target = { active: true, display: targetDisplay, width: desired.current.width, maxFps: 120 };
+      // These are the initial target only. The immutable source object survives every later
+      // configuration, including the native receiver which starts before the page bridge.
+      const query = buildScreenViewerQuery({
+        token,
+        playback,
+        display: targetDisplay,
+        width: target.width,
+        mode: desired.current.mode,
+        via,
+        isDirectComputer: computer.kind === "direct",
+        pacing: pacing.current,
+        audio: audioRef.current,
       });
-    };
-    // Waiting briefly is useful only before the first forward exists. A later bulk-path upgrade
-    // must not replace a healthy media peer or its authenticated signaling socket.
-    if (path === "connecting") {
-      const timer = setTimeout(start, 3000);
-      return () => clearTimeout(timer);
-    }
-    start();
-  }, [snapshot.active, snapshot.resource, snapshot.generation, failure, foreground, status, path, playback, link, streams, computer.kind, accountId, lease]);
+      const initialChrome = route.current?.chrome ?? "{}";
+      const viewer: Viewer = {
+        link, accountId, generation, forward, displays, playback, via, initialTarget: { display: targetDisplay, width: target.width },
+        source: { uri: `${forward.url}?${query.toString()}` },
+        bootstrap: `window.__linkshellChrome = ${initialChrome}; window.__linkshellSession = ${JSON.stringify(target)}; true;`,
+      };
+      if (lease.install(generation, viewer)) {
+        desired.current.display = targetDisplay;
+        setDisplay(targetDisplay);
+      }
+    }).catch((reason: unknown) => {
+      if (lease.isCurrent(generation)) setFailure(describeActionError(reason));
+    });
+  }, [snapshot.active, snapshot.resource, snapshot.generation, failure, foreground, status, path, playback, link, streams, computer.kind, accountId, lease, advanceStage]);
 
   const viewer = snapshot.resource?.link === link && snapshot.resource.accountId === accountId ? snapshot.resource : null;
   const active = snapshot.active && foreground && status === "online";
@@ -396,23 +420,31 @@ export function ScreenSessionProvider({ children }: { children: ReactNode }) {
         // A new viewer the same way the picture came (playback is kept): only the answer changes.
         reset();
       }
+    } else if (message.type === "pictureReady") {
+      advanceStage(current.generation, "live");
+    } else if (message.type === "screenLoading") {
+      if (message.phase === "ready" || message.phase === "blocked" || message.phase === "error") {
+        advanceStage(current.generation, "live");
+      } else if (message.phase === "receiving") {
+        advanceStage(current.generation, "receiving");
+      }
     } else if (message.type === "mode" || message.type === "ready") {
       if (message.type === "mode" && (message.mode === "view" || message.mode === "trackpad" || message.mode === "touch")) {
         setMode(message.mode);
         saveScreenMode(message.mode);
       }
       if (message.type === "ready") {
-        setReadyGeneration(current.generation);
+        // Older hosts without nativeLoading support render their own loading screen inside WebView;
+        // newer hosts hand loading ownership to RN until pictureReady / native onState("ready").
+        advanceStage(current.generation, message.nativeLoading ? "receiving" : "live");
         sendChrome();
         sendSession(lease.getSnapshot().active && AppState.currentState === "active");
       }
     }
     if (owner.current && lease.getSnapshot().active && AppState.currentState === "active") route.current?.onMessage(message, current.generation);
-  }, [lease, pauseWatchdog, unavailable, enableLegacy, reset, retry, sendChrome, sendSession]);
+  }, [lease, pauseWatchdog, unavailable, enableLegacy, reset, retry, sendChrome, sendSession, advanceStage]);
 
-  const onLoading = useCallback((current: Viewer) => {
-    if (lease.getSnapshot().resource === current) setReadyGeneration(null);
-  }, [lease]);
+  const onLoading = useCallback((_current: Viewer) => {}, []);
 
   const onLoaded = useCallback((current: Viewer) => {
     if (lease.getSnapshot().resource !== current) return;
@@ -423,39 +455,49 @@ export function ScreenSessionProvider({ children }: { children: ReactNode }) {
     sendSession(lease.getSnapshot().active && AppState.currentState === "active");
   }, [lease, sendChrome, sendSession]);
 
-  const onNativeState = useCallback((state: ScreenState) => {
+  const onNativeState = useCallback((current: Viewer, state: ScreenState) => {
+    if (lease.getSnapshot().resource !== current) return;
     if (typeof state.audioAvailable === "boolean") {
       setNativeAudioAvailable(state.audioAvailable);
     }
-  }, []);
+    if (state.state === "receiving") {
+      advanceStage(current.generation, "receiving");
+    } else if (state.state === "ready") {
+      advanceStage(current.generation, "live");
+    }
+  }, [lease, advanceStage]);
 
   const viewport = presentation?.viewport;
   const clipTop = Math.min(viewport?.height ?? 0, Math.max(0, presentation?.clipInsets.top ?? 0));
   const clipLeft = Math.min(viewport?.width ?? 0, Math.max(0, presentation?.clipInsets.left ?? 0));
   const clipRight = Math.min((viewport?.width ?? 0) - clipLeft, Math.max(0, presentation?.clipInsets.right ?? 0));
   const visible = active && viewport !== null && viewport !== undefined && !failure;
-  const preparing = preparingGeneration === snapshot.generation;
+  const connectStage: ScreenConnectStage = stageState.generation === snapshot.generation ? stageState.stage : "connecting";
+  const pictureReady = viewer !== null && connectStage === "live";
+  const preparing = connectStage !== "connecting";
+  const showOverlay = visible && (viewer !== null || status === "online" || status === "connecting");
+  const showLoading = showOverlay && !pictureReady;
   const audioAvailable = isScreenAudioAvailable(playback, nativeAudioAvailable);
   const value = useMemo<ScreenSessionContextValue>(
-    () => ({ viewer, failure, preparing, generation: snapshot.generation, display, mode, playback, audio, audioAvailable, attach, detach, present, inject, focus, selectDisplay, setAudio, toggleAudio, retry }),
-    [viewer, failure, preparing, snapshot.generation, display, mode, playback, audio, audioAvailable, attach, detach, present, inject, focus, selectDisplay, setAudio, toggleAudio, retry],
+    () => ({ viewer, failure, preparing, connectStage, pictureReady, generation: snapshot.generation, display, mode, playback, audio, audioAvailable, attach, detach, present, inject, focus, selectDisplay, setAudio, toggleAudio, retry, cancel }),
+    [viewer, failure, preparing, connectStage, pictureReady, snapshot.generation, display, mode, playback, audio, audioAvailable, attach, detach, present, inject, focus, selectDisplay, setAudio, toggleAudio, retry, cancel],
   );
 
   return <ScreenSessionContext value={value}>
     <View ref={root} collapsable={false} onLayout={measureRoot} style={{ flex: 1 }}>
       {children}
-      {/* Duo can place navigation controls at either side. Leave those regions visible and touchable. */}
-      {viewer ? <View
-        pointerEvents={visible ? "auto" : "none"}
-        accessibilityElementsHidden={!visible}
-        importantForAccessibility={visible ? "auto" : "no-hide-descendants"}
-        style={{ position: "absolute", left: (viewport?.x ?? 0) - origin.x + clipLeft, top: (viewport?.y ?? 0) - origin.y + clipTop, width: Math.max(1, (viewport?.width ?? 1) - clipLeft - clipRight), height: Math.max(1, (viewport?.height ?? 1) - clipTop), overflow: "hidden", opacity: visible ? 1 : 0 }}
+      {/* Duo can place navigation controls at either side; keep the navigation header above clipTop uncovered. */}
+      {viewer || showLoading ? <View
+        pointerEvents={showOverlay ? "auto" : "none"}
+        accessibilityElementsHidden={!showOverlay}
+        importantForAccessibility={showOverlay ? "auto" : "no-hide-descendants"}
+        style={{ position: "absolute", left: (viewport?.x ?? 0) - origin.x + clipLeft, top: (viewport?.y ?? 0) - origin.y + clipTop, width: Math.max(1, (viewport?.width ?? 1) - clipLeft - clipRight), height: Math.max(1, (viewport?.height ?? 1) - clipTop), overflow: "hidden", opacity: showOverlay ? 1 : 0 }}
       >
         {/* Keep the receiver's full frame so clipping never changes video or pointer coordinates. */}
         <Animated.View style={[{ position: "absolute", left: -clipLeft, top: -clipTop, width: viewport?.width ?? 1, height: viewport?.height ?? 1, backgroundColor: "#000000" }, presentation?.keyboardLift]}>
-          <PersistentScreenSurface key={viewer.generation} viewer={viewer} active={active} audio={audio} web={web} onMessage={onMessage} onNativeState={onNativeState} onUnavailable={unavailable} onLoaded={onLoaded} onLoading={onLoading} />
-          {visible && readyGeneration !== viewer.generation ? <View style={{ position: "absolute", inset: 0, backgroundColor: "#08090e" }}>
-            <ScreenConnectionLoading key={viewer.generation} preparing onRetry={retry} top={clipTop} bottom={0} />
+          {viewer ? <PersistentScreenSurface key={viewer.generation} viewer={viewer} active={active} audio={audio} web={web} onMessage={onMessage} onNativeState={(state) => onNativeState(viewer, state)} onUnavailable={unavailable} onLoaded={onLoaded} onLoading={onLoading} /> : null}
+          {showLoading ? <View style={{ position: "absolute", inset: 0, backgroundColor: "#08090e" }}>
+            <ScreenConnectionLoading key={snapshot.generation} stage={connectStage === "connecting" ? "connecting" : "receiving"} onRetry={retry} onCancel={presentation?.onCancel} top={clipTop} bottom={presentation?.bottomInset ?? 0} />
           </View> : null}
         </Animated.View>
       </View> : null}

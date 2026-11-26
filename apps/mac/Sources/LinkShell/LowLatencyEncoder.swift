@@ -60,7 +60,7 @@ final class LowLatencyH264Encoder: NSObject, RTCVideoEncoder {
   /// Old callbacks must not break a replacement session or publish its stale pictures.
   private let state = Locked((generation: 0, failure: String?.none, pending: 0, keyWanted: false))
   /// What has been made and is reckoned not yet sent, and what was skipped for it since last said.
-  private let queue = Locked((model: SendQueue(), skipped: 0, longest: 0.0, since: 0.0))
+  private let queue = Locked((model: SendQueue(), skipped: 0, consecutiveSkips: 0, longest: 0.0, since: 0.0))
   private let keyBudget: Bool
   private let queueAdmission: Bool
   private let clock: () -> Double
@@ -114,7 +114,7 @@ final class LowLatencyH264Encoder: NSObject, RTCVideoEncoder {
       compressor = made
       let rate = Int(settings.startBitrate) * 1000
       if keyBudget { made.keyPlan = .init(budget: Tuning.keyFrameBudget(bitrate: rate), finest: nil) }
-      queue.withLock { $0.model.reset(); $0.model.set(encoderRate: Double(rate), now: clock()) }
+      queue.withLock { $0.model.reset(); $0.consecutiveSkips = 0; $0.model.set(encoderRate: Double(rate), now: clock()) }
       return Code.ok
     } catch {
       return fallBack("\(error)")
@@ -169,19 +169,23 @@ final class LowLatencyH264Encoder: NSObject, RTCVideoEncoder {
     let rotation = frame.rotation
     let packetization = self.packetization
     let hevc = self.hevc
-    // A picture is not encoded behind a queue of earlier ones (`SendQueue`): it would wait too.
-    // A key frame asked for meanwhile is remembered, and made when there is room for it.
+    // A picture is not encoded behind a large backlog (`SendQueue`), bounded by
+    // `sendQueueMaxConsecutiveSkips` so a single burst never starves GCC or freezes motion.
     if queueAdmission {
       let now = clock()
       let report: String?
       let skip: Bool
       (skip, report) = queue.withLock { queue in
         let wait = queue.model.wait(now: now)
-        let skip = wait * 1000 > Tuning.sendQueueAdmitMs
+        let overBudget = wait * 1000 > Tuning.sendQueueAdmitMs
+        let skip = overBudget && queue.consecutiveSkips < Tuning.sendQueueMaxConsecutiveSkips
         if skip {
           if queue.skipped == 0 { queue.since = now }
           queue.skipped += 1
+          queue.consecutiveSkips += 1
           queue.longest = max(queue.longest, wait)
+        } else {
+          queue.consecutiveSkips = 0
         }
         // Said a few seconds after the first of them, with what came since.
         guard queue.skipped > 0, now - queue.since >= 5 else { return (skip, nil) }

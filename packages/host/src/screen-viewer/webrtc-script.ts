@@ -50,7 +50,21 @@ function signal(message) {
     // The answer is the browser's own, as it made it: the sender's playout-delay header has to survive in it,
     // unless the viewer chose even pacing, which is not agreeing to that header at all.
     mine.described = mine.pc.setRemoteDescription({ type: "offer", sdp: pacing === "smooth" ? withoutPlayoutDelay(message.sdp) : message.sdp })
-      .then(() => mine.pc.createAnswer())
+      .then(() => {
+        // Strip FlexFEC-03 on receiver transceivers so repair packets do not steal video bitrate on clean/LAN links.
+        if (typeof mine.pc.getTransceivers === "function" && typeof RTCRtpReceiver !== "undefined" && typeof RTCRtpReceiver.getCapabilities === "function") {
+          const caps = RTCRtpReceiver.getCapabilities("video");
+          const preferred = caps && Array.isArray(caps.codecs) ? caps.codecs.filter((codec) => codec.mimeType.toLowerCase() !== "video/flexfec-03") : [];
+          if (preferred.length > 0) {
+            for (const transceiver of mine.pc.getTransceivers()) {
+              if (transceiver.receiver && transceiver.receiver.track && transceiver.receiver.track.kind === "video" && typeof transceiver.setCodecPreferences === "function") {
+                try { transceiver.setCodecPreferences(preferred); } catch {}
+              }
+            }
+          }
+        }
+        return mine.pc.createAnswer();
+      })
       .then((answer) => mine.pc.setLocalDescription(answer))
       .then(() => { if (rtc === mine) send({ t: "rtc.answer", sdp: mine.pc.localDescription.sdp }); });
     mine.described.catch((error) => { if (rtc === mine) giveUp("the offer could not be answered: " + error.message); });

@@ -2,7 +2,7 @@ import { requireNativeView, requireOptionalNativeModule } from "expo";
 import { Platform, type NativeSyntheticEvent, type ViewProps } from "react-native";
 
 export interface ScreenState {
-  state: "connecting" | "ready" | "failed";
+  state: "connecting" | "receiving" | "ready" | "failed";
   message?: string;
   maxFps?: number;
   width?: number;

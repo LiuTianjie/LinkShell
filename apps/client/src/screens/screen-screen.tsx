@@ -21,8 +21,25 @@ import { Icon } from "@/components/icon";
 import { useConnection, useConnectionStatus } from "@/lib/client";
 import { SCREEN_IDLE, useScreenSession, type ScreenPageMessage, type ScreenPresentation, type ScreenViewport } from "@/lib/screen-session";
 import { haptics } from "@/lib/haptics";
-import { loadScreenShortcuts, saveScreenShortcuts, screenShortcuts } from "@/lib/settings";
+import { type ScreenMode, loadScreenShortcuts, saveScreenShortcuts, screenShortcuts } from "@/lib/settings";
 import { type } from "@/theme/type";
+
+/**
+ * Guarantees the native header bar (including iOS 26 Liquid Glass back pill) is never covered
+ * by the persistent screen overlay even when `useHeaderHeight()` momentarily reports 0.
+ */
+export function resolveScreenHeaderInset(params: { fullscreen: boolean; headerHeight: number; safeTop: number }): number {
+  if (params.fullscreen) return 0;
+  return Math.max(params.headerHeight, params.safeTop + 56);
+}
+
+/**
+ * Keep swipe-back enabled while connecting or before the live screen is shown, even when the
+ * user's persisted control mode is trackpad or direct touch.
+ */
+export function screenGestureEnabled(params: { fullscreen: boolean; pictureReady: boolean; mode: ScreenMode }): boolean {
+  return !params.fullscreen && (!params.pictureReady || params.mode === "view");
+}
 
 /**
  * The computer's screen, live: the host's viewer page and H.264 stream,
@@ -38,7 +55,8 @@ export function ScreenScreen() {
   const {
     viewer,
     failure,
-    preparing,
+    connectStage,
+    pictureReady,
     generation,
     display,
     mode,
@@ -53,6 +71,7 @@ export function ScreenScreen() {
     selectDisplay,
     toggleAudio,
     retry,
+    cancel,
   } = useScreenSession();
   const owner = useRef({}).current;
   const focusGeneration = useRef(0);
@@ -80,11 +99,17 @@ export function ScreenScreen() {
   const [fullscreen, setFullscreen] = useState(false);
   const fullscreenRef = useRef(fullscreen);
   fullscreenRef.current = fullscreen;
+  const topInset = resolveScreenHeaderInset({ fullscreen, headerHeight, safeTop: insets.top });
   const clipInsets = useMemo(() => ({
-    top: fullscreen ? 0 : Math.max(insets.top, headerHeight),
+    top: topInset,
     left: fullscreen ? 0 : insets.left,
     right: fullscreen ? 0 : insets.right,
-  }), [fullscreen, headerHeight, insets.top, insets.left, insets.right]);
+  }), [fullscreen, topInset, insets.left, insets.right]);
+  const exitScreen = useCallback(() => {
+    cancel();
+    if (router.canGoBack()) router.back();
+    else router.replace("/");
+  }, [cancel]);
   const window = useWindowDimensions();
   // Measure the picture's frame independently of the requested rotation (including folding and resizing).
   const landscape = window.width > window.height;
@@ -141,6 +166,8 @@ export function ScreenScreen() {
         // This app lets the page play video in place: the page may take the picture as a video track.
         video: !relayOnly,
         nativePicture: playback === "native",
+        // RN owns the unified initial loading overlay so WebView never flashes a second loading UI.
+        nativeLoading: true,
         // This app starts a new viewer for a new pacing choice (`pacing` in the address).
         canPace: true,
         relayFallback: !relayOnly,
@@ -151,9 +178,9 @@ export function ScreenScreen() {
         shortcuts,
         divisions: layout?.divisions ?? [],
         // The keyboard covers the bottom edge while it is up.
-        insets: { top: fullscreen ? insets.top : Math.max(insets.top, headerHeight), right: insets.right, bottom: keyboardOpen ? 0 : insets.bottom, left: insets.left },
+        insets: { top: fullscreen ? insets.top : topInset, right: insets.right, bottom: keyboardOpen ? 0 : insets.bottom, left: insets.left },
       }),
-    [fullscreen, landscape, window.fontScale, headerHeight, keyboardOpen, shortcuts, layout?.divisions, insets.top, insets.right, insets.bottom, insets.left, relayOnly, playback, mode],
+    [fullscreen, landscape, window.fontScale, topInset, keyboardOpen, shortcuts, layout?.divisions, insets.top, insets.right, insets.bottom, insets.left, relayOnly, playback, mode],
   );
   const onMessage = useCallback(
     (message: ScreenPageMessage, generation: number) => {
@@ -188,7 +215,7 @@ export function ScreenScreen() {
   const { height: keyboardHeight } = useReanimatedKeyboardAnimation();
   const lift = useAnimatedStyle(() => ({ paddingBottom: Math.max(-keyboardHeight.value, 0) }));
   const routePresentation = useRef<ScreenPresentation>(null!);
-  routePresentation.current = { viewport, clipInsets, chrome, keyboardLift: lift, onMessage };
+  routePresentation.current = { viewport, clipInsets, bottomInset: insets.bottom, chrome, keyboardLift: lift, onMessage, onCancel: exitScreen };
   useLayoutEffect(() => {
     if (!focused) return;
     const resume = () => {
@@ -214,12 +241,12 @@ export function ScreenScreen() {
     const remove = navigation.addListener("beforeRemove", leave);
     const start = navigation.addListener("transitionStart", ({ data }) => { if (data.closing) leave(); });
     const end = navigation.addListener("transitionEnd", ({ data }) => { if (!data.closing) resume(); });
-    const cancel = navigation.addListener("gestureCancel", resume);
+    const cancelGesture = navigation.addListener("gestureCancel", resume);
     return () => {
       remove();
       start();
       end();
-      cancel();
+      cancelGesture();
       leave();
       void clearOrientationRequest().catch(() => {});
     };
@@ -227,8 +254,8 @@ export function ScreenScreen() {
   useLayoutEffect(() => {
     if (!focused || !routeActive.current) return;
     measureAnchor();
-    publishPresentation(owner, { viewport, clipInsets, chrome, keyboardLift: lift, onMessage });
-  }, [focused, measureAnchor, publishPresentation, owner, viewport, clipInsets, chrome, lift, onMessage]);
+    publishPresentation(owner, { viewport, clipInsets, bottomInset: insets.bottom, chrome, keyboardLift: lift, onMessage, onCancel: exitScreen });
+  }, [focused, measureAnchor, publishPresentation, owner, viewport, clipInsets, insets.bottom, chrome, lift, onMessage, exitScreen]);
   const current = viewer?.displays.find((entry) => entry.index === display);
   const streamVia = viewer?.via;
 
@@ -252,15 +279,15 @@ export function ScreenScreen() {
             </View>
           ),
           headerTintColor: "#ffffff",
-          headerStyle: { backgroundColor: "#000000" },
+          ...(Platform.OS === "ios" ? {} : { headerStyle: { backgroundColor: "#000000" } }),
           headerShadowVisible: false,
           // Keep the live surface in one coordinate space while the system controls come and go.
           headerTransparent: true,
           headerShown: !fullscreen,
           navigationBarHidden: fullscreen,
           autoHideHomeIndicator: fullscreen,
-          // A swipe from the edge belongs to the computer's pointer once it is being moved.
-          gestureEnabled: !fullscreen && mode === "view",
+          // Keep swipe-back enabled until the live screen is showing in an active control mode.
+          gestureEnabled: screenGestureEnabled({ fullscreen, pictureReady, mode }),
         }}
       />
       {/* The header's buttons keep the header: they go with it. */}
@@ -323,8 +350,8 @@ export function ScreenScreen() {
           </Text>
           {linkStatus === "locked" ? <Button title="输入访问密码" variant="tonal" size="small" onPress={() => router.push("/unlock")} /> : null}
         </ScrollView>
-      ) : !viewer ? (
-        <ScreenConnectionLoading key={generation} preparing={preparing} onRetry={retry} top={Math.max(insets.top, fullscreen ? 0 : headerHeight)} bottom={insets.bottom} />
+      ) : !viewer && !viewport ? (
+        <ScreenConnectionLoading key={generation} stage={connectStage === "connecting" ? "connecting" : "receiving"} onRetry={retry} onCancel={exitScreen} top={topInset} bottom={insets.bottom} />
       ) : null}
     </View>
   );

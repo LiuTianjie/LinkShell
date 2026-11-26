@@ -110,7 +110,7 @@ private final class ScreenMetalRenderer {
   private let worker = ScreenRenderThread()
   private let lifecycle = ScreenShared((generation: UInt64(0), active: true))
   private let mailbox = ScreenMailbox<ScreenPicture>()
-  private let inFlight = DispatchSemaphore(value: 2)
+  private let inFlight = DispatchSemaphore(value: 1)
   private let timingLock = NSLock()
   private var gpuSeconds = 0.0005
   private var framesSinceCacheFlush = 0
@@ -147,7 +147,9 @@ private final class ScreenMetalRenderer {
     surface.device = device
     surface.pixelFormat = .bgra8Unorm
     surface.framebufferOnly = true
-    surface.maximumDrawableCount = 3
+    // Double-buffered opaque swapchain enables iOS Direct-to-Display scanout without +1 frame GPU queueing.
+    surface.maximumDrawableCount = 2
+    surface.isOpaque = true
     surface.presentsWithTransaction = false
     surface.colorspace = CGColorSpace(name: CGColorSpace.sRGB)
     queue = device.makeCommandQueue()
@@ -276,7 +278,9 @@ private final class ScreenMetalRenderer {
       return
     }
     timingLock.lock(); let cost = gpuSeconds; timingLock.unlock()
-    guard ScreenTiming.canSubmit(now: CACurrentMediaTime(), deadline: deadline, gpuSeconds: cost),
+    // CAMetalDisplayLink's targetTimestamp is the commit target while targetPresentationTimestamp is
+    // display scanout; a 0.3 ms fullscreen blit must check against expected presentation, not drop frames.
+    guard ScreenTiming.canSubmit(now: CACurrentMediaTime(), deadline: expectedPresentation ?? deadline, gpuSeconds: cost),
           inFlight.wait(timeout: .now()) == .success else { metrics.missed(); return }
     var committed = false
     defer { if !committed { inFlight.signal() } }
@@ -287,11 +291,6 @@ private final class ScreenMetalRenderer {
     dirty = dirty || presentedRevision != view.revision
     guard dirty, let picture = current, let cache, let queue,
           let command = queue.makeCommandBuffer(), let drawable = supplied ?? surface.nextDrawable() else { return }
-    framesSinceCacheFlush += 1
-    if framesSinceCacheFlush >= 120 {
-      framesSinceCacheFlush = 0
-      CVMetalTextureCacheFlush(cache, 0)
-    }
     let rotationStep: UInt32
     switch picture.frame.rotation {
     case ._90: rotationStep = 1
@@ -414,6 +413,12 @@ private final class ScreenMetalRenderer {
     }
     command.present(drawable)
     command.commit()
+    // Flush expired CVMetalTexture wrappers after committing so active frame bindings are never evicted early.
+    framesSinceCacheFlush += 1
+    if framesSinceCacheFlush >= 120 {
+      framesSinceCacheFlush = 0
+      CVMetalTextureCacheFlush(cache, 0)
+    }
     metrics.committed()
     committed = true
     submittedTimestamp = picture.timestamp

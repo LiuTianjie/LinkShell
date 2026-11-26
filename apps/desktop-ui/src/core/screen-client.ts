@@ -78,7 +78,7 @@ const DEFAULT_SCREEN_PREFERENCES: UnifiedScreenPreferences = {
   width: "auto",
   maxFps: "60",
   codec: "auto",
-  pacing: "smooth",
+  pacing: "immediate",
   control: true,
   mode: "view",
   match: true,
@@ -105,7 +105,7 @@ function sanitizeCodecChoice(raw: unknown): ScreenCodecChoice {
 }
 
 function sanitizePacingChoice(raw: unknown): ScreenPacingChoice {
-  return raw === "immediate" ? "immediate" : "smooth";
+  return raw === "smooth" ? "smooth" : "immediate";
 }
 
 function sanitizeModeChoice(raw: unknown): ScreenModeChoice {
@@ -834,6 +834,8 @@ export interface ReceiverOptions {
   hevc: boolean;
   /** `viewerScreenMatch()`, when the computer should show its desktop at this screen's resolution. */
   match?: string;
+  /** "immediate" (default, 0 ms jitter buffer) or "smooth" (adaptive jitter buffer, +50 ms on Wi-Fi). */
+  pacing?: ScreenPacingChoice;
   relayed: boolean;
   videoTrack?: boolean;
   video: HTMLVideoElement;
@@ -879,6 +881,13 @@ function extractSps(unit: Uint8Array): Uint8Array | undefined {
     }
   }
   return undefined;
+}
+
+function stripPlayoutDelayExt(sdp: string): string {
+  return sdp
+    .split("\r\n")
+    .filter((line) => !line.includes("http://www.webrtc.org/experiments/rtp-hdrext/playout-delay"))
+    .join("\r\n");
 }
 
 const toHex = (value: number) => value.toString(16).padStart(2, "0");
@@ -1284,8 +1293,9 @@ export class ScreenReceiver {
     if (rtc.t === "offer" && typeof rtc.sdp === "string" && rtc.sdp.length < 128_000) {
       this.tried = true;
       this.patience = this.later(PATIENCE_MS, () => this.patient(pc));
+      const offerSdp = this.options.pacing === "smooth" ? stripPlayoutDelayExt(rtc.sdp) : rtc.sdp;
       this.described = pc
-        .setRemoteDescription({ type: "offer", sdp: rtc.sdp })
+        .setRemoteDescription({ type: "offer", sdp: offerSdp })
         .then(() => {
           this.preferCodecs(pc);
           return pc.createAnswer();
@@ -1369,19 +1379,21 @@ export class ScreenReceiver {
       }
     };
     pc.ontrack = ({ receiver, track, streams }) => {
-      const tuning = receiver as RTCRtpReceiver & {
-        jitterBufferTarget?: number;
-        playoutDelayHint?: number;
-      };
-      try {
-        if ("jitterBufferTarget" in tuning) tuning.jitterBufferTarget = 0;
-      } catch {
-        // Older engines.
-      }
-      try {
-        if ("playoutDelayHint" in tuning) tuning.playoutDelayHint = 0;
-      } catch {
-        // Older engines.
+      if (this.options.pacing !== "smooth") {
+        const tuning = receiver as RTCRtpReceiver & {
+          jitterBufferTarget?: number;
+          playoutDelayHint?: number;
+        };
+        try {
+          if ("jitterBufferTarget" in tuning) tuning.jitterBufferTarget = 0;
+        } catch {
+          // Older engines.
+        }
+        try {
+          if ("playoutDelayHint" in tuning) tuning.playoutDelayHint = 0;
+        } catch {
+          // Older engines.
+        }
       }
       const video = this.options.video;
       video.srcObject = streams[0] ?? new MediaStream([track]);
@@ -1761,11 +1773,15 @@ export class ScreenReceiver {
     if (!this.state.canInput) return;
     this.pendingMove = { x, y };
     this.movedAt = nowClock();
-    if (!this.moveFrame && typeof requestAnimationFrame === "function") {
-      this.moveFrame = requestAnimationFrame(() => {
-        this.moveFrame = 0;
-        this.flushMove(false);
-      });
+    // Leading-edge immediate send + per-frame coalescing cuts first-move latency by up to 16 ms.
+    if (!this.moveFrame) {
+      this.flushMove(false);
+      if (typeof requestAnimationFrame === "function") {
+        this.moveFrame = requestAnimationFrame(() => {
+          this.moveFrame = 0;
+          if (this.pendingMove) this.flushMove(false);
+        });
+      }
     }
   }
 

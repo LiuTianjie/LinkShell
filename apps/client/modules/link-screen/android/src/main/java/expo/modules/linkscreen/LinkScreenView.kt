@@ -54,6 +54,8 @@ class LinkScreenView(
   private var supportsConfiguration: Boolean = false
   private var supportsPause: Boolean = false
   private var controlsReady: Boolean = false
+  private val pendingMessages = ArrayList<JSONObject>()
+  private var latestStats: JSONObject? = null
   private var disposed: Boolean = false
 
   private var lastPictureWidth: Int = 0
@@ -98,12 +100,16 @@ class LinkScreenView(
     url = value
     expectedPort = parseExpectedLoopbackPort(value)
     controlsReady = false
+    pendingMessages.clear()
+    latestStats = null
     pictureRectCss = null
     audioAvailable = false
     reloadedForBridge = false
     attachStartMs = SystemClock.elapsedRealtime()
     requestLayout()
     attachControls()
+    // Start native WebRTC signaling & ICE immediately in parallel with WebView HTML/JS load.
+    connect()
   }
 
   fun setMaxFps(value: Int) {
@@ -296,7 +302,7 @@ class LinkScreenView(
   }
 
   private fun connect() {
-    if (disposed || !active || !applicationActive || !isAttachedToWindow || !controlsReady || connection != null || url.isEmpty()) {
+    if (disposed || !active || !applicationActive || !isAttachedToWindow || connection != null || url.isEmpty()) {
       return
     }
     val sharedEgl = eglBase ?: EglBase.create().also { eglBase = it }
@@ -364,6 +370,13 @@ class LinkScreenView(
       FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT),
     )
 
+    conn.onReceiving = {
+      mainHandler.post {
+        if (disposed || connection !== conn || !active || reportedPictureWidth > 0) return@post
+        onState(mapOf("state" to "receiving", "maxFps" to receiverRate()))
+      }
+    }
+
     conn.onAudioAvailable = { available ->
       mainHandler.post {
         if (disposed || connection !== conn || audioAvailable == available) return@post
@@ -400,21 +413,30 @@ class LinkScreenView(
           supportsConfiguration = sess.optBoolean("configure", false)
           supportsPause = supportsConfiguration && sess.optBoolean("pause", false)
         }
-        controlsCall("message", message)
+        if (controlsReady) {
+          controlsCall("message", message)
+        } else if (pendingMessages.size < 128) {
+          pendingMessages.add(message)
+        }
       }
     }
 
     conn.onStats = { stats ->
       mainHandler.post {
         if (disposed || connection !== conn) return@post
-        controlsCall("stats", stats)
+        latestStats = stats
+        if (controlsReady) {
+          controlsCall("stats", stats)
+        }
       }
     }
 
     onState(mapOf("state" to "connecting", "maxFps" to rate))
     conn.start()
-    controlsCall("connecting", JSONObject())
-    controlsSession(JSONObject().put("active", active).put("maxFps", rate))
+    if (controlsReady) {
+      controlsCall("connecting", JSONObject())
+      controlsSession(JSONObject().put("active", active).put("maxFps", rate))
+    }
   }
 
   private fun maybeNotifyPicture(conn: ScreenConnectionAndroid) {
@@ -423,7 +445,9 @@ class LinkScreenView(
     if (!changed) return
     reportedPictureWidth = lastPictureWidth
     reportedPictureHeight = lastPictureHeight
-    controlsCall("picture", JSONObject().put("width", reportedPictureWidth).put("height", reportedPictureHeight))
+    if (controlsReady) {
+      controlsCall("picture", JSONObject().put("width", reportedPictureWidth).put("height", reportedPictureHeight))
+    }
     if (active) {
       onState(
         mapOf(
@@ -448,6 +472,8 @@ class LinkScreenView(
     lastPictureHeight = 0
     reportedPictureWidth = 0
     reportedPictureHeight = 0
+    pendingMessages.clear()
+    latestStats = null
     rendererContainer.removeAllViews()
     runCatching { renderer?.clearImage() }
     runCatching { renderer?.release() }
@@ -460,7 +486,21 @@ class LinkScreenView(
         if (ScreenSessionStateAndroid.jsonInt(message, "version") != 1) return
         controlsReady = true
         cancelAttachPolling()
-        connect()
+        if (connection == null) {
+          connect()
+        } else {
+          if (reportedPictureWidth <= 0) {
+            controlsCall("connecting", JSONObject())
+          }
+          controlsSession(JSONObject().put("active", active).put("maxFps", receiverRate()))
+          val buffered = ArrayList(pendingMessages)
+          pendingMessages.clear()
+          for (item in buffered) controlsCall("message", item)
+          if (reportedPictureWidth > 0 && reportedPictureHeight > 0) {
+            controlsCall("picture", JSONObject().put("width", reportedPictureWidth).put("height", reportedPictureHeight))
+          }
+          latestStats?.let { controlsCall("stats", it) }
+        }
       }
       "frame" -> {
         val rect = message.optJSONObject("rect") ?: return

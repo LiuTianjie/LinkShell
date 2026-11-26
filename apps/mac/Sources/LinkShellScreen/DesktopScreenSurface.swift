@@ -776,6 +776,7 @@ private final class DesktopScreenMetalRenderer {
   private var failureReported = false
   private var fillsBounds = false
   private var frozen = false
+  private var framesSinceCacheFlush = 0
   private let inFlight = DispatchSemaphore(value: 1)
   private var link: CVDisplayLink?
   private var queue: MTLCommandQueue?
@@ -788,7 +789,8 @@ private final class DesktopScreenMetalRenderer {
     layer.device = MTLCreateSystemDefaultDevice()
     layer.pixelFormat = .bgra8Unorm
     layer.framebufferOnly = true
-    layer.maximumDrawableCount = 3
+    // Double-buffered swapchain eliminates 1 frame of Metal presentation queueing latency.
+    layer.maximumDrawableCount = 2
     layer.presentsWithTransaction = false
     layer.colorspace = CGColorSpace(name: CGColorSpace.sRGB)
     layer.isOpaque = false
@@ -939,7 +941,13 @@ private final class DesktopScreenMetalRenderer {
       self?.presented(ticket: ticket, size: size, failed: buffer.status == .error)
     }
     command.present(drawable); command.commit(); committed = true
-    lock.lock(); drawn = mark; clearRequested = false; lock.unlock()
+    lock.lock()
+    drawn = mark; clearRequested = false
+    framesSinceCacheFlush += 1
+    let shouldFlush = framesSinceCacheFlush >= 120
+    if shouldFlush { framesSinceCacheFlush = 0 }
+    lock.unlock()
+    if shouldFlush { CVMetalTextureCacheFlush(cache, 0) }
   }
   /// Runs on Metal's completion thread; the main thread hears only about a new size or the first frame.
   private func presented(ticket: UInt64, size: CGSize, failed: Bool) {

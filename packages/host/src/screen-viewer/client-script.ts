@@ -147,7 +147,9 @@ const chrome = Object.assign({ fullscreen: false, landscape: false, canRotate: f
 // The same controls and gestures sit over the iOS Metal surface. Only small input and
 // layout messages cross WebKit's native bridge; video frames never enter this page.
 const nativePicture = chrome.nativePicture === true;
+const appManagedLoading = !!app && chrome.nativeLoading === true;
 document.documentElement.classList.toggle("native-picture", nativePicture);
+document.documentElement.classList.toggle("app-managed-loading", appManagedLoading);
 const nativePost = (message) => window.webkit?.messageHandlers?.linkshellScreen?.postMessage(message);
 let nativeStats = null;
 // Whether this viewer may move the computer's pointer: asked for with the first controlling mode.
@@ -161,15 +163,27 @@ const mods = new Set();
 
 // ---- The picture ----------------------------------------------------------
 
-let sessionError = "", sessionPhase = "", hasPicture = false;
+let sessionError = "", sessionPhase = "", hasPicture = false, pictureReported = false;
 const loading = createScreenLoading(note, () => {
   if (app && chrome.canRetryScreen) tellApp({ type: "screenRetry" });
   else if (typeof window.__linkshellReload === "function") window.__linkshellReload({});
   else location.reload();
-}, (phase) => window.__linkshellScreenState?.(phase));
+}, (phase) => {
+  window.__linkshellScreenState?.(phase);
+  if (appManagedLoading && (phase === "receiving" || phase === "ready" || phase === "blocked" || phase === "error")) {
+    tellApp({ type: "screenLoading", phase });
+  }
+});
 addEventListener("pagehide", () => loading.dispose(), { once: true });
 const say = (text) => {
-  if (!text) hasPicture = true;
+  if (!text) {
+    hasPicture = true;
+    document.documentElement.classList.remove("app-managed-loading");
+    if (!pictureReported) {
+      pictureReported = true;
+      tellApp({ type: "pictureReady" });
+    }
+  }
   if (sessionError) loading.set("error", sessionError);
   else if (text) loading.set("error", text);
   else if (sessionPhase) loading.set(sessionPhase);

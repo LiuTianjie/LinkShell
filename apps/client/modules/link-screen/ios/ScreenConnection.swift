@@ -7,6 +7,7 @@ import WebRTC
 /// input use the peer connection; no second account, pairing or media-relay protocol is added.
 final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDelegate {
   var onMessage: (([String: Any]) -> Void)?
+  var onReceiving: (() -> Void)?
   var onFailure: ((String) -> Void)?
   var onStats: (([String: Any]) -> Void)?
   var onAudioAvailable: ((Bool) -> Void)?
@@ -328,7 +329,10 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
           for candidate in self.candidates { peer.add(candidate) { _ in } }
           self.candidates.removeAll()
           self.attachTrack(peer)
-          if self.smooth, let video = peer.transceivers.first(where: { $0.mediaType == .video }) { self.declinePlayoutDelay(video) }
+          if let video = peer.transceivers.first(where: { $0.mediaType == .video }) {
+            self.preferCodecs(video)
+            if self.smooth { self.declinePlayoutDelay(video) }
+          }
           peer.answer(for: RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil)) { [weak self, weak peer] answer, error in
             guard let self, let peer else { return }
             self.queue.async {
@@ -355,6 +359,26 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
     case "off": fail("当前网络无法建立视频直连")
     default: break
     }
+  }
+
+  /// Prefer hardware HEVC/H.264 and strip FlexFEC-03 so repair packets never steal video bitrate even against older hosts.
+  private func preferCodecs(_ transceiver: RTCRtpTransceiver) {
+    guard let factory else { return }
+    let available = factory.rtpReceiverCapabilities(forMediaType: kRTCMediaTypeVideo).codecs.filter {
+      $0.name.uppercased() != "FLEXFEC-03"
+    }
+    let preferHEVC = HEVCDecoder.available
+    func rank(_ codec: RTCRtpCodecCapability) -> Int {
+      switch codec.name.uppercased() {
+      case "H265": return preferHEVC ? 0 : 2
+      case "H264": return preferHEVC ? 1 : 0
+      case "RTX", "RED", "ULPFEC": return 9
+      default: return 4
+      }
+    }
+    let ordered = available.enumerated().sorted { (rank($0.element), $0.offset) < (rank($1.element), $1.offset) }.map(\.element)
+    guard !ordered.isEmpty else { return }
+    try? transceiver.setCodecPreferences(ordered)
   }
 
   /// After the offer is set and before the answer is made. An older sender offers no such header: nothing to decline.
@@ -439,7 +463,10 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
     queue.async {
       guard !self.closed, self.peer === peerConnection else { return }
       switch newState {
-      case .connected, .completed: self.disconnectedAt = nil; self.attachTrack(peerConnection)
+      case .connected, .completed:
+        self.disconnectedAt = nil
+        self.attachTrack(peerConnection)
+        if !self.receivedPicture { self.onReceiving?() }
       case .disconnected: if self.disconnectedAt == nil { self.disconnectedAt = CACurrentMediaTime() }
       case .failed: self.diagnoseThenFail("当前网络无法建立视频直连", reason: "ICE failed")
       default: break

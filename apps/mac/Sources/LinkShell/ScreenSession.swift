@@ -813,11 +813,13 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
     guard now != said else { return }
     said = now
     link.emit(["t": "rtc.state", "v": viewer, "ice": Self.name(ice), "connection": Self.name(connection)])
-    // A path is up: no more restarting, a later stall is the disconnect timers' to handle.
+    // A path is up: no more restarting, and immediately push the latest captured frame so a static
+    // screen renders at once instead of waiting for the idle repeat interval.
     if connection == .connected {
       everConnected = true
       restartTimer?.cancel()
       restartTimer = nil
+      if !inputGate.suspended { capturer?.resendLatest() }
     }
     // A viewer that can't be heard can't let go of what it holds.
     if [.disconnected, .failed, .closed].contains(connection) { control?.releaseAll() }

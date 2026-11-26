@@ -10,9 +10,11 @@ const ACCENT = brandColors.accent[1];
 const SECONDARY = brandColors.secondaryLabel[1];
 const TERTIARY = brandColors.tertiaryLabel[1];
 
-export function ScreenConnectionLoading({ preparing, onRetry, top, bottom }: {
-  preparing: boolean;
+export function ScreenConnectionLoading({ preparing = false, stage, onRetry, onCancel, top, bottom }: {
+  preparing?: boolean;
+  stage?: "connecting" | "receiving";
   onRetry: () => void;
+  onCancel?: () => void;
   top: number;
   bottom: number;
 }) {
@@ -21,6 +23,7 @@ export function ScreenConnectionLoading({ preparing, onRetry, top, bottom }: {
     const timer = setTimeout(() => setSlow(true), 12000);
     return () => clearTimeout(timer);
   }, []);
+  const receiving = (stage ?? (preparing ? "receiving" : "connecting")) === "receiving";
   return (
     <ScrollView contentInsetAdjustmentBehavior="never" contentContainerStyle={{ flexGrow: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 28, paddingTop: top + 28, paddingBottom: bottom + 48 }}>
       <View style={{ width: "100%", maxWidth: 340, alignItems: "center" }}>
@@ -33,19 +36,22 @@ export function ScreenConnectionLoading({ preparing, onRetry, top, bottom }: {
           <View style={{ width: 26, height: 1, backgroundColor: TERTIARY }} />
         </View>
         <View accessibilityLiveRegion="polite" style={{ alignItems: "center", gap: 10 }}>
-          <Text style={[type.headline, { color: "#f4f4f7" }]}>{preparing ? "正在准备屏幕" : "正在连接电脑"}</Text>
+          <Text style={[type.headline, { color: "#f4f4f7" }]}>{receiving ? "正在接收画面" : "正在连接电脑"}</Text>
           <Text style={[type.footnote, { color: SECONDARY, textAlign: "center" }]}>
-            {slow ? "这次连接耗时较长。可以继续等待，或重新连接。" : preparing ? "电脑已响应，正在打开画面。" : "正在建立屏幕连接，画面会自动显示。"}
+            {slow ? "这次连接耗时较长。可以继续等待、重新连接，或先返回。" : receiving ? "电脑已响应，画面准备好后会自动显示。" : "正在建立屏幕连接，画面会自动显示。"}
           </Text>
         </View>
         <View accessible={false} style={{ flexDirection: "row", alignItems: "center", gap: 10, marginTop: 24 }}>
-          <Text style={[type.caption, { color: preparing ? SECONDARY : ACCENT }]}>连接电脑</Text>
+          <Text style={[type.caption, { color: receiving ? SECONDARY : ACCENT }]}>连接电脑</Text>
           <View style={{ width: 24, height: 1, backgroundColor: "rgba(255,255,255,0.12)" }} />
-          <Text style={[type.caption, { color: preparing ? ACCENT : TERTIARY }]}>接收画面</Text>
+          <Text style={[type.caption, { color: receiving ? ACCENT : TERTIARY }]}>接收画面</Text>
           <View style={{ width: 24, height: 1, backgroundColor: "rgba(255,255,255,0.12)" }} />
           <Text style={[type.caption, { color: TERTIARY }]}>显示桌面</Text>
         </View>
-        {slow ? <View style={{ marginTop: 22 }}><Button title="重新连接" variant="tonal" size="small" onPress={onRetry} /></View> : null}
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 12, marginTop: 24 }}>
+          {slow ? <Button title="重新连接" variant="tonal" size="small" onPress={onRetry} /> : null}
+          {onCancel ? <Button title="返回" variant="plain" size="small" onPress={onCancel} /> : null}
+        </View>
       </View>
     </ScrollView>
   );

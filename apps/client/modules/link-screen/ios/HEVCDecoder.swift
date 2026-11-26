@@ -54,21 +54,26 @@ final class HEVCDecoder: NSObject, RTCVideoDecoder {
   func decode(_ image: RTCEncodedImage, missingFrames: Bool, codecSpecificInfo info: RTCCodecSpecificInfo?, renderTimeMs: Int64) -> Int {
     let data = image.buffer
     var sets: [Data] = []
-    var body = Data()
-    body.reserveCapacity(data.count + 16)
+    var payloadRanges: [Range<Int>] = []
+    var payloadLength = 0
     var hasKeyframeUnit = image.frameType == .videoFrameKey
-    for unit in Self.units(of: data) {
-      let nalType = (unit[unit.startIndex] >> 1) & 0x3f
-      switch nalType {
-      case 32...34: sets.append(unit)
-      // An access unit delimiter is of no use to VideoToolbox.
-      case 35: break
-      default:
-        // HEVC IRAP NAL units (BLA/IDR/CRA: 16...21) start an independent decodable picture.
-        if (16...21).contains(nalType) { hasKeyframeUnit = true }
-        var length = UInt32(unit.count).bigEndian
-        withUnsafeBytes(of: &length) { body.append(contentsOf: $0) }
-        body.append(unit)
+    data.withUnsafeBytes { (bytes: UnsafeRawBufferPointer) in
+      let ranges = Self.unitRanges(in: bytes)
+      payloadRanges.reserveCapacity(ranges.count)
+      for range in ranges {
+        let nalType = (bytes[range.lowerBound] >> 1) & 0x3f
+        switch nalType {
+        case 32...34:
+          sets.append(Data(bytes[range]))
+        // An access unit delimiter is of no use to VideoToolbox.
+        case 35:
+          break
+        default:
+          // HEVC IRAP NAL units (BLA/IDR/CRA: 16...21) start an independent decodable picture.
+          if (16...21).contains(nalType) { hasKeyframeUnit = true }
+          payloadRanges.append(range)
+          payloadLength += 4 + range.count
+        }
       }
     }
     if !sets.isEmpty, sets != parameterSets {
@@ -84,12 +89,12 @@ final class HEVCDecoder: NSObject, RTCVideoDecoder {
     // After startup or any decode error, wait for the next IDR/keyframe instead of feeding broken P-frames.
     if needsKeyframe && !hasKeyframeUnit { return Code.error }
     // Nothing to decode with until the first key frame.
-    guard let described = format, !body.isEmpty else { return Code.error }
+    guard let described = format, payloadLength > 0 else { return Code.error }
     if session == nil, !makeSession(described) {
       needsKeyframe = true
       return Code.error
     }
-    guard let session, let sample = Self.sample(body, format: described) else {
+    guard let session, let sample = Self.sample(from: data, ranges: payloadRanges, totalLength: payloadLength, format: described) else {
       needsKeyframe = true
       return Code.error
     }
@@ -141,30 +146,39 @@ final class HEVCDecoder: NSObject, RTCVideoDecoder {
     session = nil
   }
 
+  /// Zero-allocation Annex B NAL range scanner.
+  static func unitRanges(in bytes: UnsafeRawBufferPointer) -> [Range<Int>] {
+    var ranges: [Range<Int>] = []
+    let count = bytes.count
+    var index = 0
+    var start: Int?
+    while index + 2 < count {
+      if bytes[index] == 0, bytes[index + 1] == 0, bytes[index + 2] == 1 {
+        if let start {
+          // A 4-byte start code's leading zero belongs to it, not to the unit before.
+          var end = index
+          while end > start, bytes[end - 1] == 0 { end -= 1 }
+          if end > start { ranges.append(start..<end) }
+        }
+        index += 3
+        start = index
+      } else {
+        index += 1
+      }
+    }
+    if let start, start < count {
+      var end = count
+      while end > start, bytes[end - 1] == 0 { end -= 1 }
+      if end > start { ranges.append(start..<end) }
+    }
+    return ranges
+  }
+
   /// The NAL units of an Annex B stream, without their start codes (3 or 4 bytes).
   static func units(of data: Data) -> [Data] {
-    var units: [Data] = []
-    data.withUnsafeBytes { (bytes: UnsafeRawBufferPointer) in
-      let count = bytes.count
-      var index = 0
-      var start: Int?
-      while index + 2 < count {
-        if bytes[index] == 0, bytes[index + 1] == 0, bytes[index + 2] == 1 {
-          if let start {
-            // A 4-byte start code's leading zero belongs to it, not to the unit before.
-            var end = index
-            while end > start, bytes[end - 1] == 0 { end -= 1 }
-            if end > start { units.append(Data(bytes[start..<end])) }
-          }
-          index += 3
-          start = index
-        } else {
-          index += 1
-        }
-      }
-      if let start, start < count { units.append(Data(bytes[start..<count])) }
+    data.withUnsafeBytes { bytes in
+      unitRanges(in: bytes).map { Data(bytes[$0]) }
     }
-    return units
   }
 
   static func formatDescription(_ sets: [Data]) -> CMVideoFormatDescription? {
@@ -184,18 +198,29 @@ final class HEVCDecoder: NSObject, RTCVideoDecoder {
     return status == noErr ? format : nil
   }
 
-  private static func sample(_ body: Data, format: CMVideoFormatDescription) -> CMSampleBuffer? {
+  /// Single-pass write straight into CMBlockBuffer memory — avoids 2 intermediate full-frame Data copies at 120 fps.
+  private static func sample(from data: Data, ranges: [Range<Int>], totalLength: Int, format: CMVideoFormatDescription) -> CMSampleBuffer? {
     var block: CMBlockBuffer?
-    let length = body.count
-    guard CMBlockBufferCreateWithMemoryBlock(allocator: kCFAllocatorDefault, memoryBlock: nil, blockLength: length, blockAllocator: kCFAllocatorDefault,
-                                             customBlockSource: nil, offsetToData: 0, dataLength: length, flags: kCMBlockBufferAssureMemoryNowFlag,
+    guard CMBlockBufferCreateWithMemoryBlock(allocator: kCFAllocatorDefault, memoryBlock: nil, blockLength: totalLength, blockAllocator: kCFAllocatorDefault,
+                                             customBlockSource: nil, offsetToData: 0, dataLength: totalLength, flags: kCMBlockBufferAssureMemoryNowFlag,
                                              blockBufferOut: &block) == kCMBlockBufferNoErr, let block else { return nil }
-    let copied = body.withUnsafeBytes { bytes in
-      CMBlockBufferReplaceDataBytes(with: bytes.baseAddress!, blockBuffer: block, offsetIntoDestination: 0, dataLength: length)
+    var dstPtr: UnsafeMutablePointer<CChar>?
+    var availableLength = 0
+    guard CMBlockBufferGetDataPointer(block, atOffset: 0, lengthAtOffsetOut: &availableLength, totalLengthOut: nil, dataPointerOut: &dstPtr) == kCMBlockBufferNoErr,
+          let dst = dstPtr, availableLength >= totalLength else { return nil }
+    data.withUnsafeBytes { bytes in
+      guard let srcBase = bytes.baseAddress else { return }
+      var offset = 0
+      for range in ranges {
+        var lenBE = UInt32(range.count).bigEndian
+        memcpy(dst.advanced(by: offset), &lenBE, 4)
+        offset += 4
+        memcpy(dst.advanced(by: offset), srcBase.advanced(by: range.lowerBound), range.count)
+        offset += range.count
+      }
     }
-    guard copied == kCMBlockBufferNoErr else { return nil }
     var sample: CMSampleBuffer?
-    var size = length
+    var size = totalLength
     guard CMSampleBufferCreateReady(allocator: kCFAllocatorDefault, dataBuffer: block, formatDescription: format, sampleCount: 1, sampleTimingEntryCount: 0,
                                     sampleTimingArray: nil, sampleSizeEntryCount: 1, sampleSizeArray: &size, sampleBufferOut: &sample) == noErr else { return nil }
     return sample

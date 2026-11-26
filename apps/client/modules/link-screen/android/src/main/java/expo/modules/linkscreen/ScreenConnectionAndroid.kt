@@ -161,6 +161,7 @@ internal class ScreenConnectionAndroid private constructor(
   private val wsUrl: String,
   private var maxFps: Int,
   private val diagnosticsEnabled: Boolean,
+  private val smooth: Boolean,
   private val eglContext: EglBase.Context,
   private val renderer: SurfaceViewRenderer,
   initialAudio: Boolean,
@@ -169,6 +170,7 @@ internal class ScreenConnectionAndroid private constructor(
   companion object {
     private const val PATIENCE_SECONDS = 25L
     private const val MAX_ICE_CANDIDATES = 256
+    private const val PLAYOUT_DELAY_URI = "http://www.webrtc.org/experiments/rtp-hdrext/playout-delay"
     private val STRIPPED_QUERY_KEYS = setOf("video", "maxFps", "diagnostics", "codec", "turn", "audio")
 
     private val webrtcInitialized = AtomicBoolean(false)
@@ -188,8 +190,13 @@ internal class ScreenConnectionAndroid private constructor(
       }
     }
 
-    private fun hasHardwareHevcDecoder(): Boolean {
+    private fun hasHardwareHevcDecoder(context: Context, eglContext: EglBase.Context): Boolean {
       return runCatching {
+        ensureWebRtcInitialized(context)
+        val webrtcSupportsHevc = DefaultVideoDecoderFactory(eglContext).supportedCodecs.any {
+          it.name.equals("H265", ignoreCase = true) || it.name.equals("HEVC", ignoreCase = true)
+        }
+        if (!webrtcSupportsHevc) return@runCatching false
         val list = MediaCodecList(MediaCodecList.REGULAR_CODECS)
         list.codecInfos.any { info ->
           if (info.isEncoder) return@any false
@@ -204,6 +211,43 @@ internal class ScreenConnectionAndroid private constructor(
       }.getOrDefault(false)
     }
 
+    /** Strips FlexFEC-03 (and playout-delay when smooth pacing is selected) from remote video offers. */
+    private fun filterOfferSdp(sdp: String, stripPlayoutDelay: Boolean): String {
+      val lines = sdp.split("\r\n")
+      val flexFecPts = HashSet<String>()
+      val rtpmapRegex = Regex("^a=rtpmap:(\\d+)\\s+flexfec-03/", RegexOption.IGNORE_CASE)
+      for (line in lines) {
+        rtpmapRegex.find(line)?.groupValues?.getOrNull(1)?.let { flexFecPts.add(it) }
+      }
+      val out = ArrayList<String>(lines.size)
+      var inVideo = false
+      for (line in lines) {
+        if (line.startsWith("m=")) {
+          inVideo = line.startsWith("m=video ")
+          if (inVideo && flexFecPts.isNotEmpty()) {
+            val parts = line.split(" ")
+            if (parts.size > 3) {
+              val kept = parts.subList(0, 3) + parts.subList(3, parts.size).filter { it !in flexFecPts }
+              out.add(kept.joinToString(" "))
+              continue
+            }
+          }
+        }
+        if (inVideo) {
+          if (stripPlayoutDelay && line.contains(PLAYOUT_DELAY_URI)) continue
+          if (flexFecPts.isNotEmpty()) {
+            if (line.startsWith("a=ssrc-group:FEC-FR ")) continue
+            val isFlexLine = flexFecPts.any { pt ->
+              line.startsWith("a=rtpmap:$pt ") || line.startsWith("a=fmtp:$pt ") || line.startsWith("a=rtcp-fb:$pt ")
+            }
+            if (isFlexLine) continue
+          }
+        }
+        out.add(line)
+      }
+      return out.joinToString("\r\n")
+    }
+
     fun create(
       context: Context,
       url: String,
@@ -216,6 +260,7 @@ internal class ScreenConnectionAndroid private constructor(
       if (parsed.scheme != "http" || parsed.host != "127.0.0.1" || parsed.port <= 0) return null
 
       val diagnostics = parsed.getQueryParameter("diagnostics") == "1"
+      val smooth = parsed.getQueryParameter("pacing") == "smooth"
       val builder = Uri.Builder()
         .scheme("ws")
         .encodedAuthority("127.0.0.1:${parsed.port}")
@@ -232,7 +277,7 @@ internal class ScreenConnectionAndroid private constructor(
       builder.appendQueryParameter("diagnostics", if (diagnostics) "1" else "0")
       builder.appendQueryParameter("audio", if (audio) "1" else "0")
       builder.appendQueryParameter("turn", "1")
-      if (hasHardwareHevcDecoder()) {
+      if (hasHardwareHevcDecoder(context.applicationContext, eglContext)) {
         builder.appendQueryParameter("codec", "hevc")
       }
 
@@ -241,6 +286,7 @@ internal class ScreenConnectionAndroid private constructor(
         wsUrl = builder.build().toString(),
         maxFps = maxFps,
         diagnosticsEnabled = diagnostics,
+        smooth = smooth,
         eglContext = eglContext,
         renderer = renderer,
         initialAudio = audio,
@@ -249,6 +295,7 @@ internal class ScreenConnectionAndroid private constructor(
   }
 
   var onMessage: ((JSONObject) -> Unit)? = null
+  var onReceiving: (() -> Unit)? = null
   var onFailure: ((String) -> Unit)? = null
   var onStats: ((JSONObject) -> Unit)? = null
   var onAudioAvailable: ((Boolean) -> Unit)? = null
@@ -522,6 +569,7 @@ internal class ScreenConnectionAndroid private constructor(
           fail("电脑返回了无效的视频协商信息")
           return
         }
+        val filteredSdp = filterOfferSdp(sdp, stripPlayoutDelay = smooth)
         currentPeer.setRemoteDescription(
           object : SdpObserverAdapter() {
             override fun onSetSuccess() {
@@ -578,7 +626,7 @@ internal class ScreenConnectionAndroid private constructor(
               }
             }
           },
-          SessionDescription(SessionDescription.Type.OFFER, sdp),
+          SessionDescription(SessionDescription.Type.OFFER, filteredSdp),
         )
       }
       "ice" -> {
@@ -751,6 +799,7 @@ internal class ScreenConnectionAndroid private constructor(
         PeerConnection.IceConnectionState.COMPLETED -> {
           disconnectedAtMs = null
           peer?.let { attachVideoTrack(it) }
+          if (!receivedPicture) onReceiving?.invoke()
         }
         PeerConnection.IceConnectionState.DISCONNECTED -> {
           if (disconnectedAtMs == null) disconnectedAtMs = SystemClock.elapsedRealtime()

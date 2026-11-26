@@ -729,7 +729,7 @@ if (nativePicture) {
       session.reconnect();
       waitForCapabilities();
       Object.assign(control, { asked: false, known: false, trusted: false });
-      showProgress("connecting");
+      if (!hasPicture && loading.phase !== "receiving") showProgress("connecting");
       if (mode !== "view") askControl();
     },
   };
@@ -745,5 +745,5 @@ if (nativePicture) {
   };
   attachNative();
 }
-tellApp({ type: "ready", mode });
+tellApp({ type: "ready", mode, nativeLoading: appManagedLoading });
 `;

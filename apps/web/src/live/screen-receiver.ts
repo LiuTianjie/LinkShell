@@ -728,12 +728,18 @@ export class ScreenReceiver {
     channel.send(JSON.stringify({ ...stamped, i: ++this.sent }));
   }
 
-  /** The pointer, a frame at a time: as often as the picture could show it. */
+  /** Leading-edge immediate send + per-frame coalescing cuts first-move latency by up to 16 ms. */
   pointer(x: number, y: number) {
     if (!this.state.canInput) return;
     this.pendingMove = { x, y };
     this.movedAt = performance.now();
-    if (!this.moveFrame) this.moveFrame = requestAnimationFrame(() => { this.moveFrame = 0; this.flushMove(false); });
+    if (!this.moveFrame) {
+      this.flushMove(false);
+      this.moveFrame = requestAnimationFrame(() => {
+        this.moveFrame = 0;
+        if (this.pendingMove) this.flushMove(false);
+      });
+    }
   }
 
   /**

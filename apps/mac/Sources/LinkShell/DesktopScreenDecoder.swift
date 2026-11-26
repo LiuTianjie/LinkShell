@@ -62,6 +62,15 @@ enum DesktopScreenCodec {
   var label: String { self == .h264 ? "H.264" : "HEVC" }
   var parameterKinds: [UInt8] { self == .h264 ? [7, 8] : [32, 33, 34] }
 
+  func kind(of bytes: UnsafeRawBufferPointer, range: Range<Int>) -> UInt8? {
+    guard !range.isEmpty else { return nil }
+    let first = bytes[range.lowerBound]
+    guard first & 0x80 == 0 else { return nil }
+    if self == .h264 { return first & 0x1f }
+    guard range.count >= 2, bytes[range.lowerBound + 1] & 7 != 0 else { return nil }
+    return (first >> 1) & 0x3f
+  }
+
   func kind(of unit: Data) -> UInt8? {
     guard let first = unit.first, first & 0x80 == 0 else { return nil }
     if self == .h264 { return first & 0x1f }
@@ -108,30 +117,34 @@ struct DesktopScreenAccessUnit {
     }
   }
 
-  static func units(of data: Data) -> [Data] {
-    var result: [Data] = []
-    data.withUnsafeBytes { (bytes: UnsafeRawBufferPointer) in
-      var index = 0
-      var start: Int?
-      func append(until limit: Int) {
-        guard let start else { return }
-        var end = limit
-        // Annex B trailing_zero_8bits and a four-byte start code's first zero are not payload.
-        while end > start, bytes[end - 1] == 0 { end -= 1 }
-        if end > start { result.append(Data(bytes[start..<end])) }
-      }
-      while index + 2 < bytes.count {
-        if bytes[index] == 0, bytes[index + 1] == 0, bytes[index + 2] == 1 {
-          append(until: index)
-          index += 3
-          start = index
-        } else {
-          index += 1
-        }
-      }
-      append(until: bytes.count)
+  static func unitRanges(in bytes: UnsafeRawBufferPointer) -> [Range<Int>] {
+    var result: [Range<Int>] = []
+    var index = 0
+    var start: Int?
+    func append(until limit: Int) {
+      guard let start else { return }
+      var end = limit
+      // Annex B trailing_zero_8bits and a four-byte start code's first zero are not payload.
+      while end > start, bytes[end - 1] == 0 { end -= 1 }
+      if end > start { result.append(start..<end) }
     }
+    while index + 2 < bytes.count {
+      if bytes[index] == 0, bytes[index + 1] == 0, bytes[index + 2] == 1 {
+        append(until: index)
+        index += 3
+        start = index
+      } else {
+        index += 1
+      }
+    }
+    append(until: bytes.count)
     return result
+  }
+
+  static func units(of data: Data) -> [Data] {
+    data.withUnsafeBytes { bytes in
+      unitRanges(in: bytes).map { Data(bytes[$0]) }
+    }
   }
 }
 
@@ -179,12 +192,32 @@ final class DesktopScreenDecoder: NSObject, RTCVideoDecoder {
 
   func decode(_ image: RTCEncodedImage, missingFrames: Bool, codecSpecificInfo info: RTCCodecSpecificInfo?, renderTimeMs: Int64) -> Int {
     guard !terminalFailure else { return -1 }
-    let access = DesktopScreenAccessUnit(image.buffer, codec: codec)
-    pendingParameters.merge(access.parameters) { _, newest in newest }
-    guard access.hasPicture else { return access.parameters.isEmpty ? -1 : 0 }
-    if needsKey, !access.hasKey { return -1 }
+    let buffer = image.buffer
+    var parsedParameters: [UInt8: Data] = [:]
+    var payloadRanges: [Range<Int>] = []
+    var payloadLength = 0
+    var hasPicture = false
+    var hasKey = false
+    buffer.withUnsafeBytes { bytes in
+      let ranges = DesktopScreenAccessUnit.unitRanges(in: bytes)
+      payloadRanges.reserveCapacity(ranges.count)
+      for range in ranges {
+        guard let kind = codec.kind(of: bytes, range: range) else { continue }
+        if codec.parameterKinds.contains(kind) {
+          parsedParameters[kind] = Data(bytes[range])
+        } else if !codec.isDelimiter(kind), range.count <= UInt32.max {
+          payloadRanges.append(range)
+          payloadLength += 4 + range.count
+          hasPicture = hasPicture || codec.isPicture(kind)
+          hasKey = hasKey || codec.isKey(kind)
+        }
+      }
+    }
+    pendingParameters.merge(parsedParameters) { _, newest in newest }
+    guard hasPicture else { return parsedParameters.isEmpty ? -1 : 0 }
+    if needsKey, !hasKey { return -1 }
 
-    if access.hasKey {
+    if hasKey {
       let candidate = parameters.merging(pendingParameters) { _, newest in newest }
       guard codec.parameterKinds.allSatisfy({ candidate[$0] != nil }) else { return -1 }
       if format == nil || candidate != parameters {
@@ -205,10 +238,10 @@ final class DesktopScreenDecoder: NSObject, RTCVideoDecoder {
     }
     guard let described = format else { return -1 }
     if session == nil, !makeSession(described) { return -1 }
-    guard let session, let sample = Self.sample(access.body, format: described) else { return -1 }
+    guard let session, let sample = Self.sample(from: buffer, ranges: payloadRanges, totalLength: payloadLength, format: described) else { return -1 }
 
     let timestamp = Int32(bitPattern: image.timeStamp)
-    let fusion = FusionMetadata.enabled ? FusionMetadata.layout(in: image.buffer) : nil
+    let fusion = FusionMetadata.enabled ? FusionMetadata.layout(in: buffer) : nil
     let rotation = image.rotation
     let captured = image.captureTimeMs * 1_000_000
     var output: RTCVideoFrame?
@@ -230,7 +263,7 @@ final class DesktopScreenDecoder: NSObject, RTCVideoDecoder {
       return -1
     }
     guard let output else {
-      if access.hasKey {
+      if hasKey {
         decodeFailed(kVTVideoDecoderBadDataErr)
         return -1
       }
@@ -323,18 +356,30 @@ final class DesktopScreenDecoder: NSObject, RTCVideoDecoder {
     return status == noErr ? format : nil
   }
 
-  private static func sample(_ body: Data, format: CMVideoFormatDescription) -> CMSampleBuffer? {
-    guard !body.isEmpty else { return nil }
+  /// Single-pass write straight into CMBlockBuffer memory — avoids 2 intermediate full-frame Data copies at 120 fps.
+  private static func sample(from data: Data, ranges: [Range<Int>], totalLength: Int, format: CMVideoFormatDescription) -> CMSampleBuffer? {
+    guard totalLength > 0 else { return nil }
     var block: CMBlockBuffer?
-    guard CMBlockBufferCreateWithMemoryBlock(allocator: kCFAllocatorDefault, memoryBlock: nil, blockLength: body.count,
-      blockAllocator: kCFAllocatorDefault, customBlockSource: nil, offsetToData: 0, dataLength: body.count,
+    guard CMBlockBufferCreateWithMemoryBlock(allocator: kCFAllocatorDefault, memoryBlock: nil, blockLength: totalLength,
+      blockAllocator: kCFAllocatorDefault, customBlockSource: nil, offsetToData: 0, dataLength: totalLength,
       flags: kCMBlockBufferAssureMemoryNowFlag, blockBufferOut: &block) == noErr, let block else { return nil }
-    let copied = body.withUnsafeBytes { bytes in
-      CMBlockBufferReplaceDataBytes(with: bytes.baseAddress!, blockBuffer: block, offsetIntoDestination: 0, dataLength: body.count)
+    var dstPtr: UnsafeMutablePointer<CChar>?
+    var availableLength = 0
+    guard CMBlockBufferGetDataPointer(block, atOffset: 0, lengthAtOffsetOut: &availableLength, totalLengthOut: nil, dataPointerOut: &dstPtr) == kCMBlockBufferNoErr,
+          let dst = dstPtr, availableLength >= totalLength else { return nil }
+    data.withUnsafeBytes { bytes in
+      guard let srcBase = bytes.baseAddress else { return }
+      var offset = 0
+      for range in ranges {
+        var lenBE = UInt32(range.count).bigEndian
+        memcpy(dst.advanced(by: offset), &lenBE, 4)
+        offset += 4
+        memcpy(dst.advanced(by: offset), srcBase.advanced(by: range.lowerBound), range.count)
+        offset += range.count
+      }
     }
-    guard copied == noErr else { return nil }
     var sample: CMSampleBuffer?
-    var size = body.count
+    var size = totalLength
     guard CMSampleBufferCreateReady(allocator: kCFAllocatorDefault, dataBuffer: block, formatDescription: format,
       sampleCount: 1, sampleTimingEntryCount: 0, sampleTimingArray: nil, sampleSizeEntryCount: 1,
       sampleSizeArray: &size, sampleBufferOut: &sample) == noErr else { return nil }

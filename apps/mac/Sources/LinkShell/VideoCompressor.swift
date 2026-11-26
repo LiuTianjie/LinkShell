@@ -116,14 +116,13 @@ final class VideoCompressor {
   private let session: VTCompressionSession
   private let codec: CMVideoCodecType
   private let state = Locked(State())
-  private let settings = DispatchQueue(label: "com.bd.linkshell.encoder-settings")
 
   /// Quantizer steps that take a key frame of screen content to 1/e of its size: measured on
   /// a page of text, 19 from 22 to 28, 16 from 34 to 40 and 10 from 40 to 46. The lowest: a guess
   /// that falls short is corrected by the next key frame, one that overshoots costs sharpness.
   private static let stepsPerFold = 12.0
-  /// No key frame is asked to be coarser than this: beyond it text can't be read.
-  private static let coarsestKey = 46
+  /// No key frame is asked to be coarser than this: keeps code and UI text legible even during recovery.
+  private static let coarsestKey = 36
   /// HEVC's quantizer isn't read from the stream (`SliceQuantizer` is H.264's), so a planned key
   /// frame is held to one quantizer exactly, which is then known; none is asked to be finer
   /// than text needs to be crisp. The session's first key frame is the encoder's own: held to a
@@ -249,7 +248,7 @@ final class VideoCompressor {
   /// A refresh may be a small LTR-P; it is not advertised to ordinary RTP receivers as an IDR.
   func encode(_ buffer: CVPixelBuffer, at time: CMTime, key: Bool, refresh: Bool,
               acknowledged: [UInt64], done: @escaping (Result<Frame?, Failure>) -> Void) {
-    if key { holdKeyQuantizer() }
+    let heldQuantizer = key ? holdKeyQuantizer() : false
     var properties: [CFString: Any] = [:]
     if key { properties[kVTEncodeFrameOptionKey_ForceKeyFrame] = true }
     if longTermReferences {
@@ -261,7 +260,7 @@ final class VideoCompressor {
       guard let self, let sample, !flags.contains(.frameDropped) else { return done(.success(nil)) }
       let key = AnnexB.isKey(sample)
       let quantizer = self.codec == kCMVideoCodecType_H264 ? self.state.withLock { $0.reader.quantizer(of: sample) } : nil
-      if key { self.keyCameOut(quantizer: quantizer, bytes: CMSampleBufferGetTotalSampleSize(sample)) }
+      if key { self.recordKey(quantizer: quantizer, bytes: CMSampleBufferGetTotalSampleSize(sample)) }
       var referenceToken: UInt64?
       if self.longTermReferences {
         let attachments = (CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: false) as? [[CFString: Any]])?.first
@@ -270,6 +269,14 @@ final class VideoCompressor {
         referenceToken = token?.uint64Value
       }
       done(.success(Frame(sample: sample, key: key, quantizer: quantizer, referenceToken: referenceToken, silentOnOrder: self.mode != "low-latency")))
+    }
+    if heldQuantizer {
+      // Complete this single keyframe before restoring Min/MaxAllowedFrameQP on the encoder thread so
+      // subsequent P-frames never inherit the held keyframe quantizer and VT callback thread never deadlocks.
+      if status == noErr {
+        VTCompressionSessionCompleteFrames(session, untilPresentationTimeStamp: time)
+      }
+      releaseKeyQuantizer()
     }
     if status != noErr { done(.failure(Failure(what: "a frame was not taken by the encoder", status: status))) }
   }
@@ -281,7 +288,7 @@ final class VideoCompressor {
 
   // MARK: The size of a key frame
 
-  private func holdKeyQuantizer() {
+  private func holdKeyQuantizer() -> Bool {
     let exact = codec != kCMVideoCodecType_H264
     let range: ClosedRange<Int>? = state.withLock { state in
       guard let plan = state.keyPlan, plan.budget > 0 else { return nil }
@@ -314,26 +321,25 @@ final class VideoCompressor {
       }
       return min(max(fitting, 1), VideoCompressor.coarsestKey)...51
     }
-    if let range {
-      VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MinAllowedFrameQP, value: range.lowerBound as CFNumber)
-      VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxAllowedFrameQP, value: range.upperBound as CFNumber)
+    guard let range else { return false }
+    VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MinAllowedFrameQP, value: range.lowerBound as CFNumber)
+    VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxAllowedFrameQP, value: range.upperBound as CFNumber)
+    return true
+  }
+
+  private func recordKey(quantizer: Int?, bytes: Int) {
+    state.withLock { state in
+      if let quantizer = quantizer ?? state.heldTo { state.lastKey = (quantizer, bytes) } else { state.freeKeyBytes = bytes }
     }
   }
 
-  private func keyCameOut(quantizer: Int?, bytes: Int) {
-    let held: Bool = state.withLock { state in
-      if let quantizer = quantizer ?? state.heldTo { state.lastKey = (quantizer, bytes) } else { state.freeKeyBytes = bytes }
-      defer { state.holding = false; state.heldTo = nil }
-      return state.holding
+  private func releaseKeyQuantizer() {
+    state.withLock { state in
+      state.holding = false
+      state.heldTo = nil
     }
-    // The frames after it are the rate control's again. Not from here: this is the encoder's
-    // own thread, in the middle of a frame, and the session waits for it to be done.
-    if held {
-      settings.async { [session] in
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MinAllowedFrameQP, value: 1 as CFNumber)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxAllowedFrameQP, value: 51 as CFNumber)
-      }
-    }
+    VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MinAllowedFrameQP, value: 1 as CFNumber)
+    VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxAllowedFrameQP, value: 51 as CFNumber)
   }
 }
 

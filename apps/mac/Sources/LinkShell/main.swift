@@ -85,7 +85,7 @@ if let path = Launch.value(after: "--connect") {
   guard let link = Link(path: path) else { exit(1) }
   Engine.playoutDelay = !Launch.has("--no-playout-delay")
   Engine.ownEncoder = Launch.value(after: "--encoder") != "stock"
-  Engine.flexfec = !Launch.has("--no-flexfec")
+  Engine.flexfec = Launch.has("--flexfec") && !Launch.has("--no-flexfec")
   Engine.report = { link.log($0) }
   if Launch.has("--rtc-log") { Engine.forwardLog(to: link) }
   // With no window and no place in the Dock.

@@ -270,9 +270,14 @@ final class DesktopScreenSurfaceTests: XCTestCase {
       host.layoutSubtreeIfNeeded()
       if let rep = clip.bitmapImageRepForCachingDisplay(in: clip.bounds) {
         clip.cacheDisplay(in: clip.bounds, to: rep)
-        // NSBitmapImageRep(colorAtX:y:) uses top-down pixel coordinates (y = 0 at top).
-        let topCutoutAlpha = rep.colorAt(x: 560, y: 80)?.alphaComponent ?? 1
-        let bottomSolidAlpha = rep.colorAt(x: 560, y: 650)?.alphaComponent ?? 0
+        // NSBitmapImageRep(colorAtX:y:) addresses backing pixels (2x on Retina displays), not points.
+        let scaleX = CGFloat(rep.pixelsWide) / clip.bounds.width
+        let scaleY = CGFloat(rep.pixelsHigh) / clip.bounds.height
+        let alphaAt = { (x: CGFloat, y: CGFloat) -> CGFloat? in
+          rep.colorAt(x: Int((x * scaleX).rounded()), y: Int((y * scaleY).rounded()))?.alphaComponent
+        }
+        let topCutoutAlpha = alphaAt(560, 80) ?? 1
+        let bottomSolidAlpha = alphaAt(560, 650) ?? 0
         XCTAssertLessThan(topCutoutAlpha, 0.05, "Top popover hole (y=80 from top) must be masked transparent (host.isFlipped=\(host.isFlipped))")
         XCTAssertGreaterThan(bottomSolidAlpha, 0.95, "Bottom stage outside hole (y=650 from top) must stay opaque (host.isFlipped=\(host.isFlipped))")
       }
@@ -305,14 +310,19 @@ final class DesktopScreenSurfaceTests: XCTestCase {
       host.layoutSubtreeIfNeeded()
       if let rep = clip.bitmapImageRepForCachingDisplay(in: clip.bounds) {
         clip.cacheDisplay(in: clip.bounds, to: rep)
+        let scaleX = CGFloat(rep.pixelsWide) / clip.bounds.width
+        let scaleY = CGFloat(rep.pixelsHigh) / clip.bounds.height
+        let alphaAt = { (x: CGFloat, y: CGFloat) -> CGFloat? in
+          rep.colorAt(x: Int((x * scaleX).rounded()), y: Int((y * scaleY).rounded()))?.alphaComponent
+        }
         // Nested hole center: CSS (810, 130) -> clip (570, 88)
-        let nestedAlpha = rep.colorAt(x: 570, y: 88)?.alphaComponent ?? 1
+        let nestedAlpha = alphaAt(570, 88) ?? 1
         // Overlap between popover (y=48..308) and picker (y=298..388): CSS (810, 303) -> clip (570, 261)
-        let overlapAlpha = rep.colorAt(x: 570, y: 261)?.alphaComponent ?? 1
+        let overlapAlpha = alphaAt(570, 261) ?? 1
         // Picker below popover: CSS (810, 360) -> clip (570, 318)
-        let belowPopoverAlpha = rep.colorAt(x: 570, y: 318)?.alphaComponent ?? 1
+        let belowPopoverAlpha = alphaAt(570, 318) ?? 1
         // Outside all holes: CSS (810, 600) -> clip (570, 558)
-        let outsideAlpha = rep.colorAt(x: 570, y: 558)?.alphaComponent ?? 0
+        let outsideAlpha = alphaAt(570, 558) ?? 0
         XCTAssertLessThan(nestedAlpha, 0.05, "Nested cutout inside popover must stay transparent")
         XCTAssertLessThan(overlapAlpha, 0.05, "Overlap between popover and select picker must stay transparent")
         XCTAssertLessThan(belowPopoverAlpha, 0.05, "Select picker extending below popover must be cut out transparent")

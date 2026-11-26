@@ -4,6 +4,7 @@ export const VIEWER_STYLE = String.raw`
   html, body { margin: 0; height: 100%; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; background: #000; overflow: hidden; overscroll-behavior: none; }
   body { position: fixed; inset: 0; color: #fff; font: 15px/1.45 -apple-system, system-ui, "PingFang SC", "Noto Sans CJK SC", sans-serif; }
   html.native-picture, html.native-picture body { background: transparent; }
+  html.app-managed-loading #note:not([data-state="error"]):not([data-state="blocked"]) { display: none !important; }
   .native-picture canvas, .native-picture video { visibility: hidden; }
   #stage { position: absolute; inset: 0; overflow: hidden; touch-action: none; }
   #picture { position: absolute; inset: 0; transform-origin: 0 0; will-change: transform; }

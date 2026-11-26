@@ -32,10 +32,6 @@ enum Tuning {
   /// way to say so to a receiver without `jitterBufferTarget` (Safari, WKWebView).
   static let fieldTrials: [String: String] = [
     "WebRTC-ForceSendPlayoutDelay": "min_ms:0,max_ms:0",
-    // M154 needs both: one exposes the send codec, the other creates the FEC-FR SSRC and
-    // permits the sender. A receiver which drops flexfec-03 keeps the usual NACK/RTX path.
-    "WebRTC-FlexFEC-03-Advertised": "Enabled",
-    "WebRTC-FlexFEC-03": "Enabled",
   ]
 
   /// When the network or the encoder can't keep up, the picture gets smaller, not jerkier: a
@@ -47,20 +43,20 @@ enum Tuning {
   /// width at 60 frames is more than the encoder and a phone's decoder carry.
   static let widestPicture = 3840
 
-  /// 8 Mbit/s for a 1920-wide picture at 30 frames, half as much again at 60. Above that the
-  /// ceiling grows with the square root of the pixels, not in proportion: the more pixels a
-  /// screen has, the more of them are the same as their neighbours. The bandwidth estimate
-  /// decides what is actually sent; this is the ceiling.
+  /// 10 Mbit/s for a 1920-wide picture at 30 frames, 16 Mbit/s at 60, scaling up to 50 Mbit/s
+  /// for 4K60 / 2K120 / 4K120 so crisp HiDPI text is never choked on LAN or fiber. The bandwidth
+  /// estimate decides what is actually sent; this is only the ceiling.
   static func maxBitrate(width: Int, height: Int, fps: Int) -> Int {
     let pixels = Double(width * height) / Double(1920 * 1080)
-    let frameFactor = fps > 60 ? 1.5 * Double(fps) / 60 : fps > 30 ? 1.5 : 1
-    let rate = 8_000_000 * (pixels > 1 ? pixels.squareRoot() : pixels) * frameFactor
-    return Int(min(max(rate, 2_000_000), 30_000_000))
+    let frameFactor = fps > 60 ? 1.6 * Double(fps) / 60 : fps > 30 ? 1.6 : 1
+    let rate = 10_000_000 * (pixels > 1 ? pixels.squareRoot() : pixels) * frameFactor
+    return Int(min(max(rate, 2_000_000), 50_000_000))
   }
 
-  /// Where the bandwidth estimate starts. libwebrtc's default (300 kbit/s) makes the first
-  /// seconds of a screen unreadable; a home network carries this from the first frame.
-  static let startBitrate = 2_000_000
+  /// Where the bandwidth estimate starts. Starting at 6 Mbit/s delivers crisp desktop text
+  /// from frame #1 instead of spending 4-5 seconds ramping from 2 Mbit/s; GCC backs off
+  /// within ~200 ms if the actual path is narrower.
+  static let startBitrate = 6_000_000
 
   /// The most a picture sent through a TURN relay uses, in kbit/s, where the host doesn't say: someone pays
   /// for every byte a relay carries, and a phone shows a screen well at this.
@@ -68,13 +64,13 @@ enum Tuning {
 
   // MARK: The floor under the estimate on the local network (`LanFloor`)
 
-  /// What the estimate is held to while the video stays on the local network: enough for crisp
-  /// text at 1080p, a small part of what any working Wi-Fi carries.
-  static let lanFloor = 8_000_000
+  /// What the estimate is held to while the video stays on the local network: crisp HiDPI text
+  /// at 1080p120 / 2K60 while still a small fraction of any modern Wi-Fi link.
+  static let lanFloor = 16_000_000
   /// Seconds of round trips looked at. The floor is set when the lowest of them is under
   /// `lanFloorRttMs` and lifted when even the lowest is over `lanFloorLiftRttMs`: a radio that
   /// holds packets for a moment raises some round trips, a queue that stays raises all of them.
-  static let lanFloorWindow = 4
+  static let lanFloorWindow = 2
   static let lanFloorRttMs = 20.0
   static let lanFloorLiftRttMs = 40.0
   /// Loss the floor is set under, and lifted over.
@@ -98,8 +94,8 @@ enum Tuning {
   /// count as `frameRateDownAfter`: a queue that lasts this long costs the frame rate anyway.
   static let lanFloorLiftSendDelaySeconds = 3
   /// Calm seconds before a lifted floor comes back, and lifts after which it never does.
-  static let lanFloorRecalm = 30
-  static let lanFloorMaxLifts = 2
+  static let lanFloorRecalm = 20
+  static let lanFloorMaxLifts = 6
 
   /// DSCP marking and the pacer's order, where a network honours it.
   static let networkPriority = RTCPriority.high
@@ -165,13 +161,17 @@ enum Tuning {
   /// after it sharpen the picture. A change of scene that is not a key frame can't be held this
   /// way: the low-latency rate control ignores `DataRateLimits`, and those frames are for
   /// `SendQueue` to make room after.
-  static let keyFrameSendSeconds = 0.08
+  static let keyFrameSendSeconds = 0.16
   static func keyFrameBudget(bitrate: Int) -> Int {
     max(1024, Int(Double(bitrate) * pacerFactor * keyFrameSendSeconds / 8))
   }
-  /// With more than this reckoned to be waiting to be sent, a picture is not encoded. The same
-  /// 50 ms that, standing for seconds, costs the frame rate and the floor.
-  static let sendQueueAdmitMs = 50.0
+  /// With more than this reckoned to be waiting to be sent, a picture is skipped before encoding.
+  /// 75 ms stays completely silent on normal LAN bursts (an 83 KB startup IDR at 6 Mbit/s is
+  /// 44 ms; a 250 KB page flip at 16 Mbit/s is 50 ms) while immediately shedding excess frames
+  /// on sudden bandwidth cliffs before pacer latency can spike, and `sendQueueMaxConsecutiveSkips`
+  /// ensures the encoder never enters a multi-frame lockout spiral that starves GCC or freezes motion.
+  static let sendQueueAdmitMs = 75.0
+  static let sendQueueMaxConsecutiveSkips = 2
   /// The pacer is not reckoned slower than this rate allows, whatever the encoder is told.
   static let sendQueueLowestRate = 300_000
   /// Both are on unless said otherwise, by flag or by a default
@@ -200,12 +200,12 @@ enum Tuning {
   /// picture is sent again: quickly for a moment after the screen stops changing, then slowly.
   static let settleRepeatInterval = 0.1
   static let settleWindow = 1.0
-  static let idleRepeatInterval = 0.5
+  static let idleRepeatInterval = 0.25
 
   // MARK: Pointer, input and numbers
 
-  /// How often the pointer's place is looked at, and said when it changed.
-  static let cursorRate = 60.0
+  /// How often the pointer's place is looked at, and said when it changed (120 Hz for ProMotion).
+  static let cursorRate = 120.0
 
   /// How often the pointer's picture is looked at: a change of shape a fifth of a second late
   /// is not noticed, and reading the picture is the dearer of the two.

@@ -5,7 +5,7 @@ import XCTest
 final class LanFloorTests: XCTestCase {
   private let host = LanFloor.Endpoint(type: "host", address: "192.168.100.126")
   private let phone = LanFloor.Endpoint(type: "host", address: "192.168.100.206")
-  private let ceiling = 12_000_000
+  private let ceiling = 24_000_000
 
   private func second(rtt: Double, lost: Double = 0, local: LanFloor.Endpoint? = nil, remote: LanFloor.Endpoint? = nil) -> LanFloor.Second {
     .init(local: local ?? host, remote: remote ?? phone, rttMs: rtt, fractionLost: lost)
@@ -81,15 +81,19 @@ final class LanFloorTests: XCTestCase {
     guard case .lift = floor.judge(second(rtt: 4, remote: reflexive), ceiling: ceiling) else { return XCTFail("a new path kept the floor") }
   }
 
-  /// After a lift the floor comes back only after a longer calm; after two lifts never.
-  func testTheFloorComesBackAfterALongCalmAndNotAfterTwoLifts() {
+  /// After a lift the floor comes back only after a longer calm; after `lanFloorMaxLifts` lifts never.
+  func testTheFloorComesBackAfterALongCalmAndNotAfterMaxLifts() {
     var floor = LanFloor()
     for _ in 0..<Tuning.lanFloorWindow { _ = floor.judge(second(rtt: 4), ceiling: ceiling) }
-    _ = floor.judge(second(rtt: 4, lost: 0.2), ceiling: ceiling)
-    let back = applied(&floor, Array(repeating: second(rtt: 4), count: 100))
-    XCTAssertNotNil(back)
-    XCTAssertGreaterThanOrEqual(back ?? 0, Tuning.lanFloorRecalm)
-    _ = floor.judge(second(rtt: 4, lost: 0.2), ceiling: ceiling)
+    for lift in 1...Tuning.lanFloorMaxLifts {
+      _ = floor.judge(second(rtt: 4, lost: 0.2), ceiling: ceiling)
+      XCTAssertEqual(floor.lifts, lift)
+      if lift < Tuning.lanFloorMaxLifts {
+        let back = applied(&floor, Array(repeating: second(rtt: 4), count: 100))
+        XCTAssertNotNil(back)
+        XCTAssertGreaterThanOrEqual(back ?? 0, Tuning.lanFloorRecalm)
+      }
+    }
     XCTAssertEqual(floor.lifts, Tuning.lanFloorMaxLifts)
     XCTAssertNil(applied(&floor, Array(repeating: second(rtt: 4), count: 200)))
   }

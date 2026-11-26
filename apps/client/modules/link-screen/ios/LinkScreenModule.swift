@@ -30,6 +30,8 @@ final class LinkScreenView: ExpoView {
   private var supportsConfiguration = false
   private var supportsPause = false
   private var controlsReady = false
+  private var pendingMessages: [[String: Any]] = []
+  private var latestStats: [String: Any]?
   private var pictureRect: CGRect?
   private var attachment: DispatchWorkItem?
   private var attachmentStarted = 0.0
@@ -79,11 +81,15 @@ final class LinkScreenView: ExpoView {
     url = value
     controls.expectedURL = URL(string: value)
     controlsReady = false
+    pendingMessages.removeAll()
+    latestStats = nil
     pictureRect = nil
     audioAvailable = false
     lastPictureSize = nil
     attachmentStarted = CACurrentMediaTime()
     attachControls()
+    // Start native WebRTC signaling & ICE immediately in parallel with WebView HTML/JS load.
+    connect()
   }
 
   func setAudio(_ value: Bool) {
@@ -192,7 +198,7 @@ final class LinkScreenView: ExpoView {
   }
 
   private func connect() {
-    guard active, applicationActive, window != nil, controlsReady, connection == nil, !url.isEmpty else { return }
+    guard active, applicationActive, window != nil, connection == nil, !url.isEmpty else { return }
     // Connection info can ask for lightweight WebRTC stats; normal playback still has
     // neither decoder instrumentation nor drawable presentation callbacks.
     let diagnostics = URLComponents(string: url)?.queryItems?.contains { $0.name == "diagnostics" && $0.value == "1" } == true
@@ -209,6 +215,12 @@ final class LinkScreenView: ExpoView {
       return
     }
     self.connection = connection
+    connection.onReceiving = { [weak self, weak connection] in
+      DispatchQueue.main.async {
+        guard let self, let connection, self.connection === connection, self.active, self.lastPictureSize == nil else { return }
+        self.onState(["state": "receiving", "maxFps": self.receiverRate])
+      }
+    }
     connection.onAudioAvailable = { [weak self, weak connection] available in
       DispatchQueue.main.async {
         guard let self, let connection, self.connection === connection, self.audioAvailable != available else { return }
@@ -228,7 +240,9 @@ final class LinkScreenView: ExpoView {
       guard let self, let connection, self.connection === connection else { return }
       connection.pictureArrived()
       self.lastPictureSize = size
-      self.controls.call("picture", ["width": size.width, "height": size.height])
+      if self.controlsReady {
+        self.controls.call("picture", ["width": size.width, "height": size.height])
+      }
       if self.active {
         self.onState([
           "state": "ready",
@@ -258,26 +272,36 @@ final class LinkScreenView: ExpoView {
           self.supportsConfiguration = session["configure"] as? Bool == true
           self.supportsPause = self.supportsConfiguration && session["pause"] as? Bool == true
         }
-        self.controls.call("message", message)
+        if self.controlsReady {
+          self.controls.call("message", message)
+        } else if self.pendingMessages.count < 128 {
+          self.pendingMessages.append(message)
+        }
       }
     }
     connection.onStats = { [weak self, weak connection] stats in
       DispatchQueue.main.async {
         guard let self, let connection, self.connection === connection else { return }
-        self.controls.call("stats", stats)
+        self.latestStats = stats
+        if self.controlsReady {
+          self.controls.call("stats", stats)
+        }
       }
     }
     renderer.start(fps: receiverRate)
     onState(["state": "connecting", "maxFps": receiverRate])
     connection.start()
-    controls.call("connecting", [:])
-    controls.session(["active": active, "maxFps": receiverRate])
+    if controlsReady {
+      controls.call("connecting", [:])
+      controls.session(["active": active, "maxFps": receiverRate])
+    }
   }
 
   private func disconnect() {
     connection?.stop(); connection = nil
     supportsConfiguration = false; supportsPause = false
     audioAvailable = false; lastPictureSize = nil
+    pendingMessages.removeAll(); latestStats = nil
     renderer?.stop(); renderer?.removeFromSuperview(); renderer = nil
   }
 
@@ -287,7 +311,24 @@ final class LinkScreenView: ExpoView {
       guard message["version"] as? Int == 1 else { return }
       controlsReady = true
       attachment?.cancel(); attachment = nil
-      connect()
+      if connection == nil {
+        connect()
+      } else {
+        // Replay any early capabilities/control/cursor/picture events received while WebView booted.
+        if lastPictureSize == nil {
+          controls.call("connecting", [:])
+        }
+        controls.session(["active": active, "maxFps": receiverRate])
+        let buffered = pendingMessages
+        pendingMessages.removeAll()
+        for item in buffered { controls.call("message", item) }
+        if let size = lastPictureSize {
+          controls.call("picture", ["width": size.width, "height": size.height])
+        }
+        if let stats = latestStats {
+          controls.call("stats", stats)
+        }
+      }
     case "frame":
       guard let rect = message["rect"] as? [String: Double],
             let x = rect["x"], let y = rect["y"], let width = rect["w"], let height = rect["h"],

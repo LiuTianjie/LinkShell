@@ -17,10 +17,11 @@ final class SendQueueTests: XCTestCase {
   func testALargeFrameTakesItsSizeOverThePacersRate() {
     var queue = SendQueue()
     queue.set(encoderRate: 8_000_000, now: 0)
+    // 300 KB at 20 Mbit/s pacer = 120 ms backlog; crosses 75 ms admission threshold at 45 ms.
     queue.made(bytes: 300_000, now: 0)
     XCTAssertEqual(queue.wait(now: 0) * 1000, 120, accuracy: 0.1)
-    XCTAssertGreaterThan(queue.wait(now: 0.069) * 1000, Tuning.sendQueueAdmitMs)
-    XCTAssertLessThan(queue.wait(now: 0.071) * 1000, Tuning.sendQueueAdmitMs)
+    XCTAssertGreaterThan(queue.wait(now: 0.044) * 1000, Tuning.sendQueueAdmitMs)
+    XCTAssertLessThan(queue.wait(now: 0.046) * 1000, Tuning.sendQueueAdmitMs)
     XCTAssertEqual(queue.wait(now: 1), 0)
   }
 
@@ -36,15 +37,16 @@ final class SendQueueTests: XCTestCase {
     XCTAssertEqual(queue.rate, Double(Tuning.sendQueueLowestRate) * Tuning.pacerFactor)
   }
 
-  func testAKeyFramesBudgetIsAFifthOfASecondOfTheRate() {
-    XCTAssertEqual(Tuning.keyFrameBudget(bitrate: 8_000_000), 200_000)
-    XCTAssertEqual(Tuning.keyFrameBudget(bitrate: 2_000_000), 50_000)
+  func testAKeyFramesBudgetScalesWithPacerSendWindow() {
+    XCTAssertEqual(Tuning.keyFrameBudget(bitrate: 8_000_000), 400_000)
+    XCTAssertEqual(Tuning.keyFrameBudget(bitrate: 2_000_000), 100_000)
     XCTAssertEqual(Tuning.keyFrameBudget(bitrate: 0), 1024)
   }
 
-  /// With the real encoder: after a large frame nothing is encoded until it is reckoned sent, a
-  /// key frame asked for meanwhile is made then, and without the admission every frame is taken.
-  func testNothingIsEncodedBehindALargeFrame() throws {
+  /// With the real encoder: after a very large frame at a narrow rate, admission skips up to
+  /// `sendQueueMaxConsecutiveSkips` frames (never starving motion or GCC forever) and remembers
+  /// any keyframe request across the skip.
+  func testNothingIsEncodedBehindALargeFrameWithoutStarvingMotion() throws {
     for admission in [true, false] {
       var now = 100.0
       let counting = Counting()
@@ -57,31 +59,34 @@ final class SendQueueTests: XCTestCase {
       encoder.setCallback { image, _ in sizes.withLock { $0.append(image.buffer.count) }; came.signal(); return true }
       let settings = RTCVideoEncoderSettings()
       settings.name = "H264"; settings.width = 1280; settings.height = 720; settings.maxFramerate = 60
-      settings.startBitrate = 1_000; settings.mode = .screensharing
+      settings.startBitrate = 500; settings.mode = .screensharing
       guard encoder.startEncode(with: settings, numberOfCores: 2) == 0, counting.inner != nil else { throw XCTSkip("no low-latency hardware encoder here") }
-      XCTAssertEqual(encoder.setBitrate(1_000, framerate: 60), 0)
+      XCTAssertEqual(encoder.setBitrate(500, framerate: 60), 0)
       let key = [NSNumber(value: RTCFrameType.videoFrameKey.rawValue)], delta = [NSNumber(value: RTCFrameType.videoFrameDelta.rawValue)]
-      // A page of noise: its key frame is many times what 2.5 Mbit/s sends in 50 ms (15 KB).
+      // A page of noise: at 500 kbit/s (pacer 1.25 Mbit/s), 75 ms is ~12 KB, so the IDR exceeds it.
       XCTAssertEqual(encoder.encode(try Self.noise(1280, 720, at: 1), codecSpecificInfo: nil, frameTypes: key), 0)
       XCTAssertEqual(came.wait(timeout: .now() + 5), .success)
       let first = try XCTUnwrap(sizes.withLock { $0.first })
-      try XCTSkipIf(first < 40_000, "the key frame came out too small to queue (\(first) bytes)")
-      let reckoned = Double(first * 8) / 2_500_000
-      // A frame's time later the queue is still there.
+      try XCTSkipIf(first < 60_000, "the key frame came out too small to queue (\(first) bytes)")
+      // Next frames arrive while queue is deep: skip at most sendQueueMaxConsecutiveSkips, then admit!
       now += 1.0 / 60
       XCTAssertEqual(encoder.encode(try Self.noise(1280, 720, at: 2), codecSpecificInfo: nil, frameTypes: key), 0)
       if admission {
-        XCTAssertEqual(counting.keys.count, 1, "a picture was encoded behind the queue")
+        XCTAssertEqual(counting.keys.count, 1, "first frame behind deep queue should be skipped")
       } else {
-        // Taken by the encoder; its own rate control may still drop it, to pay for the first.
         XCTAssertEqual(counting.keys.count, 2)
         XCTAssertEqual(encoder.release(), 0)
         continue
       }
-      // Once it is reckoned sent, the next picture is taken, as the key frame that was asked for.
-      now += reckoned
-      XCTAssertEqual(encoder.encode(try Self.noise(1280, 720, at: 3), codecSpecificInfo: nil, frameTypes: delta), 0)
-      XCTAssertEqual(counting.keys, [true, true])
+      // Skip up to the cap, then the very next frame MUST be admitted as the remembered keyframe!
+      for idx in 1..<Tuning.sendQueueMaxConsecutiveSkips {
+        now += 1.0 / 60
+        XCTAssertEqual(encoder.encode(try Self.noise(1280, 720, at: Int64(2 + idx)), codecSpecificInfo: nil, frameTypes: delta), 0)
+        XCTAssertEqual(counting.keys.count, 1)
+      }
+      now += 1.0 / 60
+      XCTAssertEqual(encoder.encode(try Self.noise(1280, 720, at: 10), codecSpecificInfo: nil, frameTypes: delta), 0)
+      XCTAssertEqual(counting.keys, [true, true], "bounded admission must never starve motion forever")
       XCTAssertEqual(encoder.release(), 0)
     }
   }

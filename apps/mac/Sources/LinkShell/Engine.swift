@@ -10,8 +10,8 @@ enum Engine {
   /// (`--encoder stock` keeps the upstream encoder available for comparisons).
   static var ownEncoder = true
 
-  /// Off only for a comparison with the previous sender (`--no-flexfec`).
-  static var flexfec = true
+  /// Off by default (NACK/RTX is faster and wastes no video bitrate on clean/LAN links); opt-in via `--flexfec`.
+  static var flexfec = false
 
   /// Where the engine says what the host should know (its log).
   static var report: (String) -> Void = { _ in }
@@ -22,7 +22,10 @@ enum Engine {
     // deprecated call; it has to come before anything else in the library.
     var trials = Tuning.fieldTrials
     if !playoutDelay { trials["WebRTC-ForceSendPlayoutDelay"] = nil }
-    if !flexfec {
+    if flexfec {
+      trials["WebRTC-FlexFEC-03-Advertised"] = "Enabled"
+      trials["WebRTC-FlexFEC-03"] = "Enabled"
+    } else {
       trials["WebRTC-FlexFEC-03-Advertised"] = "Disabled"
       trials["WebRTC-FlexFEC-03"] = "Disabled"
     }

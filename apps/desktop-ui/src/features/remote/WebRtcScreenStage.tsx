@@ -46,6 +46,7 @@ export function WebRtcScreenStage({
   fpsChoice,
   codecChoice,
   matchResolution,
+  pacingChoice,
   transportMode,
   controlWanted,
   audioEnabled = false,
@@ -168,6 +169,7 @@ export function WebRtcScreenStage({
       audio: initial.audioEnabled,
       hevc: codecChoice === "auto",
       match: matchResolution ? viewerScreenMatch() : undefined,
+      pacing: pacingChoice,
       relayed: streams.path !== "direct",
       videoTrack: transportMode !== "compat",
       video,
@@ -195,7 +197,7 @@ export function WebRtcScreenStage({
       receiver.stop();
       if (receiverRef.current === receiver) receiverRef.current = null;
     };
-  }, [codecChoice, link, matchResolution, reconnectNonce, revision, streams, transportMode]);
+  }, [codecChoice, link, matchResolution, pacingChoice, reconnectNonce, revision, streams, transportMode]);
 
   // Apply in-band display / resolution / fps updates without tearing down WebRTC when supported.
   useEffect(() => {

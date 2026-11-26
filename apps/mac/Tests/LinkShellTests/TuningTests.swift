@@ -3,9 +3,9 @@ import XCTest
 
 /// The ceiling on what the video track may send, for the pictures a viewer can ask for.
 final class TuningTests: XCTestCase {
-  func testCeilingAt1920IsUnchanged() {
-    XCTAssertEqual(Tuning.maxBitrate(width: 1920, height: 1080, fps: 30), 8_000_000)
-    XCTAssertEqual(Tuning.maxBitrate(width: 1920, height: 1080, fps: 60), 12_000_000)
+  func testCeilingAt1920ScalesCleanlyForCrispDesktopText() {
+    XCTAssertEqual(Tuning.maxBitrate(width: 1920, height: 1080, fps: 30), 10_000_000)
+    XCTAssertEqual(Tuning.maxBitrate(width: 1920, height: 1080, fps: 60), 16_000_000)
   }
 
   func testHighRefreshRequiresBothDisplaysAndKeepsAdaptationEnabled() {
@@ -19,7 +19,7 @@ final class TuningTests: XCTestCase {
     XCTAssertEqual(Tuning.fullRate(viewer: 60, display: 144), 60)
     XCTAssertEqual(Tuning.fullRate(viewer: 30, display: 120), 30)
     XCTAssertEqual(Tuning.fullRate(viewer: 120, display: 24), 24)
-    XCTAssertEqual(Tuning.maxBitrate(width: 1920, height: 1080, fps: 120), 24_000_000)
+    XCTAssertEqual(Tuning.maxBitrate(width: 1920, height: 1080, fps: 120), 32_000_000)
   }
 
   func testLargerPicturesGetMoreButLessThanInProportion() {
@@ -29,13 +29,23 @@ final class TuningTests: XCTestCase {
     XCTAssertGreaterThan(p2560, p1920)
     XCTAssertGreaterThan(p3840, p2560)
     // Four times the pixels, twice the bits.
-    XCTAssertEqual(p3840, 24_000_000)
-    XCTAssertLessThanOrEqual(Tuning.maxBitrate(width: 6016, height: 3384, fps: 60), 30_000_000)
+    XCTAssertEqual(p3840, 32_000_000)
+    XCTAssertLessThanOrEqual(Tuning.maxBitrate(width: 6016, height: 3384, fps: 60), 50_000_000)
   }
 
   func testSmallPicturesStayInProportionWithAFloor() {
-    XCTAssertEqual(Tuning.maxBitrate(width: 1280, height: 720, fps: 30), 3_555_555)
+    XCTAssertEqual(Tuning.maxBitrate(width: 1280, height: 720, fps: 30), 4_444_444)
     XCTAssertEqual(Tuning.maxBitrate(width: 320, height: 180, fps: 30), 2_000_000)
+  }
+
+  func testLowLatencyDefaultsAvoidFlexFECAndStartFast() {
+    XCTAssertEqual(Tuning.startBitrate, 6_000_000)
+    XCTAssertEqual(Tuning.lanFloor, 16_000_000)
+    XCTAssertEqual(Tuning.lanFloorWindow, 2)
+    XCTAssertEqual(Tuning.cursorRate, 120.0)
+    XCTAssertEqual(Tuning.idleRepeatInterval, 0.25)
+    XCTAssertEqual(Tuning.fieldTrials["WebRTC-ForceSendPlayoutDelay"], "min_ms:0,max_ms:0")
+    XCTAssertNil(Tuning.fieldTrials["WebRTC-FlexFEC-03"])
   }
 
   func testRequestedWidthIsHeldToTheWidest() {

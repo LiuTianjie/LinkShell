@@ -623,7 +623,7 @@ function transmitInput(message, lane) {
   if (channel && channel.readyState === "open") channel.send(JSON.stringify(message));
 }
 
-let moveWaiting = false;
+let moveWaiting = false, moveFramePending = false;
 /** Says where the pointer is: in order, when something is about to happen there. */
 function tell(placed) {
   if (!session.canInput()) { moveWaiting = false; return; }
@@ -640,15 +640,29 @@ function tell(placed) {
   clearTimeout(rest);
   if (!sure) rest = setTimeout(() => { if (!sure) tell(true); }, 80);
 }
-const flush = () => { if (moveWaiting) tell(false); };
-// A pointer position a frame: as often as the picture could show it.
-function moved() {
+const flush = () => {
+  moveFramePending = false;
+  if (moveWaiting) tell(false);
+};
+// Leading-edge immediate send on live pointer/trackpad motion + per-frame trailing coalesce:
+// cuts first-move latency by up to 16 ms while keeping pre-click placement (immediate = false)
+// single-packet on the reliable input channel.
+function moved(immediate = false) {
   if (!session.canInput()) return;
-  if (!moveWaiting) requestAnimationFrame(flush);
-  moveWaiting = true;
   movedAt = performance.now();
   glow();
   place();
+  if (immediate && !moveFramePending) {
+    moveFramePending = true;
+    tell(false);
+    requestAnimationFrame(flush);
+  } else {
+    if (!moveWaiting && !moveFramePending) {
+      moveFramePending = true;
+      requestAnimationFrame(flush);
+    }
+    moveWaiting = true;
+  }
 }
 // Everything else goes at once, after the position it happens at.
 function act(message) {
@@ -676,6 +690,7 @@ function releaseInput() {
   held = 0;
   sure = true;
   moveWaiting = false;
+  moveFramePending = false;
   clearTimeout(rest);
   clearTimeout(fade);
   clearTimeout(settling);
@@ -738,12 +753,12 @@ function click(buttonName, count) {
 }
 
 /** Puts the pointer under a point of the page; false when that is outside the picture. */
-function pointAt(x, y) {
+function pointAt(x, y, immediate = false) {
   const u = (x - shown.x) / shown.w, v = (y - shown.y) / shown.h;
   if (u < 0 || u > 1 || v < 0 || v > 1) return false;
   cursor.x = u;
   cursor.y = v;
-  moved();
+  moved(immediate);
   return true;
 }
 
@@ -760,7 +775,7 @@ function nudge(dx, dy, dt) {
     const shiftY = y < area.y + edge ? area.y + edge - y : y > area.y + area.h - edge ? area.y + area.h - edge - y : 0;
     if (shiftX || shiftY) panBy(shiftX, shiftY);
   }
-  moved();
+  moved(true);
 }
 
 // ---- Touch ----------------------------------------------------------------
@@ -845,7 +860,7 @@ stage.addEventListener("pointermove", (event) => {
     if (g.held) return;
     if (!controlling()) panBy(dx, dy);
     else if (mode === "trackpad") nudge(dx, dy, dt);
-    else if (g.dragging) pointAt(clamp(g.x, shown.x, shown.x + shown.w), clamp(g.y, shown.y, shown.y + shown.h));
+    else if (g.dragging) pointAt(clamp(g.x, shown.x, shown.x + shown.w), clamp(g.y, shown.y, shown.y + shown.h), true);
     else panBy(dx, dy);
   } else if (gesture.kind === "two" && touches.size === 2) {
     const g = gesture, c = centre();
@@ -942,7 +957,7 @@ function mouseDown(event) {
 }
 function mouseMove(event) {
   if (mouseHeld === "pan") return panBy(event.movementX, event.movementY);
-  if (controlling()) pointAt(clamp(event.clientX, shown.x, shown.x + shown.w), clamp(event.clientY, shown.y, shown.y + shown.h));
+  if (controlling()) pointAt(clamp(event.clientX, shown.x, shown.x + shown.w), clamp(event.clientY, shown.y, shown.y + shown.h), true);
 }
 function mouseUp(event) {
   if (mouseHeld && mouseHeld !== "pan") act({ t: "up", b: mouseHeld, n: mouseClicks.n, m: hardMods(event) });
