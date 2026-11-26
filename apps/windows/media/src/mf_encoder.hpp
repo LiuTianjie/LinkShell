@@ -8,6 +8,7 @@
 #include <wrl/client.h>
 
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -47,19 +48,20 @@ class MediaFoundationVideoEncoder : public webrtc::VideoEncoder {
   static std::vector<uint8_t> BuildFusionSeiNal(const std::string& layout_json, bool hevc);
 
  private:
+  struct FrameMeta {
+    uint32_t rtp_timestamp = 0;
+    int64_t render_time_ms = 0;
+    int64_t ntp_time_ms = 0;
+    webrtc::VideoRotation rotation = webrtc::kVideoRotation_0;
+    std::string fusion_layout;
+    bool requested_key = false;
+    int64_t encode_start_ms = 0;
+  };
+
   bool CreateMft(int width, int height, int fps, int bitrate_bps, bool try_hardware);
   bool ConfigureMft(int width, int height, int fps, int bitrate_bps);
-  bool DrainAsyncOutput(
-      const webrtc::VideoFrame& frame,
-      const std::string& fusion_layout,
-      bool requested_key,
-      int64_t encode_start_ms);
-  bool EmitSample(
-      IMFSample* sample,
-      const webrtc::VideoFrame& frame,
-      const std::string& fusion_layout,
-      bool requested_key,
-      int64_t encode_start_ms);
+  bool DrainAsyncOutput();
+  bool EmitSample(IMFSample* sample, const FrameMeta& meta);
   void CacheParameterSets(const uint8_t* data, size_t len, bool* out_is_key, bool* out_has_ps);
   void DestroyMft();
 
@@ -95,8 +97,10 @@ class MediaFoundationVideoEncoder : public webrtc::VideoEncoder {
 
   SendQueue send_queue_;
   int queue_skipped_ = 0;
+  int queue_consecutive_skips_ = 0;
   double queue_longest_ = 0.0;
   double queue_since_ = 0.0;
+  std::deque<FrameMeta> pending_meta_;
 };
 
 class ScreenVideoEncoderFactory : public webrtc::VideoEncoderFactory {

@@ -477,7 +477,9 @@ int32_t MediaFoundationVideoEncoder::Encode(
     fusion_layout = d3d_buf->fusion_layout();
     if (is_hardware_ && d3d_buf->texture()) {
       ComPtr<IMFMediaBuffer> dxgi_buf;
-      if (FAILED(MFCreateDXGISurfaceBuffer(__uuidof(ID3D11Texture2D), d3d_buf->texture(), 0, FALSE, &dxgi_buf))) {
+      HRESULT dhr = MFCreateDXGISurfaceBuffer(__uuidof(ID3D11Texture2D), d3d_buf->texture(), 0, FALSE, &dxgi_buf);
+      if (FAILED(dhr)) {
+        if (log_) log_(impl_name_ + " MFCreateDXGISurfaceBuffer failed hr=" + std::to_string(dhr));
         return WEBRTC_VIDEO_CODEC_ERROR;
       }
       ComPtr<IMF2DBuffer> buf2d;
@@ -560,9 +562,16 @@ int32_t MediaFoundationVideoEncoder::Encode(
         return WEBRTC_VIDEO_CODEC_ERROR;
       }
     }
-    if (pending_need_input_ <= 0) return WEBRTC_VIDEO_CODEC_ERROR;
+    if (pending_need_input_ <= 0) {
+      if (log_) log_(impl_name_ + " async MFT did not emit METransformNeedInput");
+      return WEBRTC_VIDEO_CODEC_ERROR;
+    }
     pending_need_input_ -= 1;
-    if (FAILED(mft_->ProcessInput(0, in_sample.Get(), 0))) return WEBRTC_VIDEO_CODEC_ERROR;
+    HRESULT phr = mft_->ProcessInput(0, in_sample.Get(), 0);
+    if (FAILED(phr)) {
+      if (log_) log_(impl_name_ + " async ProcessInput failed hr=" + std::to_string(phr));
+      return WEBRTC_VIDEO_CODEC_ERROR;
+    }
     // Queue metadata in strict FIFO order so primed async MFT outputs keep exact timestamps & Fusion SEI.
     pending_meta_.push_back(std::move(meta));
     while (pending_meta_.size() > 8) pending_meta_.pop_front();

@@ -29,11 +29,11 @@ inline constexpr int kReducedFps = 30;
 inline constexpr int kMaxFps = 120;
 inline constexpr int kMinFps = 1;
 
-inline constexpr int kStartBitrateBps = 2'000'000;
+inline constexpr int kStartBitrateBps = 6'000'000;
 inline constexpr int kRelayDefaultKbps = 3000;
 
-inline constexpr int kLanFloorBps = 8'000'000;
-inline constexpr int kLanFloorWindow = 4;
+inline constexpr int kLanFloorBps = 16'000'000;
+inline constexpr int kLanFloorWindow = 2;
 inline constexpr double kLanFloorRttMs = 20.0;
 inline constexpr double kLanFloorLiftRttMs = 40.0;
 inline constexpr double kLanFloorLoss = 0.01;
@@ -42,8 +42,8 @@ inline constexpr double kLanFloorSendDelayMs = 10.0;
 inline constexpr double kLanFloorLiftSendDelayMs = 50.0;
 inline constexpr int kLanFloorSettle = 5;
 inline constexpr int kLanFloorLiftSendDelaySeconds = 3;
-inline constexpr int kLanFloorRecalm = 30;
-inline constexpr int kLanFloorMaxLifts = 2;
+inline constexpr int kLanFloorRecalm = 20;
+inline constexpr int kLanFloorMaxLifts = 6;
 
 inline constexpr int kIceRestartAfterSeconds = 8;
 inline constexpr int kIceRestartLimit = 2;
@@ -62,15 +62,16 @@ inline constexpr double kFrameRateEase = 0.5;
 inline constexpr int kFrameRateEaseFloorBps = 1'000'000;
 
 inline constexpr double kPacerFactor = 2.5;
-inline constexpr double kKeyFrameSendSeconds = 0.08;
-inline constexpr double kSendQueueAdmitMs = 50.0;
+inline constexpr double kKeyFrameSendSeconds = 0.16;
+inline constexpr double kSendQueueAdmitMs = 75.0;
+inline constexpr int kSendQueueMaxConsecutiveSkips = 2;
 inline constexpr int kSendQueueLowestRateBps = 300'000;
 
 inline constexpr int kSettleRepeatMs = 100;
 inline constexpr int kSettleWindowMs = 1000;
-inline constexpr int kIdleRepeatMs = 500;
+inline constexpr int kIdleRepeatMs = 250;
 
-inline constexpr int kCursorIntervalMs = 16;  // ~60 Hz
+inline constexpr int kCursorIntervalMs = 8;   // ~120 Hz for ProMotion / high-refresh receivers
 inline constexpr int kShapeIntervalMs = 200;  // 5 Hz
 inline constexpr size_t kMaxEventBytes = 64'000;
 
@@ -83,11 +84,11 @@ inline int FullRate(int viewer_max_fps, int display_hz) {
 
 inline int MaxBitrateBps(int width, int height, int fps) {
   double pixels = static_cast<double>(std::max(1, width) * std::max(1, height)) / (1920.0 * 1080.0);
-  double frame_factor = fps > 60 ? 1.5 * static_cast<double>(fps) / 60.0 : (fps > 30 ? 1.5 : 1.0);
+  double frame_factor = fps > 60 ? 1.6 * static_cast<double>(fps) / 60.0 : (fps > 30 ? 1.6 : 1.0);
   double scaled = pixels > 1.0 ? std::sqrt(pixels) : pixels;
-  double rate = 8'000'000.0 * scaled * frame_factor;
+  double rate = 10'000'000.0 * scaled * frame_factor;
   if (rate < 2'000'000.0) rate = 2'000'000.0;
-  if (rate > 30'000'000.0) rate = 30'000'000.0;
+  if (rate > 50'000'000.0) rate = 50'000'000.0;
   return static_cast<int>(rate);
 }
 

@@ -499,7 +499,10 @@ void ScreenSession::OnConnectionState(webrtc::PeerConnectionInterface::PeerConne
   if (closed_.load()) return;
   bool is_conn = (state == webrtc::PeerConnectionInterface::PeerConnectionState::kConnected);
   connected_.store(is_conn);
-  if (is_conn) ever_connected_.store(true);
+  if (is_conn) {
+    ever_connected_.store(true);
+    if (source_ && !paused_.load()) source_->ResendLatest();
+  }
   ipc_->Emit({{"t", "rtc.state"}, {"v", viewer_id_}, {"connection", ConnectionStateString(state)}});
 }
 

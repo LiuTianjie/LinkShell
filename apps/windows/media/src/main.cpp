@@ -208,6 +208,7 @@ int main(int argc, char** argv) {
               frames += 1;
               return Result(Result::OK);
             }
+            void OnFrameDropped(uint32_t, int, bool) override {}
           } sink;
           std::vector<std::string> enc_logs;
           MediaFoundationVideoEncoder enc(d3d, fmt, [&](const std::string& m) { enc_logs.push_back(m); });
@@ -216,15 +217,15 @@ int main(int argc, char** argv) {
           vc.width = kW;
           vc.height = kH;
           vc.maxFramerate = 60;
-          vc.startBitrate = 2000;
-          vc.maxBitrate = 4000;
+          vc.startBitrate = 6000;
+          vc.maxBitrate = 12000;
           vc.minBitrate = 500;
           webrtc::VideoEncoder::Settings st(webrtc::VideoEncoder::Capabilities(false), 2, 1200);
           int rc = enc.InitEncode(&vc, st);
           if (rc == 0) {
             enc.RegisterEncodeCompleteCallback(&sink);
             std::vector<webrtc::VideoFrameType> key_types = {webrtc::VideoFrameType::kVideoFrameKey};
-            for (int i = 0; i < 3; ++i) {
+            for (int i = 0; i < 4; ++i) {
               webrtc::VideoFrame vf = webrtc::VideoFrame::Builder()
                                           .set_video_frame_buffer(frame_buf)
                                           .set_timestamp_us(1000000 + i * 16667)
