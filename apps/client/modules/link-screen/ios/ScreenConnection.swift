@@ -364,7 +364,7 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
   /// Prefer hardware HEVC/H.264 and strip FlexFEC-03 so repair packets never steal video bitrate even against older hosts.
   private func preferCodecs(_ transceiver: RTCRtpTransceiver) {
     guard let factory else { return }
-    let available = factory.rtpReceiverCapabilities(forMediaType: kRTCMediaTypeVideo).codecs.filter {
+    let available = factory.rtpReceiverCapabilities(forKind: kRTCMediaStreamTrackKindVideo).codecs.filter {
       $0.name.uppercased() != "FLEXFEC-03"
     }
     let preferHEVC = HEVCDecoder.available
