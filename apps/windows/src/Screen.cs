@@ -69,10 +69,30 @@ namespace LinkShell.Windows {
         [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool GetUserObjectInformation(IntPtr handle, int index, StringBuilder value, int length, out int needed);
         delegate bool MonitorEnumProc(IntPtr monitor, IntPtr hdc, IntPtr rect, IntPtr data);
         [DllImport("user32.dll")] static extern bool EnumDisplayMonitors(IntPtr hdc, IntPtr clip, MonitorEnumProc callback, IntPtr data);
-        [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern bool GetMonitorInfo(IntPtr monitor, ref MONITORINFO info);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern bool GetMonitorInfo(IntPtr monitor, ref MONITORINFOEX info);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern bool EnumDisplayDevices(string device, uint index, ref DISPLAY_DEVICE displayDevice, uint flags);
+        [DllImport("user32.dll")] static extern bool RedrawWindow(IntPtr hWnd, IntPtr lprcUpdate, IntPtr hrgnUpdate, uint flags);
+        [DllImport("kernel32.dll")] static extern uint SetThreadExecutionState(uint esFlags);
         [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
-        [StructLayout(LayoutKind.Sequential)] struct MONITORINFO { public int cbSize; public RECT rcMonitor; public RECT rcWork; public uint dwFlags; }
-        internal struct DisplayInfo { public Rectangle Bounds; public bool Primary; }
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] struct MONITORINFOEX {
+            public int cbSize; public RECT rcMonitor; public RECT rcWork; public uint dwFlags;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string szDevice;
+        }
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] struct DISPLAY_DEVICE {
+            public int cb;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string DeviceName;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceString;
+            public uint StateFlags;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceID;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceKey;
+        }
+        internal struct DisplayInfo {
+            public Rectangle Bounds;
+            public bool Primary;
+            public IntPtr Monitor;
+            public string DeviceName;
+            public bool HasActiveMonitor;
+        }
         [StructLayout(LayoutKind.Sequential)] struct POINT { public int X, Y; }
         [StructLayout(LayoutKind.Sequential)] struct CURSORINFO { public int cbSize, flags; public IntPtr hCursor; public POINT ptScreenPos; }
         [StructLayout(LayoutKind.Sequential)] struct ICONINFO { [MarshalAs(UnmanagedType.Bool)] public bool fIcon; public int xHotspot, yHotspot; public IntPtr hbmMask, hbmColor; }
@@ -238,18 +258,38 @@ namespace LinkShell.Windows {
             EnsureSharingEnabled();
             if (!IsDefaultDesktopActive()) throw new InvalidOperationException("Windows 已锁定或正在显示安全桌面，请在电脑上解锁后重新连接");
         }
+        internal static bool DisplayHasActiveMonitor(string deviceName) {
+            if (String.IsNullOrEmpty(deviceName)) return false;
+            for (uint j = 0; j < 16; j++) {
+                var mon = new DISPLAY_DEVICE();
+                mon.cb = Marshal.SizeOf(typeof(DISPLAY_DEVICE));
+                if (!EnumDisplayDevices(deviceName, j, ref mon, 0)) break;
+                if ((mon.StateFlags & 0x1u) != 0) return true;
+            }
+            return false;
+        }
+
+        // Gently asks DWM to present a fresh frame (wakes sleeping/headless displays without moving cursor).
+        internal static void NudgeDesktopForCapture() {
+            try { SetThreadExecutionState(0x00000002u | 0x00000001u); } catch { }
+            try { RedrawWindow(IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, 0x0001u | 0x0004u | 0x0080u | 0x0400u); } catch { }
+        }
+
         // Query Win32 directly on each call: System.Windows.Forms.Screen.AllScreens caches monitor
         // bounds for the process lifetime when no WinForms message loop processes WM_DISPLAYCHANGE.
-        internal static DisplayInfo[] EnumerateDisplays() {
+        internal static DisplayInfo[] EnumerateDisplays(bool probeMonitors = true) {
             var list = new List<DisplayInfo>();
             EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, delegate(IntPtr monitor, IntPtr hdc, IntPtr rect, IntPtr data) {
-                var info = new MONITORINFO();
-                info.cbSize = Marshal.SizeOf(typeof(MONITORINFO));
+                var info = new MONITORINFOEX();
+                info.cbSize = Marshal.SizeOf(typeof(MONITORINFOEX));
                 if (GetMonitorInfo(monitor, ref info)) {
                     var rc = info.rcMonitor;
                     list.Add(new DisplayInfo {
                         Bounds = Rectangle.FromLTRB(rc.Left, rc.Top, rc.Right, rc.Bottom),
                         Primary = (info.dwFlags & 1u) != 0,
+                        Monitor = monitor,
+                        DeviceName = info.szDevice,
+                        HasActiveMonitor = probeMonitors && DisplayHasActiveMonitor(info.szDevice),
                     });
                 }
                 return true;
@@ -257,9 +297,9 @@ namespace LinkShell.Windows {
             if (list.Count == 0) {
                 int sw = GetSystemMetrics(0), sh = GetSystemMetrics(1);
                 if (sw > 0 && sh > 0) {
-                    list.Add(new DisplayInfo { Bounds = new Rectangle(0, 0, sw, sh), Primary = true });
+                    list.Add(new DisplayInfo { Bounds = new Rectangle(0, 0, sw, sh), Primary = true, Monitor = IntPtr.Zero, DeviceName = "", HasActiveMonitor = false });
                 } else {
-                    return Screen.AllScreens.Where(s => s.Bounds.Width > 0 && s.Bounds.Height > 0).Select(s => new DisplayInfo { Bounds = s.Bounds, Primary = s.Primary }).ToArray();
+                    return Screen.AllScreens.Where(s => s.Bounds.Width > 0 && s.Bounds.Height > 0).Select(s => new DisplayInfo { Bounds = s.Bounds, Primary = s.Primary, Monitor = IntPtr.Zero, DeviceName = s.DeviceName, HasActiveMonitor = false }).ToArray();
                 }
             }
             return list.OrderByDescending(d => d.Primary).ToArray();
@@ -280,23 +320,31 @@ namespace LinkShell.Windows {
             return SystemInformation.VirtualScreen;
         }
 
-        static Rectangle Display(int index) {
+        internal static DisplayInfo DisplayEntry(int index, bool probeMonitors = true) {
             EnsureDesktop();
-            var all = EnumerateDisplays();
+            var all = EnumerateDisplays(probeMonitors);
             if (all.Length == 0) throw new InvalidOperationException("这台 Windows 电脑未检测到可用显示器（无头模式）。请连接显示器、插入 HDMI/DP 欺骗器，或安装虚拟显示器驱动（Virtual Display Driver）后再试。");
             if (index < 0 || index >= all.Length) throw new ArgumentOutOfRangeException("display", "屏幕已断开，请重新打开屏幕共享");
-            return all[index].Bounds;
+            return all[index];
+        }
+
+        static Rectangle Display(int index) {
+            return DisplayEntry(index, false).Bounds;
         }
         static void Write(object value) { lock (OutputLock) { Console.WriteLine(Json.Serialize(value)); Console.Out.Flush(); } }
 
         static void Capture(int screen, int width, int fps, int quality) {
             EnsureSharingEnabled();
+            bool hasActiveMonitor = true;
             Rectangle svcBounds;
             if (!IsDefaultDesktopActive() && TryServiceDisplayBounds(screen, out svcBounds)) {
                 bounds = svcBounds;
             } else {
-                bounds = Display(screen);
+                var entry = DisplayEntry(screen);
+                bounds = entry.Bounds;
+                hasActiveMonitor = entry.HasActiveMonitor;
             }
+            NudgeDesktopForCapture();
             captureProfile = new CaptureProfile(width, fps, quality);
             // EOF also stops capture after a host crash; nothing keeps recording without a reader.
             var eof = new Thread(() => {
@@ -325,8 +373,10 @@ namespace LinkShell.Windows {
             long checkedAt = -1000;
             IntPtr screenDC = GetDC(IntPtr.Zero);
             if (screenDC == IntPtr.Zero) throw new InvalidOperationException("无法读取 Windows 桌面");
-            string duplicationReason;
-            var duplication = DesktopDuplication.TryCreate(bounds, out duplicationReason);
+            string duplicationReason = "no active physical monitor (headless)";
+            // Unplugged/headless displays still open DXGI without error but never present frames; go straight to GDI.
+            var duplication = hasActiveMonitor ? DesktopDuplication.TryCreate(bounds, out duplicationReason) : null;
+            long duplicationStartedAt = clock.ElapsedMilliseconds;
             Console.Error.WriteLine(duplication == null ? "[capture] GDI: " + duplicationReason : "[capture] DXGI Desktop Duplication");
             try {
                 using (var output = Console.OpenStandardOutput())
@@ -357,7 +407,9 @@ namespace LinkShell.Windows {
                                         if (screenDC != IntPtr.Zero) ReleaseDC(IntPtr.Zero, screenDC);
                                         screenDC = GetDC(IntPtr.Zero);
                                         if (screenDC == IntPtr.Zero) throw new InvalidOperationException("无法读取 Windows 桌面");
-                                        duplication = DesktopDuplication.TryCreate(bounds, out duplicationReason);
+                                        hasActiveMonitor = DisplayEntry(screen).HasActiveMonitor;
+                                        duplication = hasActiveMonitor ? DesktopDuplication.TryCreate(bounds, out duplicationReason) : null;
+                                        duplicationStartedAt = clock.ElapsedMilliseconds;
                                         Interlocked.Exchange(ref forceFrame, 1);
                                         checkedAt = -1000;
                                         continue;
@@ -375,6 +427,11 @@ namespace LinkShell.Windows {
                                         duplication.Dispose(); duplication = null;
                                         if (!IsDefaultDesktopActive()) { checkedAt = -1000; continue; }
                                         Console.Error.WriteLine("[capture] GDI fallback: " + error.Message);
+                                    }
+                                    // Sleeping/unplugged displays open DXGI successfully yet return WaitTimeout forever.
+                                    if (duplication != null && !copied && frame.Length == 0 && began - duplicationStartedAt >= 1000) {
+                                        duplication.Dispose(); duplication = null;
+                                        Console.Error.WriteLine("[capture] GDI fallback: DXGI produced no initial frame");
                                     }
                                 }
                                 if (duplication == null) {

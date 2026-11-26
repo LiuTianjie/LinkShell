@@ -39,7 +39,7 @@ Windows 桌面端复用现有 Host / Gateway / 手机协议，窗口与 macOS �
 
 Windows 屏幕组件在已登录、已解锁的交互桌面中运行，按远程请求启动，支持多显示器与 DPI 缩放。手机和 Web 工作区继续使用现有屏幕查看页、配对权限及端到端加密通道。
 
-优先走 DXGI Desktop Duplication → GPU 缩放 → 硬件 H.264 → WebRTC 视频直连，复用 Mac 的 SDP/ICE 协商与 iOS 原生、Android 原生、WebView、Web 接收端。安装包自带校验固定版本的 FFmpeg LGPL 共享运行库，按显示适配器选择 AMD AMF、NVIDIA NVENC 或 Intel QSV，之后尝试硬件 Media Foundation，采用低延迟 VBR + QP 边界与 BT.709 色彩矩阵以保持高分辨率文字锐利。能力上限支持至原生 4K（3840×2160、60 fps、最高 24 Mbps），TURN 中继场景自动限帧至 30 fps 以保证单帧清晰度。已补齐 Win32 光标形状同步、WASAPI loopback 系统音频采集及 Fusion 文件剪贴板。
+优先走 DXGI Desktop Duplication / Windows.Graphics.Capture（`gfxcapture` 内置 GPU bicubic 缩放）→ 硬件 H.264 → WebRTC 视频直连，复用 Mac 的 SDP/ICE 协商与 iOS 原生、Android 原生、WebView、Web 接收端。未检测到活跃物理显示器（拔掉显示器、息屏或合盖等无头场景）或 DXGI 2.2 秒无首帧时，自动无缝切换至 `gfxcapture`（NVIDIA 零拷贝直连 NVENC，AMD/Intel/通用 GPU 走 `hwdownload`→硬件 H.264），进一步兜底至 `gdigrab` + 硬件/软件 Media Foundation H.264 与 GDI JPEG，无需强依赖虚拟显示器驱动即可开箱捕获。Node 发送端采用 `setImmediate` 批发送（避免 Windows 15.6 ms `setTimeout(1)` 定时器拖慢关键帧）、收紧 VBV 缓冲与 2 秒 GOP，并在 ICE 建连阶段缓存首个 GOP 实现静态无头桌面毫秒级出首帧。能力上限支持至原生 4K（3840×2160、60 fps、最高 24 Mbps），TURN 中继场景自动限帧至 30 fps 以保证单帧清晰度。已补齐 Win32 光标形状同步、WASAPI loopback 系统音频采集及 Fusion 文件剪贴板。
 
 设置可关闭远程屏幕，拒绝后续采集与输入。**可选 `LinkShellScreenService` 系统控制服务**：在首次安装完成页或桌面版「总览 / 通用设置」中一键授权一次后，将极简纯 C# 组件 `LinkShell.Screen.exe` 安装到受系统保护的 `%ProgramFiles%\LinkShell\ScreenService\` 并以 `LocalSystem` 运行（Node/Electron/FFmpeg 绝不以 SYSTEM 运行，Named Pipe 同时校检用户 SID DACL 与 256 位随机密钥），从而支持直接操控管理员 PowerShell / 任务管理器等高权限窗口，并在现有 WebRTC/JPEG 通道内实时查看与点击 UAC 安全桌面弹窗及锁屏。未安装系统服务时，弹出 UAC 仅暂停采集而不断开会话。无物理显示器的无头 Windows 主机需插接 HDMI/DP 欺骗器或安装开源虚拟显示器驱动（Virtual Display Driver）以启用硬件加速捕获。
 

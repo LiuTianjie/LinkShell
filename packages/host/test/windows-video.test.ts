@@ -149,6 +149,10 @@ describe("what a small computer can make", () => {
     expect(windowsVideoEnv().LINKSHELL_WINDOWS_VIDEO_HINT).toBeUndefined();
     noteWindowsVideo("[video] encoder=h264_qsv width=1920 height=1280 fps=30 path=compatible\n");
     expect(windowsVideoEnv().LINKSHELL_WINDOWS_VIDEO_HINT).toBe("h264_qsv:compatible");
+    noteWindowsVideo("[video] encoder=h264_nvenc width=2560 height=1440 fps=60 path=native source=gfxcapture\n");
+    expect(windowsVideoEnv().LINKSHELL_WINDOWS_VIDEO_HINT).toBe("gfxcapture:h264_nvenc:native");
+    noteWindowsVideo("[video] encoder=h264_mf width=1920 height=1080 fps=30 path=software source=gdigrab\n");
+    expect(windowsVideoEnv().LINKSHELL_WINDOWS_VIDEO_HINT).toBe("gdigrab:h264_mf:software");
   });
 });
 
@@ -659,4 +663,60 @@ describe("Windows video quality, pacing, recovery and in-band reconfigure", () =
     expect(videos[1]!.proc.exitCode).toBe(0);
     expect(channels.get("input")?.readyState).toBe("open");
   }, 20_000);
+
+  it("replays warmup GOP immediately on WebRTC connect (static headless WGC), sends large IDRs without setTimeout(1) stalls, and avoids breaking P-frame chains on brief spikes", async () => {
+    const session = new WindowsVideoSession(
+      { screen: 0, iceServers: [] },
+      { tell: () => {}, input: () => {}, lost: () => {}, log: () => {} },
+    );
+    cleanups.push(() => session.end());
+
+    const internals = session as unknown as {
+      pc: { connectionStateChange: { execute(state: string): void } };
+      sender: { sendRtp: (pkt: unknown) => Promise<void>; onPictureLossIndication: { execute(): void } };
+      connected: boolean;
+      needsKey: boolean;
+      sentFrames: number;
+      sending: boolean;
+      pending: { unit: Buffer; key: boolean; at: number }[];
+      lastCapturedAt: number;
+      enqueue(unit: Buffer, key: boolean): void;
+      frame(unit: Buffer, key: boolean, capturedAt: number): Promise<void>;
+    };
+
+    let rtpPackets = 0;
+    let lastPacketAt = 0;
+    internals.sender.sendRtp = async () => { rtpPackets++; lastPacketAt = performance.now(); };
+
+    // 1. Static headless screen emits ONLY 1 IDR while ICE is still connecting (!connected).
+    const bigIdr = Buffer.concat([aud, nal(0x67), nal(0x68), nal(0x65, Buffer.alloc(145_000, 0x33))]);
+    internals.enqueue(bigIdr, true);
+    expect(internals.sentFrames).toBe(0);
+    expect(rtpPackets).toBe(0);
+
+    // 2. When WebRTC transitions to connected, the cached warmup IDR flushes immediately without waiting for another frame,
+    //    and sending 130+ RTP packets uses setImmediate (not Windows 15.6ms setTimeout(1)), completing well under 30ms.
+    const started = performance.now();
+    internals.pc.connectionStateChange.execute("connected");
+    await vi.waitFor(() => expect(internals.sentFrames).toBe(1), { timeout: 2000, interval: 5 });
+    const elapsedMs = lastPacketAt - started;
+    expect(rtpPackets).toBeGreaterThan(120);
+    expect(elapsedMs).toBeLessThan(35);
+    expect(internals.needsKey).toBe(false);
+
+    // 3. Static-screen PLI (>400ms idle with no P-frames after key) replays the cached IDR once for instant recovery.
+    const beforePliPackets = rtpPackets;
+    internals.lastCapturedAt = performance.now() - 1000;
+    internals.sender.onPictureLossIndication.execute();
+    await vi.waitFor(() => expect(rtpPackets).toBeGreaterThan(beforePliPackets + 100), { timeout: 2000, interval: 5 });
+
+    // 4. A brief 6-frame P-frame spike (no newer IDR) does NOT break the reference chain (needsKey stays false).
+    const pframe = Buffer.concat([aud, nal(0x41)]);
+    internals.sending = true;
+    const now = performance.now();
+    internals.pending = Array.from({ length: 6 }, (_, idx) => ({ unit: pframe, key: false, at: now - (6 - idx) * 16 }));
+    internals.enqueue(pframe, false);
+    expect(internals.needsKey).toBe(false);
+    expect(internals.pending).toHaveLength(7);
+  });
 });

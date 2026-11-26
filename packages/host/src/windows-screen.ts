@@ -43,9 +43,14 @@ export function windowsVideoEnv(): NodeJS.ProcessEnv {
   return { ...process.env, LINKSHELL_VIDEO_FRAMED: "1", ...(videoHint ? { LINKSHELL_WINDOWS_VIDEO_HINT: videoHint } : {}) };
 }
 
-/** Reads the helper's `[video] encoder=h264_qsv … path=compatible` line. */
+/** Reads the helper's `[video] encoder=h264_qsv … path=compatible [source=gfxcapture]` line. */
 export function noteWindowsVideo(stderr: string): void {
-  const found = /\[video\] encoder=(h264_[a-z]+)\b[^\n]*\bpath=(native|compatible)/.exec(stderr);
+  const withSource = /\[video\] encoder=(h264_[a-z]+)\b[^\n]*\bpath=(native|compatible|software)\b[^\n]*\bsource=(ddagrab|gfxcapture|gdigrab)/.exec(stderr);
+  if (withSource) {
+    videoHint = `${withSource[3]}:${withSource[1]}:${withSource[2]}`;
+    return;
+  }
+  const found = /\[video\] encoder=(h264_[a-z]+)\b[^\n]*\bpath=(native|compatible|software)/.exec(stderr);
   if (found) videoHint = `${found[1]}:${found[2]}`;
 }
 

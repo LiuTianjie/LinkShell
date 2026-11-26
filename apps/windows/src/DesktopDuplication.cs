@@ -83,6 +83,28 @@ namespace LinkShell.Windows {
         static IntPtr Query(IntPtr value, Guid id) { IntPtr result; Check(Marshal.QueryInterface(value, ref id, out result)); return result; }
         static void Release(ref IntPtr value) { if (value != IntPtr.Zero) { Marshal.Release(value); value = IntPtr.Zero; } }
 
+        // Query the primary DXGI adapter vendor even when no physical outputs are attached
+        // (headless/virtual-display Windows), so hardware NVENC/AMF/QSV is still chosen first.
+        public static uint PrimaryVendor() {
+            IntPtr factory = IntPtr.Zero;
+            try {
+                Guid factoryId = DxgiFactory1;
+                if (CreateDXGIFactory1(ref factoryId, out factory) < 0) return 0;
+                for (uint a = 0; ; a++) {
+                    IntPtr adapter = IntPtr.Zero;
+                    if (Method<EnumAdapters1>(factory, 12)(factory, a, out adapter) < 0) break;
+                    try {
+                        AdapterDesc info;
+                        if (Method<GetAdapterDesc>(adapter, 8)(adapter, out info) >= 0 && info.Vendor != 0x1414 && info.Vendor != 0) {
+                            return info.Vendor;
+                        }
+                    } finally { Release(ref adapter); }
+                }
+            } catch { }
+            finally { Release(ref factory); }
+            return 0;
+        }
+
         // Display enumeration order is not DXGI output order, and hybrid/multi-GPU systems attach
         // external monitors to secondary adapters. Enumerate all DXGI adapters and match bounds.
         public static int VideoOutput(Rectangle bounds, out uint vendor) {

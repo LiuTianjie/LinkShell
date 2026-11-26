@@ -213,6 +213,8 @@ test('Windows native helpers maintain multi-GPU, dynamic display, monotonic tick
   const read = name => readFileSync(resolve('src', name), 'utf8');
   const screen = read('Screen.cs');
   assert.match(screen, /\bEnumDisplayMonitors\b/);
+  assert.match(screen, /\bDisplayHasActiveMonitor\b/);
+  assert.match(screen, /\bNudgeDesktopForCapture\b/);
   assert.match(screen, /var displays = EnumerateDisplays\(\);/);
   assert.match(screen, /SetStretchBltMode\(dc,\s*4\)/);
   assert.match(screen, /\bEnsureSharingEnabled\b/);
@@ -223,7 +225,10 @@ test('Windows native helpers maintain multi-GPU, dynamic display, monotonic tick
   assert.match(videoCapture, /LINKSHELL_WINDOWS_PROFILE/);
   assert.match(videoCapture, /Math\.Min\(3840,\s*width\)/);
   assert.match(videoCapture, /24000000/);
-  assert.match(videoCapture, /flags=lanczos/);
+  assert.match(videoCapture, /scale_mode=bicubic/);
+  assert.match(videoCapture, /flags=bilinear/);
+  assert.match(videoCapture, /gfxcapture=/);
+  assert.match(videoCapture, /-f gdigrab/);
   assert.match(videoCapture, /bt709/);
   assert.match(videoCapture, /-rc vbr -cq 19/);
   assert.match(videoCapture, /scale_d3d11=width=.*:format=nv12/);
@@ -243,6 +248,7 @@ test('Windows native helpers maintain multi-GPU, dynamic display, monotonic tick
   const dxgi = read('DesktopDuplication.cs');
   assert.match(dxgi, /\bCreateDXGIFactory1\b/);
   assert.match(dxgi, /\bEnumAdapters1\b/);
+  assert.match(dxgi, /\bPrimaryVendor\b/);
 
   const fusion = read('Fusion.cs');
   assert.doesNotMatch(fusion, /\bEnvironment\.TickCount\b/);

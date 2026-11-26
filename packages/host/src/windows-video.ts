@@ -177,6 +177,13 @@ export class WindowsVideoSession implements ScreenVideoSession {
   private hidden = false;
   private sending = false;
   private pending: { unit: Buffer; key: boolean; at: number }[] = [];
+  /** Buffers the latest IDR + P-frames emitted while ICE is still connecting so static screens (WGC) appear instantly on connect. */
+  private warmupGop: { unit: Buffer; key: boolean }[] = [];
+  private warmupBytes = 0;
+  private lastKeyUnit?: Buffer;
+  private framesAfterKey = 0;
+  private lastCapturedAt = 0;
+  private lastPliReplayAt = 0;
   private needsKey = true;
   private connected = false;
   private level = windowsMachineLevel();
@@ -245,7 +252,20 @@ export class WindowsVideoSession implements ScreenVideoSession {
     this.sender = this.pc.addTransceiver("video", { direction: "sendonly" }).sender;
     // Never gate P-frames on a PLI: FFmpeg cannot emit an on-demand IDR here, so setting needsKey
     // would discard seconds of valid P-frames instead of letting RTX/NACK repair packet loss.
-    this.sender.onPictureLossIndication.subscribe(() => { this.plis++; });
+    this.sender.onPictureLossIndication.subscribe(() => {
+      this.plis++;
+      if (!this.connected || this.closed || this.hidden) return;
+      const now = performance.now();
+      // On an event-driven static screen (e.g. headless WGC), resend the cached IDR or nudge DWM so a lost keyframe recovers immediately.
+      if (now - this.lastCapturedAt > 400 && now - this.lastPliReplayAt > 1000) {
+        this.lastPliReplayAt = now;
+        if (this.lastKeyUnit && this.framesAfterKey === 0) {
+          this.pushPending(this.lastKeyUnit, true, now);
+        } else if (this.child) {
+          configureWindowsCapture(this.child, { t: "nudge" });
+        }
+      }
+    });
     this.sender.onRtcp.subscribe(() => {
       const remb = Number(this.sender.receiverEstimatedMaxBitrate);
       if (Number.isFinite(remb) && remb > 0) {
@@ -274,6 +294,16 @@ export class WindowsVideoSession implements ScreenVideoSession {
         this.goodSince = performance.now();
         this.strainedIntervals = this.behindIntervals = 0;
         this.events.log("[screen] Windows H.264 video connected directly to the viewer");
+        // Immediately flush any GOP buffered while ICE was connecting so both static and moving WGC desktops render in <30ms.
+        if (this.warmupGop.length > 0 && !this.hidden) {
+          const buffered = this.warmupGop.splice(0);
+          this.warmupBytes = 0;
+          const now = performance.now();
+          for (const item of buffered) this.pending.push({ unit: item.unit, key: item.key, at: now });
+          this.drainPending();
+        } else if (this.child && !this.hidden) {
+          configureWindowsCapture(this.child, { t: "nudge" });
+        }
       } else if (state === "disconnected") {
         // Missed consent checks on Wi-Fi recover on their own; ending at once sent the viewer to
         // the JPEG fallback for good. The receivers allow four seconds, the sender a little more.
@@ -514,12 +544,13 @@ export class WindowsVideoSession implements ScreenVideoSession {
     child.stderr!.on("data", (chunk: Buffer) => {
       const text = chunk.toString(); errors = (errors + text).slice(-2000);
       noteWindowsVideo(text);
-      const dims = /\[video\] encoder=(\S+)\s+width=(\d+)\s+height=(\d+)/.exec(text);
+      const dims = /\[video\] encoder=(\S+)\s+width=(\d+)\s+height=(\d+)(?:[^\n]*\bpath=(\S+))?(?:[^\n]*\bsource=(\S+))?/.exec(text);
       if (dims) {
         this.encoder = dims[1]!;
         this.lastWidth = Number(dims[2]);
         this.lastHeight = Number(dims[3]);
-        this.events.log(`[screen] Windows hardware encoder: ${this.encoder}`);
+        const detail = [dims[5], dims[4]].filter(Boolean).join("/");
+        this.events.log(`[screen] Windows hardware encoder: ${this.encoder}${detail ? ` (${detail})` : ""}`);
       } else {
         const encoder = /\[video\] encoder=(\S+)/.exec(text)?.[1];
         if (encoder) { this.encoder = encoder; this.events.log(`[screen] Windows hardware encoder: ${encoder}`); }
@@ -536,9 +567,36 @@ export class WindowsVideoSession implements ScreenVideoSession {
     const nals = h264Nals(unit);
     for (const nal of nals) { const type = nal[0]! & 31; if (type === 7 || type === 8) this.parameterSets.set(type, Buffer.from(nal)); }
     if (!nals.some(nal => (nal[0]! & 31) >= 1 && (nal[0]! & 31) <= 5)) return;
-    this.captured++;
-    if (this.closed || this.hidden || !this.connected) return;
     const at = performance.now();
+    this.captured++;
+    this.lastCapturedAt = at;
+    if (key) {
+      this.lastKeyUnit = Buffer.from(unit);
+      this.framesAfterKey = 0;
+    } else if (this.lastKeyUnit) {
+      this.framesAfterKey++;
+    }
+    if (this.closed || this.hidden) return;
+    if (!this.connected) {
+      // Keep the newest warmup GOP (up to 90 frames / 2.5 MB) so connecting to either a static or active
+      // WGC desktop renders immediately instead of waiting up to 2s for the next periodic IDR.
+      const copy = Buffer.from(unit);
+      if (key) {
+        this.warmupGop = [{ unit: copy, key: true }];
+        this.warmupBytes = copy.length;
+      } else if (this.warmupGop.length > 0 && this.warmupGop.length < 90 && this.warmupBytes + copy.length <= 2_500_000) {
+        this.warmupGop.push({ unit: copy, key: false });
+        this.warmupBytes += copy.length;
+      } else {
+        this.warmupGop = [];
+        this.warmupBytes = 0;
+      }
+      return;
+    }
+    this.pushPending(unit, key, at);
+  }
+
+  private pushPending(unit: Buffer, key: boolean, at: number): void {
     if (this.pending.length >= 4 || (this.pending[0] && at - this.pending[0].at > 160)) {
       if (key) {
         this.dropped += this.pending.length;
@@ -555,7 +613,8 @@ export class WindowsVideoSession implements ScreenVideoSession {
           this.queueDrops += newestKey;
           this.pending = this.pending.slice(newestKey);
           this.needsKey = false;
-        } else {
+        } else if (this.pending.length >= 12 || (this.pending[0] && at - this.pending[0].at > 250)) {
+          // Only break the reference chain under sustained >250ms / 12-frame backup, never on a brief IDR burst.
           this.dropped += this.pending.length;
           this.queueDrops += this.pending.length;
           this.pending = [];
@@ -564,6 +623,10 @@ export class WindowsVideoSession implements ScreenVideoSession {
       }
     }
     this.pending.push({ unit, key, at });
+    this.drainPending();
+  }
+
+  private drainPending(): void {
     if (this.sending) return;
     this.sending = true;
     void (async () => {
@@ -586,18 +649,16 @@ export class WindowsVideoSession implements ScreenVideoSession {
       const missing = key ? [...this.parameterSets].filter(([type]) => !nals.some(nal => (nal[0]! & 31) === type)).map(([, nal]) => Buffer.concat([Buffer.from([0, 0, 0, 1]), nal])) : [];
       const payloads = h264Payloads(missing.length ? Buffer.concat([...missing, unit]) : unit);
       const payloadType = this.sender.codec?.payloadType ?? 96;
-      const batchSize = 8;
-      const shouldPace = payloads.length > 16;
+      // Yield with setImmediate (never setTimeout(1), which sleeps 15.6ms per tick on Windows and stalls 60fps IDRs by 65+ms).
+      const batchSize = this.relayed ? 8 : 16;
       for (let i = 0; i < payloads.length; i += batchSize) {
         if (this.closed || this.hidden) break;
-        if (performance.now() - now > 200) { this.needsKey = true; this.dropped++; this.queueDrops++; break; }
-        // Micro-paced 8-packet batches smooth large IDR UDP bursts so Wi-Fi/TURN queues and werift's NACK ring do not overflow.
+        if (performance.now() - now > 350) { this.needsKey = true; this.dropped++; this.queueDrops++; break; }
         await Promise.all(payloads.slice(i, i + batchSize).map((payload, offset) => this.sender.sendRtp(new RtpPacket(new RtpHeader({
           payloadType, sequenceNumber: this.seq++ & 0xffff, timestamp: this.timestamp, ssrc: this.sender.ssrc, marker: i + offset === payloads.length - 1,
         }), payload))));
-        // Cap pacing wait to 60 ms so Windows' default 15.6 ms timer tick never trips the 200 ms stall guard.
-        if (shouldPace && i + batchSize < payloads.length && performance.now() - now < 60) {
-          await new Promise<void>(resolve => setTimeout(resolve, 1));
+        if (i + batchSize < payloads.length) {
+          await new Promise<void>(resolve => setImmediate(resolve));
         }
       }
       this.sentFrames++; this.sentBytes += unit.length;
@@ -641,10 +702,10 @@ export class WindowsVideoSession implements ScreenVideoSession {
     // A same-computer receiver can bootstrap a low REMB from an almost still desktop.
     // That estimate says nothing about link capacity and must not trigger repeated encoder restarts.
     const loopback = pair && pair.localCandidate.host === pair.remoteCandidate.host;
-    // A mostly static desktop (typing, cursor moves) legitimately produces 5-35 fps at low bitrate.
-    // Only treat sub-target FPS as a real CPU/GPU machine bottleneck during sustained active motion.
-    const activeMotion = sendBitrate > profile.bitrate * 0.25;
-    const behind = now > this.steadySince && activeMotion && this.made >= 15 && this.made < profile.fps * 0.55;
+    // A mostly static or event-driven (WGC) desktop legitimately produces 5-45 fps at moderate bitrate.
+    // Only treat sub-target FPS as a real CPU/GPU bottleneck during sustained heavy motion.
+    const activeMotion = sendBitrate > profile.bitrate * 0.35;
+    const behind = now > this.steadySince && activeMotion && this.made >= 10 && this.made < profile.fps * 0.4;
     this.behindIntervals = behind ? this.behindIntervals + 1 : 0;
     // REMB estimates link capacity; werift's TWCC senderBWE reports min(send, recv) throughput which tracks
     // sendBitrate on a quiet screen, so TWCC only flags congestion when recv lags send or congestion triggers.
@@ -666,7 +727,13 @@ export class WindowsVideoSession implements ScreenVideoSession {
         const machineLimit = this.behindIntervals >= 6;
         const next = windowsSlowerLevel(this.level, machineLimit ? this.made : undefined);
         if (machineLimit) noteWindowsMachineLevel(next);
-        this.adapt(next);
+        const reasons = [
+          behind ? `behind(${this.made.toFixed(1)}fps)` : "",
+          queueDrops > profile.fps * 0.4 ? `queueDrops(${queueDrops})` : "",
+          plis >= 4 ? `plis(${plis})` : "",
+          lowBandwidth ? `lowBw(${Math.round(this.estimate / 1000)}k)` : "",
+        ].filter(Boolean).join(",");
+        this.adapt(next, reasons);
       }
     } else if (queueDrops === 0 && plis === 0 && !bweCongested) {
       if (this.lastUpgradeAt !== undefined && now - this.lastUpgradeAt >= 45_000) {
@@ -678,7 +745,7 @@ export class WindowsVideoSession implements ScreenVideoSession {
         const canUpgrade = !rembFeedback || this.estimate > nextProfile.bitrate * 1.15;
         if (canUpgrade) {
           this.lastUpgradeAt = now;
-          this.adapt(this.level - 1);
+          this.adapt(this.level - 1, "calm");
         }
       }
     } else {
@@ -686,10 +753,10 @@ export class WindowsVideoSession implements ScreenVideoSession {
     }
   }
 
-  private adapt(level: number): void {
+  private adapt(level: number, reason = ""): void {
     this.level = level; this.changed = performance.now(); this.goodSince = this.changed; this.needsKey = true;
     this.strainedIntervals = this.behindIntervals = 0;
-    this.events.log(`[screen] Windows video profile: ${JSON.stringify(this.profile())}`);
+    this.events.log(`[screen] Windows video profile: ${JSON.stringify(this.profile())}${reason ? ` (${reason})` : ""}`);
     this.restartCapture();
   }
 
@@ -705,6 +772,10 @@ export class WindowsVideoSession implements ScreenVideoSession {
 
   private stopCapture(): Promise<void> {
     this.pending = [];
+    this.warmupGop = [];
+    this.warmupBytes = 0;
+    this.lastKeyUnit = undefined;
+    this.framesAfterKey = 0;
     const child = this.child; this.child = undefined;
     return this.stopChild(child);
   }

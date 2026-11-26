@@ -27,6 +27,16 @@ namespace LinkShell.Windows {
             public UIntPtr ProcessMemory, JobMemory, PeakProcessMemory, PeakJobMemory;
         }
 
+        sealed class VideoAttempt {
+            public string SourceKind; // "ddagrab", "gfxcapture", "gdigrab", or "window"
+            public string Encoder;
+            public bool Compatible;
+            public bool SoftwareFallback;
+            public string PathName { get { return SoftwareFallback ? "software" : (Compatible ? "compatible" : "native"); } }
+            public string HintKey { get { return SourceKind + ":" + Encoder + ":" + PathName; } }
+            public string LegacyHintKey { get { return Encoder + ":" + PathName; } }
+        }
+
         /// <summary>
         /// Fusion: one window (FFmpeg's gfxcapture, Windows.Graphics.Capture) at the top left of a
         /// fixed canvas, so resizing the window never restarts the encoder (docs/v2/fusion.md §8.2).
@@ -40,7 +50,7 @@ namespace LinkShell.Windows {
             bounds = DisplayBoundsAt(center);
             int w = Math.Max(2, Math.Min(3840, canvasWidth) / 2 * 2), h = Math.Max(2, Math.Min(2160, canvasHeight) / 2 * 2);
             string source = "gfxcapture=hwnd=" + hwnd + ":capture_border=1:capture_cursor=0:width=" + w + ":height=" + h + ":resize_mode=crop:max_framerate=" + Math.Max(1, Math.Min(60, fps)) + ",";
-            RunVideo(w, h, fps, bitrate, executable, source);
+            RunVideo(w, h, fps, bitrate, executable, source, 0, 0, -1, -1, IntPtr.Zero, true);
         }
 
         static void CaptureVideo(int screen, int width, int fps, int bitrate, string executable) {
@@ -50,52 +60,122 @@ namespace LinkShell.Windows {
             bitrate = Math.Max(300000, Math.Min(24000000, bitrate));
             System.Drawing.Rectangle svcBounds;
             bool startedOnSecure = !IsDefaultDesktopActive();
+            IntPtr hmonitor = IntPtr.Zero;
+            bool hasActiveMonitor = true;
             if (startedOnSecure && TryServiceDisplayBounds(screen, out svcBounds)) {
                 bounds = svcBounds;
             } else {
-                bounds = Display(screen);
+                var entry = DisplayEntry(screen);
+                bounds = entry.Bounds;
+                hmonitor = entry.Monitor;
+                hasActiveMonitor = entry.HasActiveMonitor;
             }
             // Allow up to 4K native (3840x2160, Level 5.2) when requested and never upscale.
             int maxW = Math.Max(320, Math.Min(3840, width));
             double maxH = maxW > 2560 ? 2160.0 : maxW > 1920 ? 1440.0 : 1080.0;
             double scale = Math.Min(1, Math.Min(maxW / (double)bounds.Width, maxH / bounds.Height));
             int w = Math.Max(2, (int)(bounds.Width * scale) / 2 * 2), h = Math.Max(2, (int)(bounds.Height * scale) / 2 * 2);
-            uint vendor = 0; int adapterIndex = 0; int output = 0;
+            uint vendor = 0; int adapterIndex = 0; int dxgiOutput = -1;
             if (!startedOnSecure) {
-                output = DesktopDuplication.VideoOutput(bounds, out vendor, out adapterIndex);
+                try {
+                    dxgiOutput = DesktopDuplication.VideoOutput(bounds, out vendor, out adapterIndex);
+                } catch {
+                    dxgiOutput = -1;
+                    vendor = DesktopDuplication.PrimaryVendor();
+                    adapterIndex = 0;
+                }
             }
-            RunVideo(w, h, fps, bitrate, executable, "ddagrab=output_idx=" + output + ":framerate=" + fps + ":draw_mouse=0,", vendor, adapterIndex, screen);
+            if (vendor == 0) vendor = DesktopDuplication.PrimaryVendor();
+            string ddaSource = dxgiOutput >= 0 ? ("ddagrab=output_idx=" + dxgiOutput + ":framerate=" + fps + ":draw_mouse=0,") : null;
+            RunVideo(w, h, fps, bitrate, executable, ddaSource, vendor, adapterIndex, screen, dxgiOutput, hmonitor, hasActiveMonitor);
         }
 
-        static void RunVideo(int w, int h, int fps, int bitrate, string executable, string source, uint vendor = 0, int adapterIndex = 0, int screenIndex = -1) {
+        static string BuildGfxMonitorFilter(IntPtr hmonitor, int screenIndex, int w, int h, int fps) {
+            string target = hmonitor != IntPtr.Zero
+                ? ("hmonitor=" + unchecked((ulong)hmonitor.ToInt64()).ToString(System.Globalization.CultureInfo.InvariantCulture))
+                : ("monitor_idx=" + Math.Max(0, screenIndex));
+            return "gfxcapture=" + target + ":capture_cursor=0:width=" + w + ":height=" + h + ":resize_mode=scale:scale_mode=bicubic:max_framerate=" + fps;
+        }
+
+        static void RunVideo(int w, int h, int fps, int bitrate, string executable, string source, uint vendor = 0, int adapterIndex = 0, int screenIndex = -1, int dxgiOutput = -1, IntPtr hmonitor = default(IntPtr), bool hasActiveMonitor = true) {
             if (!Path.IsPathRooted(executable) || !File.Exists(executable)) throw new ArgumentException("Windows 视频组件缺失");
             fps = Math.Max(1, Math.Min(60, fps));
             bitrate = Math.Max(300000, Math.Min(24000000, bitrate));
+            bool isWindowCapture = screenIndex < 0;
             // A window's capture only wants to know whose encoder to try first: a display that
             // can't be duplicated (rotated, on another adapter) must not stop the window's picture.
-            if (vendor == 0 && IsDefaultDesktopActive()) { try { uint found; DesktopDuplication.VideoOutput(bounds, out found); vendor = found; } catch (Exception) { vendor = 0; } }
+            if (vendor == 0 && IsDefaultDesktopActive()) {
+                try { uint found; DesktopDuplication.VideoOutput(bounds, out found); vendor = found; }
+                catch (Exception) { vendor = DesktopDuplication.PrimaryVendor(); }
+            }
             string preferred = vendor == 0x1002 ? "h264_amf" : vendor == 0x10de ? "h264_nvenc" : vendor == 0x8086 ? "h264_qsv" : "h264_mf";
             string selected = Environment.GetEnvironmentVariable("LINKSHELL_WINDOWS_ENCODER");
             var encoders = String.IsNullOrEmpty(selected) ? new[] { preferred, "h264_mf" }.Distinct().ToArray() : new[] { selected };
             if (encoders.Any(e => !new[] { "h264_amf", "h264_nvenc", "h264_qsv", "h264_mf" }.Contains(e))) throw new ArgumentException("未知 Windows 硬件编码器");
-            var input = new Thread(() => { try { while (Console.ReadLine() != null) {} } finally { ended = true; } });
+            var input = new Thread(() => {
+                try {
+                    string line;
+                    while ((line = Console.ReadLine()) != null) {
+                        if (line.IndexOf("\"nudge\"", StringComparison.Ordinal) >= 0 || line.IndexOf("\"keyframe\"", StringComparison.Ordinal) >= 0) {
+                            NudgeDesktopForCapture();
+                        }
+                    }
+                } finally { ended = true; }
+            });
             input.IsBackground = true; input.Start();
             IntPtr job = CreateJobObject(IntPtr.Zero, null);
             if (job == IntPtr.Zero) throw new InvalidOperationException("无法保护视频进程生命周期");
             try {
                 var limits = new JobLimits { Basic = new BasicLimits { Flags = 0x2000 } }; // KILL_ON_JOB_CLOSE, including a killed helper.
                 if (!SetInformationJobObject(job, 9, ref limits, (uint)Marshal.SizeOf(typeof(JobLimits)))) throw new InvalidOperationException("无法配置视频进程生命周期");
-                // Each attempt: an encoder, and whether frames are converted on the CPU on their way to it.
-                var attempts = new List<KeyValuePair<string, bool>>();
-                foreach (var encoder in encoders) {
-                    if (encoder != "h264_mf") attempts.Add(new KeyValuePair<string, bool>(encoder, false));
-                    attempts.Add(new KeyValuePair<string, bool>(encoder, true));
+                var attempts = new List<VideoAttempt>();
+                if (isWindowCapture) {
+                    foreach (var encoder in encoders) {
+                        if (encoder != "h264_mf") attempts.Add(new VideoAttempt { SourceKind = "window", Encoder = encoder, Compatible = false });
+                        attempts.Add(new VideoAttempt { SourceKind = "window", Encoder = encoder, Compatible = true });
+                    }
+                } else {
+                    bool allowDdaFirst = hasActiveMonitor && dxgiOutput >= 0 && !String.IsNullOrEmpty(source);
+                    bool allowGfx = hmonitor != IntPtr.Zero;
+                    // 1. When an active physical monitor is attached, try zero-copy ddagrab first.
+                    if (allowDdaFirst) {
+                        foreach (var encoder in encoders) {
+                            if (encoder != "h264_mf") attempts.Add(new VideoAttempt { SourceKind = "ddagrab", Encoder = encoder, Compatible = false });
+                        }
+                    }
+                    // 2. Windows.Graphics.Capture (gfxcapture): GPU-scaled and works BOTH with monitors AND headless (unplugged/sleeping/rotated).
+                    // Direct D3D11->NVENC avoids CPU download completely; hwdownload+nv12 covers AMF/QSV/MF cleanly.
+                    if (allowGfx) {
+                        foreach (var encoder in encoders) {
+                            if (encoder == "h264_nvenc") attempts.Add(new VideoAttempt { SourceKind = "gfxcapture", Encoder = encoder, Compatible = false });
+                            attempts.Add(new VideoAttempt { SourceKind = "gfxcapture", Encoder = encoder, Compatible = true });
+                        }
+                    }
+                    // 3. Compatible ddagrab fallback (active monitor only).
+                    if (allowDdaFirst) {
+                        foreach (var encoder in encoders) {
+                            attempts.Add(new VideoAttempt { SourceKind = "ddagrab", Encoder = encoder, Compatible = true });
+                        }
+                    }
+                    // 4. Universal GDI desktop grab + hardware H.264: works even on 0-HMONITOR headless or legacy Win10 1809.
+                    foreach (var encoder in encoders) {
+                        attempts.Add(new VideoAttempt { SourceKind = "gdigrab", Encoder = encoder, Compatible = true });
+                    }
+                    // 5. Universal Media Foundation software-allowed fallback for VMs / Basic Render Driver with no GPU encoder.
+                    if (String.IsNullOrEmpty(selected)) {
+                        if (allowGfx) attempts.Add(new VideoAttempt { SourceKind = "gfxcapture", Encoder = "h264_mf", Compatible = true, SoftwareFallback = true });
+                        attempts.Add(new VideoAttempt { SourceKind = "gdigrab", Encoder = "h264_mf", Compatible = true, SoftwareFallback = true });
+                    }
                 }
                 // What made pictures last time goes first (the host remembers it): a driver that
                 // refuses the zero-copy path refuses it every time, at an FFmpeg launch each.
+                // Never prioritize a stale ddagrab hint when no active physical monitor is attached.
                 string hint = Environment.GetEnvironmentVariable("LINKSHELL_WINDOWS_VIDEO_HINT");
-                int known = String.IsNullOrEmpty(hint) ? -1 : attempts.FindIndex(a => a.Key + (a.Value ? ":compatible" : ":native") == hint);
-                if (known > 0) { var first = attempts[known]; attempts.RemoveAt(known); attempts.Insert(0, first); }
+                if (!String.IsNullOrEmpty(hint)) {
+                    int known = attempts.FindIndex(a => a.HintKey == hint);
+                    if (known < 0 && (isWindowCapture || hasActiveMonitor)) known = attempts.FindIndex(a => a.LegacyHintKey == hint);
+                    if (known > 0) { var first = attempts[known]; attempts.RemoveAt(known); attempts.Insert(0, first); }
+                }
                 bool framed = Environment.GetEnvironmentVariable("LINKSHELL_VIDEO_FRAMED") == "1";
                 using (var destination = Console.OpenStandardOutput()) {
                     foreach (var attempt in attempts) {
@@ -103,29 +183,39 @@ namespace LinkShell.Windows {
                         while (!ended) {
                             EnsureSharingEnabled();
                             if (!IsDefaultDesktopActive()) {
-                                bool streamedSecure = screenIndex >= 0 && TryStreamSecureDesktopVideo(job, destination, executable, screenIndex, w, h, Math.Min(15, fps), Math.Min(bitrate, 4000000), attempt.Key, framed);
+                                bool streamedSecure = screenIndex >= 0 && TryStreamSecureDesktopVideo(job, destination, executable, screenIndex, w, h, Math.Min(15, fps), Math.Min(bitrate, 4000000), attempt.Encoder, framed);
                                 if (ended) return;
                                 if (!streamedSecure && !WaitForDefaultDesktop(120000)) return;
                                 if (!IsDefaultDesktopActive()) continue;
                                 Thread.Sleep(250);
                                 EnsureSharingEnabled();
                                 if (screenIndex >= 0) {
-                                    bounds = Display(screenIndex);
-                                    uint v2; int a2; int out2 = DesktopDuplication.VideoOutput(bounds, out v2, out a2);
-                                    adapterIndex = a2;
-                                    source = "ddagrab=output_idx=" + out2 + ":framerate=" + fps + ":draw_mouse=0,";
+                                    var entry = DisplayEntry(screenIndex);
+                                    bounds = entry.Bounds;
+                                    hmonitor = entry.Monitor;
+                                    hasActiveMonitor = entry.HasActiveMonitor;
+                                    try {
+                                        uint v2; int a2; int out2 = DesktopDuplication.VideoOutput(bounds, out v2, out a2);
+                                        adapterIndex = a2;
+                                        dxgiOutput = out2;
+                                        source = "ddagrab=output_idx=" + out2 + ":framerate=" + fps + ":draw_mouse=0,";
+                                    } catch {
+                                        dxgiOutput = -1;
+                                        source = null;
+                                    }
                                 } else if (DisplayFromCacheChanged()) {
                                     throw new InvalidOperationException("屏幕布局已改变，请重新连接");
                                 }
                             }
+                            if (attempt.SourceKind == "ddagrab" && (dxgiOutput < 0 || String.IsNullOrEmpty(source))) break;
                             bool hadFrames;
-                            int outcome = RunVideoEncoder(job, destination, executable, source, w, h, fps, bitrate, attempt.Key, attempt.Value, adapterIndex, out hadFrames);
+                            int outcome = RunVideoEncoder(job, destination, executable, attempt.SourceKind, source, hmonitor, screenIndex, w, h, fps, bitrate, attempt.Encoder, attempt.Compatible, attempt.SoftwareFallback, adapterIndex, out hadFrames);
                             if (outcome == VideoEnded) return;
                             if (outcome == VideoDesktopPaused) {
                                 if (hadFrames) zeroFramePauses = 0;
                                 else if (++zeroFramePauses >= 5) break;
                                 Console.Error.WriteLine("[video] desktop interrupted (UAC/secure desktop); streaming secure desktop or waiting for Default");
-                                bool streamedSecure = screenIndex >= 0 && TryStreamSecureDesktopVideo(job, destination, executable, screenIndex, w, h, Math.Min(15, fps), Math.Min(bitrate, 4000000), attempt.Key, framed);
+                                bool streamedSecure = screenIndex >= 0 && TryStreamSecureDesktopVideo(job, destination, executable, screenIndex, w, h, Math.Min(15, fps), Math.Min(bitrate, 4000000), attempt.Encoder, framed);
                                 if (ended) return;
                                 if (!streamedSecure && !WaitForDefaultDesktop(120000)) return;
                                 if (!IsDefaultDesktopActive()) continue;
@@ -155,17 +245,37 @@ namespace LinkShell.Windows {
                 || line.IndexOf("desktop switch", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
-        static int RunVideoEncoder(IntPtr job, Stream destination, string executable, string source, int width, int height, int fps, int bitrate, string encoder, bool compatible, int adapterIndex, out bool hadFrames) {
+        static int RunVideoEncoder(IntPtr job, Stream destination, string executable, string sourceKind, string ddaOrWindowSource, IntPtr hmonitor, int screenIndex, int width, int height, int fps, int bitrate, string encoder, bool compatible, bool softwareFallback, int adapterIndex, out bool hadFrames) {
             hadFrames = false;
-            string filter = source;
             bool framed = Environment.GetEnvironmentVariable("LINKSHELL_VIDEO_FRAMED") == "1";
-            // Older drivers reject D3D11_BIND_VIDEO_ENCODER surfaces. Use the vendor's scaler
-            // where available, then allow CPU conversion while retaining hardware encoding.
             bool needsScale = width != bounds.Width || height != bounds.Height;
-            if (compatible) filter += needsScale ? "hwdownload,format=bgra,scale=" + width + ":" + height + ":flags=lanczos:out_color_matrix=bt709,format=nv12" : "hwdownload,format=bgra,scale=out_color_matrix=bt709,format=nv12";
-            else if (encoder == "h264_amf") filter += "vpp_amf=w=" + width + ":h=" + height + ":format=nv12";
-            else if (encoder == "h264_qsv") filter += "hwmap=derive_device=qsv,vpp_qsv=w=" + width + ":h=" + height + ":format=nv12";
-            else filter += "scale_d3d11=width=" + width + ":height=" + height + ":format=nv12";
+            bool directRgbToNvenc = sourceKind == "gfxcapture" && encoder == "h264_nvenc" && !compatible;
+            int effectiveFps = (sourceKind == "gdigrab" || softwareFallback) ? Math.Min(30, fps) : fps;
+
+            string inputArgs;
+            string adapterOption = "";
+            if (sourceKind == "gdigrab") {
+                string vf = needsScale
+                    ? "scale=" + width + ":" + height + ":flags=bilinear:out_color_matrix=bt709,format=nv12"
+                    : "scale=out_color_matrix=bt709,format=nv12";
+                inputArgs = "-f gdigrab -framerate " + effectiveFps + " -draw_mouse 0 -offset_x " + bounds.Left + " -offset_y " + bounds.Top + " -video_size " + bounds.Width + "x" + bounds.Height + " -i desktop -vf \"" + vf + "\"";
+            } else if (sourceKind == "gfxcapture") {
+                string gfx = BuildGfxMonitorFilter(hmonitor, screenIndex, width, height, effectiveFps);
+                string filter = directRgbToNvenc
+                    ? gfx
+                    : gfx + ",hwdownload,format=bgra,scale=out_color_matrix=bt709,format=nv12";
+                inputArgs = "-f lavfi -i \"" + filter + "\"";
+            } else {
+                // ddagrab or Fusion window capture
+                string filter = ddaOrWindowSource;
+                if (compatible) filter += needsScale ? "hwdownload,format=bgra,scale=" + width + ":" + height + ":flags=bilinear:out_color_matrix=bt709,format=nv12" : "hwdownload,format=bgra,scale=out_color_matrix=bt709,format=nv12";
+                else if (encoder == "h264_amf") filter += "vpp_amf=w=" + width + ":h=" + height + ":format=nv12";
+                else if (encoder == "h264_qsv") filter += "hwmap=derive_device=qsv,vpp_qsv=w=" + width + ":h=" + height + ":format=nv12";
+                else filter += "scale_d3d11=width=" + width + ":height=" + height + ":format=nv12";
+                if (adapterIndex > 0 && sourceKind == "ddagrab") adapterOption = "-init_hw_device d3d11va=ls:" + adapterIndex + " -filter_hw_device ls ";
+                inputArgs = "-f lavfi -i \"" + filter + "\"";
+            }
+
             bool baseline = String.Equals(Environment.GetEnvironmentVariable("LINKSHELL_WINDOWS_PROFILE"), "baseline", StringComparison.OrdinalIgnoreCase);
             bool level52 = width * height > 3686400;
             bool level51 = width * height > 2088960;
@@ -174,7 +284,8 @@ namespace LinkShell.Windows {
             // Low-latency VBR with QP bounds keeps UI text razor-sharp without CBR single-frame starvation.
             string tuning = encoder == "h264_amf" ? "-usage lowlatency -quality quality -rc vbr_latency -qp_i 18 -qp_p 20 -min_qp_i 14 -max_qp_i 32 -min_qp_p 14 -max_qp_p 34 -async_depth 1 -preanalysis 0" :
                 encoder == "h264_nvenc" ? "-preset p4 -tune ll -rc vbr -cq 19 -qmin 14 -qmax 32 -zerolatency 1 -delay 0 -rc-lookahead 0 -spatial-aq 1 -aq-strength 10" :
-                encoder == "h264_qsv" ? "-preset fast -async_depth 1 -look_ahead 0 -qmin 14 -qmax 32" : "-hw_encoding 1 -scenario display_remoting -quality 90";
+                encoder == "h264_qsv" ? "-preset fast -async_depth 1 -look_ahead 0 -qmin 14 -qmax 32" :
+                softwareFallback ? "-hw_encoding 0 -scenario display_remoting -quality 80" : "-hw_encoding 1 -scenario display_remoting -quality 90";
             string profileOption = encoder == "h264_nvenc"
                 ? " -profile:v " + (baseline ? "baseline" : "main") + " -level:v " + nvLevel
                 : encoder == "h264_amf"
@@ -182,13 +293,15 @@ namespace LinkShell.Windows {
                     : encoder == "h264_qsv"
                         ? " -profile:v " + (baseline ? "baseline" : "main") + " -level:v " + numLevel
                         : " -profile:v " + (baseline ? "66" : "77") + " -level:v " + numLevel;
-            // 3-second GOP with VBR burst headroom prevents forced IDRs or CBR clamps from blurring crisp text.
-            int gop = Math.Max(fps * 2, Math.Min(180, fps * 3));
+            // 2-second GOP with bounded VBV buffer keeps IDR frames crisp (~80-150 KB) without UDP bursts.
+            int gop = Math.Max(effectiveFps, Math.Min(120, effectiveFps * 2));
             int maxrate = Math.Min(28000000, bitrate + bitrate / 4);
-            string adapterOption = adapterIndex > 0 ? "-init_hw_device d3d11va=ls:" + adapterIndex + " -filter_hw_device ls " : "";
-            string args = "-hide_banner -loglevel warning -nostats " + adapterOption + "-f lavfi -i \"" + filter + "\" -an -c:v " + encoder + " " + tuning +
+            int bufsize = Math.Max(1500000, Math.Min(bitrate / 2, Math.Max(bitrate / 4, 2500000)));
+            // Let direct D3D11->NVENC emit its native RGB->YUV color VUI (matches its internal matrix accurately).
+            string colorArgs = directRgbToNvenc ? "" : " -color_range tv -colorspace bt709 -color_primaries bt709 -color_trc bt709";
+            string args = "-hide_banner -loglevel warning -nostats " + adapterOption + inputArgs + " -an -c:v " + encoder + " " + tuning +
                 // Level 4.2 covers 1080p, 5.1 covers 1440p, and 5.2 covers 4K60 native desktops.
-                profileOption + " -color_range tv -colorspace bt709 -color_primaries bt709 -color_trc bt709 -bf 0 -g " + gop + " -b:v " + bitrate + " -maxrate " + maxrate + " -bufsize " + bitrate +
+                profileOption + colorArgs + " -bf 0 -g " + gop + " -b:v " + bitrate + " -maxrate " + maxrate + " -bufsize " + bufsize +
                 " -fps_mode passthrough" +
                 // Framed (the host asks): AVI, each picture in a chunk that says its length and is
                 // written as it is encoded, so the host hands it on at its last byte. Raw H.264
@@ -196,6 +309,8 @@ namespace LinkShell.Windows {
                 // setts counts the pictures: AVI fills a gap in time with empty chunks, and gives
                 // up over a long one, where a window's capture simply had nothing new to send.
                 (framed ? " -bsf:v h264_metadata=aud=insert,setts=ts=N -flush_packets 1 -f avi pipe:1" : " -bsf:v h264_metadata=aud=insert -flush_packets 1 -f h264 pipe:1");
+            int firstFrameTimeoutMs = sourceKind == "ddagrab" ? 2200 : sourceKind == "gfxcapture" ? 3000 : 4000;
+            if (sourceKind == "gfxcapture") NudgeDesktopForCapture();
             using (var process = new Process()) {
                 int accessLost = 0;
                 process.StartInfo = new ProcessStartInfo(executable, args) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
@@ -207,7 +322,7 @@ namespace LinkShell.Windows {
                 };
                 process.Start();
                 if (!AssignProcessToJobObject(job, process.Handle)) { process.Kill(); throw new InvalidOperationException("无法绑定视频进程生命周期"); }
-                Console.Error.WriteLine("[video] child=" + process.Id);
+                Console.Error.WriteLine("[video] child=" + process.Id + " source=" + sourceKind);
                 process.BeginErrorReadLine();
                 int received = 0;
                 var copy = Task.Run(() => {
@@ -223,19 +338,33 @@ namespace LinkShell.Windows {
                             matched = buffer[i] == mark[matched] ? matched + 1 : buffer[i] == mark[0] ? 1 : 0;
                             if (matched == mark.Length) pictures = i + 1 < count;
                         }
-                        if (pictures && Interlocked.Exchange(ref received, 1) == 0) Console.Error.WriteLine("[video] encoder=" + encoder + " width=" + width + " height=" + height + " fps=" + fps + " path=" + (compatible ? "compatible" : "native"));
+                        if (pictures && Interlocked.Exchange(ref received, 1) == 0) {
+                            string srcTag = sourceKind == "window" ? "" : (" source=" + sourceKind);
+                            string pathName = softwareFallback ? "software" : (compatible ? "compatible" : "native");
+                            Console.Error.WriteLine("[video] encoder=" + encoder + " width=" + width + " height=" + height + " fps=" + effectiveFps + " path=" + pathName + srcTag);
+                        }
                         destination.Write(buffer, 0, count); destination.Flush();
                     }
                 });
                 bool desktopPaused = false;
+                bool nudged = false;
+                long lastLayoutCheck = 0;
                 try {
                     var clock = Stopwatch.StartNew();
                     while (!ended && !process.WaitForExit(50)) {
                         EnsureSharingEnabled();
                         if (!IsDefaultDesktopActive()) { desktopPaused = true; break; }
-                        if (DisplayFromCacheChanged()) throw new InvalidOperationException("屏幕布局已改变，请重新连接");
+                        long elapsedMs = clock.ElapsedMilliseconds;
+                        if (elapsedMs - lastLayoutCheck >= 500) {
+                            lastLayoutCheck = elapsedMs;
+                            if (DisplayFromCacheChanged()) throw new InvalidOperationException("屏幕布局已改变，请重新连接");
+                        }
                         if (copy.IsFaulted) throw copy.Exception;
-                        if (received == 0 && clock.ElapsedMilliseconds > 5000) break;
+                        if (received == 0 && !nudged && sourceKind == "gfxcapture" && elapsedMs >= 350) {
+                            nudged = true;
+                            NudgeDesktopForCapture();
+                        }
+                        if (received == 0 && elapsedMs > firstFrameTimeoutMs) break;
                     }
                 } finally {
                     if (!process.HasExited) {
@@ -255,7 +384,7 @@ namespace LinkShell.Windows {
 
         static bool DisplayFromCacheChanged() {
             // Bounds matching also rejects removal or a rotation while this helper owns a capture.
-            return !EnumerateDisplays().Any(s => s.Bounds == bounds);
+            return !EnumerateDisplays(false).Any(s => s.Bounds == bounds);
         }
 
         [ComImport, Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
