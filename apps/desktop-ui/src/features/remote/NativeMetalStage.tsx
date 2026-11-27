@@ -452,6 +452,7 @@ export function NativeMetalStage({
         holes: initialHoles,
         overlayOpen: initialOverlayOpen,
         smooth: smoothRef.current,
+        preferH264: codecChoice === "h264",
         fullscreen: callbacksRef.current.fullscreen,
         audioMuted: !audioEnabledRef.current,
       })
@@ -625,7 +626,11 @@ export function NativeMetalStage({
             : nativeStatus.relayed === false
               ? "direct"
               : undefined),
+        width: nativeStatus.width,
+        height: nativeStatus.height,
+        fps: nativeStatus.fps,
         codec: nativeStatus.codec || (codecChoice === "auto" ? "HEVC" : "H.264"),
+        bitrateMbps: nativeStatus.bitrateMbps,
         rttMs: nativeStatus.rttMs,
         hardware: nativeStatus.hardware ?? true,
         displayFps,

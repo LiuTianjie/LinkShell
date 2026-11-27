@@ -486,6 +486,7 @@ public func linkshellNativeInit(_ env: napi_env?, _ exports: napi_value?) -> nap
         holes: DesktopScreenBridge.holes(message["holes"]) ?? [],
         overlayOpen: DesktopScreenBridge.boolean(message["overlayOpen"]) == true,
         smooth: DesktopScreenBridge.boolean(message["smooth"]) == true,
+        preferH264: DesktopScreenBridge.boolean(message["preferH264"]) == true,
         fullScreen: DesktopScreenBridge.boolean(message["fullscreen"]) == true,
         audioMuted: audioMuted,
         systemShortcutCapture: NativeScreen.desiredSystemShortcutCapture,

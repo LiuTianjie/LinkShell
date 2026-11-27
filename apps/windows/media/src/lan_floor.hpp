@@ -3,10 +3,22 @@
 #include <deque>
 #include <optional>
 #include <string>
+#include <unordered_set>
 
 #include "common.hpp"
 
 namespace linkshell {
+
+// Collects local IP addresses sitting on disconnected, APIPA, loopback, or virtual
+// interfaces (Hyper-V/WSL/Docker/Bluetooth/Wi-Fi Direct/etc.) so ICE host candidates on
+// them are not offered. Real LAN (Ethernet/Wi-Fi) and Tailscale CGNAT (100.64/10) stay.
+std::unordered_set<std::string> CollectUselessHostAddresses();
+
+// Returns true when `candidate_sdp` is a `typ host` candidate bound to an unreachable
+// APIPA/link-local/loopback/virtual address. Never drops srflx, prflx, or relay candidates.
+bool IsUselessHostCandidate(
+    const std::string& candidate_sdp,
+    const std::unordered_set<std::string>& useless_ips);
 
 // Exact port of apps/mac/Sources/LinkShell/LanFloor.swift.
 class LanFloor {

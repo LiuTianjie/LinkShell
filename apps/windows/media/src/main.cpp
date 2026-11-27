@@ -21,6 +21,7 @@
 #include "common.hpp"
 #include "d3d_context.hpp"
 #include "display_info.hpp"
+#include "dxgi_capturer.hpp"
 #include "fusion_session.hpp"
 #include "mf_encoder.hpp"
 #include "rtc_base/ssl_adapter.h"
@@ -177,10 +178,20 @@ int main(int argc, char** argv) {
     bool nv12_ok = false;
     bool nv12_gpu = false;
     std::string nv12_err;
+    bool dxgi_ok = false;
+    std::string dxgi_err;
     json h264_enc = {{"ok", false}, {"bytes", 0}, {"impl", ""}, {"hw", false}};
     json hevc_enc = {{"ok", false}, {"bytes", 0}, {"impl", ""}, {"hw", false}};
 
     if (d3d) {
+      auto disp0 = FindDisplay(0);
+      if (disp0 && disp0->has_active_monitor) {
+        DxgiDuplicationCapturer probe_dxgi(d3d);
+        dxgi_ok = probe_dxgi.Open(*disp0, &dxgi_err);
+        probe_dxgi.Close();
+      } else {
+        dxgi_err = "no active monitor";
+      }
       constexpr int kW = 640, kH = 360;
       std::vector<uint8_t> bgra(static_cast<size_t>(kW) * kH * 4);
       for (int y = 0; y < kH; ++y) {
@@ -267,6 +278,8 @@ int main(int argc, char** argv) {
         {"nv12Ok", nv12_ok},
         {"nv12Gpu", nv12_gpu},
         {"nv12Error", nv12_err},
+        {"dxgiOk", dxgi_ok},
+        {"dxgiError", dxgi_err},
         {"h264Encode", h264_enc},
         {"hevcEncode", hevc_enc},
         {"wgcSupported", wgc_ok},
@@ -334,93 +347,99 @@ int main(int argc, char** argv) {
     if (msg.is_discarded() || !msg.is_object() || !msg.contains("t") || !msg["t"].is_string()) continue;
     std::string type = msg["t"].get<std::string>();
 
-    if (type == "status") {
-      emit_status();
-    } else if (type == "displays") {
-      // Wake virtual display if headless PC has no active monitor and MttVDD is installed.
-      VddController vdd([&ipc](const std::string& m) { ipc.Log(m); });
-      vdd.EnsureHeadlessDisplay();
-      ipc.Emit({{"t", "displays"}, {"list", DisplaysJson()}});
-    } else if (type == "rtc.open") {
-      std::string v = msg.value("v", std::string{});
-      if (v.empty()) continue;
-      // One viewer owns the screen at a time, matching Mac ScreenSession.
-      for (auto& [_, s] : screen_sessions) s->Close();
-      screen_sessions.clear();
-      auto session = std::make_unique<ScreenSession>(v, rtc.factory, d3d, &ipc);
-      if (session->Open(msg)) screen_sessions[v] = std::move(session);
-    } else if (type == "rtc.answer") {
-      std::string v = msg.value("v", std::string{});
-      if (auto it = screen_sessions.find(v); it != screen_sessions.end()) {
-        it->second->HandleAnswer(msg.value("sdp", std::string{}));
+    try {
+      if (type == "status") {
+        emit_status();
+      } else if (type == "displays") {
+        // Wake virtual display if headless PC has no active monitor and MttVDD is installed.
+        VddController vdd([&ipc](const std::string& m) { ipc.Log(m); });
+        vdd.EnsureHeadlessDisplay();
+        ipc.Emit({{"t", "displays"}, {"list", DisplaysJson()}});
+      } else if (type == "rtc.open") {
+        std::string v = msg.value("v", std::string{});
+        if (v.empty()) continue;
+        // One viewer owns the screen at a time, matching Mac ScreenSession.
+        for (auto& [_, s] : screen_sessions) s->Close();
+        screen_sessions.clear();
+        auto session = std::make_unique<ScreenSession>(v, rtc.factory, d3d, &ipc);
+        if (session->Open(msg)) screen_sessions[v] = std::move(session);
+      } else if (type == "rtc.answer") {
+        std::string v = msg.value("v", std::string{});
+        if (auto it = screen_sessions.find(v); it != screen_sessions.end()) {
+          it->second->HandleAnswer(msg.value("sdp", std::string{}));
+        }
+      } else if (type == "rtc.ice") {
+        std::string v = msg.value("v", std::string{});
+        if (auto it = screen_sessions.find(v); it != screen_sessions.end()) {
+          it->second->HandleIce(msg);
+        }
+      } else if (type == "rtc.configure") {
+        std::string v = msg.value("v", std::string{});
+        if (auto it = screen_sessions.find(v); it != screen_sessions.end()) {
+          it->second->HandleConfigure(msg);
+        }
+      } else if (type == "rtc.audio") {
+        std::string v = msg.value("v", std::string{});
+        if (auto it = screen_sessions.find(v); it != screen_sessions.end()) {
+          it->second->SetAudio(msg.value("enabled", false));
+        }
+      } else if (type == "rtc.close") {
+        std::string v = msg.value("v", std::string{});
+        if (auto it = screen_sessions.find(v); it != screen_sessions.end()) {
+          it->second->Close();
+          screen_sessions.erase(it);
+        }
+      } else if (type == "fusion.open") {
+        std::string id = msg.value("id", std::string{});
+        if (id.empty()) continue;
+        if (auto it = fusion_sessions.find(id); it != fusion_sessions.end()) {
+          it->second->Close();
+          fusion_sessions.erase(it);
+        }
+        auto fs = std::make_unique<FusionSession>(id, rtc.factory, d3d, &ipc);
+        if (fs->Open(msg)) fusion_sessions[id] = std::move(fs);
+      } else if (type == "fusion.stream.open") {
+        std::string id = msg.value("id", std::string{});
+        if (auto it = fusion_sessions.find(id); it != fusion_sessions.end()) it->second->OpenStream(msg);
+      } else if (type == "fusion.stream.layout") {
+        std::string id = msg.value("id", std::string{});
+        if (auto it = fusion_sessions.find(id); it != fusion_sessions.end()) it->second->UpdateLayout(msg);
+      } else if (type == "fusion.stream.close") {
+        std::string id = msg.value("id", std::string{});
+        if (auto it = fusion_sessions.find(id); it != fusion_sessions.end()) {
+          it->second->CloseStream(msg.value("key", std::string{}));
+        }
+      } else if (type == "fusion.answer") {
+        std::string id = msg.value("id", std::string{});
+        if (auto it = fusion_sessions.find(id); it != fusion_sessions.end()) {
+          it->second->HandleAnswer(msg.value("sdp", std::string{}));
+        }
+      } else if (type == "fusion.ice") {
+        std::string id = msg.value("id", std::string{});
+        if (auto it = fusion_sessions.find(id); it != fusion_sessions.end()) it->second->HandleIce(msg);
+      } else if (type == "fusion.shape") {
+        std::string id = msg.value("id", std::string{});
+        if (auto it = fusion_sessions.find(id); it != fusion_sessions.end() && msg.contains("shape")) {
+          it->second->SendShape(msg["shape"]);
+        }
+      } else if (type == "fusion.cursor") {
+        std::string id = msg.value("id", std::string{});
+        if (auto it = fusion_sessions.find(id); it != fusion_sessions.end()) {
+          it->second->SendCursor(msg.value("x", 0.0), msg.value("y", 0.0));
+        }
+      } else if (type == "fusion.close") {
+        std::string id = msg.value("id", std::string{});
+        if (auto it = fusion_sessions.find(id); it != fusion_sessions.end()) {
+          it->second->Close();
+          fusion_sessions.erase(it);
+        }
+      } else if (type == "quit") {
+        break;
       }
-    } else if (type == "rtc.ice") {
-      std::string v = msg.value("v", std::string{});
-      if (auto it = screen_sessions.find(v); it != screen_sessions.end()) {
-        it->second->HandleIce(msg);
-      }
-    } else if (type == "rtc.configure") {
-      std::string v = msg.value("v", std::string{});
-      if (auto it = screen_sessions.find(v); it != screen_sessions.end()) {
-        it->second->HandleConfigure(msg);
-      }
-    } else if (type == "rtc.audio") {
-      std::string v = msg.value("v", std::string{});
-      if (auto it = screen_sessions.find(v); it != screen_sessions.end()) {
-        it->second->SetAudio(msg.value("enabled", false));
-      }
-    } else if (type == "rtc.close") {
-      std::string v = msg.value("v", std::string{});
-      if (auto it = screen_sessions.find(v); it != screen_sessions.end()) {
-        it->second->Close();
-        screen_sessions.erase(it);
-      }
-    } else if (type == "fusion.open") {
-      std::string id = msg.value("id", std::string{});
-      if (id.empty()) continue;
-      if (auto it = fusion_sessions.find(id); it != fusion_sessions.end()) {
-        it->second->Close();
-        fusion_sessions.erase(it);
-      }
-      auto fs = std::make_unique<FusionSession>(id, rtc.factory, d3d, &ipc);
-      if (fs->Open(msg)) fusion_sessions[id] = std::move(fs);
-    } else if (type == "fusion.stream.open") {
-      std::string id = msg.value("id", std::string{});
-      if (auto it = fusion_sessions.find(id); it != fusion_sessions.end()) it->second->OpenStream(msg);
-    } else if (type == "fusion.stream.layout") {
-      std::string id = msg.value("id", std::string{});
-      if (auto it = fusion_sessions.find(id); it != fusion_sessions.end()) it->second->UpdateLayout(msg);
-    } else if (type == "fusion.stream.close") {
-      std::string id = msg.value("id", std::string{});
-      if (auto it = fusion_sessions.find(id); it != fusion_sessions.end()) {
-        it->second->CloseStream(msg.value("key", std::string{}));
-      }
-    } else if (type == "fusion.answer") {
-      std::string id = msg.value("id", std::string{});
-      if (auto it = fusion_sessions.find(id); it != fusion_sessions.end()) {
-        it->second->HandleAnswer(msg.value("sdp", std::string{}));
-      }
-    } else if (type == "fusion.ice") {
-      std::string id = msg.value("id", std::string{});
-      if (auto it = fusion_sessions.find(id); it != fusion_sessions.end()) it->second->HandleIce(msg);
-    } else if (type == "fusion.shape") {
-      std::string id = msg.value("id", std::string{});
-      if (auto it = fusion_sessions.find(id); it != fusion_sessions.end() && msg.contains("shape")) {
-        it->second->SendShape(msg["shape"]);
-      }
-    } else if (type == "fusion.cursor") {
-      std::string id = msg.value("id", std::string{});
-      if (auto it = fusion_sessions.find(id); it != fusion_sessions.end()) {
-        it->second->SendCursor(msg.value("x", 0.0), msg.value("y", 0.0));
-      }
-    } else if (type == "fusion.close") {
-      std::string id = msg.value("id", std::string{});
-      if (auto it = fusion_sessions.find(id); it != fusion_sessions.end()) {
-        it->second->Close();
-        fusion_sessions.erase(it);
-      }
-    } else if (type == "quit") {
-      break;
+    } catch (const std::exception& e) {
+      ipc.Log("IPC message error (" + type + "): " + e.what());
+    } catch (...) {
+      ipc.Log("IPC message error (" + type + "): unknown exception");
     }
   }
 

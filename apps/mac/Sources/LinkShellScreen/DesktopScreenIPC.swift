@@ -48,7 +48,8 @@ public final class DesktopFramePort {
     lock.unlock()
     // The reader owns the receive right until it exits. A newly opened viewer cannot reuse
     // the numeric port name while this thread is between its stop check and mach_msg.
-    Thread.detachNewThread { [self] in
+    // User-interactive QoS keeps 120 Hz IOSurface arrivals out of macOS background scheduling.
+    let thread = Thread { [self] in
       defer {
         lock.lock(); stopped = true; receiving = false
         ls_screen_close(port, 1)
@@ -68,6 +69,9 @@ public final class DesktopFramePort {
         each(surface, token, Data(bytes.prefix(Int(size))))
       }
     }
+    thread.name = "linkshell.frame.mach"
+    thread.qualityOfService = .userInteractive
+    thread.start()
   }
 }
 
@@ -90,7 +94,7 @@ public final class DesktopMediaPipe {
     try? output.close()
   }
   public static func read(_ input: FileHandle, each: @escaping ([String: Any]) -> Void, end: @escaping () -> Void) {
-    Thread.detachNewThread {
+    let thread = Thread {
       var buffer = Data()
       var chunk = [UInt8](repeating: 0, count: 65_536)
       while true {
@@ -108,5 +112,8 @@ public final class DesktopMediaPipe {
       }
       end()
     }
+    thread.name = "linkshell.media.pipe"
+    thread.qualityOfService = .userInteractive
+    thread.start()
   }
 }

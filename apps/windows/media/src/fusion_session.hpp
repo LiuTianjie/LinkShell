@@ -6,6 +6,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 #include "api/data_channel_interface.h"
@@ -14,6 +15,7 @@
 #include "capture_source.hpp"
 #include "common.hpp"
 #include "d3d_context.hpp"
+#include "lan_floor.hpp"
 
 namespace linkshell {
 
@@ -64,6 +66,13 @@ class FusionSession {
   IpcChannel* ipc_;
 
   std::mutex mu_;
+  std::mutex close_mu_;
+  bool cleaned_up_ = false;
+  struct Lifetime {
+    std::mutex mu;
+    bool alive = true;
+  };
+  std::shared_ptr<Lifetime> life_ = std::make_shared<Lifetime>();
   std::atomic<bool> closed_{false};
   std::atomic<bool> connected_{false};
   std::string wanted_codec_ = "h264";
@@ -72,6 +81,7 @@ class FusionSession {
   int64_t offer_deadline_ms_ = 0;
   int64_t offer_due_ms_ = 0;
   int cursor_seq_ = 0;
+  std::unordered_set<std::string> useless_host_ips_;
 
   std::unique_ptr<PcObserver> pc_observer_;
   std::vector<std::unique_ptr<DcObserver>> dc_observers_;

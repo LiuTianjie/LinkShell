@@ -88,7 +88,9 @@ class MediaFoundationVideoEncoder : public webrtc::VideoEncoder {
   int height_ = 0;
   int fps_ = 60;
   int bitrate_bps_ = tuning::kStartBitrateBps;
-  int64_t frame_index_ = 0;
+  bool has_first_frame_ts_ = false;
+  int64_t last_frame_us_ = 0;
+  int64_t last_pts_100ns_ = 0;
   bool key_wanted_ = true;
 
   std::vector<uint8_t> cached_vps_;

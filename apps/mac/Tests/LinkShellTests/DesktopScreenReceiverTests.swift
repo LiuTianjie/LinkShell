@@ -199,6 +199,25 @@ final class DesktopScreenReceiverTests: XCTestCase {
     )
   }
 
+  func testDirectCommandInputValidationMatchesJSONPath() throws {
+    let validMove: [String: Any] = ["t": "move", "x": 0.25, "y": 0.75, "i": 12]
+    let direct = try XCTUnwrap(InputEvent(command: validMove))
+    XCTAssertEqual(direct.kind, "move")
+    XCTAssertEqual(direct.number, 12)
+    let fromJson = try XCTUnwrap(InputEvent(json: try JSONSerialization.data(withJSONObject: validMove)))
+    XCTAssertEqual(fromJson.kind, direct.kind)
+    XCTAssertEqual(fromJson.number, direct.number)
+    XCTAssertNil(InputEvent(command: ["t": "move", "x": 1.5, "y": 0.5]))
+    XCTAssertNil(InputEvent(command: ["t": "unknown"]))
+  }
+
+  func testVirtualHostCandidatesAreFilteredWhileRealLanAndSrflxStay() {
+    let virtual: Set<String> = ["192.168.3.1", "192.168.139.3"]
+    XCTAssertTrue(Networks.isUselessHost("candidate:1 1 udp 2122260223 192.168.3.1 54321 typ host", virtual: virtual))
+    XCTAssertFalse(Networks.isUselessHost("candidate:2 1 udp 2122260223 192.168.100.133 54321 typ host", virtual: virtual))
+    XCTAssertFalse(Networks.isUselessHost("candidate:3 1 udp 1686052607 192.168.3.1 54321 typ srflx raddr 0.0.0.0 rport 0", virtual: virtual))
+  }
+
   private var capabilities: [String: Any] { ["t": "capabilities", "version": 1, "configure": true, "pause": true] }
 
   private func configuredState() -> DesktopScreenInputState {

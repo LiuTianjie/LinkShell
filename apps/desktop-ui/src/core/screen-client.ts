@@ -76,7 +76,7 @@ export interface ScreenPreferencesStoreState extends UnifiedScreenPreferences {
 
 const DEFAULT_SCREEN_PREFERENCES: UnifiedScreenPreferences = {
   width: "auto",
-  maxFps: "60",
+  maxFps: "120",
   codec: "auto",
   pacing: "immediate",
   control: true,
@@ -97,7 +97,7 @@ function sanitizeFpsChoice(raw: unknown): ScreenFpsChoice {
   return typeof text === "string" &&
     (SCREEN_FPS_CHOICES as readonly string[]).includes(text)
     ? (text as ScreenFpsChoice)
-    : "60";
+    : "120";
 }
 
 function sanitizeCodecChoice(raw: unknown): ScreenCodecChoice {
@@ -431,6 +431,10 @@ export interface NativeScreenStatus {
   path?: "direct" | "lan" | "relay" | "socket";
   relayed?: boolean;
   rttMs?: number;
+  width?: number;
+  height?: number;
+  fps?: number;
+  bitrateMbps?: number;
   control?: boolean;
   controlRequested?: boolean;
   controlError?: string;

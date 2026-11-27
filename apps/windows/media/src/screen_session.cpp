@@ -130,7 +130,9 @@ class ScreenSession::PcObserver : public webrtc::PeerConnectionObserver {
   explicit PcObserver(ScreenSession* owner) : owner_(owner) {}
   void OnSignalingChange(webrtc::PeerConnectionInterface::SignalingState) override {}
   void OnDataChannel(webrtc::scoped_refptr<webrtc::DataChannelInterface>) override {}
-  void OnIceGatheringChange(webrtc::PeerConnectionInterface::IceGatheringState) override {}
+  void OnIceGatheringChange(webrtc::PeerConnectionInterface::IceGatheringState state) override {
+    owner_->OnIceGatheringState(state);
+  }
   void OnIceCandidate(const webrtc::IceCandidate* candidate) override { owner_->OnIceCandidate(candidate); }
   void OnConnectionChange(webrtc::PeerConnectionInterface::PeerConnectionState state) override {
     owner_->OnConnectionState(state);
@@ -151,12 +153,16 @@ class ScreenSession::DcObserver : public webrtc::DataChannelObserver {
 
 class ScreenSession::StatsCallback : public webrtc::RTCStatsCollectorCallback {
  public:
-  explicit StatsCallback(ScreenSession* owner) : owner_(owner) {}
+  StatsCallback(ScreenSession* owner, std::shared_ptr<ScreenSession::Lifetime> life)
+      : owner_(owner), life_(std::move(life)) {}
   void OnStatsDelivered(const webrtc::scoped_refptr<const webrtc::RTCStatsReport>& report) override {
+    std::lock_guard<std::mutex> lk(life_->mu);
+    if (!life_->alive) return;
     owner_->OnStats(report);
   }
  private:
   ScreenSession* owner_;
+  std::shared_ptr<ScreenSession::Lifetime> life_;
 };
 
 ScreenSession::ScreenSession(
@@ -218,6 +224,9 @@ bool ScreenSession::Open(const json& request) {
   awake_ = std::make_unique<AwakeGuard>();
   input_->SetDisplay(display_);
 
+  useless_host_ips_ = CollectUselessHostAddresses();
+  dropped_candidates_.store(0);
+
   webrtc::PeerConnectionInterface::RTCConfiguration config;
   config.sdp_semantics = webrtc::SdpSemantics::kUnifiedPlan;
   config.servers = ParseIceServers(request);
@@ -225,6 +234,8 @@ bool ScreenSession::Open(const json& request) {
   config.rtcp_mux_policy = webrtc::PeerConnectionInterface::kRtcpMuxPolicyRequire;
   config.continual_gathering_policy = webrtc::PeerConnectionInterface::GATHER_CONTINUALLY;
   config.disable_link_local_networks = true;
+  config.prune_turn_ports = true;
+  config.ice_candidate_pool_size = 2;
   config.set_dscp(true);
 
   pc_observer_ = std::make_unique<PcObserver>(this);
@@ -236,7 +247,7 @@ bool ScreenSession::Open(const json& request) {
   }
   pc_ = pc_or.MoveValue();
 
-  source_ = webrtc::make_ref_counted<ScreenVideoTrackSource>(d3d_, [this](const std::string& m) { ipc_->Log(m); });
+  source_ = webrtc::make_ref_counted<ScreenVideoTrackSource>(d3d_, [ipc = ipc_](const std::string& m) { ipc->Log(m); });
   auto track = factory_->CreateVideoTrack(source_, "screen");
 
   webrtc::RtpTransceiverInit init;
@@ -307,7 +318,7 @@ bool ScreenSession::Open(const json& request) {
   if (audio_enabled_) {
     audio_ = std::make_unique<AudioCapturer>(
         [this](const uint8_t* data, size_t len) { SendAudioPacket(data, len); },
-        [this](const std::string& m) { ipc_->Log(m); });
+        [ipc = ipc_](const std::string& m) { ipc->Log(m); });
     audio_->Start();
   }
 
@@ -342,53 +353,83 @@ void ScreenSession::ApplySenderParameters() {
 }
 
 void ScreenSession::CreateOffer(bool ice_restart) {
-  if (closed_.load() || !pc_) return;
-  offer_sent_ms_ = NowMillis();
+  webrtc::scoped_refptr<webrtc::PeerConnectionInterface> pc;
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    if (closed_.load() || !pc_) return;
+    offer_sent_ms_ = NowMillis();
+    pc = pc_;
+  }
   webrtc::PeerConnectionInterface::RTCOfferAnswerOptions opts;
   opts.ice_restart = ice_restart;
 
+  auto life = life_;
   auto obs = webrtc::make_ref_counted<CreateOfferAdapter>(
-      [this](webrtc::SessionDescriptionInterface* desc) {
-        if (closed_.load() || !pc_ || !desc) {
+      [this, life](webrtc::SessionDescriptionInterface* desc) {
+        webrtc::scoped_refptr<webrtc::PeerConnectionInterface> local_pc;
+        {
+          std::lock_guard<std::mutex> lk(life->mu);
+          if (!life->alive || closed_.load() || !desc) {
+            delete desc;
+            return;
+          }
+          std::lock_guard<std::mutex> lock(mu_);
+          local_pc = pc_;
+        }
+        if (!local_pc) {
           delete desc;
           return;
         }
         std::string sdp;
         desc->ToString(&sdp);
-        auto set_obs = webrtc::make_ref_counted<SetLocalAdapter>([this, sdp](webrtc::RTCError err) {
-          if (closed_.load()) return;
+        auto set_obs = webrtc::make_ref_counted<SetLocalAdapter>([this, life, sdp](webrtc::RTCError err) {
+          std::lock_guard<std::mutex> lk2(life->mu);
+          if (!life->alive || closed_.load()) return;
           if (!err.ok()) {
             Fail(std::string("SetLocalDescription failed: ") + err.message());
             return;
           }
           ipc_->Emit({{"t", "rtc.offer"}, {"v", viewer_id_}, {"sdp", sdp}});
         });
-        pc_->SetLocalDescription(std::unique_ptr<webrtc::SessionDescriptionInterface>(desc), set_obs);
+        local_pc->SetLocalDescription(std::unique_ptr<webrtc::SessionDescriptionInterface>(desc), set_obs);
       },
-      [this](const std::string& err) {
-        if (!closed_.load()) Fail("CreateOffer failed: " + err);
+      [this, life](const std::string& err) {
+        std::lock_guard<std::mutex> lk(life->mu);
+        if (life->alive && !closed_.load()) Fail("CreateOffer failed: " + err);
       });
-  pc_->CreateOffer(obs.get(), opts);
+  pc->CreateOffer(obs.get(), opts);
 }
 
 void ScreenSession::HandleAnswer(const std::string& sdp) {
-  if (closed_.load() || !pc_) return;
+  webrtc::scoped_refptr<webrtc::PeerConnectionInterface> pc;
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    if (closed_.load() || !pc_) return;
+    pc = pc_;
+  }
   webrtc::SdpParseError parse_err;
   auto desc = webrtc::CreateSessionDescription(webrtc::SdpType::kAnswer, sdp, &parse_err);
   if (!desc) {
     Fail("Invalid answer SDP: " + parse_err.description);
     return;
   }
-  auto obs = webrtc::make_ref_counted<SetRemoteAdapter>([this](webrtc::RTCError err) {
-    if (!err.ok() && !closed_.load()) {
+  auto life = life_;
+  auto obs = webrtc::make_ref_counted<SetRemoteAdapter>([this, life](webrtc::RTCError err) {
+    std::lock_guard<std::mutex> lk(life->mu);
+    if (!err.ok() && life->alive && !closed_.load()) {
       Fail(std::string("SetRemoteDescription failed: ") + err.message());
     }
   });
-  pc_->SetRemoteDescription(std::move(desc), obs);
+  pc->SetRemoteDescription(std::move(desc), obs);
 }
 
 void ScreenSession::HandleIce(const json& msg) {
-  if (closed_.load() || !pc_) return;
+  webrtc::scoped_refptr<webrtc::PeerConnectionInterface> pc;
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    if (closed_.load() || !pc_) return;
+    pc = pc_;
+  }
   std::string cand = msg.value("candidate", std::string{});
   if (cand.empty()) return;
   std::string mid = msg.contains("sdpMid") && msg["sdpMid"].is_string() ? msg["sdpMid"].get<std::string>() : "";
@@ -396,7 +437,7 @@ void ScreenSession::HandleIce(const json& msg) {
   webrtc::SdpParseError err;
   auto ice = webrtc::IceCandidate::Create(mid, mline, cand, &err);
   if (ice) {
-    pc_->AddIceCandidate(std::move(ice), [](webrtc::RTCError) {});
+    pc->AddIceCandidate(std::move(ice), [](webrtc::RTCError) {});
   }
 }
 
@@ -488,12 +529,13 @@ void ScreenSession::HandleConfigure(const json& msg) {
 
 void ScreenSession::SetAudio(bool enabled) {
   std::lock_guard<std::mutex> lock(mu_);
+  if (closed_.load()) return;
   audio_enabled_ = enabled;
   if (enabled) {
     if (!audio_) {
       audio_ = std::make_unique<AudioCapturer>(
           [this](const uint8_t* data, size_t len) { SendAudioPacket(data, len); },
-          [this](const std::string& m) { ipc_->Log(m); });
+          [ipc = ipc_](const std::string& m) { ipc->Log(m); });
     }
     audio_->Start();
   } else if (audio_) {
@@ -501,12 +543,29 @@ void ScreenSession::SetAudio(bool enabled) {
   }
 }
 
+void ScreenSession::OnIceGatheringState(webrtc::PeerConnectionInterface::IceGatheringState state) {
+  if (closed_.load()) return;
+  if (state == webrtc::PeerConnectionInterface::kIceGatheringComplete) {
+    int dropped = dropped_candidates_.exchange(0);
+    if (dropped > 0) {
+      ipc_->Log("gathering done: " + std::to_string(dropped) +
+                " host candidate" + (dropped == 1 ? "" : "s") +
+                " on a virtual/APIPA interface not offered");
+    }
+  }
+}
+
 void ScreenSession::OnIceCandidate(const webrtc::IceCandidate* candidate) {
   if (closed_.load() || !candidate) return;
+  std::string cand_str = candidate->ToString();
+  if (IsUselessHostCandidate(cand_str, useless_host_ips_)) {
+    dropped_candidates_.fetch_add(1);
+    return;
+  }
   ipc_->Emit({
       {"t", "rtc.ice"},
       {"v", viewer_id_},
-      {"candidate", candidate->ToString()},
+      {"candidate", cand_str},
       {"sdpMid", candidate->sdp_mid()},
       {"sdpMLineIndex", candidate->sdp_mline_index()},
   });
@@ -566,11 +625,16 @@ void ScreenSession::SendShape(const CursorShapePayload& shape, bool force_full) 
 }
 
 void ScreenSession::SendAudioPacket(const uint8_t* data, size_t size) {
-  if (closed_.load() || paused_.load() || !ch_audio_) return;
-  if (ch_audio_->state() != webrtc::DataChannelInterface::kOpen) return;
-  if (ch_audio_->buffered_amount() > 262'144) return;
+  if (closed_.load() || paused_.load()) return;
+  webrtc::scoped_refptr<webrtc::DataChannelInterface> ch;
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    ch = ch_audio_;
+  }
+  if (!ch || ch->state() != webrtc::DataChannelInterface::kOpen) return;
+  if (ch->buffered_amount() > 262'144) return;
   webrtc::CopyOnWriteBuffer buf(data, size);
-  ch_audio_->Send(webrtc::DataBuffer(buf, /*binary=*/true));
+  ch->Send(webrtc::DataBuffer(buf, /*binary=*/true));
 }
 
 void ScreenSession::OnStats(const webrtc::scoped_refptr<const webrtc::RTCStatsReport>& report) {
@@ -619,18 +683,31 @@ void ScreenSession::OnStats(const webrtc::scoped_refptr<const webrtc::RTCStatsRe
     }
   }
 
+  bool has_video_out = false;
+  uint64_t bytes = 0;
+  uint32_t frames = 0;
+  double enc_time = 0.0;
+  double delay = 0.0;
+  uint64_t pkts = 0;
   for (const auto* out : report->GetStatsOfType<webrtc::RTCOutboundRtpStreamStats>()) {
     if (out->kind.value_or("") != "video") continue;
-    uint64_t bytes = out->bytes_sent.value_or(0);
-    uint32_t frames = out->frames_encoded.value_or(0);
-    double enc_time = out->total_encode_time.value_or(0.0);
-    double delay = out->total_packet_send_delay.value_or(0.0);
-    uint64_t pkts = out->packets_sent.value_or(0);
+    has_video_out = true;
+    bytes = out->bytes_sent.value_or(0);
+    frames = out->frames_encoded.value_or(0);
+    enc_time = out->total_encode_time.value_or(0.0);
+    delay = out->total_packet_send_delay.value_or(0.0);
+    pkts = out->packets_sent.value_or(0);
     sent_w = static_cast<int>(out->frame_width.value_or(0));
     sent_h = static_cast<int>(out->frame_height.value_or(0));
     encoder_impl = out->encoder_implementation.value_or("");
     if (out->quality_limitation_reason.has_value()) limitation = *out->quality_limitation_reason;
+    break;
+  }
 
+  std::lock_guard<std::mutex> lock(mu_);
+  if (closed_.load() || !pc_) return;
+
+  if (has_video_out) {
     if (has_prev_stats_) {
       bitrate_kbps = static_cast<double>(bytes - prev_bytes_sent_) * 8.0 / 1000.0;
       encoded_fps = static_cast<double>(frames - prev_frames_encoded_);
@@ -644,11 +721,7 @@ void ScreenSession::OnStats(const webrtc::scoped_refptr<const webrtc::RTCStatsRe
     prev_send_delay_ = delay;
     prev_packets_sent_ = pkts;
     has_prev_stats_ = true;
-    break;
   }
-
-  std::lock_guard<std::mutex> lock(mu_);
-  if (closed_.load()) return;
 
   // Report path change (LAN / direct / TURN relay).
   if (local_ep && remote_ep) {
@@ -747,16 +820,23 @@ void ScreenSession::MonitorLoop() {
 
     if (now - last_stats_ms >= 1000) {
       last_stats_ms = now;
-      if (pc_ && connected_.load()) {
-        auto cb = webrtc::make_ref_counted<StatsCallback>(this);
-        pc_->GetStats(cb.get());
-      } else if (!ever_connected_.load() && offer_sent_ms_ > 0 &&
-                 (now - offer_sent_ms_) >= tuning::kIceRestartAfterSeconds * 1000 &&
+      webrtc::scoped_refptr<webrtc::PeerConnectionInterface> pc;
+      int64_t sent_ms = 0;
+      {
+        std::lock_guard<std::mutex> lock(mu_);
+        pc = pc_;
+        sent_ms = offer_sent_ms_;
+      }
+      if (pc && connected_.load()) {
+        auto cb = webrtc::make_ref_counted<StatsCallback>(this, life_);
+        pc->GetStats(cb.get());
+      } else if (pc && !ever_connected_.load() && sent_ms > 0 &&
+                 (now - sent_ms) >= tuning::kIceRestartAfterSeconds * 1000 &&
                  ice_restarts_ < tuning::kIceRestartLimit) {
         ice_restarts_ += 1;
         ipc_->Log("no path yet after " + std::to_string(tuning::kIceRestartAfterSeconds) +
                   " s: restarting ICE (attempt " + std::to_string(ice_restarts_) + ")");
-        if (pc_) pc_->RestartIce();
+        pc->RestartIce();
         CreateOffer(true);
       }
     }
@@ -766,18 +846,30 @@ void ScreenSession::MonitorLoop() {
 }
 
 void ScreenSession::Fail(const std::string& message) {
+  if (failed_.exchange(true)) return;
+  // Never call Close() from here: Fail() runs on libwebrtc's signaling thread inside SDP
+  // callbacks, where joining monitor_ (which proxies to signaling) would ABBA-deadlock.
+  closed_.store(true);
   ipc_->Emit({{"t", "rtc.error"}, {"v", viewer_id_}, {"message", message}});
-  Close();
 }
 
 void ScreenSession::Close() {
-  if (closed_.exchange(true)) return;
+  closed_.store(true);
+  std::lock_guard<std::mutex> close_lock(close_mu_);
+  if (cleaned_up_) return;
+  cleaned_up_ = true;
+
   if (monitor_.joinable() && monitor_.get_id() != std::this_thread::get_id()) {
     monitor_.join();
   }
-  if (audio_) {
-    audio_->Stop();
-    audio_.reset();
+  std::unique_ptr<AudioCapturer> audio;
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    audio = std::move(audio_);
+  }
+  if (audio) {
+    audio->Stop();
+    audio.reset();
   }
   if (input_) {
     input_->ReleaseAll();
@@ -785,22 +877,38 @@ void ScreenSession::Close() {
   if (source_) {
     source_->Stop();
   }
-  for (auto& ch : channels_) {
+
+  std::vector<webrtc::scoped_refptr<webrtc::DataChannelInterface>> channels;
+  webrtc::scoped_refptr<webrtc::PeerConnectionInterface> pc;
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    channels = std::move(channels_);
+    channels_.clear();
+    ch_cursor_ = nullptr;
+    ch_shape_ = nullptr;
+    ch_audio_ = nullptr;
+    pc = std::move(pc_);
+    pc_ = nullptr;
+    transceiver_ = nullptr;
+  }
+  for (auto& ch : channels) {
     if (ch) {
       ch->UnregisterObserver();
       ch->Close();
     }
   }
-  channels_.clear();
-  ch_cursor_ = nullptr;
-  ch_shape_ = nullptr;
-  ch_audio_ = nullptr;
-  dc_observers_.clear();
-  if (pc_) {
-    pc_->Close();
-    pc_ = nullptr;
+  channels.clear();
+  if (pc) {
+    pc->Close();
+    pc = nullptr;
   }
-  transceiver_ = nullptr;
+  {
+    // Wait for any in-flight async WebRTC callbacks before allowing destruction.
+    std::lock_guard<std::mutex> lk(life_->mu);
+    life_->alive = false;
+  }
+  dc_observers_.clear();
+  pc_observer_.reset();
   source_ = nullptr;
   awake_.reset();
   if (vdd_) {

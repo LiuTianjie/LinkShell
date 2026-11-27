@@ -54,8 +54,9 @@ class InputCursorController {
   std::optional<CursorShapePayload> PollShape(bool force = false);
 
  private:
-  bool ShouldForwardElevated() const;
+  bool ShouldForwardElevated(bool force_refresh);
   bool ForwardToService(const json& event);
+  void DrainServicePipe();
   void CloseServicePipe();
 
   void SendMouse(DWORD flags, int dx = 0, int dy = 0, DWORD data = 0);
@@ -86,6 +87,10 @@ class InputCursorController {
 
   HANDLE svc_pipe_ = INVALID_HANDLE_VALUE;
   int svc_screen_ = -1;
+  std::string cached_svc_token_;
+  int64_t cached_svc_token_ms_ = -60'000;
+  bool cached_elevated_ = false;
+  int64_t cached_elevated_ms_ = -60'000;
 };
 
 }  // namespace linkshell

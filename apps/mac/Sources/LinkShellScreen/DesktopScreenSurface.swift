@@ -378,16 +378,21 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
   /// The display link draws only while the picture is on screen, synced to the screen the window is on.
   private func updateRunning() {
     guard !presentationFrozen else { return }
-    let number = window?.screen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
-    renderer.setRunning(window != nil && active && !stopped, display: number.map { CGDirectDisplayID($0.uint32Value) })
+    let screen = window?.screen
+    let number = screen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
+    let refreshRate = max(30, min(240, screen?.maximumFramesPerSecond ?? 60))
+    renderer.setRunning(window != nil && active && !stopped, display: number.map { CGDirectDisplayID($0.uint32Value) }, refreshRate: refreshRate)
   }
   private func cursorPoint() -> CGPoint {
     let rect = surfaceRect()
     return CGPoint(x: rect.minX + cursorPosition.x * rect.width, y: rect.minY + cursorPosition.y * rect.height)
   }
   private func placeCursor() {
+    guard !cursorView.isHidden || !compositionLabel.isHidden else { return }
     let point = cursorPoint()
-    cursorView.frame = CGRect(origin: CGPoint(x: point.x - cursorHotspot.x, y: point.y - cursorHotspot.y), size: cursorSize)
+    if !cursorView.isHidden {
+      cursorView.frame = CGRect(origin: CGPoint(x: point.x - cursorHotspot.x, y: point.y - cursorHotspot.y), size: cursorSize)
+    }
     if !compositionLabel.isHidden { positionOverlays() }
   }
   private func positionOverlays() {
@@ -777,8 +782,14 @@ private final class DesktopScreenMetalRenderer {
   private var fillsBounds = false
   private var frozen = false
   private var framesSinceCacheFlush = 0
-  private let inFlight = DispatchSemaphore(value: 1)
+  // Match `layer.maximumDrawableCount = 2` so encoding frame N+1 never drops on a 120 Hz
+  // VSync tick while frame N's GPU completion handler finishes scanout.
+  private let inFlight = DispatchSemaphore(value: 2)
   private var link: CVDisplayLink?
+  private var metalLinkStorage: AnyObject?
+  private var metalDriverStorage: AnyObject?
+  private var renderThreadStorage: AnyObject?
+  private var metalLinkStopped = false
   private var queue: MTLCommandQueue?
   private var pipeline: MTLRenderPipelineState?
   private var cache: CVMetalTextureCache?
@@ -806,12 +817,52 @@ private final class DesktopScreenMetalRenderer {
       descriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
       pipeline = try device.makeRenderPipelineState(descriptor: descriptor)
     } catch { fail("原生屏幕渲染初始化失败") }
-    var made: CVDisplayLink?
-    guard CVDisplayLinkCreateWithActiveCGDisplays(&made) == kCVReturnSuccess, let made else { fail("无法与显示器刷新同步，请重新连接"); return }
-    CVDisplayLinkSetOutputHandler(made) { [weak self] _, _, _, _, _ in self?.draw(); return kCVReturnSuccess }
-    link = made
+    if #available(macOS 14.0, *) {
+      // Exact parity with iOS ScreenMetalView: CAMetalDisplayLink on a dedicated user-interactive
+      // thread unlocks true 120 Hz ProMotion VSync at 1-frame latency instead of 60 Hz CVDisplayLink.
+      let thread = DesktopRenderThread()
+      let driver = DesktopMetalDisplayLinkDriver(renderer: self)
+      let metalLink = CAMetalDisplayLink(metalLayer: layer)
+      metalLink.delegate = driver
+      metalLink.preferredFrameLatency = 1
+      metalLink.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
+      metalLink.isPaused = true
+      renderThreadStorage = thread
+      metalDriverStorage = driver
+      metalLinkStorage = metalLink
+      thread.perform { metalLink.add(to: .current, forMode: .common) }
+    } else {
+      var made: CVDisplayLink?
+      guard CVDisplayLinkCreateWithActiveCGDisplays(&made) == kCVReturnSuccess, let made else { fail("无法与显示器刷新同步，请重新连接"); return }
+      CVDisplayLinkSetOutputHandler(made) { [weak self] _, _, _, _, _ in self?.draw(); return kCVReturnSuccess }
+      link = made
+    }
   }
-  deinit { if let link { CVDisplayLinkStop(link) } }
+  deinit {
+    teardownDisplayLinks()
+  }
+
+  private func teardownDisplayLinks() {
+    if let link { CVDisplayLinkStop(link) }
+    if #available(macOS 14.0, *) {
+      lock.lock()
+      let alreadyStopped = metalLinkStopped
+      metalLinkStopped = true
+      lock.unlock()
+      guard !alreadyStopped else { return }
+      if let metalLink = metalLinkStorage as? CAMetalDisplayLink,
+         let thread = renderThreadStorage as? DesktopRenderThread {
+        thread.performSync {
+          metalLink.isPaused = true
+          metalLink.invalidate()
+        }
+        thread.shutdown()
+      }
+      metalLinkStorage = nil
+      metalDriverStorage = nil
+      renderThreadStorage = nil
+    }
+  }
 
   func receive(_ picture: DesktopScreenFrame) {
     lock.lock()
@@ -825,13 +876,25 @@ private final class DesktopScreenMetalRenderer {
     lock.unlock()
     if ready { draw() }
   }
-  /// Draws only while the surface is on screen; `display` follows the window to its current screen.
-  func setRunning(_ value: Bool, display: CGDirectDisplayID?) {
-    guard let link else { return }
-    if let display { CVDisplayLinkSetCurrentCGDisplay(link, display) }
+  /// Draws only while the surface is on screen; `display` and `refreshRate` follow the window's screen.
+  func setRunning(_ value: Bool, display: CGDirectDisplayID?, refreshRate: Int = 60) {
     lock.lock(); let was = running; running = value && !stopped; let now = running
     if now && !was { changes &+= 1 }
     lock.unlock()
+    if #available(macOS 14.0, *),
+       let metalLink = metalLinkStorage as? CAMetalDisplayLink,
+       let thread = renderThreadStorage as? DesktopRenderThread {
+      let maxHz = Float(max(30, min(240, refreshRate)))
+      let minHz = min(60, maxHz)
+      let range = CAFrameRateRange(minimum: minHz, maximum: maxHz, preferred: maxHz)
+      thread.perform {
+        metalLink.preferredFrameRateRange = range
+        metalLink.isPaused = !now
+      }
+      return
+    }
+    guard let link else { return }
+    if let display { CVDisplayLinkSetCurrentCGDisplay(link, display) }
     if now && !was { CVDisplayLinkStart(link) } else if !now && was { CVDisplayLinkStop(link) }
   }
   func drawableSizeChanged() { lock.lock(); changes &+= 1; lock.unlock() }
@@ -868,10 +931,11 @@ private final class DesktopScreenMetalRenderer {
   func stop() {
     lock.lock(); stopped = true; accepting = false; pending = nil; current = nil; generation &+= 1; lock.unlock()
     setRunning(false, display: nil)
+    teardownDisplayLinks()
     if let cache { CVMetalTextureCacheFlush(cache, 0) }
   }
 
-  private func draw(waitTimeout: DispatchTime = .now()) {
+  fileprivate func draw(drawable providedDrawable: CAMetalDrawable? = nil, waitTimeout: DispatchTime = .now()) {
     lock.lock()
     if stopped || frozen { lock.unlock(); return }
     // Allow clearing a stale drawable even after the surface becomes inactive or pauses its display link.
@@ -885,7 +949,7 @@ private final class DesktopScreenMetalRenderer {
     guard needed, inFlight.wait(timeout: waitTimeout) == .success else { return }
     var committed = false
     defer { if !committed { inFlight.signal() } }
-    guard let queue, let command = queue.makeCommandBuffer(), let drawable = layer.nextDrawable() else { return }
+    guard let queue, let command = queue.makeCommandBuffer(), let drawable = providedDrawable ?? layer.nextDrawable() else { return }
     let pass = MTLRenderPassDescriptor()
     pass.colorAttachments[0].texture = drawable.texture
     pass.colorAttachments[0].loadAction = .clear
@@ -998,4 +1062,86 @@ private final class DesktopScreenMetalRenderer {
     return float4(l+c.x*chroma.y,l+c.y*chroma.x+c.z*chroma.y,l+c.w*chroma.x,1);
   }
   """
+}
+
+@available(macOS 14.0, *)
+private final class DesktopMetalDisplayLinkDriver: NSObject, CAMetalDisplayLinkDelegate {
+  weak var renderer: DesktopScreenMetalRenderer?
+  init(renderer: DesktopScreenMetalRenderer) { self.renderer = renderer }
+  func metalDisplayLink(_ link: CAMetalDisplayLink, needsUpdate update: CAMetalDisplayLink.Update) {
+    renderer?.draw(drawable: update.drawable)
+  }
+}
+
+@available(macOS 14.0, *)
+private final class DesktopRenderThread: Thread {
+  private let ready = DispatchSemaphore(value: 0)
+  private let lock = NSLock()
+  private var loop: RunLoop?
+  private var keepAlive: Port?
+  private var loopExited = false
+
+  override init() {
+    super.init()
+    name = "linkshell.desktop.metal"
+    qualityOfService = .userInteractive
+    start()
+    ready.wait()
+  }
+
+  override func main() {
+    let current = RunLoop.current
+    let port = Port()
+    current.add(port, forMode: .common)
+    lock.lock()
+    loop = current
+    keepAlive = port
+    lock.unlock()
+    ready.signal()
+    while !isCancelled {
+      autoreleasepool {
+        _ = current.run(mode: .default, before: Date(timeIntervalSinceNow: 1))
+      }
+    }
+    lock.lock()
+    if let keepAlive { current.remove(keepAlive, forMode: .common) }
+    keepAlive = nil
+    loop = nil
+    loopExited = true
+    lock.unlock()
+  }
+
+  func perform(_ work: @escaping () -> Void) {
+    lock.lock()
+    let target = loop
+    let done = loopExited
+    lock.unlock()
+    guard !done, let target else { return }
+    CFRunLoopPerformBlock(target.getCFRunLoop(), CFRunLoopMode.commonModes.rawValue, work)
+    CFRunLoopWakeUp(target.getCFRunLoop())
+  }
+
+  func performSync(_ work: @escaping () -> Void) {
+    if Thread.current === self { work(); return }
+    let done = DispatchSemaphore(value: 0)
+    lock.lock()
+    let target = loop
+    let isDone = loopExited
+    lock.unlock()
+    guard !isDone, let target else { return }
+    CFRunLoopPerformBlock(target.getCFRunLoop(), CFRunLoopMode.commonModes.rawValue) {
+      work()
+      done.signal()
+    }
+    CFRunLoopWakeUp(target.getCFRunLoop())
+    _ = done.wait(timeout: .now() + .seconds(1))
+  }
+
+  func shutdown() {
+    cancel()
+    lock.lock()
+    let target = loop
+    lock.unlock()
+    if let target { CFRunLoopWakeUp(target.getCFRunLoop()) }
+  }
 }

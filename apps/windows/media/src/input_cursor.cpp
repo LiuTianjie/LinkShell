@@ -113,9 +113,20 @@ void InputCursorController::SetSuspended(bool suspended) {
   suspended_ = suspended;
 }
 
-bool InputCursorController::ShouldForwardElevated() const {
-  if (!GdiAndSecureCapturer::IsServiceAvailable()) return false;
-  return !IsDefaultDesktopActive() || IsForegroundWindowElevated();
+bool InputCursorController::ShouldForwardElevated(bool force_refresh) {
+  int64_t now = NowMillis();
+  // Refresh the per-install service token at most once every 5s instead of opening a file on
+  // every 120 Hz mouse move!
+  if (now - cached_svc_token_ms_ >= 5000) {
+    cached_svc_token_ = GdiAndSecureCapturer::ReadServiceToken();
+    cached_svc_token_ms_ = now;
+  }
+  if (cached_svc_token_.empty()) return false;
+  if (force_refresh || (now - cached_elevated_ms_ >= 150)) {
+    cached_elevated_ = !IsDefaultDesktopActive() || IsForegroundWindowElevated();
+    cached_elevated_ms_ = now;
+  }
+  return cached_elevated_;
 }
 
 void InputCursorController::CloseServicePipe() {
@@ -126,16 +137,32 @@ void InputCursorController::CloseServicePipe() {
   svc_screen_ = -1;
 }
 
+void InputCursorController::DrainServicePipe() {
+  if (svc_pipe_ == INVALID_HANDLE_VALUE) return;
+  // LinkShellScreenService writes cursor updates back onto the duplex control pipe; drain them
+  // non-blockingly so the 64 KB pipe buffer never fills and deadlocks the elevated worker.
+  DWORD avail = 0;
+  char scratch[4096];
+  while (PeekNamedPipe(svc_pipe_, nullptr, 0, nullptr, &avail, nullptr) && avail > 0) {
+    DWORD to_read = std::min<DWORD>(avail, sizeof(scratch));
+    DWORD got = 0;
+    if (!ReadFile(svc_pipe_, scratch, to_read, &got, nullptr) || got == 0) break;
+  }
+}
+
 bool InputCursorController::ForwardToService(const json& event) {
   if (svc_pipe_ == INVALID_HANDLE_VALUE || svc_screen_ != display_.screen) {
     CloseServicePipe();
-    std::string token = GdiAndSecureCapturer::ReadServiceToken();
-    if (token.empty()) return false;
+    if (cached_svc_token_.empty()) {
+      cached_svc_token_ = GdiAndSecureCapturer::ReadServiceToken();
+      cached_svc_token_ms_ = NowMillis();
+    }
+    if (cached_svc_token_.empty()) return false;
     HANDLE h = CreateFileW(
         L"\\\\.\\pipe\\LinkShellScreenServiceV1",
         GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
     if (h == INVALID_HANDLE_VALUE) return false;
-    json handshake = {{"token", token}, {"mode", "control"}, {"screen", display_.screen}, {"w", 1920}, {"h", 1080}, {"fps", 30}, {"quality", 80}};
+    json handshake = {{"token", cached_svc_token_}, {"mode", "control"}, {"screen", display_.screen}, {"w", 1920}, {"h", 1080}, {"fps", 30}, {"quality", 80}};
     std::string hs = handshake.dump() + "\n";
     DWORD written = 0;
     if (!WriteFile(h, hs.data(), static_cast<DWORD>(hs.size()), &written, nullptr) || written != hs.size()) {
@@ -145,6 +172,7 @@ bool InputCursorController::ForwardToService(const json& event) {
     svc_pipe_ = h;
     svc_screen_ = display_.screen;
   }
+  DrainServicePipe();
   std::string line = event.dump() + "\n";
   DWORD written = 0;
   if (!WriteFile(svc_pipe_, line.data(), static_cast<DWORD>(line.size()), &written, nullptr) || written != line.size()) {
@@ -248,7 +276,8 @@ bool InputCursorController::HandleEvent(const json& event, bool lossy) {
   std::string type = event["t"].get<std::string>();
 
   // Forward to LinkShellScreenService when targeting UAC / Lock Screen / elevated Admin window.
-  if (ShouldForwardElevated() && type != "keydown" && type != "keyup") {
+  bool force_elev_check = (type != "move" && type != "scroll");
+  if (ShouldForwardElevated(force_elev_check) && type != "keydown" && type != "keyup") {
     if (ForwardToService(event)) return true;
   }
 

@@ -46,6 +46,7 @@ final class NativeScreen: NSObject {
     holes: [DesktopScreenHole] = [],
     overlayOpen: Bool = false,
     smooth: Bool = false,
+    preferH264: Bool = false,
     fullScreen: Bool = false,
     audioMuted: Bool = false,
     systemShortcutCapture: Bool = NativeScreen.desiredSystemShortcutCapture,
@@ -112,7 +113,7 @@ final class NativeScreen: NSObject {
       DesktopMediaPipe.read(output.fileHandleForReading, each: { [weak self] in self?.event($0) }, end: { [weak self] in
         DispatchQueue.main.async { self?.fail("原生画面连接已关闭，请重新连接") }
       })
-      pipe.send(["type": "start", "port": port.name, "smooth": smooth, "audioMuted": audioMuted])
+      pipe.send(["type": "start", "port": port.name, "smooth": smooth, "preferH264": preferH264, "audioMuted": audioMuted])
     } catch { stop(); throw error }
     let timeout = DispatchWorkItem { [weak self] in self?.fail("原生画面进程未就绪，请重新连接") }
     startup = timeout; DispatchQueue.main.asyncAfter(deadline: .now() + 10, execute: timeout)
@@ -193,7 +194,15 @@ final class NativeScreen: NSObject {
     // Decoder and release callbacks can send concurrently; never present an older arrival.
     guard accepted, let shared, let picture = DesktopScreenFrame.importSurface(shared, metadata: metadata, release: release) else { release(); return }
     // Thread-safe mailbox: never schedule frames on the Electron/AppKit main thread.
-    surface.receive(picture)
+    // On macOS 14+, CAMetalDisplayLink drives tear-free 120 Hz ProMotion VSync at 1-frame latency.
+    // On macOS 13 (legacy 60 Hz CVDisplayLink), draw immediately in low-latency mode to avoid 16.7ms stalls.
+    if #available(macOS 14.0, *) {
+      surface.receive(picture)
+    } else if !wantedSmooth {
+      surface.receiveImmediate(picture)
+    } else {
+      surface.receive(picture)
+    }
   }
 
   func message(_ value: [String: Any]) {

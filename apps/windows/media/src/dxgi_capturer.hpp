@@ -16,21 +16,29 @@
 
 namespace linkshell {
 
-// Native DXGI Desktop Duplication fallback for older Win10 builds or WGC failures.
+// Native DXGI Desktop Duplication capturer (primary zero-copy GPU monitor backend,
+// supporting both same-GPU zero-copy and cross-adapter multi-GPU displays).
 class DxgiDuplicationCapturer {
  public:
   DxgiDuplicationCapturer(std::shared_ptr<D3DContext> d3d);
   ~DxgiDuplicationCapturer();
 
   bool Open(const DisplayInfo& display, std::string* error = nullptr);
-  // Returns S_OK with a GPU texture copy, DXGI_ERROR_WAIT_TIMEOUT if static, or failure HRESULT.
+  // Returns S_OK with a GPU texture on d3d_'s device, DXGI_ERROR_WAIT_TIMEOUT if no new desktop frame,
+  // or a failure HRESULT (e.g. DXGI_ERROR_ACCESS_LOST on mode switch / UAC).
   HRESULT Acquire(int timeout_ms, Microsoft::WRL::ComPtr<ID3D11Texture2D>* out_texture, int* out_w, int* out_h);
   void Close();
+  bool is_cross_adapter() const { return cross_adapter_; }
 
  private:
   std::shared_ptr<D3DContext> d3d_;
+  // Non-null only when the monitor sits on a different DXGI adapter than d3d_ (e.g. Optimus iGPU + dGPU).
+  Microsoft::WRL::ComPtr<ID3D11Device> dup_device_;
+  Microsoft::WRL::ComPtr<ID3D11DeviceContext> dup_context_;
   Microsoft::WRL::ComPtr<IDXGIOutputDuplication> dup_;
   Microsoft::WRL::ComPtr<ID3D11Texture2D> copy_tex_;
+  Microsoft::WRL::ComPtr<ID3D11Texture2D> xadapter_staging_;
+  bool cross_adapter_ = false;
   int width_ = 0;
   int height_ = 0;
 };

@@ -8,6 +8,7 @@
 #include <wrl/client.h>
 
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -108,11 +109,55 @@ class D3DContext : public std::enable_shared_from_this<D3DContext> {
       int width,
       int height);
 
+  struct PooledNv12 {
+    ComPtr<ID3D11Texture2D> texture;
+    ComPtr<ID3D11VideoProcessorOutputView> out_view;
+    int width = 0;
+    int height = 0;
+    uint64_t vp_gen = 0;
+  };
+
+  // Returns an NV12 texture + cached output view to the ring pool when a D3D11TextureBuffer dies.
+  void ReleaseNv12(PooledNv12 slot);
+
  private:
+  enum class VpColorMode { kNone, kBgraToNv12, kNv12ToNv12 };
+
   D3DContext() = default;
   void SetError(const std::string& msg);
   bool InitVideoProcessor(int src_w, int src_h, int dst_w, int dst_h);
+  void EnsureVpColorMode(VpColorMode mode);
   ComPtr<ID3D11Texture2D> CreateNv12Texture(int width, int height);
+  bool AcquireNv12Locked(int width, int height, PooledNv12* out);
+  bool ConvertBgraToNv12SlotLocked(
+      ID3D11Texture2D* src_bgra,
+      int src_w,
+      int src_h,
+      int dst_w,
+      int dst_h,
+      bool canvas_paste,
+      int paste_w,
+      int paste_h,
+      PooledNv12* out_slot);
+  bool ConvertBgraToNv12Slot(
+      ID3D11Texture2D* src_bgra,
+      int src_w,
+      int src_h,
+      int dst_w,
+      int dst_h,
+      bool canvas_paste,
+      int paste_w,
+      int paste_h,
+      PooledNv12* out_slot);
+  bool ScaleNv12Slot(
+      ID3D11Texture2D* src_nv12,
+      int crop_x,
+      int crop_y,
+      int crop_w,
+      int crop_h,
+      int dst_w,
+      int dst_h,
+      PooledNv12* out_slot);
   webrtc::scoped_refptr<webrtc::I420BufferInterface> ConvertBgraCpuFallback(
       ID3D11Texture2D* src_bgra,
       int src_w,
@@ -141,20 +186,33 @@ class D3DContext : public std::enable_shared_from_this<D3DContext> {
   ComPtr<ID3D11DeviceContext> context_;
   ComPtr<ID3D11VideoDevice> video_device_;
   ComPtr<ID3D11VideoContext> video_context_;
+  ComPtr<ID3D11VideoContext1> video_context1_;
   ComPtr<ID3D11VideoProcessorEnumerator> vp_enum_;
   ComPtr<ID3D11VideoProcessor> vp_;
+  uint64_t vp_gen_ = 0;
+  VpColorMode vp_color_mode_ = VpColorMode::kNone;
   int vp_src_w_ = 0;
   int vp_src_h_ = 0;
   int vp_dst_w_ = 0;
   int vp_dst_h_ = 0;
 
   ComPtr<ID3D11Texture2D> vp_input_bgra_;
+  ComPtr<ID3D11VideoProcessorInputView> vp_input_view_;
+  uint64_t vp_input_view_gen_ = 0;
   int vp_input_w_ = 0;
   int vp_input_h_ = 0;
 
   ComPtr<ID3D11Texture2D> cpu_upload_bgra_;
+  ComPtr<ID3D11VideoProcessorInputView> cpu_upload_view_;
+  uint64_t cpu_upload_view_gen_ = 0;
   int cpu_upload_w_ = 0;
   int cpu_upload_h_ = 0;
+
+  std::mutex pool_mu_;
+  std::deque<PooledNv12> nv12_pool_;
+  int nv12_pool_w_ = 0;
+  int nv12_pool_h_ = 0;
+  uint64_t nv12_pool_gen_ = 0;
 
   ComPtr<ID3D11Texture2D> staging_bgra_;
   int staging_bgra_w_ = 0;
@@ -179,11 +237,15 @@ class D3D11TextureBuffer : public webrtc::VideoFrameBuffer {
       ComPtr<ID3D11Texture2D> texture,
       int width,
       int height,
-      std::string fusion_layout = {});
+      std::string fusion_layout = {},
+      ComPtr<ID3D11VideoProcessorOutputView> pooled_out_view = nullptr,
+      uint64_t pooled_vp_gen = 0);
 
   D3D11TextureBuffer(
       webrtc::scoped_refptr<webrtc::I420BufferInterface> cpu_i420,
       std::string fusion_layout = {});
+
+  ~D3D11TextureBuffer() override;
 
   Type type() const override { return Type::kNative; }
   int width() const override { return width_; }
@@ -206,6 +268,8 @@ class D3D11TextureBuffer : public webrtc::VideoFrameBuffer {
  private:
   std::shared_ptr<D3DContext> ctx_;
   ComPtr<ID3D11Texture2D> texture_;
+  ComPtr<ID3D11VideoProcessorOutputView> pooled_out_view_;
+  uint64_t pooled_vp_gen_ = 0;
   webrtc::scoped_refptr<webrtc::I420BufferInterface> cpu_i420_;
   int width_;
   int height_;

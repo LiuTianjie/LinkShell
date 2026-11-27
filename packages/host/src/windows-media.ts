@@ -128,18 +128,25 @@ export class WindowsMediaEngine {
       const msg = parseJsonLine(line);
       if (msg) this.dispatch(msg);
     });
-    child.on("exit", (code) => {
+    const teardown = (reason: string) => {
       if (this.child !== child) return;
       this.child = undefined;
       this.statusCache = undefined;
-      if (code && code !== 0) this.log(`[win-media] engine exited ${code}`);
       for (const id of this.configuring.keys()) this.cancelConfigurations(id);
       for (const route of this.videoRoutes.values()) route({ t: "gone" });
       this.videoRoutes.clear();
       for (const route of this.fusionRoutes.values()) route({ t: "gone" });
       this.fusionRoutes.clear();
-      for (const waiter of this.statusWaiters.splice(0)) waiter.reject(new Error("Windows 媒体引擎已退出"));
-      for (const waiter of this.displayWaiters.splice(0)) waiter.reject(new Error("Windows 媒体引擎已退出"));
+      for (const waiter of this.statusWaiters.splice(0)) waiter.reject(new Error(reason));
+      for (const waiter of this.displayWaiters.splice(0)) waiter.reject(new Error(reason));
+    };
+    child.on("error", (error) => {
+      this.log(`[win-media] engine spawn error: ${error.message}`);
+      teardown(`Windows 媒体引擎启动失败：${error.message}`);
+    });
+    child.on("exit", (code) => {
+      if (this.child === child && code && code !== 0) this.log(`[win-media] engine exited ${code}`);
+      teardown("Windows 媒体引擎已退出");
     });
     return child;
   }

@@ -41,7 +41,7 @@ class WgcCapturer {
   FrameCallback on_frame_;
   ClosedCallback on_closed_;
   std::atomic<bool> running_{false};
-  std::unique_ptr<Impl> impl_;
+  std::shared_ptr<Impl> impl_;
 };
 
 }  // namespace linkshell

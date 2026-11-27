@@ -1,9 +1,14 @@
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <iphlpapi.h>
+
 #include "lan_floor.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <sstream>
+#include <vector>
 
 namespace linkshell {
 
@@ -14,7 +19,112 @@ std::string ToLower(std::string s) {
   }
   return s;
 }
+
+bool ContainsAsciiI(const std::string& haystack, const char* needle) {
+  return ToLower(haystack).find(ToLower(needle)) != std::string::npos;
+}
+
+bool IsTailscaleCgnatIpv4(const std::string& addr) {
+  int a = -1, b = -1, c = -1, d = -1;
+  if (std::sscanf(addr.c_str(), "%d.%d.%d.%d", &a, &b, &c, &d) != 4) return false;
+  return a == 100 && b >= 64 && b <= 127 && c >= 0 && c <= 255 && d >= 0 && d <= 255;
+}
+
+bool IsAlwaysUselessHostIp(const std::string& lower_ip) {
+  if (lower_ip.empty()) return false;
+  if (lower_ip == "::1" || lower_ip.rfind("fe80:", 0) == 0) return true;
+  if (lower_ip.rfind("127.", 0) == 0 || lower_ip.rfind("169.254.", 0) == 0) return true;
+  return false;
+}
+
+bool IsVirtualAdapter(const IP_ADAPTER_ADDRESSES* aa) {
+  if (!aa) return true;
+  if (aa->OperStatus != IfOperStatusUp) return true;
+  if (aa->IfType == IF_TYPE_SOFTWARE_LOOPBACK || aa->IfType == IF_TYPE_TUNNEL) return true;
+  std::string friendly = aa->FriendlyName ? WideToUtf8(aa->FriendlyName) : "";
+  std::string desc = aa->Description ? WideToUtf8(aa->Description) : "";
+  static constexpr const char* kVirtualPatterns[] = {
+      "vethernet",
+      "hyper-v",
+      "wsl",
+      "docker",
+      "vmware",
+      "virtualbox",
+      "vbox",
+      "loopback",
+      "bluetooth",
+      "wi-fi direct",
+      "teredo",
+      "isatap",
+      "npcap",
+      "km-test",
+  };
+  for (const char* pat : kVirtualPatterns) {
+    if (ContainsAsciiI(friendly, pat) || ContainsAsciiI(desc, pat)) return true;
+  }
+  // Chinese/English Windows Bluetooth and Wi-Fi Direct virtual adapters ("蓝牙网络连接", "本地连接* 9", "Local Area Connection* 9").
+  if (friendly.find("\xe8\x93\x9d\xe7\x89\x99") != std::string::npos) return true;  // 蓝牙
+  if (friendly.find("\xe6\x9c\xac\xe5\x9c\xb0\xe8\xbf\x9e\xe6\x8e\xa5*") != std::string::npos) return true;  // 本地连接*
+  if (ContainsAsciiI(friendly, "local area connection*")) return true;
+  return false;
+}
+
+std::string CandidateHostAddress(const std::string& sdp) {
+  // Format: [a=]candidate:<foundation> <component> <transport> <priority> <ip> <port> typ <type> ...
+  std::istringstream iss(sdp);
+  std::string tok;
+  std::vector<std::string> fields;
+  while (iss >> tok && fields.size() < 8) fields.push_back(std::move(tok));
+  if (fields.size() < 8) return {};
+  if (ToLower(fields[6]) != "typ" || ToLower(fields[7]) != "host") return {};
+  return ToLower(fields[4]);
+}
 }  // namespace
+
+std::unordered_set<std::string> CollectUselessHostAddresses() {
+  std::unordered_set<std::string> out;
+  ULONG buf_len = 32 * 1024;
+  std::vector<uint8_t> buf(buf_len);
+  ULONG flags = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER;
+  ULONG res = GetAdaptersAddresses(AF_UNSPEC, flags, nullptr, reinterpret_cast<PIP_ADAPTER_ADDRESSES>(buf.data()), &buf_len);
+  if (res == ERROR_BUFFER_OVERFLOW && buf_len > 0 && buf_len <= 4 * 1024 * 1024) {
+    buf.resize(buf_len);
+    res = GetAdaptersAddresses(AF_UNSPEC, flags, nullptr, reinterpret_cast<PIP_ADAPTER_ADDRESSES>(buf.data()), &buf_len);
+  }
+  if (res != ERROR_SUCCESS) return out;
+
+  for (auto* aa = reinterpret_cast<PIP_ADAPTER_ADDRESSES>(buf.data()); aa; aa = aa->Next) {
+    if (!IsVirtualAdapter(aa)) continue;
+    for (auto* ua = aa->FirstUnicastAddress; ua; ua = ua->Next) {
+      if (!ua->Address.lpSockaddr) continue;
+      char ip_buf[INET6_ADDRSTRLEN] = {};
+      if (ua->Address.lpSockaddr->sa_family == AF_INET) {
+        auto* sin = reinterpret_cast<const sockaddr_in*>(ua->Address.lpSockaddr);
+        if (inet_ntop(AF_INET, &sin->sin_addr, ip_buf, sizeof(ip_buf))) {
+          std::string ip = ToLower(ip_buf);
+          // Keep Tailscale CGNAT (100.64.0.0/10) even though it rides a tunnel adapter.
+          if (IsTailscaleCgnatIpv4(ip)) continue;
+          out.insert(std::move(ip));
+        }
+      } else if (ua->Address.lpSockaddr->sa_family == AF_INET6) {
+        auto* sin6 = reinterpret_cast<const sockaddr_in6*>(ua->Address.lpSockaddr);
+        if (inet_ntop(AF_INET6, &sin6->sin6_addr, ip_buf, sizeof(ip_buf))) {
+          out.insert(ToLower(ip_buf));
+        }
+      }
+    }
+  }
+  return out;
+}
+
+bool IsUselessHostCandidate(
+    const std::string& candidate_sdp,
+    const std::unordered_set<std::string>& useless_ips) {
+  std::string ip = CandidateHostAddress(candidate_sdp);
+  if (ip.empty()) return false;
+  if (IsAlwaysUselessHostIp(ip)) return true;
+  return useless_ips.find(ip) != useless_ips.end();
+}
 
 bool LanFloor::IsLocal(const std::optional<Endpoint>& ep) {
   if (!ep) return false;

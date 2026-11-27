@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <functional>
@@ -33,9 +34,9 @@ inline constexpr int kStartBitrateBps = 6'000'000;
 inline constexpr int kRelayDefaultKbps = 3000;
 
 inline constexpr int kLanFloorBps = 16'000'000;
-inline constexpr int kLanFloorWindow = 2;
-inline constexpr double kLanFloorRttMs = 20.0;
-inline constexpr double kLanFloorLiftRttMs = 40.0;
+inline constexpr int kLanFloorWindow = 3;
+inline constexpr double kLanFloorRttMs = 25.0;
+inline constexpr double kLanFloorLiftRttMs = 65.0;
 inline constexpr double kLanFloorLoss = 0.01;
 inline constexpr double kLanFloorLiftLoss = 0.05;
 inline constexpr double kLanFloorSendDelayMs = 10.0;

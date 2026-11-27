@@ -8,6 +8,7 @@
 #include <windows.graphics.directx.direct3d11.interop.h>
 #include <winstring.h>
 #include <wrl/event.h>
+#include <wrl/implements.h>
 #include <wrl/wrappers/corewrappers.h>
 
 #include <algorithm>
@@ -62,6 +63,9 @@ HRESULT ActivateFactory(const wchar_t* class_name, ComPtr<T>& out) {
 
 struct WgcCapturer::Impl {
   std::mutex mu;
+  std::atomic<bool> alive{true};
+  FrameCallback on_frame;
+  ClosedCallback on_closed;
   ComPtr<WGD3D::IDirect3DDevice> winrt_device;
   ComPtr<WGC::IGraphicsCaptureItem> item;
   ComPtr<WGC::IDirect3D11CaptureFramePool> frame_pool;
@@ -138,7 +142,9 @@ bool WgcCapturer::StartWithItem(void* raw_item_unknown, std::string* error) {
     if (error) *error = "missing D3D11 device";
     return false;
   }
-  auto impl = std::make_unique<Impl>();
+  auto impl = std::make_shared<Impl>();
+  impl->on_frame = on_frame_;
+  impl->on_closed = on_closed_;
   impl->winrt_device = WrapD3D11Device(d3d_->device());
   if (!impl->winrt_device) {
     if (error) *error = "CreateDirect3D11DeviceFromDXGIDevice failed";
@@ -190,14 +196,22 @@ bool WgcCapturer::StartWithItem(void* raw_item_unknown, std::string* error) {
     session3->put_IsBorderRequired(FALSE);
   }
 
-  impl_ = std::move(impl);
+  impl_ = impl;
   running_.store(true);
+
+  std::weak_ptr<Impl> weak_impl = impl;
 
   using FrameArrivedHandler =
       ABI::Windows::Foundation::ITypedEventHandler<WGC::Direct3D11CaptureFramePool*, IInspectable*>;
-  auto on_arrived = Callback<FrameArrivedHandler>(
-      [this](WGC::IDirect3D11CaptureFramePool* sender, IInspectable*) -> HRESULT {
-        if (!running_.load()) return S_OK;
+  using AgileFrameArrived =
+      Microsoft::WRL::Implements<Microsoft::WRL::RuntimeClassFlags<Microsoft::WRL::ClassicCom>, FrameArrivedHandler, Microsoft::WRL::FtmBase>;
+  auto on_arrived = Callback<AgileFrameArrived>(
+      [weak_impl](WGC::IDirect3D11CaptureFramePool* sender, IInspectable*) -> HRESULT {
+        auto state = weak_impl.lock();
+        if (!state || !state->alive.load(std::memory_order_acquire)) return S_OK;
+        std::lock_guard<std::mutex> lock(state->mu);
+        if (!state->alive.load(std::memory_order_acquire) || !state->frame_pool) return S_OK;
+
         ComPtr<WGC::IDirect3D11CaptureFrame> frame;
         if (FAILED(sender->TryGetNextFrame(&frame)) || !frame) return S_OK;
 
@@ -216,38 +230,46 @@ bool WgcCapturer::StartWithItem(void* raw_item_unknown, std::string* error) {
                                               : static_cast<int>(desc.Width);
               int ch = content_size.Height > 0 ? std::min<int>(content_size.Height, static_cast<int>(desc.Height))
                                                : static_cast<int>(desc.Height);
-              if (cw > 0 && ch > 0 && on_frame_) {
-                on_frame_(texture.Get(), cw, ch);
+              if (cw > 0 && ch > 0 && state->on_frame) {
+                state->on_frame(texture.Get(), cw, ch);
               }
             }
           }
         }
 
         // Recreate pool if monitor/window resized.
-        if (content_size.Width > 0 && content_size.Height > 0 && impl_) {
-          std::lock_guard<std::mutex> lock(impl_->mu);
-          if (running_.load() && impl_->frame_pool && impl_->winrt_device &&
-              (content_size.Width != impl_->pool_size.Width || content_size.Height != impl_->pool_size.Height)) {
-            impl_->pool_size = content_size;
-            impl_->frame_pool->Recreate(
-                impl_->winrt_device.Get(),
-                WGD::DirectXPixelFormat_B8G8R8A8UIntNormalized,
-                2,
-                content_size);
-          }
+        if (content_size.Width > 0 && content_size.Height > 0 &&
+            state->alive.load(std::memory_order_acquire) && state->frame_pool && state->winrt_device &&
+            (content_size.Width != state->pool_size.Width || content_size.Height != state->pool_size.Height)) {
+          state->pool_size = content_size;
+          state->frame_pool->Recreate(
+              state->winrt_device.Get(),
+              WGD::DirectXPixelFormat_B8G8R8A8UIntNormalized,
+              2,
+              content_size);
         }
         return S_OK;
       });
 
   hr = impl_->frame_pool->add_FrameArrived(on_arrived.Get(), &impl_->frame_token);
-  if (SUCCEEDED(hr)) impl_->has_frame_token = true;
+  if (FAILED(hr)) {
+    if (error) *error = "WGC add_FrameArrived failed: " + std::to_string(hr);
+    Stop();
+    return false;
+  }
+  impl_->has_frame_token = true;
 
   using ClosedHandler =
       ABI::Windows::Foundation::ITypedEventHandler<WGC::GraphicsCaptureItem*, IInspectable*>;
-  auto on_item_closed = Callback<ClosedHandler>(
-      [this](WGC::IGraphicsCaptureItem*, IInspectable*) -> HRESULT {
-        if (running_.exchange(false) && on_closed_) {
-          on_closed_("capture target closed");
+  using AgileClosed =
+      Microsoft::WRL::Implements<Microsoft::WRL::RuntimeClassFlags<Microsoft::WRL::ClassicCom>, ClosedHandler, Microsoft::WRL::FtmBase>;
+  auto on_item_closed = Callback<AgileClosed>(
+      [weak_impl](WGC::IGraphicsCaptureItem*, IInspectable*) -> HRESULT {
+        auto state = weak_impl.lock();
+        if (!state || !state->alive.exchange(false, std::memory_order_acq_rel)) return S_OK;
+        std::lock_guard<std::mutex> lock(state->mu);
+        if (state->on_closed) {
+          state->on_closed("capture target closed");
         }
         return S_OK;
       });
@@ -266,25 +288,46 @@ bool WgcCapturer::StartWithItem(void* raw_item_unknown, std::string* error) {
 
 void WgcCapturer::Stop() {
   running_.store(false);
-  if (!impl_) return;
   auto impl = std::move(impl_);
-  std::lock_guard<std::mutex> lock(impl->mu);
-  if (impl->frame_pool && impl->has_frame_token) {
-    impl->frame_pool->remove_FrameArrived(impl->frame_token);
+  if (!impl) return;
+  impl->alive.store(false, std::memory_order_release);
+
+  ComPtr<WGC::IDirect3D11CaptureFramePool> frame_pool;
+  ComPtr<WGC::IGraphicsCaptureItem> item;
+  ComPtr<WGC::IGraphicsCaptureSession> session;
+  ComPtr<WGD3D::IDirect3DDevice> winrt_device;
+  EventRegistrationToken frame_token{};
+  EventRegistrationToken closed_token{};
+  bool has_frame_token = false;
+  bool has_closed_token = false;
+  {
+    // Wait for any in-flight callback to finish and detach all COM/callback state before
+    // making WinRT remove/Close calls outside the lock (avoids WinRT lock inversion).
+    std::lock_guard<std::mutex> lock(impl->mu);
+    impl->on_frame = nullptr;
+    impl->on_closed = nullptr;
+    frame_pool = std::move(impl->frame_pool);
+    item = std::move(impl->item);
+    session = std::move(impl->session);
+    winrt_device = std::move(impl->winrt_device);
+    frame_token = impl->frame_token;
+    closed_token = impl->closed_token;
+    has_frame_token = impl->has_frame_token;
+    has_closed_token = impl->has_closed_token;
     impl->has_frame_token = false;
-  }
-  if (impl->item && impl->has_closed_token) {
-    impl->item->remove_Closed(impl->closed_token);
     impl->has_closed_token = false;
   }
+
+  if (frame_pool && has_frame_token) {
+    frame_pool->remove_FrameArrived(frame_token);
+  }
+  if (item && has_closed_token) {
+    item->remove_Closed(closed_token);
+  }
   ComPtr<ABI::Windows::Foundation::IClosable> closable;
-  if (impl->session && SUCCEEDED(impl->session.As(&closable)) && closable) closable->Close();
+  if (session && SUCCEEDED(session.As(&closable)) && closable) closable->Close();
   closable.Reset();
-  if (impl->frame_pool && SUCCEEDED(impl->frame_pool.As(&closable)) && closable) closable->Close();
-  impl->session.Reset();
-  impl->frame_pool.Reset();
-  impl->item.Reset();
-  impl->winrt_device.Reset();
+  if (frame_pool && SUCCEEDED(frame_pool.As(&closable)) && closable) closable->Close();
 }
 
 }  // namespace linkshell

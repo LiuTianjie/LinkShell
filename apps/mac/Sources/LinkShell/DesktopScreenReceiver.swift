@@ -29,6 +29,9 @@ final class DesktopScreenReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataC
   private var publishedPath: String?
   private var publishedRelayed: Bool?
   private var publishedRttMs: Int?
+  private var inboundFrames = Rate()
+  private var inboundBytes = Rate()
+  private var virtualAddresses: Set<String> = []
   private var lastStatsPoll: Double = 0
   private var negotiating = false
   private var closed = false
@@ -190,12 +193,14 @@ final class DesktopScreenReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataC
   private func createPeer(_ rtc: [String: Any]) {
     guard peer == nil else { return }
     _ = Engine.factory // Share the application's one-time SSL and field-trial initialization.
+    virtualAddresses = Networks.virtualAddresses()
     let configuration = RTCConfiguration()
     configuration.sdpSemantics = .unifiedPlan
     configuration.bundlePolicy = .maxBundle
     configuration.rtcpMuxPolicy = .require
     configuration.continualGatheringPolicy = .gatherContinually
     configuration.disableLinkLocalNetworks = true
+    configuration.iceCandidatePoolSize = 2
     configuration.iceServers = ((rtc["iceServers"] as? [[String: Any]]) ?? []).prefix(16).compactMap { server in
       let urls = (server["urls"] as? [String]) ?? (server["urls"] as? String).map { [$0] } ?? []
       let allowed = urls.prefix(8).filter { value in
@@ -262,7 +267,8 @@ final class DesktopScreenReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataC
   }
 
   /// Intel prioritizes its broadly supported H.264 hardware path. Apple silicon prefers HEVC.
-  /// Only codecs accepted by the hardware decoder factory are offered; neither uses FlexFEC.
+  /// Only codecs accepted by the hardware decoder factory are offered; neither uses FlexFEC,
+  /// and auxiliary RTX/RED/ULPFEC payload types stay ordered after video codecs (matching iOS).
   private func preferReceiveCodecs(_ peer: RTCPeerConnection) {
     guard let factory, let transceiver = peer.transceivers.first(where: { $0.mediaType == .video }) else { return }
     let available = factory.rtpReceiverCapabilities(forKind: kRTCMediaStreamTrackKindVideo).codecs
@@ -272,7 +278,20 @@ final class DesktopScreenReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataC
     #else
     let preferred = preferH264 ? "H264" : "H265"
     #endif
-    let codecs = available.filter { $0.name.uppercased() == preferred } + available.filter { $0.name.uppercased() != preferred }
+    let auxiliary: Set<String> = ["RTX", "RED", "ULPFEC"]
+    func rank(_ codec: RTCRtpCodecCapability) -> Int {
+      let name = codec.name.uppercased()
+      if name == preferred { return 0 }
+      if name == "H265" || name == "H264" { return 1 }
+      if auxiliary.contains(name) { return 3 }
+      return 2
+    }
+    let codecs = available.enumerated()
+      .sorted { a, b in
+        let ra = rank(a.element), rb = rank(b.element)
+        return ra != rb ? ra < rb : a.offset < b.offset
+      }
+      .map(\.element)
     guard codecs.contains(where: { ["H264", "H265"].contains($0.name.uppercased()) }) else { return }
     try? transceiver.setCodecPreferences(codecs, error: ())
   }
@@ -414,6 +433,28 @@ final class DesktopScreenReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataC
             update["rttMs"] = rttMs
           }
         }
+        let sampleTime = CACurrentMediaTime()
+        if let inbound = reader.first("inbound-rtp", kind: "video") {
+          if let w = StatsReader.number(inbound, "frameWidth"), let h = StatsReader.number(inbound, "frameHeight"), w > 0, h > 0 {
+            update["width"] = Int(w.rounded())
+            update["height"] = Int(h.rounded())
+          }
+          if let decodedRate = self.inboundFrames.per(second: StatsReader.number(inbound, "framesDecoded"), at: sampleTime),
+             decodedRate.isFinite, decodedRate >= 0 {
+            update["fps"] = Int(decodedRate.rounded())
+          } else if let reportedFps = StatsReader.number(inbound, "framesPerSecond"), reportedFps.isFinite, reportedFps >= 0 {
+            update["fps"] = Int(reportedFps.rounded())
+          }
+          if let bytesPerSec = self.inboundBytes.per(second: StatsReader.number(inbound, "bytesReceived"), at: sampleTime),
+             bytesPerSec.isFinite, bytesPerSec >= 0 {
+            update["bitrateMbps"] = ((bytesPerSec * 8 / 1_000_000) * 10).rounded() / 10
+          }
+          if let codecRecord = reader.linked(inbound, "codecId"),
+             let mime = StatsReader.text(codecRecord, "mimeType") {
+            let short = mime.replacingOccurrences(of: "video/", with: "").uppercased()
+            if !short.isEmpty { update["codec"] = short == "H265" ? "HEVC" : short }
+          }
+        }
         if !update.isEmpty {
           self.status(update)
         }
@@ -453,6 +494,9 @@ final class DesktopScreenReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataC
   func peerConnection(_ peerConnection: RTCPeerConnection, didGenerate candidate: RTCIceCandidate) {
     queue.async {
       guard !self.closed, self.peer === peerConnection else { return }
+      // Drop host candidates on container bridges or virtual interfaces (OrbStack/Docker/etc.)
+      // so LAN pairing stays fast and never competes against unreachable private subnets.
+      if Networks.isUselessHost(candidate.sdp, virtual: self.virtualAddresses) { return }
       self.signal(["t": "rtc.ice", "candidate": candidate.sdp, "sdpMid": candidate.sdpMid ?? NSNull(), "sdpMLineIndex": candidate.sdpMLineIndex])
     }
   }

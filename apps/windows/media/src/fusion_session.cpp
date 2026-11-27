@@ -98,12 +98,16 @@ FusionSession::~FusionSession() {
 bool FusionSession::Open(const json& request) {
   wanted_codec_ = (request.value("codec", std::string("h264")) == "hevc") ? "hevc" : "h264";
 
+  useless_host_ips_ = CollectUselessHostAddresses();
+
   webrtc::PeerConnectionInterface::RTCConfiguration config;
   config.sdp_semantics = webrtc::SdpSemantics::kUnifiedPlan;
   config.bundle_policy = webrtc::PeerConnectionInterface::kBundlePolicyMaxBundle;
   config.rtcp_mux_policy = webrtc::PeerConnectionInterface::kRtcpMuxPolicyRequire;
   config.continual_gathering_policy = webrtc::PeerConnectionInterface::GATHER_CONTINUALLY;
   config.disable_link_local_networks = true;
+  config.prune_turn_ports = true;
+  config.ice_candidate_pool_size = 2;
   config.set_dscp(true);
 
   if (request.contains("iceServers") && request["iceServers"].is_array()) {
@@ -173,10 +177,12 @@ void FusionSession::OpenStream(const json& msg) {
   std::string layout_json;
   if (msg.contains("layout") && !msg["layout"].is_null()) layout_json = msg["layout"].dump();
 
-  auto source = webrtc::make_ref_counted<ScreenVideoTrackSource>(d3d_, [this](const std::string& m) { ipc_->Log("[fusion] " + m); });
+  auto source = webrtc::make_ref_counted<ScreenVideoTrackSource>(d3d_, [ipc = ipc_](const std::string& m) { ipc->Log("[fusion] " + m); });
   if (!layout_json.empty()) source->SetFusionLayout(layout_json);
-  source->SetOnStop([this, key](const std::string& reason) {
-    if (!closed_.load()) {
+  auto life = life_;
+  source->SetOnStop([this, life, key](const std::string& reason) {
+    std::lock_guard<std::mutex> lk(life->mu);
+    if (life->alive && !closed_.load()) {
       ipc_->Emit({{"t", "fusion.error"}, {"id", session_id_}, {"key", key}, {"message", reason}});
     }
   });
@@ -294,15 +300,29 @@ void FusionSession::NegotiateLoop() {
 }
 
 void FusionSession::DoOffer() {
-  if (closed_.load() || !pc_) return;
+  webrtc::scoped_refptr<webrtc::PeerConnectionInterface> pc;
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    if (closed_.load() || !pc_) return;
+    pc = pc_;
+  }
   webrtc::PeerConnectionInterface::RTCOfferAnswerOptions opts;
+  auto life = life_;
   auto obs = webrtc::make_ref_counted<FusionOfferAdapter>(
-      [this](webrtc::SessionDescriptionInterface* desc) {
-        if (closed_.load() || !pc_ || !desc) { delete desc; return; }
+      [this, life](webrtc::SessionDescriptionInterface* desc) {
+        webrtc::scoped_refptr<webrtc::PeerConnectionInterface> local_pc;
+        {
+          std::lock_guard<std::mutex> lk(life->mu);
+          if (!life->alive || closed_.load() || !desc) { delete desc; return; }
+          std::lock_guard<std::mutex> lock(mu_);
+          local_pc = pc_;
+        }
+        if (!local_pc) { delete desc; return; }
         std::string sdp;
         desc->ToString(&sdp);
-        auto set_obs = webrtc::make_ref_counted<FusionSetLocalAdapter>([this, sdp](webrtc::RTCError err) {
-          if (closed_.load()) return;
+        auto set_obs = webrtc::make_ref_counted<FusionSetLocalAdapter>([this, life, sdp](webrtc::RTCError err) {
+          std::lock_guard<std::mutex> lk2(life->mu);
+          if (!life->alive || closed_.load()) return;
           if (!err.ok()) {
             std::lock_guard<std::mutex> lock(mu_);
             negotiating_ = false;
@@ -322,39 +342,54 @@ void FusionSession::DoOffer() {
           ipc_->Emit({{"t", "fusion.streams"}, {"id", session_id_}, {"streams", stream_map}});
           ipc_->Emit({{"t", "fusion.offer"}, {"id", session_id_}, {"sdp", sdp}});
         });
-        pc_->SetLocalDescription(std::unique_ptr<webrtc::SessionDescriptionInterface>(desc), set_obs);
+        local_pc->SetLocalDescription(std::unique_ptr<webrtc::SessionDescriptionInterface>(desc), set_obs);
       },
-      [this](const std::string& err) {
+      [this, life](const std::string& err) {
+        std::lock_guard<std::mutex> lk(life->mu);
+        if (!life->alive || closed_.load()) return;
         std::lock_guard<std::mutex> lock(mu_);
         negotiating_ = false;
         ipc_->Log("[fusion] CreateOffer failed: " + err);
       });
-  pc_->CreateOffer(obs.get(), opts);
+  pc->CreateOffer(obs.get(), opts);
 }
 
 void FusionSession::HandleAnswer(const std::string& sdp) {
-  if (closed_.load() || !pc_) return;
+  webrtc::scoped_refptr<webrtc::PeerConnectionInterface> pc;
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    if (closed_.load() || !pc_) return;
+    pc = pc_;
+  }
   webrtc::SdpParseError err;
   auto desc = webrtc::CreateSessionDescription(webrtc::SdpType::kAnswer, sdp, &err);
   if (!desc) return;
-  auto obs = webrtc::make_ref_counted<FusionSetRemoteAdapter>([this](webrtc::RTCError e) {
+  auto life = life_;
+  auto obs = webrtc::make_ref_counted<FusionSetRemoteAdapter>([this, life](webrtc::RTCError e) {
+    std::lock_guard<std::mutex> lk(life->mu);
+    if (!life->alive || closed_.load()) return;
     std::lock_guard<std::mutex> lock(mu_);
     negotiating_ = false;
     offer_deadline_ms_ = 0;
     if (!e.ok()) ipc_->Log(std::string("[fusion] SetRemoteDescription failed: ") + e.message());
   });
-  pc_->SetRemoteDescription(std::move(desc), obs);
+  pc->SetRemoteDescription(std::move(desc), obs);
 }
 
 void FusionSession::HandleIce(const json& msg) {
-  if (closed_.load() || !pc_) return;
+  webrtc::scoped_refptr<webrtc::PeerConnectionInterface> pc;
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    if (closed_.load() || !pc_) return;
+    pc = pc_;
+  }
   std::string cand = msg.value("candidate", std::string{});
   if (cand.empty()) return;
   std::string mid = msg.contains("sdpMid") && msg["sdpMid"].is_string() ? msg["sdpMid"].get<std::string>() : "";
   int mline = msg.contains("sdpMLineIndex") && msg["sdpMLineIndex"].is_number_integer() ? msg["sdpMLineIndex"].get<int>() : 0;
   webrtc::SdpParseError err;
   auto ice = webrtc::IceCandidate::Create(mid, mline, cand, &err);
-  if (ice) pc_->AddIceCandidate(std::move(ice), [](webrtc::RTCError) {});
+  if (ice) pc->AddIceCandidate(std::move(ice), [](webrtc::RTCError) {});
 }
 
 void FusionSession::SendShape(const json& shape) {
@@ -374,10 +409,12 @@ void FusionSession::SendCursor(double x, double y) {
 
 void FusionSession::OnIceCandidate(const webrtc::IceCandidate* c) {
   if (closed_.load() || !c) return;
+  std::string cand_str = c->ToString();
+  if (IsUselessHostCandidate(cand_str, useless_host_ips_)) return;
   ipc_->Emit({
       {"t", "fusion.ice"},
       {"id", session_id_},
-      {"candidate", c->ToString()},
+      {"candidate", cand_str},
       {"sdpMid", c->sdp_mid()},
       {"sdpMLineIndex", c->sdp_mline_index()},
   });
@@ -411,30 +448,50 @@ void FusionSession::OnDataChannelMessage(const std::string& label, const webrtc:
 }
 
 void FusionSession::Close() {
-  if (closed_.exchange(true)) return;
+  closed_.store(true);
+  std::lock_guard<std::mutex> close_lock(close_mu_);
+  if (cleaned_up_) return;
+  cleaned_up_ = true;
+
   if (worker_.joinable() && worker_.get_id() != std::this_thread::get_id()) worker_.join();
+  std::vector<webrtc::scoped_refptr<ScreenVideoTrackSource>> sources;
+  std::vector<webrtc::scoped_refptr<webrtc::DataChannelInterface>> channels;
+  webrtc::scoped_refptr<webrtc::PeerConnectionInterface> pc;
   {
     std::lock_guard<std::mutex> lock(mu_);
     for (auto& [k, entry] : streams_) {
-      if (entry.source) entry.source->Stop();
+      if (entry.source) sources.push_back(entry.source);
     }
     streams_.clear();
     spare_.clear();
+    channels = std::move(channels_);
+    channels_.clear();
+    ch_cursor_ = nullptr;
+    ch_shape_ = nullptr;
+    pc = std::move(pc_);
+    pc_ = nullptr;
   }
-  for (auto& ch : channels_) {
+  for (auto& src : sources) {
+    src->Stop();
+  }
+  sources.clear();
+  for (auto& ch : channels) {
     if (ch) {
       ch->UnregisterObserver();
       ch->Close();
     }
   }
-  channels_.clear();
-  ch_cursor_ = nullptr;
-  ch_shape_ = nullptr;
-  dc_observers_.clear();
-  if (pc_) {
-    pc_->Close();
-    pc_ = nullptr;
+  channels.clear();
+  if (pc) {
+    pc->Close();
+    pc = nullptr;
   }
+  {
+    std::lock_guard<std::mutex> lk(life_->mu);
+    life_->alive = false;
+  }
+  dc_observers_.clear();
+  pc_observer_.reset();
 }
 
 }  // namespace linkshell

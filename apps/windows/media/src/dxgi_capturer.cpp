@@ -26,21 +26,55 @@ bool DxgiDuplicationCapturer::Open(const DisplayInfo& display, std::string* erro
   }
   ComPtr<IDXGIDevice> dxgi_dev;
   if (FAILED(d3d_->device()->QueryInterface(IID_PPV_ARGS(&dxgi_dev))) || !dxgi_dev) return false;
-  ComPtr<IDXGIAdapter> adapter;
-  if (FAILED(dxgi_dev->GetAdapter(&adapter)) || !adapter) return false;
+  ComPtr<IDXGIAdapter> primary_adapter;
+  if (FAILED(dxgi_dev->GetAdapter(&primary_adapter)) || !primary_adapter) return false;
 
-  ComPtr<IDXGIOutput> matched;
-  ComPtr<IDXGIOutput> candidate;
-  for (UINT i = 0; adapter->EnumOutputs(i, &candidate) != DXGI_ERROR_NOT_FOUND; ++i) {
-    DXGI_OUTPUT_DESC desc{};
-    if (SUCCEEDED(candidate->GetDesc(&desc)) && desc.AttachedToDesktop) {
-      if (desc.Monitor == display.hmonitor || _wcsicmp(desc.DeviceName, display.device_name.c_str()) == 0) {
-        matched = candidate;
-        break;
+  auto find_output_on_adapter = [&](IDXGIAdapter* adapter) -> ComPtr<IDXGIOutput> {
+    ComPtr<IDXGIOutput> candidate;
+    for (UINT i = 0; adapter->EnumOutputs(i, &candidate) != DXGI_ERROR_NOT_FOUND; ++i) {
+      DXGI_OUTPUT_DESC desc{};
+      if (SUCCEEDED(candidate->GetDesc(&desc)) && desc.AttachedToDesktop) {
+        if ((display.hmonitor && desc.Monitor == display.hmonitor) ||
+            (!display.device_name.empty() && _wcsicmp(desc.DeviceName, display.device_name.c_str()) == 0)) {
+          return candidate;
+        }
+      }
+      candidate.Reset();
+    }
+    return nullptr;
+  };
+
+  // Fast path: display belongs to d3d_'s own GPU adapter (100% zero-copy VRAM blit).
+  ComPtr<IDXGIOutput> matched = find_output_on_adapter(primary_adapter.Get());
+  ID3D11Device* dup_owner_dev = d3d_->device();
+
+  // Multi-GPU path (e.g. Optimus laptop where display is on iGPU while NVENC sits on dGPU):
+  // search all DXGI adapters and create a lightweight duplication device on the owning adapter.
+  if (!matched) {
+    ComPtr<IDXGIFactory1> factory;
+    if (SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))) && factory) {
+      ComPtr<IDXGIAdapter1> adapter;
+      for (UINT ai = 0; factory->EnumAdapters1(ai, &adapter) != DXGI_ERROR_NOT_FOUND; ++ai) {
+        matched = find_output_on_adapter(adapter.Get());
+        if (matched) {
+          D3D_FEATURE_LEVEL levels[] = {D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_1};
+          HRESULT chr = D3D11CreateDevice(
+              adapter.Get(), D3D_DRIVER_TYPE_UNKNOWN, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+              levels, ARRAYSIZE(levels), D3D11_SDK_VERSION,
+              &dup_device_, nullptr, &dup_context_);
+          if (SUCCEEDED(chr) && dup_device_ && dup_context_) {
+            dup_owner_dev = dup_device_.Get();
+            cross_adapter_ = true;
+          } else {
+            matched.Reset();
+          }
+          break;
+        }
+        adapter.Reset();
       }
     }
-    candidate.Reset();
   }
+
   if (!matched) {
     if (error) *error = "no DXGI output for display";
     return false;
@@ -49,12 +83,14 @@ bool DxgiDuplicationCapturer::Open(const DisplayInfo& display, std::string* erro
   ComPtr<IDXGIOutput1> output1;
   if (FAILED(matched.As(&output1)) || !output1) {
     if (error) *error = "IDXGIOutput1 unavailable";
+    Close();
     return false;
   }
 
-  HRESULT hr = output1->DuplicateOutput(d3d_->device(), &dup_);
+  HRESULT hr = output1->DuplicateOutput(dup_owner_dev, &dup_);
   if (FAILED(hr) || !dup_) {
     if (error) *error = "DuplicateOutput failed: " + std::to_string(hr);
+    Close();
     return false;
   }
 
@@ -72,6 +108,13 @@ HRESULT DxgiDuplicationCapturer::Acquire(int timeout_ms, ComPtr<ID3D11Texture2D>
   HRESULT hr = dup_->AcquireNextFrame(static_cast<UINT>(timeout_ms), &info, &res);
   if (FAILED(hr)) return hr;
 
+  // Cursor-only or metadata-only wakeups carry no updated desktop image; avoid encoding duplicates
+  // or uninitialized pre-present textures.
+  if (info.LastPresentTime.QuadPart == 0 && info.AccumulatedFrames == 0) {
+    dup_->ReleaseFrame();
+    return DXGI_ERROR_WAIT_TIMEOUT;
+  }
+
   ComPtr<ID3D11Texture2D> src;
   hr = res.As(&src);
   if (SUCCEEDED(hr) && src) {
@@ -79,20 +122,47 @@ HRESULT DxgiDuplicationCapturer::Acquire(int timeout_ms, ComPtr<ID3D11Texture2D>
     src->GetDesc(&sdesc);
     if (!copy_tex_ || width_ != static_cast<int>(sdesc.Width) || height_ != static_cast<int>(sdesc.Height)) {
       copy_tex_.Reset();
+      xadapter_staging_.Reset();
       D3D11_TEXTURE2D_DESC cdesc = sdesc;
-      cdesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+      cdesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
       cdesc.MiscFlags = 0;
       cdesc.Usage = D3D11_USAGE_DEFAULT;
       cdesc.CPUAccessFlags = 0;
-      d3d_->device()->CreateTexture2D(&cdesc, nullptr, &copy_tex_);
+      if (FAILED(d3d_->device()->CreateTexture2D(&cdesc, nullptr, &copy_tex_))) {
+        cdesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        d3d_->device()->CreateTexture2D(&cdesc, nullptr, &copy_tex_);
+      }
+      if (cross_adapter_ && dup_device_) {
+        D3D11_TEXTURE2D_DESC stdesc = sdesc;
+        stdesc.BindFlags = 0;
+        stdesc.MiscFlags = 0;
+        stdesc.Usage = D3D11_USAGE_STAGING;
+        stdesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        dup_device_->CreateTexture2D(&stdesc, nullptr, &xadapter_staging_);
+      }
       width_ = static_cast<int>(sdesc.Width);
       height_ = static_cast<int>(sdesc.Height);
     }
     if (copy_tex_) {
-      d3d_->context()->CopyResource(copy_tex_.Get(), src.Get());
-      if (out_texture) *out_texture = copy_tex_;
-      if (out_w) *out_w = width_;
-      if (out_h) *out_h = height_;
+      if (!cross_adapter_) {
+        d3d_->context()->CopyResource(copy_tex_.Get(), src.Get());
+      } else if (dup_context_ && xadapter_staging_) {
+        dup_context_->CopyResource(xadapter_staging_.Get(), src.Get());
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        if (SUCCEEDED(dup_context_->Map(xadapter_staging_.Get(), 0, D3D11_MAP_READ, 0, &mapped))) {
+          d3d_->context()->UpdateSubresource(copy_tex_.Get(), 0, nullptr, mapped.pData, mapped.RowPitch, 0);
+          dup_context_->Unmap(xadapter_staging_.Get(), 0);
+        } else {
+          hr = E_FAIL;
+        }
+      } else {
+        hr = E_FAIL;
+      }
+      if (SUCCEEDED(hr)) {
+        if (out_texture) *out_texture = copy_tex_;
+        if (out_w) *out_w = width_;
+        if (out_h) *out_h = height_;
+      }
     } else {
       hr = E_OUTOFMEMORY;
     }
@@ -104,6 +174,10 @@ HRESULT DxgiDuplicationCapturer::Acquire(int timeout_ms, ComPtr<ID3D11Texture2D>
 void DxgiDuplicationCapturer::Close() {
   dup_.Reset();
   copy_tex_.Reset();
+  xadapter_staging_.Reset();
+  dup_context_.Reset();
+  dup_device_.Reset();
+  cross_adapter_ = false;
   width_ = 0;
   height_ = 0;
 }
@@ -304,22 +378,30 @@ bool GdiAndSecureCapturer::OpenSecurePipe(int screen, int width, int height, int
 }
 
 bool GdiAndSecureCapturer::ReadSecureFrame(std::vector<uint8_t>* out_bgra, int* out_w, int* out_h) {
-  if (pipe_ == INVALID_HANDLE_VALUE) return false;
-  // LinkShellScreenService capture-raw framing: [u32 LE length][raw BGRA bytes].
-  uint32_t size = 0;
-  if (!ReadExact(pipe_, reinterpret_cast<uint8_t*>(&size), 4)) {
+  if (pipe_ == INVALID_HANDLE_VALUE || !out_bgra || secure_w_ <= 0 || secure_h_ <= 0) return false;
+  // LinkShellScreenService capture-raw framing (`ScreenService.cs` RunServiceCaptureRawWorker):
+  // raw packed 24-bpp BGR frames (`w * h * 3` bytes, no length prefix).
+  const size_t pixels = static_cast<size_t>(secure_w_) * static_cast<size_t>(secure_h_);
+  const size_t bgr_bytes = pixels * 3;
+  if (bgr_bytes == 0 || bgr_bytes > 64 * 1024 * 1024) {
     CloseSecurePipe();
     return false;
   }
-  size_t expected = static_cast<size_t>(secure_w_) * static_cast<size_t>(secure_h_) * 4;
-  if (size == 0 || size > 64 * 1024 * 1024 || size != expected) {
+  std::vector<uint8_t> bgr(bgr_bytes);
+  if (!ReadExact(pipe_, bgr.data(), bgr_bytes)) {
     CloseSecurePipe();
     return false;
   }
-  out_bgra->resize(size);
-  if (!ReadExact(pipe_, out_bgra->data(), size)) {
-    CloseSecurePipe();
-    return false;
+  out_bgra->resize(pixels * 4);
+  const uint8_t* src = bgr.data();
+  uint8_t* dst = out_bgra->data();
+  for (size_t i = 0; i < pixels; ++i) {
+    dst[0] = src[0];
+    dst[1] = src[1];
+    dst[2] = src[2];
+    dst[3] = 255;
+    src += 3;
+    dst += 4;
   }
   if (out_w) *out_w = secure_w_;
   if (out_h) *out_h = secure_h_;

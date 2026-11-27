@@ -64,29 +64,9 @@ bool ScreenVideoTrackSource::StartDisplay(
   logged_convert_err_.store(false);
   running_.store(true);
 
-  if (WgcCapturer::IsSupported() && display.hmonitor && IsDefaultDesktopActive()) {
-    std::string wgc_err;
-    wgc_ = std::make_unique<WgcCapturer>(
-        d3d_,
-        [this](ID3D11Texture2D* tex, int cw, int ch) { OnWgcFrame(tex, cw, ch); },
-        [this](const std::string& reason) {
-          if (log_) log_("WGC monitor closed: " + reason);
-        });
-    if (wgc_->StartMonitor(display.hmonitor, &wgc_err)) {
-      std::lock_guard<std::mutex> lock(state_mu_);
-      backend_name_ = "wgc";
-      if (log_) {
-        log_("GPU WGC monitor capture started (" + std::to_string(display.width) + "x" +
-             std::to_string(display.height) + " -> " + std::to_string(dst_w_) + "x" +
-             std::to_string(dst_h_) + ", activeMonitor=" + (display.has_active_monitor ? "true" : "false") + ")");
-      }
-      NudgeDesktopForCapture();
-    } else {
-      wgc_.reset();
-      if (log_) log_("WGC monitor unavailable (" + wgc_err + "); falling back to DXGI/GDI");
-    }
-  }
-
+  // Monitor capture uses GPU DXGI Desktop Duplication first inside WorkerLoop (sub-millisecond
+  // zero-copy VRAM blit at up to 120+ fps, no capture border, full MttVDD support), falling back
+  // to GPU WGC and only then GDI if neither GPU backend is available.
   worker_ = std::thread([this]() { WorkerLoop(); });
   return true;
 }
@@ -253,11 +233,37 @@ void ScreenVideoTrackSource::WorkerLoop() {
   bool using_dxgi = false;
   bool using_gdi = false;
   bool using_secure = false;
+  bool dxgi_exhausted = false;
+  bool wgc_attempted = is_window;
   bool wgc_gdi_assist = false;
+  bool dxgi_bootstrapped_static = false;
+  int64_t dxgi_opened_ms = 0;
+  int64_t wgc_started_ms = started_ms;
+  int dxgi_consecutive_losses = 0;
   int gdi_timing_samples = 0;
   int64_t gdi_cap_ms_sum = 0;
   int64_t gdi_up_ms_sum = 0;
   std::vector<uint8_t> cpu_bgra;
+
+  auto repeat_if_due = [&](int64_t now_ms_val) {
+    webrtc::scoped_refptr<webrtc::VideoFrameBuffer> repeat_buf;
+    bool should_repeat = false;
+    {
+      std::lock_guard<std::mutex> lock(latest_mu_);
+      if (latest_frame_) {
+        int64_t since_fresh = now_ms_val - last_fresh_ms_;
+        int64_t since_emit = now_ms_val - (last_emit_us_ / 1000);
+        int interval = since_fresh < tuning::kSettleWindowMs ? tuning::kSettleRepeatMs : tuning::kIdleRepeatMs;
+        if (since_emit >= interval) {
+          repeat_buf = latest_frame_;
+          should_repeat = true;
+        }
+      }
+    }
+    if (should_repeat && repeat_buf) {
+      EmitFrame(std::move(repeat_buf), false);
+    }
+  };
 
   while (running_.load()) {
     if (paused_.load()) {
@@ -276,7 +282,10 @@ void ScreenVideoTrackSource::WorkerLoop() {
     if (!is_window) {
       bool default_desk = IsDefaultDesktopActive();
       if (!default_desk && !using_secure) {
-        if (wgc_) wgc_->Stop();
+        if (wgc_) {
+          wgc_->Stop();
+          wgc_.reset();
+        }
         dxgi.Close();
         using_dxgi = false;
         using_gdi = false;
@@ -292,25 +301,17 @@ void ScreenVideoTrackSource::WorkerLoop() {
       } else if (default_desk && using_secure) {
         gdi_secure.CloseSecurePipe();
         using_secure = false;
-        if (WgcCapturer::IsSupported() && display.hmonitor) {
-          std::string err;
-          wgc_ = std::make_unique<WgcCapturer>(
-              d3d_,
-              [this](ID3D11Texture2D* tex, int cw, int ch) { OnWgcFrame(tex, cw, ch); },
-              [this](const std::string& reason) {
-                if (log_) log_("WGC monitor closed: " + reason);
-              });
-          if (wgc_->StartMonitor(display.hmonitor, &err)) {
-            wgc_frames_.store(0);
-            wgc_gdi_assist = false;
-            std::lock_guard<std::mutex> lock(state_mu_);
-            backend_name_ = "wgc";
-            if (log_) log_("restored GPU WGC capture after returning from secure desktop");
-            NudgeDesktopForCapture();
-          } else {
-            wgc_.reset();
-          }
+        dxgi_exhausted = false;
+        dxgi_consecutive_losses = 0;
+        wgc_attempted = false;
+        wgc_gdi_assist = false;
+        dxgi_bootstrapped_static = false;
+        if (auto refreshed = FindDisplay(display.screen)) {
+          display = *refreshed;
+          std::lock_guard<std::mutex> lock(state_mu_);
+          display_ = display;
         }
+        if (log_) log_("returned from secure desktop; re-initializing GPU capture");
       }
     }
 
@@ -327,51 +328,46 @@ void ScreenVideoTrackSource::WorkerLoop() {
       continue;
     }
 
-    // 3. WGC active: monitor watchdog for headless/static screens + Mac-parity settle/idle repeats.
+    // 3. WGC active (primary for Fusion windows, secondary GPU fallback for monitors if DXGI DD fails).
     if (wgc_ && wgc_->running()) {
       const int64_t wait_threshold_ms = is_window ? 250 : (display.has_active_monitor ? 1000 : 120);
-      if (wgc_frames_.load() == 0 && (now_ms - started_ms) >= wait_threshold_ms) {
+      if (wgc_frames_.load() == 0 && (now_ms - wgc_started_ms) >= wait_threshold_ms) {
+        if (!is_window) {
+          // Monitor WGC emitted 0 frames: tear down cleanly instead of trapping the loop in GDI
+          // while falsely claiming backend=wgc.
+          wgc_->Stop();
+          wgc_.reset();
+          using_gdi = true;
+          std::lock_guard<std::mutex> lock(state_mu_);
+          backend_name_ = "gdi";
+          if (log_) {
+            log_("WGC monitor produced 0 frames after " + std::to_string(wait_threshold_ms) +
+                 "ms; stopping WGC and falling back to GDI");
+          }
+          continue;
+        }
         if (!wgc_gdi_assist) {
           wgc_gdi_assist = true;
           if (log_) {
-            log_(std::string("WGC produced 0 frames after ") + std::to_string(wait_threshold_ms) +
-                 "ms; streaming " + (is_window ? "PrintWindow" : "GDI") + " live assist while keeping WGC armed");
+            log_("WGC window produced 0 frames after " + std::to_string(wait_threshold_ms) +
+                 "ms; streaming PrintWindow assist while keeping WGC armed");
           }
         }
         int64_t t0 = NowMillis();
         const uint8_t* ptr = nullptr;
         int gw = 0, gh = 0;
-        if (is_window) {
-          HWND win = nullptr;
-          {
-            std::lock_guard<std::mutex> lock(state_mu_);
-            win = hwnd_;
-          }
-          if (!win || !IsWindow(win)) {
-            if (running_.exchange(false) && on_stop_) on_stop_("window closed");
-            break;
-          }
-          if (gdi_secure.CaptureWindowDirect(win, &ptr, &gw, &gh) && ptr) {
-            auto buf = d3d_->UploadBgraToFrame(ptr, gw, gh, gw * 4, dst_w, dst_h, layout, true, gw, gh);
-            if (buf) EmitFrame(std::move(buf), true);
-          }
-        } else {
-          if (gdi_secure.CaptureGdiDirect(display.bounds, &ptr, &gw, &gh) && ptr) {
-            int64_t t1 = NowMillis();
-            auto buf = d3d_->UploadBgraToFrame(ptr, gw, gh, gw * 4, dst_w, dst_h, layout);
-            int64_t t2 = NowMillis();
-            if (gdi_timing_samples < 20) {
-              gdi_cap_ms_sum += (t1 - t0);
-              gdi_up_ms_sum += (t2 - t1);
-              gdi_timing_samples += 1;
-              if (gdi_timing_samples == 20 && log_) {
-                log_("GDI live assist avg (20 frames): capture=" +
-                     std::to_string(gdi_cap_ms_sum / 20) + "ms upload+nv12=" +
-                     std::to_string(gdi_up_ms_sum / 20) + "ms (" + std::to_string(gw) + "x" + std::to_string(gh) + ")");
-              }
-            }
-            if (buf) EmitFrame(std::move(buf), true);
-          }
+        HWND win = nullptr;
+        {
+          std::lock_guard<std::mutex> lock(state_mu_);
+          win = hwnd_;
+        }
+        if (!win || !IsWindow(win)) {
+          if (running_.exchange(false) && on_stop_) on_stop_("window closed");
+          break;
+        }
+        if (gdi_secure.CaptureWindowDirect(win, &ptr, &gw, &gh) && ptr) {
+          auto buf = d3d_->UploadBgraToFrame(ptr, gw, gh, gw * 4, dst_w, dst_h, layout, true, gw, gh);
+          if (buf) EmitFrame(std::move(buf), true);
         }
         int fps = std::clamp(target_fps_.load(), 1, 60);
         int elapsed = static_cast<int>(NowMillis() - t0);
@@ -380,23 +376,7 @@ void ScreenVideoTrackSource::WorkerLoop() {
         continue;
       }
 
-      webrtc::scoped_refptr<webrtc::VideoFrameBuffer> repeat_buf;
-      bool should_repeat = false;
-      {
-        std::lock_guard<std::mutex> lock(latest_mu_);
-        if (latest_frame_) {
-          int64_t since_fresh = now_ms - last_fresh_ms_;
-          int64_t since_emit = now_ms - (last_emit_us_ / 1000);
-          int interval = since_fresh < tuning::kSettleWindowMs ? tuning::kSettleRepeatMs : tuning::kIdleRepeatMs;
-          if (since_emit >= interval) {
-            repeat_buf = latest_frame_;
-            should_repeat = true;
-          }
-        }
-      }
-      if (should_repeat && repeat_buf) {
-        EmitFrame(std::move(repeat_buf), false);
-      }
+      repeat_if_due(now_ms);
       std::this_thread::sleep_for(std::chrono::milliseconds(20));
       continue;
     }
@@ -429,14 +409,49 @@ void ScreenVideoTrackSource::WorkerLoop() {
       continue;
     }
 
-    // 4. Fallback chain when WGC is unavailable (older Win10 <1903): DXGI Desktop Duplication -> GDI.
+    // 4. Monitor backend selection: GPU DXGI Desktop Duplication -> GPU WGC -> GDI (last resort).
     if (!using_dxgi && !using_gdi) {
       std::string derr;
-      if (display.has_active_monitor && dxgi.Open(display, &derr)) {
+      if (!dxgi_exhausted && display.has_active_monitor && dxgi.Open(display, &derr)) {
         using_dxgi = true;
+        dxgi_opened_ms = NowMillis();
+        dxgi_bootstrapped_static = false;
+        {
+          std::lock_guard<std::mutex> lock(state_mu_);
+          backend_name_ = dxgi.is_cross_adapter() ? "dxgi-xadapter" : "dxgi";
+        }
+        if (log_) {
+          log_("GPU DXGI Desktop Duplication capture started (" +
+               std::to_string(display.width) + "x" + std::to_string(display.height) + " -> " +
+               std::to_string(dst_w) + "x" + std::to_string(dst_h) +
+               (dxgi.is_cross_adapter() ? ", cross-adapter" : ", zero-copy") + ")");
+        }
+        NudgeDesktopForCapture();
+      } else if (!wgc_attempted && WgcCapturer::IsSupported() && display.hmonitor && IsDefaultDesktopActive()) {
+        wgc_attempted = true;
+        std::string wgc_err;
+        wgc_ = std::make_unique<WgcCapturer>(
+            d3d_,
+            [this](ID3D11Texture2D* tex, int cw, int ch) { OnWgcFrame(tex, cw, ch); },
+            [this](const std::string& reason) {
+              if (log_) log_("WGC monitor closed: " + reason);
+            });
+        wgc_frames_.store(0);
+        wgc_started_ms = NowMillis();
+        if (wgc_->StartMonitor(display.hmonitor, &wgc_err)) {
+          std::lock_guard<std::mutex> lock(state_mu_);
+          backend_name_ = "wgc";
+          if (log_) {
+            log_("GPU WGC monitor capture started after DXGI unavailable (" + derr + ")");
+          }
+          NudgeDesktopForCapture();
+          continue;
+        }
+        wgc_.reset();
+        using_gdi = true;
         std::lock_guard<std::mutex> lock(state_mu_);
-        backend_name_ = "dxgi";
-        if (log_) log_("GPU DXGI Desktop Duplication capture started");
+        backend_name_ = "gdi";
+        if (log_) log_("GDI desktop capture started (DXGI: " + derr + "; WGC: " + wgc_err + ")");
       } else {
         using_gdi = true;
         std::lock_guard<std::mutex> lock(state_mu_);
@@ -446,30 +461,69 @@ void ScreenVideoTrackSource::WorkerLoop() {
     }
 
     if (using_dxgi) {
-      int fps = std::max(1, target_fps_.load());
-      int wait_ms = std::clamp(1000 / fps, 8, 50);
+      int fps = std::clamp(target_fps_.load(), tuning::kMinFps, tuning::kMaxFps);
+      int wait_ms = std::clamp(1000 / std::max(1, fps), 4, 33);
       ComPtr<ID3D11Texture2D> tex;
       int tw = 0, th = 0;
       HRESULT hr = dxgi.Acquire(wait_ms, &tex, &tw, &th);
       if (SUCCEEDED(hr) && tex) {
-        auto buf = d3d_->ConvertBgraToFrame(tex.Get(), tw, th, dst_w, dst_h, layout);
-        if (buf) EmitFrame(std::move(buf), true);
-      } else if (hr == DXGI_ERROR_WAIT_TIMEOUT) {
-        webrtc::scoped_refptr<webrtc::VideoFrameBuffer> repeat_buf;
+        dxgi_consecutive_losses = 0;
+        // Microsecond-accurate pacing avoids beat-frequency judder on 60/120/144/240 Hz displays.
+        int64_t now_us = NowMicros();
+        double min_gap_us = 1'000'000.0 / (std::max(1, fps) * 1.12);
+        bool skip_pace = false;
         {
           std::lock_guard<std::mutex> lock(latest_mu_);
-          if (latest_frame_ && (NowMillis() - (last_emit_us_ / 1000)) >= tuning::kIdleRepeatMs) {
-            repeat_buf = latest_frame_;
+          if (last_emit_us_ > 0 && static_cast<double>(now_us - last_emit_us_) < min_gap_us * 0.85) {
+            skip_pace = true;
           }
         }
-        if (repeat_buf) EmitFrame(std::move(repeat_buf), false);
+        if (!skip_pace) {
+          auto buf = d3d_->ConvertBgraToFrame(tex.Get(), tw, th, dst_w, dst_h, layout);
+          if (buf) EmitFrame(std::move(buf), true);
+        }
+      } else if (hr == DXGI_ERROR_WAIT_TIMEOUT) {
+        int64_t t_now = NowMillis();
+        bool has_any = false;
+        {
+          std::lock_guard<std::mutex> lock(latest_mu_);
+          has_any = (latest_frame_ != nullptr);
+        }
+        if (!has_any && !dxgi_bootstrapped_static && (t_now - dxgi_opened_ms) >= 350) {
+          // On a completely motionless desktop immediately after connect, emit one initial frame
+          // so the viewer renders at once while DXGI DD remains armed for all subsequent updates.
+          dxgi_bootstrapped_static = true;
+          NudgeDesktopForCapture();
+          const uint8_t* ptr = nullptr;
+          int gw = 0, gh = 0;
+          if (gdi_secure.CaptureGdiDirect(display.bounds, &ptr, &gw, &gh) && ptr) {
+            auto buf = d3d_->UploadBgraToFrame(ptr, gw, gh, gw * 4, dst_w, dst_h, layout);
+            if (buf) EmitFrame(std::move(buf), true);
+          }
+        } else {
+          repeat_if_due(t_now);
+        }
       } else {
         dxgi.Close();
         using_dxgi = false;
-        using_gdi = true;
-        std::lock_guard<std::mutex> lock(state_mu_);
-        backend_name_ = "gdi";
-        if (log_) log_("DXGI duplication lost (" + std::to_string(hr) + "); switching to GDI");
+        dxgi_consecutive_losses += 1;
+        // Mode switches, ScreenMatch, display wake, or DWM resets cause transient DXGI_ERROR_ACCESS_LOST;
+        // re-open DXGI DD instead of permanently degrading to slow CPU GDI!
+        if (dxgi_consecutive_losses <= 4) {
+          if (log_) {
+            log_("DXGI duplication interrupted (" + std::to_string(hr) + "); re-acquiring GPU duplication (" +
+                 std::to_string(dxgi_consecutive_losses) + "/4)");
+          }
+          std::this_thread::sleep_for(std::chrono::milliseconds(80));
+          if (auto refreshed = FindDisplay(display.screen)) {
+            display = *refreshed;
+            std::lock_guard<std::mutex> lock(state_mu_);
+            display_ = display;
+          }
+        } else {
+          dxgi_exhausted = true;
+          if (log_) log_("DXGI duplication failed repeatedly (" + std::to_string(hr) + "); trying WGC/GDI fallback");
+        }
       }
     } else if (using_gdi) {
       int fps = std::clamp(target_fps_.load(), 1, 60);
@@ -477,7 +531,19 @@ void ScreenVideoTrackSource::WorkerLoop() {
       const uint8_t* ptr = nullptr;
       int gw = 0, gh = 0;
       if (gdi_secure.CaptureGdiDirect(display.bounds, &ptr, &gw, &gh) && ptr) {
+        int64_t t1 = NowMillis();
         auto buf = d3d_->UploadBgraToFrame(ptr, gw, gh, gw * 4, dst_w, dst_h, layout);
+        int64_t t2 = NowMillis();
+        if (gdi_timing_samples < 20) {
+          gdi_cap_ms_sum += (t1 - frame_start);
+          gdi_up_ms_sum += (t2 - t1);
+          gdi_timing_samples += 1;
+          if (gdi_timing_samples == 20 && log_) {
+            log_("GDI fallback avg (20 frames): capture=" +
+                 std::to_string(gdi_cap_ms_sum / 20) + "ms upload+nv12=" +
+                 std::to_string(gdi_up_ms_sum / 20) + "ms (" + std::to_string(gw) + "x" + std::to_string(gh) + ")");
+          }
+        }
         if (buf) EmitFrame(std::move(buf), true);
       }
       int elapsed = static_cast<int>(NowMillis() - frame_start);

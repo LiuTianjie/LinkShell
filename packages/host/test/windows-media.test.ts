@@ -179,6 +179,23 @@ describe("WindowsMediaEngine (native C++20 libwebrtc protocol)", () => {
     await expect(pendingConfig).rejects.toThrow("屏幕连接已断开");
     expect(routed).toContainEqual({ t: "gone" });
   });
+
+  it("handles child spawn error events without crashing the host daemon", async () => {
+    const proc = new FakeMediaProcess();
+    const logs: string[] = [];
+    const engine = new WindowsMediaEngine(
+      "LinkShell.Media.exe",
+      (line) => logs.push(line),
+      vi.fn(() => proc as unknown as ReturnType<typeof import("node:child_process").spawn>),
+    );
+    activeEngines.push(engine);
+
+    const pendingStatus = engine.status();
+    proc.emit("error", Object.assign(new Error("spawn ENOENT"), { code: "ENOENT" }));
+
+    await expect(pendingStatus).rejects.toThrow("Windows 媒体引擎启动失败");
+    expect(logs.some((line) => line.includes("spawn ENOENT"))).toBe(true);
+  });
 });
 
 describe("WindowsNativeFusionMedia (native multi-transceiver WGC/DXGI engine)", () => {

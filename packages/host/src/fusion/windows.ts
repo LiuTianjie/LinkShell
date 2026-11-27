@@ -76,6 +76,12 @@ export class WindowsFusionPlatform implements FusionPlatform {
       try { message = JSON.parse(line) as Record<string, unknown>; } catch { return; }
       this.receive(message);
     });
+    child.on("error", (error) => {
+      if (this.child === child) this.child = undefined;
+      console.error(`[fusion] helper spawn error: ${error.message}`);
+      for (const reply of this.replies.values()) reply({ t: "error", message: `Windows 屏幕组件启动失败：${error.message}` });
+      this.replies.clear();
+    });
     child.on("exit", () => {
       if (this.child === child) this.child = undefined;
       for (const reply of this.replies.values()) reply({ t: "error", message: "Windows 屏幕组件已退出" });

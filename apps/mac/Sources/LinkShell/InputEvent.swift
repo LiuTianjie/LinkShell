@@ -14,9 +14,13 @@ struct InputEvent {
 
   init?(json data: Data) {
     guard data.count <= Tuning.maxEventBytes,
-          let command = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-          let kind = command["t"] as? String
+          let command = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
     else { return nil }
+    self.init(command: command)
+  }
+
+  init?(command: [String: Any]) {
+    guard let kind = command["t"] as? String else { return nil }
     let number = InputEvent.number
     switch kind {
     case "move":

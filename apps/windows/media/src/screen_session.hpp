@@ -7,6 +7,7 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 #include "api/data_channel_interface.h"
@@ -51,6 +52,7 @@ class ScreenSession {
   void CreateOffer(bool ice_restart);
   void ApplySenderParameters();
   void OnConnectionState(webrtc::PeerConnectionInterface::PeerConnectionState state);
+  void OnIceGatheringState(webrtc::PeerConnectionInterface::IceGatheringState state);
   void OnIceCandidate(const webrtc::IceCandidate* candidate);
   void OnDataChannelMessage(const std::string& label, const webrtc::DataBuffer& buffer);
   void OnStats(const webrtc::scoped_refptr<const webrtc::RTCStatsReport>& report);
@@ -67,7 +69,15 @@ class ScreenSession {
   IpcChannel* ipc_;
 
   std::mutex mu_;
+  std::mutex close_mu_;
+  bool cleaned_up_ = false;
+  struct Lifetime {
+    std::mutex mu;
+    bool alive = true;
+  };
+  std::shared_ptr<Lifetime> life_ = std::make_shared<Lifetime>();
   std::atomic<bool> closed_{false};
+  std::atomic<bool> failed_{false};
   std::atomic<bool> paused_{false};
   std::atomic<bool> ever_connected_{false};
   std::atomic<bool> connected_{false};
@@ -90,6 +100,8 @@ class ScreenSession {
   int64_t last_activity_ms_ = -10'000;
   std::string last_path_desc_;
   int cursor_seq_ = 0;
+  std::unordered_set<std::string> useless_host_ips_;
+  std::atomic<int> dropped_candidates_{0};
 
   // Previous stats counters for per-second deltas.
   bool has_prev_stats_ = false;

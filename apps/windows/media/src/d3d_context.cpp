@@ -114,6 +114,9 @@ std::shared_ptr<D3DContext> D3DContext::Create(int adapter_index, std::string* e
 
   ctx->device_.As(&ctx->video_device_);
   ctx->context_.As(&ctx->video_context_);
+  if (ctx->video_context_) {
+    ctx->video_context_.As(&ctx->video_context1_);
+  }
 
   if (SUCCEEDED(MFCreateDXGIDeviceManager(&ctx->reset_token_, &ctx->dxgi_manager_)) && ctx->dxgi_manager_) {
     ctx->dxgi_manager_->ResetDevice(ctx->device_.Get(), ctx->reset_token_);
@@ -134,13 +137,24 @@ bool D3DContext::InitVideoProcessor(int src_w, int src_h, int dst_w, int dst_h) 
   }
   vp_.Reset();
   vp_enum_.Reset();
+  vp_input_view_.Reset();
+  cpu_upload_view_.Reset();
+  vp_color_mode_ = VpColorMode::kNone;
+  vp_gen_ += 1;
+  {
+    std::lock_guard<std::mutex> plock(pool_mu_);
+    nv12_pool_.clear();
+    nv12_pool_gen_ = vp_gen_;
+    nv12_pool_w_ = dst_w;
+    nv12_pool_h_ = dst_h;
+  }
 
   D3D11_VIDEO_PROCESSOR_CONTENT_DESC desc{};
   desc.InputFrameFormat = D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE;
-  desc.InputFrameRate = {60, 1};
+  desc.InputFrameRate = {120, 1};
   desc.InputWidth = static_cast<UINT>(src_w);
   desc.InputHeight = static_cast<UINT>(src_h);
-  desc.OutputFrameRate = {60, 1};
+  desc.OutputFrameRate = {120, 1};
   desc.OutputWidth = static_cast<UINT>(dst_w);
   desc.OutputHeight = static_cast<UINT>(dst_h);
   desc.Usage = D3D11_VIDEO_USAGE_PLAYBACK_NORMAL;
@@ -158,23 +172,6 @@ bool D3DContext::InitVideoProcessor(int src_w, int src_h, int dst_w, int dst_h) 
 
   video_context_->VideoProcessorSetStreamAutoProcessingMode(vp_.Get(), 0, FALSE);
 
-  ComPtr<ID3D11VideoContext1> vc1;
-  if (SUCCEEDED(video_context_.As(&vc1)) && vc1) {
-    vc1->VideoProcessorSetStreamColorSpace1(vp_.Get(), 0, DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709);
-    vc1->VideoProcessorSetOutputColorSpace1(vp_.Get(), DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709);
-  } else {
-    D3D11_VIDEO_PROCESSOR_COLOR_SPACE in_cs{};
-    in_cs.Usage = 0;
-    in_cs.RGB_Range = 0;
-    in_cs.YCbCr_Matrix = 1;
-    video_context_->VideoProcessorSetStreamColorSpace(vp_.Get(), 0, &in_cs);
-    D3D11_VIDEO_PROCESSOR_COLOR_SPACE out_cs{};
-    out_cs.Usage = 0;
-    out_cs.Nominal_Range = D3D11_VIDEO_PROCESSOR_NOMINAL_RANGE_16_235;
-    out_cs.YCbCr_Matrix = 1;
-    video_context_->VideoProcessorSetOutputColorSpace(vp_.Get(), &out_cs);
-  }
-
   D3D11_VIDEO_COLOR bg{};
   bg.YCbCr = {0.0625f, 0.5f, 0.5f, 1.0f};
   video_context_->VideoProcessorSetOutputBackgroundColor(vp_.Get(), TRUE, &bg);
@@ -183,6 +180,74 @@ bool D3DContext::InitVideoProcessor(int src_w, int src_h, int dst_w, int dst_h) 
   vp_src_h_ = src_h;
   vp_dst_w_ = dst_w;
   vp_dst_h_ = dst_h;
+  return true;
+}
+
+void D3DContext::EnsureVpColorMode(VpColorMode mode) {
+  if (vp_color_mode_ == mode || !vp_ || !video_context_) return;
+  if (video_context1_) {
+    if (mode == VpColorMode::kBgraToNv12) {
+      video_context1_->VideoProcessorSetStreamColorSpace1(vp_.Get(), 0, DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709);
+      video_context1_->VideoProcessorSetOutputColorSpace1(vp_.Get(), DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709);
+    } else if (mode == VpColorMode::kNv12ToNv12) {
+      video_context1_->VideoProcessorSetStreamColorSpace1(vp_.Get(), 0, DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709);
+      video_context1_->VideoProcessorSetOutputColorSpace1(vp_.Get(), DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709);
+    }
+  } else {
+    D3D11_VIDEO_PROCESSOR_COLOR_SPACE in_cs{};
+    in_cs.Usage = 0;
+    in_cs.RGB_Range = 0;
+    in_cs.Nominal_Range = (mode == VpColorMode::kNv12ToNv12) ? D3D11_VIDEO_PROCESSOR_NOMINAL_RANGE_16_235 : 0;
+    in_cs.YCbCr_Matrix = 1;
+    video_context_->VideoProcessorSetStreamColorSpace(vp_.Get(), 0, &in_cs);
+    D3D11_VIDEO_PROCESSOR_COLOR_SPACE out_cs{};
+    out_cs.Usage = 0;
+    out_cs.Nominal_Range = D3D11_VIDEO_PROCESSOR_NOMINAL_RANGE_16_235;
+    out_cs.YCbCr_Matrix = 1;
+    video_context_->VideoProcessorSetOutputColorSpace(vp_.Get(), &out_cs);
+  }
+  vp_color_mode_ = mode;
+}
+
+void D3DContext::ReleaseNv12(PooledNv12 slot) {
+  if (!slot.texture || !slot.out_view) return;
+  std::lock_guard<std::mutex> plock(pool_mu_);
+  if (slot.vp_gen != nv12_pool_gen_ || slot.width != nv12_pool_w_ || slot.height != nv12_pool_h_) return;
+  constexpr size_t kMaxPoolSize = 8;
+  if (nv12_pool_.size() >= kMaxPoolSize) return;
+  nv12_pool_.push_back(std::move(slot));
+}
+
+bool D3DContext::AcquireNv12Locked(int width, int height, PooledNv12* out) {
+  if (!out) return false;
+  width = Even(width);
+  height = Even(height);
+  {
+    std::lock_guard<std::mutex> plock(pool_mu_);
+    // Wait until at least 3 completed frames sit in the FIFO before recycling the oldest slot,
+    // guaranteeing any async hardware MFT holding 1-2 primed input surfaces has finished reading it.
+    if (nv12_pool_gen_ == vp_gen_ && nv12_pool_w_ == width && nv12_pool_h_ == height && nv12_pool_.size() >= 3) {
+      *out = std::move(nv12_pool_.front());
+      nv12_pool_.pop_front();
+      return true;
+    }
+  }
+  ComPtr<ID3D11Texture2D> dst = CreateNv12Texture(width, height);
+  if (!dst) return false;
+  D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC out_desc{};
+  out_desc.ViewDimension = D3D11_VPOV_DIMENSION_TEXTURE2D;
+  out_desc.Texture2D.MipSlice = 0;
+  ComPtr<ID3D11VideoProcessorOutputView> out_view;
+  HRESULT hr = video_device_->CreateVideoProcessorOutputView(dst.Get(), vp_enum_.Get(), &out_desc, &out_view);
+  if (FAILED(hr)) {
+    SetError("CreateVideoProcessorOutputView failed: " + HexHr(hr));
+    return false;
+  }
+  out->texture = std::move(dst);
+  out->out_view = std::move(out_view);
+  out->width = width;
+  out->height = height;
+  out->vp_gen = vp_gen_;
   return true;
 }
 
@@ -211,7 +276,7 @@ ComPtr<ID3D11Texture2D> D3DContext::CreateNv12Texture(int width, int height) {
   return tex;
 }
 
-ComPtr<ID3D11Texture2D> D3DContext::ConvertBgraToNv12(
+bool D3DContext::ConvertBgraToNv12Slot(
     ID3D11Texture2D* src_bgra,
     int src_w,
     int src_h,
@@ -219,8 +284,23 @@ ComPtr<ID3D11Texture2D> D3DContext::ConvertBgraToNv12(
     int dst_h,
     bool canvas_paste,
     int paste_w,
-    int paste_h) {
-  if (!src_bgra || src_w <= 0 || src_h <= 0 || dst_w <= 0 || dst_h <= 0) return nullptr;
+    int paste_h,
+    PooledNv12* out_slot) {
+  std::lock_guard<std::mutex> lock(gpu_mu_);
+  return ConvertBgraToNv12SlotLocked(src_bgra, src_w, src_h, dst_w, dst_h, canvas_paste, paste_w, paste_h, out_slot);
+}
+
+bool D3DContext::ConvertBgraToNv12SlotLocked(
+    ID3D11Texture2D* src_bgra,
+    int src_w,
+    int src_h,
+    int dst_w,
+    int dst_h,
+    bool canvas_paste,
+    int paste_w,
+    int paste_h,
+    PooledNv12* out_slot) {
+  if (!src_bgra || src_w <= 0 || src_h <= 0 || dst_w <= 0 || dst_h <= 0 || !out_slot) return false;
   dst_w = Even(dst_w);
   dst_h = Even(dst_h);
 
@@ -228,13 +308,12 @@ ComPtr<ID3D11Texture2D> D3DContext::ConvertBgraToNv12(
   src_bgra->GetDesc(&src_desc);
   int tex_w = static_cast<int>(src_desc.Width);
   int tex_h = static_cast<int>(src_desc.Height);
-  if (tex_w <= 0 || tex_h <= 0) return nullptr;
+  if (tex_w <= 0 || tex_h <= 0) return false;
 
-  std::lock_guard<std::mutex> lock(gpu_mu_);
-  if (!InitVideoProcessor(tex_w, tex_h, dst_w, dst_h)) return nullptr;
+  if (!InitVideoProcessor(tex_w, tex_h, dst_w, dst_h)) return false;
 
-  ComPtr<ID3D11Texture2D> dst = CreateNv12Texture(dst_w, dst_h);
-  if (!dst) return nullptr;
+  PooledNv12 slot;
+  if (!AcquireNv12Locked(dst_w, dst_h, &slot)) return false;
 
   D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC in_desc{};
   in_desc.FourCC = 0;
@@ -243,56 +322,55 @@ ComPtr<ID3D11Texture2D> D3DContext::ConvertBgraToNv12(
   in_desc.Texture2D.ArraySlice = 0;
 
   ComPtr<ID3D11VideoProcessorInputView> in_view;
-  HRESULT hr = video_device_->CreateVideoProcessorInputView(src_bgra, vp_enum_.Get(), &in_desc, &in_view);
-  if (FAILED(hr)) {
-    // WGC / DXGI shared textures can be rejected by CreateVideoProcessorInputView on NVIDIA;
-    // GPU-copy into a clean local non-shared BGRA texture (<0.05 ms VRAM blit).
-    if (!vp_input_bgra_ || vp_input_w_ != tex_w || vp_input_h_ != tex_h) {
-      vp_input_bgra_.Reset();
-      D3D11_TEXTURE2D_DESC local_desc{};
-      local_desc.Width = src_desc.Width;
-      local_desc.Height = src_desc.Height;
-      local_desc.MipLevels = 1;
-      local_desc.ArraySize = 1;
-      local_desc.Format = src_desc.Format;
-      local_desc.SampleDesc = {1, 0};
-      local_desc.Usage = D3D11_USAGE_DEFAULT;
-      local_desc.BindFlags = D3D11_BIND_RENDER_TARGET;
-      HRESULT chr = device_->CreateTexture2D(&local_desc, nullptr, &vp_input_bgra_);
-      if (FAILED(chr)) {
-        local_desc.BindFlags = 0;
-        chr = device_->CreateTexture2D(&local_desc, nullptr, &vp_input_bgra_);
+  if (src_bgra == cpu_upload_bgra_.Get() && cpu_upload_view_ && cpu_upload_view_gen_ == vp_gen_) {
+    in_view = cpu_upload_view_;
+  } else {
+    HRESULT hr = video_device_->CreateVideoProcessorInputView(src_bgra, vp_enum_.Get(), &in_desc, &in_view);
+    if (SUCCEEDED(hr) && src_bgra == cpu_upload_bgra_.Get()) {
+      cpu_upload_view_ = in_view;
+      cpu_upload_view_gen_ = vp_gen_;
+    } else if (FAILED(hr)) {
+      // WGC / DXGI shared textures can be rejected by CreateVideoProcessorInputView on NVIDIA;
+      // GPU-copy into a cached local non-shared BGRA texture + cached input view (<0.05 ms VRAM blit).
+      if (!vp_input_bgra_ || vp_input_w_ != tex_w || vp_input_h_ != tex_h) {
+        vp_input_bgra_.Reset();
+        vp_input_view_.Reset();
+        D3D11_TEXTURE2D_DESC local_desc{};
+        local_desc.Width = src_desc.Width;
+        local_desc.Height = src_desc.Height;
+        local_desc.MipLevels = 1;
+        local_desc.ArraySize = 1;
+        local_desc.Format = src_desc.Format;
+        local_desc.SampleDesc = {1, 0};
+        local_desc.Usage = D3D11_USAGE_DEFAULT;
+        local_desc.BindFlags = D3D11_BIND_RENDER_TARGET;
+        HRESULT chr = device_->CreateTexture2D(&local_desc, nullptr, &vp_input_bgra_);
         if (FAILED(chr)) {
-          SetError("vp_input_bgra CreateTexture2D failed: " + HexHr(chr));
-          return nullptr;
+          local_desc.BindFlags = 0;
+          chr = device_->CreateTexture2D(&local_desc, nullptr, &vp_input_bgra_);
+          if (FAILED(chr)) {
+            SetError("vp_input_bgra CreateTexture2D failed: " + HexHr(chr));
+            return false;
+          }
         }
+        vp_input_w_ = tex_w;
+        vp_input_h_ = tex_h;
       }
-      vp_input_w_ = tex_w;
-      vp_input_h_ = tex_h;
-    }
-    context_->CopyResource(vp_input_bgra_.Get(), src_bgra);
-    hr = video_device_->CreateVideoProcessorInputView(vp_input_bgra_.Get(), vp_enum_.Get(), &in_desc, &in_view);
-    if (FAILED(hr)) {
-      SetError("CreateVideoProcessorInputView failed (direct+local): " + HexHr(hr));
-      return nullptr;
+      context_->CopyResource(vp_input_bgra_.Get(), src_bgra);
+      if (!vp_input_view_ || vp_input_view_gen_ != vp_gen_) {
+        vp_input_view_.Reset();
+        hr = video_device_->CreateVideoProcessorInputView(vp_input_bgra_.Get(), vp_enum_.Get(), &in_desc, &vp_input_view_);
+        if (FAILED(hr)) {
+          SetError("CreateVideoProcessorInputView failed (direct+local): " + HexHr(hr));
+          return false;
+        }
+        vp_input_view_gen_ = vp_gen_;
+      }
+      in_view = vp_input_view_;
     }
   }
 
-  D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC out_desc{};
-  out_desc.ViewDimension = D3D11_VPOV_DIMENSION_TEXTURE2D;
-  out_desc.Texture2D.MipSlice = 0;
-  ComPtr<ID3D11VideoProcessorOutputView> out_view;
-  hr = video_device_->CreateVideoProcessorOutputView(dst.Get(), vp_enum_.Get(), &out_desc, &out_view);
-  if (FAILED(hr)) {
-    SetError("CreateVideoProcessorOutputView failed: " + HexHr(hr));
-    return nullptr;
-  }
-
-  ComPtr<ID3D11VideoContext1> vc1;
-  if (SUCCEEDED(video_context_.As(&vc1)) && vc1) {
-    vc1->VideoProcessorSetStreamColorSpace1(vp_.Get(), 0, DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709);
-    vc1->VideoProcessorSetOutputColorSpace1(vp_.Get(), DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709);
-  }
+  EnsureVpColorMode(VpColorMode::kBgraToNv12);
 
   int eff_w = std::min(src_w, tex_w);
   int eff_h = std::min(src_h, tex_h);
@@ -313,13 +391,30 @@ ComPtr<ID3D11Texture2D> D3DContext::ConvertBgraToNv12(
   stream.Enable = TRUE;
   stream.pInputSurface = in_view.Get();
 
-  hr = video_context_->VideoProcessorBlt(vp_.Get(), out_view.Get(), 0, 1, &stream);
+  HRESULT hr = video_context_->VideoProcessorBlt(vp_.Get(), slot.out_view.Get(), 0, 1, &stream);
   if (FAILED(hr)) {
     SetError("VideoProcessorBlt failed: " + HexHr(hr));
-    return nullptr;
+    return false;
   }
   context_->Flush();
-  return dst;
+  *out_slot = std::move(slot);
+  return true;
+}
+
+ComPtr<ID3D11Texture2D> D3DContext::ConvertBgraToNv12(
+    ID3D11Texture2D* src_bgra,
+    int src_w,
+    int src_h,
+    int dst_w,
+    int dst_h,
+    bool canvas_paste,
+    int paste_w,
+    int paste_h) {
+  PooledNv12 slot;
+  if (!ConvertBgraToNv12Slot(src_bgra, src_w, src_h, dst_w, dst_h, canvas_paste, paste_w, paste_h, &slot)) {
+    return nullptr;
+  }
+  return slot.texture;
 }
 
 webrtc::scoped_refptr<webrtc::I420BufferInterface> D3DContext::BgraBytesToI420(
@@ -332,18 +427,21 @@ webrtc::scoped_refptr<webrtc::I420BufferInterface> D3DContext::BgraBytesToI420(
     bool canvas_paste,
     int paste_w,
     int paste_h) {
+  if (!bgra || src_w < 2 || src_h < 2 || stride < src_w * 4 || dst_w <= 0 || dst_h <= 0) return nullptr;
   dst_w = Even(dst_w);
   dst_h = Even(dst_h);
-  auto src_i420 = webrtc::I420Buffer::Create(Even(src_w), Even(src_h));
+  int safe_src_w = (src_w / 2) * 2;
+  int safe_src_h = (src_h / 2) * 2;
+  auto src_i420 = webrtc::I420Buffer::Create(safe_src_w, safe_src_h);
   if (!src_i420) return nullptr;
   libyuv::ARGBToI420(
       bgra, stride,
       src_i420->MutableDataY(), src_i420->StrideY(),
       src_i420->MutableDataU(), src_i420->StrideU(),
       src_i420->MutableDataV(), src_i420->StrideV(),
-      Even(src_w), Even(src_h));
+      safe_src_w, safe_src_h);
 
-  if (!canvas_paste && Even(src_w) == dst_w && Even(src_h) == dst_h) {
+  if (!canvas_paste && safe_src_w == dst_w && safe_src_h == dst_h) {
     return src_i420;
   }
   auto dst_i420 = webrtc::I420Buffer::Create(dst_w, dst_h);
@@ -353,8 +451,8 @@ webrtc::scoped_refptr<webrtc::I420BufferInterface> D3DContext::BgraBytesToI420(
     std::memset(dst_i420->MutableDataY(), 16, static_cast<size_t>(dst_i420->StrideY()) * dst_h);
     std::memset(dst_i420->MutableDataU(), 128, static_cast<size_t>(dst_i420->StrideU()) * (dst_h / 2));
     std::memset(dst_i420->MutableDataV(), 128, static_cast<size_t>(dst_i420->StrideV()) * (dst_h / 2));
-    int cw = Even(std::min({src_w, paste_w > 0 ? paste_w : src_w, dst_w}));
-    int ch = Even(std::min({src_h, paste_h > 0 ? paste_h : src_h, dst_h}));
+    int cw = Even(std::min({safe_src_w, paste_w > 0 ? paste_w : safe_src_w, dst_w}));
+    int ch = Even(std::min({safe_src_h, paste_h > 0 ? paste_h : safe_src_h, dst_h}));
     for (int r = 0; r < ch; ++r) {
       std::memcpy(dst_i420->MutableDataY() + r * dst_i420->StrideY(), src_i420->DataY() + r * src_i420->StrideY(), cw);
     }
@@ -368,7 +466,7 @@ webrtc::scoped_refptr<webrtc::I420BufferInterface> D3DContext::BgraBytesToI420(
       src_i420->DataY(), src_i420->StrideY(),
       src_i420->DataU(), src_i420->StrideU(),
       src_i420->DataV(), src_i420->StrideV(),
-      Even(src_w), Even(src_h),
+      safe_src_w, safe_src_h,
       dst_i420->MutableDataY(), dst_i420->StrideY(),
       dst_i420->MutableDataU(), dst_i420->StrideU(),
       dst_i420->MutableDataV(), dst_i420->StrideV(),
@@ -433,9 +531,11 @@ webrtc::scoped_refptr<webrtc::VideoFrameBuffer> D3DContext::ConvertBgraToFrame(
     int paste_h) {
   dst_w = Even(dst_w);
   dst_h = Even(dst_h);
-  auto nv12 = ConvertBgraToNv12(src_bgra, src_w, src_h, dst_w, dst_h, canvas_paste, paste_w, paste_h);
-  if (nv12) {
-    return webrtc::make_ref_counted<D3D11TextureBuffer>(shared_from_this(), std::move(nv12), dst_w, dst_h, fusion_layout);
+  PooledNv12 slot;
+  if (ConvertBgraToNv12Slot(src_bgra, src_w, src_h, dst_w, dst_h, canvas_paste, paste_w, paste_h, &slot)) {
+    return webrtc::make_ref_counted<D3D11TextureBuffer>(
+        shared_from_this(), std::move(slot.texture), dst_w, dst_h, fusion_layout,
+        std::move(slot.out_view), slot.vp_gen);
   }
   auto i420 = ConvertBgraCpuFallback(src_bgra, src_w, src_h, dst_w, dst_h, canvas_paste, paste_w, paste_h);
   if (!i420) return nullptr;
@@ -453,34 +553,37 @@ ComPtr<ID3D11Texture2D> D3DContext::UploadBgraToNv12(
     int paste_w,
     int paste_h) {
   if (!bgra_pixels || src_w <= 0 || src_h <= 0) return nullptr;
-  {
-    std::lock_guard<std::mutex> lock(gpu_mu_);
-    if (!cpu_upload_bgra_ || cpu_upload_w_ != src_w || cpu_upload_h_ != src_h) {
-      cpu_upload_bgra_.Reset();
-      D3D11_TEXTURE2D_DESC desc{};
-      desc.Width = static_cast<UINT>(src_w);
-      desc.Height = static_cast<UINT>(src_h);
-      desc.MipLevels = 1;
-      desc.ArraySize = 1;
-      desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-      desc.SampleDesc = {1, 0};
-      desc.Usage = D3D11_USAGE_DEFAULT;
-      desc.BindFlags = D3D11_BIND_RENDER_TARGET;
-      HRESULT hr = device_->CreateTexture2D(&desc, nullptr, &cpu_upload_bgra_);
+  std::lock_guard<std::mutex> lock(gpu_mu_);
+  if (!cpu_upload_bgra_ || cpu_upload_w_ != src_w || cpu_upload_h_ != src_h) {
+    cpu_upload_bgra_.Reset();
+    cpu_upload_view_.Reset();
+    D3D11_TEXTURE2D_DESC desc{};
+    desc.Width = static_cast<UINT>(src_w);
+    desc.Height = static_cast<UINT>(src_h);
+    desc.MipLevels = 1;
+    desc.ArraySize = 1;
+    desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    desc.SampleDesc = {1, 0};
+    desc.Usage = D3D11_USAGE_DEFAULT;
+    desc.BindFlags = D3D11_BIND_RENDER_TARGET;
+    HRESULT hr = device_->CreateTexture2D(&desc, nullptr, &cpu_upload_bgra_);
+    if (FAILED(hr)) {
+      desc.BindFlags = 0;
+      hr = device_->CreateTexture2D(&desc, nullptr, &cpu_upload_bgra_);
       if (FAILED(hr)) {
-        desc.BindFlags = 0;
-        hr = device_->CreateTexture2D(&desc, nullptr, &cpu_upload_bgra_);
-        if (FAILED(hr)) {
-          SetError("cpu_upload_bgra CreateTexture2D failed: " + HexHr(hr));
-          return nullptr;
-        }
+        SetError("cpu_upload_bgra CreateTexture2D failed: " + HexHr(hr));
+        return nullptr;
       }
-      cpu_upload_w_ = src_w;
-      cpu_upload_h_ = src_h;
     }
-    context_->UpdateSubresource(cpu_upload_bgra_.Get(), 0, nullptr, bgra_pixels, static_cast<UINT>(stride), 0);
+    cpu_upload_w_ = src_w;
+    cpu_upload_h_ = src_h;
   }
-  return ConvertBgraToNv12(cpu_upload_bgra_.Get(), src_w, src_h, dst_w, dst_h, canvas_paste, paste_w, paste_h);
+  context_->UpdateSubresource(cpu_upload_bgra_.Get(), 0, nullptr, bgra_pixels, static_cast<UINT>(stride), 0);
+  PooledNv12 slot;
+  if (!ConvertBgraToNv12SlotLocked(cpu_upload_bgra_.Get(), src_w, src_h, dst_w, dst_h, canvas_paste, paste_w, paste_h, &slot)) {
+    return nullptr;
+  }
+  return slot.texture;
 }
 
 webrtc::scoped_refptr<webrtc::VideoFrameBuffer> D3DContext::UploadBgraToFrame(
@@ -496,10 +599,47 @@ webrtc::scoped_refptr<webrtc::VideoFrameBuffer> D3DContext::UploadBgraToFrame(
     int paste_h) {
   dst_w = Even(dst_w);
   dst_h = Even(dst_h);
-  if (!is_warp_) {
-    auto nv12 = UploadBgraToNv12(bgra_pixels, src_w, src_h, stride, dst_w, dst_h, canvas_paste, paste_w, paste_h);
-    if (nv12) {
-      return webrtc::make_ref_counted<D3D11TextureBuffer>(shared_from_this(), std::move(nv12), dst_w, dst_h, fusion_layout);
+  if (!is_warp_ && bgra_pixels && src_w > 0 && src_h > 0) {
+    PooledNv12 slot;
+    bool ok = false;
+    {
+      // Hold gpu_mu_ across upload AND VideoProcessorBlt so concurrent Fusion window streams
+      // can never reset or overwrite cpu_upload_bgra_ mid-conversion.
+      std::lock_guard<std::mutex> lock(gpu_mu_);
+      if (!cpu_upload_bgra_ || cpu_upload_w_ != src_w || cpu_upload_h_ != src_h) {
+        cpu_upload_bgra_.Reset();
+        cpu_upload_view_.Reset();
+        D3D11_TEXTURE2D_DESC desc{};
+        desc.Width = static_cast<UINT>(src_w);
+        desc.Height = static_cast<UINT>(src_h);
+        desc.MipLevels = 1;
+        desc.ArraySize = 1;
+        desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        desc.SampleDesc = {1, 0};
+        desc.Usage = D3D11_USAGE_DEFAULT;
+        desc.BindFlags = D3D11_BIND_RENDER_TARGET;
+        HRESULT hr = device_->CreateTexture2D(&desc, nullptr, &cpu_upload_bgra_);
+        if (FAILED(hr)) {
+          desc.BindFlags = 0;
+          hr = device_->CreateTexture2D(&desc, nullptr, &cpu_upload_bgra_);
+          if (FAILED(hr)) {
+            SetError("cpu_upload_bgra CreateTexture2D failed: " + HexHr(hr));
+          }
+        }
+        if (cpu_upload_bgra_) {
+          cpu_upload_w_ = src_w;
+          cpu_upload_h_ = src_h;
+        }
+      }
+      if (cpu_upload_bgra_) {
+        context_->UpdateSubresource(cpu_upload_bgra_.Get(), 0, nullptr, bgra_pixels, static_cast<UINT>(stride), 0);
+        ok = ConvertBgraToNv12SlotLocked(cpu_upload_bgra_.Get(), src_w, src_h, dst_w, dst_h, canvas_paste, paste_w, paste_h, &slot);
+      }
+    }
+    if (ok) {
+      return webrtc::make_ref_counted<D3D11TextureBuffer>(
+          shared_from_this(), std::move(slot.texture), dst_w, dst_h, fusion_layout,
+          std::move(slot.out_view), slot.vp_gen);
     }
   }
   auto i420 = BgraBytesToI420(bgra_pixels, src_w, src_h, stride, dst_w, dst_h, canvas_paste, paste_w, paste_h);
@@ -507,15 +647,16 @@ webrtc::scoped_refptr<webrtc::VideoFrameBuffer> D3DContext::UploadBgraToFrame(
   return webrtc::make_ref_counted<D3D11TextureBuffer>(std::move(i420), fusion_layout);
 }
 
-ComPtr<ID3D11Texture2D> D3DContext::ScaleNv12(
+bool D3DContext::ScaleNv12Slot(
     ID3D11Texture2D* src_nv12,
     int crop_x,
     int crop_y,
     int crop_w,
     int crop_h,
     int dst_w,
-    int dst_h) {
-  if (!src_nv12 || crop_w <= 0 || crop_h <= 0 || dst_w <= 0 || dst_h <= 0) return nullptr;
+    int dst_h,
+    PooledNv12* out_slot) {
+  if (!src_nv12 || crop_w <= 0 || crop_h <= 0 || dst_w <= 0 || dst_h <= 0 || !out_slot) return false;
   D3D11_TEXTURE2D_DESC src_desc{};
   src_nv12->GetDesc(&src_desc);
   dst_w = Even(dst_w);
@@ -523,30 +664,20 @@ ComPtr<ID3D11Texture2D> D3DContext::ScaleNv12(
 
   std::lock_guard<std::mutex> lock(gpu_mu_);
   if (!InitVideoProcessor(static_cast<int>(src_desc.Width), static_cast<int>(src_desc.Height), dst_w, dst_h)) {
-    return nullptr;
+    return false;
   }
 
-  ComPtr<ID3D11Texture2D> dst = CreateNv12Texture(dst_w, dst_h);
-  if (!dst) return nullptr;
+  PooledNv12 slot;
+  if (!AcquireNv12Locked(dst_w, dst_h, &slot)) return false;
 
   D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC in_desc{};
   in_desc.ViewDimension = D3D11_VPIV_DIMENSION_TEXTURE2D;
   ComPtr<ID3D11VideoProcessorInputView> in_view;
   if (FAILED(video_device_->CreateVideoProcessorInputView(src_nv12, vp_enum_.Get(), &in_desc, &in_view))) {
-    return nullptr;
-  }
-  D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC out_desc{};
-  out_desc.ViewDimension = D3D11_VPOV_DIMENSION_TEXTURE2D;
-  ComPtr<ID3D11VideoProcessorOutputView> out_view;
-  if (FAILED(video_device_->CreateVideoProcessorOutputView(dst.Get(), vp_enum_.Get(), &out_desc, &out_view))) {
-    return nullptr;
+    return false;
   }
 
-  ComPtr<ID3D11VideoContext1> vc1;
-  if (SUCCEEDED(video_context_.As(&vc1)) && vc1) {
-    vc1->VideoProcessorSetStreamColorSpace1(vp_.Get(), 0, DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709);
-    vc1->VideoProcessorSetOutputColorSpace1(vp_.Get(), DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709);
-  }
+  EnsureVpColorMode(VpColorMode::kNv12ToNv12);
 
   RECT src_rect = {crop_x, crop_y, crop_x + crop_w, crop_y + crop_h};
   RECT dst_rect = {0, 0, dst_w, dst_h};
@@ -557,11 +688,25 @@ ComPtr<ID3D11Texture2D> D3DContext::ScaleNv12(
   D3D11_VIDEO_PROCESSOR_STREAM stream{};
   stream.Enable = TRUE;
   stream.pInputSurface = in_view.Get();
-  if (FAILED(video_context_->VideoProcessorBlt(vp_.Get(), out_view.Get(), 0, 1, &stream))) {
-    return nullptr;
+  if (FAILED(video_context_->VideoProcessorBlt(vp_.Get(), slot.out_view.Get(), 0, 1, &stream))) {
+    return false;
   }
   context_->Flush();
-  return dst;
+  *out_slot = std::move(slot);
+  return true;
+}
+
+ComPtr<ID3D11Texture2D> D3DContext::ScaleNv12(
+    ID3D11Texture2D* src_nv12,
+    int crop_x,
+    int crop_y,
+    int crop_w,
+    int crop_h,
+    int dst_w,
+    int dst_h) {
+  PooledNv12 slot;
+  if (!ScaleNv12Slot(src_nv12, crop_x, crop_y, crop_w, crop_h, dst_w, dst_h, &slot)) return nullptr;
+  return slot.texture;
 }
 
 webrtc::scoped_refptr<webrtc::I420BufferInterface> D3DContext::CopyNv12ToI420(
@@ -617,9 +762,13 @@ D3D11TextureBuffer::D3D11TextureBuffer(
     ComPtr<ID3D11Texture2D> texture,
     int width,
     int height,
-    std::string fusion_layout)
+    std::string fusion_layout,
+    ComPtr<ID3D11VideoProcessorOutputView> pooled_out_view,
+    uint64_t pooled_vp_gen)
     : ctx_(std::move(ctx)),
       texture_(std::move(texture)),
+      pooled_out_view_(std::move(pooled_out_view)),
+      pooled_vp_gen_(pooled_vp_gen),
       width_(width),
       height_(height),
       fusion_layout_(std::move(fusion_layout)) {}
@@ -631,6 +780,18 @@ D3D11TextureBuffer::D3D11TextureBuffer(
       width_(cpu_i420_ ? cpu_i420_->width() : 0),
       height_(cpu_i420_ ? cpu_i420_->height() : 0),
       fusion_layout_(std::move(fusion_layout)) {}
+
+D3D11TextureBuffer::~D3D11TextureBuffer() {
+  if (ctx_ && texture_ && pooled_out_view_) {
+    D3DContext::PooledNv12 slot;
+    slot.texture = std::move(texture_);
+    slot.out_view = std::move(pooled_out_view_);
+    slot.width = width_;
+    slot.height = height_;
+    slot.vp_gen = pooled_vp_gen_;
+    ctx_->ReleaseNv12(std::move(slot));
+  }
+}
 
 webrtc::scoped_refptr<webrtc::I420BufferInterface> D3D11TextureBuffer::ToI420() {
   if (cpu_i420_) return cpu_i420_;
