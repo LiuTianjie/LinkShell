@@ -41,6 +41,9 @@ bool IsVirtualAdapter(const IP_ADAPTER_ADDRESSES* aa) {
   if (!aa) return true;
   if (aa->OperStatus != IfOperStatusUp) return true;
   if (aa->IfType == IF_TYPE_SOFTWARE_LOOPBACK || aa->IfType == IF_TYPE_TUNNEL) return true;
+  // An adapter with a default gateway is a real routable LAN/WAN interface (e.g. Azure/Hyper-V/
+  // VMware/Parallels VMs or a Hyper-V External Virtual Switch bridging the primary NIC).
+  if (aa->FirstGatewayAddress != nullptr) return false;
   std::string friendly = aa->FriendlyName ? WideToUtf8(aa->FriendlyName) : "";
   std::string desc = aa->Description ? WideToUtf8(aa->Description) : "";
   static constexpr const char* kVirtualPatterns[] = {
@@ -85,13 +88,35 @@ std::unordered_set<std::string> CollectUselessHostAddresses() {
   std::unordered_set<std::string> out;
   ULONG buf_len = 32 * 1024;
   std::vector<uint8_t> buf(buf_len);
-  ULONG flags = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER;
+  ULONG flags = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER | GAA_FLAG_INCLUDE_GATEWAYS;
   ULONG res = GetAdaptersAddresses(AF_UNSPEC, flags, nullptr, reinterpret_cast<PIP_ADAPTER_ADDRESSES>(buf.data()), &buf_len);
   if (res == ERROR_BUFFER_OVERFLOW && buf_len > 0 && buf_len <= 4 * 1024 * 1024) {
     buf.resize(buf_len);
     res = GetAdaptersAddresses(AF_UNSPEC, flags, nullptr, reinterpret_cast<PIP_ADAPTER_ADDRESSES>(buf.data()), &buf_len);
   }
   if (res != ERROR_SUCCESS) return out;
+
+  bool has_real_adapter = false;
+  for (auto* aa = reinterpret_cast<PIP_ADAPTER_ADDRESSES>(buf.data()); aa; aa = aa->Next) {
+    if (IsVirtualAdapter(aa)) continue;
+    for (auto* ua = aa->FirstUnicastAddress; ua; ua = ua->Next) {
+      if (!ua->Address.lpSockaddr) continue;
+      char ip_buf[INET6_ADDRSTRLEN] = {};
+      if (ua->Address.lpSockaddr->sa_family == AF_INET) {
+        auto* sin = reinterpret_cast<const sockaddr_in*>(ua->Address.lpSockaddr);
+        if (inet_ntop(AF_INET, &sin->sin_addr, ip_buf, sizeof(ip_buf)) && !IsAlwaysUselessHostIp(ToLower(ip_buf))) {
+          has_real_adapter = true;
+        }
+      } else if (ua->Address.lpSockaddr->sa_family == AF_INET6) {
+        auto* sin6 = reinterpret_cast<const sockaddr_in6*>(ua->Address.lpSockaddr);
+        if (inet_ntop(AF_INET6, &sin6->sin6_addr, ip_buf, sizeof(ip_buf)) && !IsAlwaysUselessHostIp(ToLower(ip_buf))) {
+          has_real_adapter = true;
+        }
+      }
+    }
+  }
+  // Never drop virtual adapter IPs if no non-virtual adapter has a usable address (e.g. isolated VM).
+  if (!has_real_adapter) return out;
 
   for (auto* aa = reinterpret_cast<PIP_ADAPTER_ADDRESSES>(buf.data()); aa; aa = aa->Next) {
     if (!IsVirtualAdapter(aa)) continue;
