@@ -476,6 +476,10 @@ export function NativeMetalStage({
           ) {
             startTarget.display = nextDisplays[0]!.index;
             appliedTarget = { ...appliedTarget, display: startTarget.display };
+            desiredTargetRef.current = {
+              ...desiredTargetRef.current,
+              display: startTarget.display,
+            };
             callbacksRef.current.onDisplayChange(startTarget.display);
           }
           const opened = await openWebSocket(
@@ -519,9 +523,18 @@ export function NativeMetalStage({
                     capabilities.configure = sess.configure === true;
                     capabilities.pause = sess.pause === true;
                     clearTimeout(capabilitiesTimer);
-                    // Only send `screen.configure` when target display/width/fps/paused actually
-                    // changed since `/stream` opened, avoiding an immediate capture restart.
-                    sessionHandle.apply(desiredTargetRef.current);
+                    const desired = desiredTargetRef.current;
+                    if (
+                      capabilities.configure &&
+                      !(desired.paused && !capabilities.pause)
+                    ) {
+                      // Configuration-capable hosts require an initial `screen.configure` ->
+                      // `configured` handshake to establish the input generation before
+                      // `DesktopScreenReceiver` can request or enable remote control.
+                      sendConfigure(desired);
+                    } else {
+                      sessionHandle.apply(desired);
+                    }
                   } else if (
                     sess?.t === "configured" &&
                     sess.requestId === awaitingPauseId &&

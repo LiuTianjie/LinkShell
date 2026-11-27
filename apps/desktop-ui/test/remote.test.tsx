@@ -18,6 +18,7 @@ import { setDesktopLocalePreference } from "../src/core/i18n";
 import { routerStore } from "../src/core/router-store";
 import { screenPreferencesStore } from "../src/core/screen-client";
 import { DESKTOP_LOCAL } from "../src/core/storage";
+import * as transport from "../src/core/transport";
 import {
   FusionQuickTrigger,
   FusionStatusBadge,
@@ -1355,5 +1356,179 @@ describe("Slice 2B-4: Fusion Launchpad & Unified Remote Screen", () => {
     const standaloneSubbar = container.querySelector(".ls-remote-subbar");
     expect(standaloneSubbar).not.toBeNull();
     expect(standaloneSubbar?.classList.contains("app-drag")).toBe(true);
+  });
+
+  it("sends initial screen.configure on capabilities even when target matches startTarget so macOS NativeMetalStage completes control handshake", async () => {
+    const remoteMac = makeMockComputer(
+      "wss://gateway.itool.tech#mac-control-handshake",
+      "darwin",
+      "Mac Studio",
+    );
+    // Seed a stale saved display index (2) that no longer exists on the remote host.
+    screenPreferencesStore.setState({
+      width: "1920",
+      maxFps: "120",
+      codec: "auto",
+      pacing: "immediate",
+      control: true,
+      mode: "view",
+      byComputer: { [remoteMac.key]: { display: 2 } },
+    });
+
+    const mockConn = makeMockConnection(remoteMac, async (method) => {
+      if (method === "screen.access") {
+        return { supported: true, recording: true, control: true };
+      }
+      if (method === "screen.start") {
+        return {
+          port: 49200,
+          token: "tok-control",
+          displays: [{ index: 0, name: "Built-in" }],
+        };
+      }
+      return {};
+    });
+    engine.state.setState({
+      computers: [remoteMac],
+      connection: mockConn,
+    });
+    routerStore.getState().openScreen(remoteMac.key);
+    installPreloadBridge("darwin");
+
+    const wsSent: Record<string, unknown>[] = [];
+    let wsEvents:
+      | {
+          open: () => void;
+          data: (value: string | ArrayBuffer) => void;
+          close: (reason?: string) => void;
+        }
+      | undefined;
+    vi.spyOn(transport, "openWebSocket").mockImplementation(
+      async (_streams, _port, _path, events) => {
+        wsEvents = events;
+        queueMicrotask(() => events.open());
+        return {
+          send(value: string | ArrayBuffer) {
+            if (typeof value === "string") {
+              wsSent.push(JSON.parse(value) as Record<string, unknown>);
+            }
+          },
+          close() {},
+        };
+      },
+    );
+
+    await act(async () => {
+      root.render(
+        <DialogProvider>
+          <RemoteScreenWorkspace computerKey={remoteMac.key} />
+        </DialogProvider>,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const nativeStart = postedMessages.find(
+      (m) => m.action === "screen" && m.type === "start",
+    );
+    expect(nativeStart?.id).toBeTypeOf("string");
+    expect(wsEvents).toBeDefined();
+
+    // Host advertises configuration capability (`configure: true, pause: true`).
+    await act(async () => {
+      wsEvents?.data(
+        JSON.stringify({
+          session: {
+            t: "capabilities",
+            version: 1,
+            configure: true,
+            pause: true,
+            keys: true,
+          },
+        }),
+      );
+      await Promise.resolve();
+    });
+
+    // NativeMetalStage MUST immediately send initial `screen.configure` (with clamped valid display 0)
+    // to BOTH the native bridge (so DesktopScreenInputState unlocks) and the host WebSocket.
+    const nativeConfigure = postedMessages.find(
+      (m) =>
+        m.action === "screen" &&
+        m.type === "signal" &&
+        (m.message as Record<string, unknown> | undefined)?.t === "screen.configure",
+    );
+    expect(nativeConfigure?.message).toEqual({
+      t: "screen.configure",
+      requestId: 1,
+      display: 0,
+      width: "1920",
+      maxFps: 120,
+      paused: false,
+    });
+    expect(wsSent).toContainEqual({
+      t: "screen.configure",
+      requestId: 1,
+      display: 0,
+      width: "1920",
+      maxFps: 120,
+      paused: false,
+    });
+
+    // Host acknowledges `configured`, native renders first frame -> requests control -> enters 控制中.
+    await act(async () => {
+      wsEvents?.data(
+        JSON.stringify({
+          session: {
+            t: "configured",
+            requestId: 1,
+            display: 0,
+            width: 1920,
+            height: 1080,
+            maxFps: 120,
+            paused: false,
+            generation: 1,
+          },
+        }),
+      );
+      window.dispatchEvent(
+        new CustomEvent(DESKTOP_NATIVE_SCREEN_EVENT, {
+          detail: {
+            id: nativeStart?.id,
+            type: "status",
+            status: { live: true, control: false, controlRequested: true },
+          },
+        }),
+      );
+      await Promise.resolve();
+    });
+
+    expect(
+      postedMessages.some(
+        (m) =>
+          m.action === "screen" &&
+          m.id === nativeStart?.id &&
+          m.type === "control" &&
+          m.enabled === true,
+      ),
+    ).toBe(true);
+    expect(container.textContent).toContain("请求控制中");
+
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent(DESKTOP_NATIVE_SCREEN_EVENT, {
+          detail: {
+            id: nativeStart?.id,
+            type: "status",
+            status: { control: true, controlRequested: true },
+          },
+        }),
+      );
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain("控制中");
+    expect(container.textContent).not.toContain("请求控制中");
   });
 });

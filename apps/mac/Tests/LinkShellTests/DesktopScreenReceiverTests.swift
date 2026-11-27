@@ -97,6 +97,47 @@ final class DesktopScreenReceiverTests: XCTestCase {
     XCTAssertEqual(pacings, ["smooth", "immediate"])
   }
 
+  func testReceiverRequestsControlWithGenerationAfterInitialConfigureHandshake() {
+    final class DummyOutput: NSObject, DesktopScreenOutput {
+      var onInput: (([String: Any], Bool) -> Void)?
+      var onFirstFrame: (() -> Void)?
+      var onFailure: ((String) -> Void)?
+      var controlEnabled = false
+      var physicalKeys = false
+      func updateCursor(_ message: [String: Any]) {}
+      func setSize(_ size: CGSize) {}
+      func renderFrame(_ frame: WebRTC.RTCVideoFrame?) {}
+      func stop() {}
+    }
+
+    let output = DummyOutput()
+    var signals: [[String: Any]] = []
+    let controlSignalExpectation = expectation(description: "control signal with generation")
+
+    let receiver = DesktopScreenReceiver(
+      surface: output,
+      smooth: false,
+      onSignal: { message in
+        signals.append(message)
+        if message["t"] as? String == "control" {
+          controlSignalExpectation.fulfill()
+        }
+      },
+      onStatus: { _ in },
+      onFailure: { XCTFail("Unexpected failure: \($0)") }
+    )
+    defer { receiver.stop() }
+
+    receiver.receive(["session": capabilities])
+    receiver.setControl(true)
+    receiver.receive(request(1))
+    receiver.receive(["session": ack(1, generation: 7)])
+    wait(for: [controlSignalExpectation], timeout: 3.0)
+
+    let controlSignal = signals.last { ($0["t"] as? String) == "control" }
+    XCTAssertEqual(controlSignal?["screenGeneration"] as? Int, 7)
+  }
+
   func testRequestIDsCannotBeBooleansFractionsOrUnsafeJSONIntegers() {
     XCTAssertEqual(DesktopScreenBridge.integer(9_007_199_254_740_991 as Int64), 9_007_199_254_740_991)
     for invalid: Any in [true, false, 1.25, Double.nan, Double.infinity, 9_007_199_254_740_992.0, "1"] {
