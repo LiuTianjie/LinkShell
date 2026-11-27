@@ -126,6 +126,15 @@ function observeRPC(method, params) {
         model: option?.current, values: option?.values?.map(value => ({ value: value.value, name: value.name })) });
       return;
     }
+    if (message.method === 'session.events' && Array.isArray(message.params?.events)) {
+      for (const item of message.params.events) {
+        if (item?.update?.sessionUpdate !== 'ls_config') continue;
+        const option = item.update.options.find(option => option.id === 'model');
+        rpcEvents.push({ at: Date.now(), event: 'config', sessionId: message.params.sessionId, seq: item.seq,
+          model: option?.current, values: option?.values?.map(value => ({ value: value.value, name: value.name })) });
+      }
+      return;
+    }
     const request = requests.get(key); if (!request) return; requests.delete(key);
     const output = message.result;
     const safe = request.method === 'agents.models' ? { models: output?.models?.map(model => ({ value: model.value, name: model.name })), current: output?.current }
