@@ -257,9 +257,13 @@ final class DesktopScreenDecoder: NSObject, RTCVideoDecoder {
       output = frame
     }
     guard status == noErr, outputStatus == noErr else {
-      // Packet loss can damage a frame. Ask WebRTC for a keyframe and recreate a hardware
-      // session on that keyframe; never negotiate a software decoder as recovery.
-      decodeFailed(status == noErr ? outputStatus : status)
+      // Packet loss can damage a delta frame before RTCP PLI brings a new IDR; only count
+      // consecutive keyframe decode failures toward terminal hardware failure.
+      if hasKey {
+        decodeFailed(status == noErr ? outputStatus : status)
+      } else {
+        invalidate()
+      }
       return -1
     }
     guard let output else {

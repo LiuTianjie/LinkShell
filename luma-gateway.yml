@@ -24,15 +24,16 @@ env:
   PORT: "8787"
   RELAY_DATA_PATH: /data/relay.db
   AUTH_REQUIRED: "true"
-  # Connections arrive through the edge, so the limit per address is a limit on everyone at once:
-  # high enough that all of them reconnecting after a deploy get back in.
+  # Trust node-edge internal proxy networks so rate limiting keys off each client's real IP.
+  TRUSTED_PROXIES: "10.0.0.0/8,172.16.0.0/12,100.64.0.0/10,127.0.0.1"
   WS_CONNECT_RATE_LIMIT_MAX: "600"
   ITOOL_CORE_URL: https://api.itool.tech
   ITOOL_CORE_BILLING_KEY: ${ITOOL_CORE_BILLING_KEY}
   # The coturn on tecent (deploy/turn/): its shared secret and its stun:/turn: addresses, lent to computers for
-  # screen video that finds no direct path.
+  # screen video that finds no direct path. 6000 kbps (6 Mbps) keeps 1080p/1440p desktop text & motion smooth.
   TURN_SECRET: ${TURN_SECRET}
   TURN_URLS: ${TURN_URLS}
+  TURN_MAX_KBPS: "6000"
 healthcheck:
   test:
     - CMD

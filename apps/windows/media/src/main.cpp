@@ -4,6 +4,7 @@
 #include <roapi.h>
 #include <shellscalingapi.h>
 #include <windows.h>
+#include <mmsystem.h>
 
 #include <iostream>
 #include <map>
@@ -150,6 +151,28 @@ int main(int argc, char** argv) {
 
   RoInitialize(RO_INIT_MULTITHREADED);
   MFStartup(MF_VERSION);
+
+  // Opt out of Windows 11 EcoQoS / background windowless timer throttling and request 1 ms
+  // scheduler granularity so capture, cursor, and media worker waits never quantize to 15.625 ms.
+  struct HighResSchedulerGuard {
+    bool timer_active = false;
+    HighResSchedulerGuard() {
+      SetPriorityClass(GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS);
+      PROCESS_POWER_THROTTLING_STATE throttling{};
+      throttling.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
+      constexpr ULONG kIgnoreTimerResolution = 0x4;  // PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION
+      throttling.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED | kIgnoreTimerResolution;
+      throttling.StateMask = 0;
+      if (!SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling, &throttling, sizeof(throttling))) {
+        throttling.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED;
+        SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling, &throttling, sizeof(throttling));
+      }
+      timer_active = (timeBeginPeriod(1) == TIMERR_NOERROR);
+    }
+    ~HighResSchedulerGuard() {
+      if (timer_active) timeEndPeriod(1);
+    }
+  } scheduler_guard;
 
   std::string mode = "--engine";
   if (argc >= 2 && argv[1]) mode = argv[1];

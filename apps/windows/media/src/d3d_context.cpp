@@ -41,16 +41,29 @@ std::shared_ptr<D3DContext> D3DContext::Create(int adapter_index, std::string* e
       factory->EnumAdapters1(static_cast<UINT>(adapter_index), &chosen);
     }
     if (!chosen) {
+      ComPtr<IDXGIAdapter1> first_hw;
       ComPtr<IDXGIAdapter1> candidate;
       for (UINT i = 0; factory->EnumAdapters1(i, &candidate) != DXGI_ERROR_NOT_FOUND; ++i) {
         DXGI_ADAPTER_DESC1 desc{};
         candidate->GetDesc1(&desc);
-        if ((desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) == 0) {
-          chosen = candidate;
-          break;
+        if ((desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) == 0 && desc.VendorId != 0x1414) {
+          if (!first_hw) first_hw = candidate;
+          // Prefer the hardware GPU that actually drives an attached desktop monitor so DXGI
+          // Desktop Duplication stays 100% zero-copy VRAM instead of cross-adapter CPU staging.
+          ComPtr<IDXGIOutput> out;
+          for (UINT oi = 0; candidate->EnumOutputs(oi, &out) != DXGI_ERROR_NOT_FOUND; ++oi) {
+            DXGI_OUTPUT_DESC odesc{};
+            if (SUCCEEDED(out->GetDesc(&odesc)) && odesc.AttachedToDesktop) {
+              chosen = candidate;
+              break;
+            }
+            out.Reset();
+          }
+          if (chosen) break;
         }
         candidate.Reset();
       }
+      if (!chosen) chosen = first_hw;
       if (!chosen) factory->EnumAdapters1(0, &chosen);
     }
   }

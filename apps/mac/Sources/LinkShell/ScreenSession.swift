@@ -277,7 +277,16 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
     }
 
     setParameters { $0.degradationPreference = NSNumber(value: Tuning.degradation.rawValue) }
-    _ = connection.setBweMinBitrateBps(nil, currentBitrateBps: NSNumber(value: Tuning.startBitrate), maxBitrateBps: nil)
+    let hasTurn = request.iceServers.contains { server in
+      server.urlStrings.contains { url in
+        let lower = url.lowercased()
+        return lower.hasPrefix("turn:") || lower.hasPrefix("turns:")
+      }
+    }
+    let initialBitrate = hasTurn
+      ? min(Tuning.startBitrate, max(1_500_000, (request.relayKbps ?? Tuning.relayKbps) * 1000))
+      : Tuning.startBitrate
+    _ = connection.setBweMinBitrateBps(nil, currentBitrateBps: NSNumber(value: initialBitrate), maxBitrateBps: nil)
 
     // The channels beside it.
     let reliable = RTCDataChannelConfiguration()
@@ -820,9 +829,27 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
       restartTimer?.cancel()
       restartTimer = nil
       if !inputGate.suspended { capturer?.resendLatest() }
+      probeConnectedPath()
     }
     // A viewer that can't be heard can't let go of what it holds.
     if [.disconnected, .failed, .closed].contains(connection) { control?.releaseAll() }
+  }
+
+  /// Queries the nominated ICE candidate pair immediately on connect so TURN bitrate caps or LAN
+  /// bandwidth floors apply right away without disturbing the 1-second capture/FPS stats counters.
+  private func probeConnectedPath() {
+    guard !closed, !inputGate.suspended, let connection else { return }
+    let generation = captureGeneration
+    connection.statistics { [weak self] report in
+      DispatchQueue.main.async {
+        guard let self, !self.closed, !self.inputGate.suspended,
+              self.captureGeneration == generation,
+              connection.connectionState == .connected else { return }
+        let reader = StatsReader(report: report)
+        let remote = reader.first("remote-inbound-rtp", kind: "video")
+        self.holdFloor(reader: reader, pair: reader.pair, remote: remote, sendDelayMs: nil)
+      }
+    }
   }
 
   // MARK: RTCDataChannelDelegate

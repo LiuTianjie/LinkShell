@@ -88,6 +88,60 @@ std::string FriendlyMftName(IMFActivate* act) {
   return "MFEncoder";
 }
 
+// Event-driven async MFT completion waiter: wakes immediately on GPU encode completion (<50 us)
+// instead of polling GetEvent(MF_EVENT_FLAG_NO_WAIT) + sleep_for(1ms). COM refcounted so a
+// timed-out driver callback can still complete and Release() safely without use-after-free.
+class AsyncEventWaiter final : public IMFAsyncCallback {
+ public:
+  AsyncEventWaiter() : event_(CreateEventW(nullptr, FALSE, FALSE, nullptr)) {}
+  ~AsyncEventWaiter() {
+    if (event_) CloseHandle(event_);
+  }
+
+  HANDLE event() const { return event_; }
+
+  ComPtr<IMFAsyncResult> TakeResult() {
+    std::lock_guard<std::mutex> lock(mu_);
+    return std::move(result_);
+  }
+
+  STDMETHODIMP QueryInterface(REFIID riid, void** ppv) override {
+    if (!ppv) return E_POINTER;
+    if (riid == __uuidof(IUnknown) || riid == __uuidof(IMFAsyncCallback)) {
+      *ppv = static_cast<IMFAsyncCallback*>(this);
+      AddRef();
+      return S_OK;
+    }
+    *ppv = nullptr;
+    return E_NOINTERFACE;
+  }
+
+  STDMETHODIMP_(ULONG) AddRef() override { return InterlockedIncrement(&ref_); }
+
+  STDMETHODIMP_(ULONG) Release() override {
+    ULONG count = InterlockedDecrement(&ref_);
+    if (count == 0) delete this;
+    return count;
+  }
+
+  STDMETHODIMP GetParameters(DWORD*, DWORD*) override { return E_NOTIMPL; }
+
+  STDMETHODIMP Invoke(IMFAsyncResult* async_result) override {
+    {
+      std::lock_guard<std::mutex> lock(mu_);
+      result_ = async_result;
+    }
+    if (event_) SetEvent(event_);
+    return S_OK;
+  }
+
+ private:
+  ULONG ref_ = 1;
+  HANDLE event_ = nullptr;
+  std::mutex mu_;
+  ComPtr<IMFAsyncResult> result_;
+};
+
 }  // namespace
 
 std::vector<uint8_t> MediaFoundationVideoEncoder::BuildFusionSeiNal(const std::string& layout_json, bool hevc) {
@@ -291,6 +345,8 @@ bool MediaFoundationVideoEncoder::ConfigureMft(int width, int height, int fps, i
 
   mft_.As(&codec_api_);
   if (codec_api_) {
+    // Explicit DisplayRemoting scenario disables multi-frame lookahead/reordering in NVENC/AMF/QSV.
+    SetCodecU32(codec_api_.Get(), CODECAPI_AVScenarioInfo, eAVScenarioInfo_DisplayRemoting);
     SetCodecBool(codec_api_.Get(), CODECAPI_AVLowLatencyMode, true);
     // Prefer LowDelayVBR on hardware encoders (avoids CBR starving keyframes to single-digit KB on 4K),
     // falling back cleanly to CBR if the vendor MFT rejects LowDelayVBR.
@@ -299,15 +355,17 @@ bool MediaFoundationVideoEncoder::ConfigureMft(int width, int height, int fps, i
     if (!rc_set) {
       SetCodecU32(codec_api_.Get(), CODECAPI_AVEncCommonRateControlMode, eAVEncCommonRateControlMode_CBR);
     }
-    UINT32 max_bps = static_cast<UINT32>(std::min<int64_t>(50'000'000, static_cast<int64_t>(bitrate_bps) * 3 / 2));
+    UINT32 max_bps = static_cast<UINT32>(std::min<int64_t>(50'000'000, static_cast<int64_t>(bitrate_bps) * 5 / 4));
     SetCodecU32(codec_api_.Get(), CODECAPI_AVEncCommonMeanBitRate, static_cast<UINT32>(bitrate_bps));
     SetCodecU32(codec_api_.Get(), CODECAPI_AVEncCommonMaxBitRate, max_bps);
-    // 250 ms VBV gives keyframes room to stay crisp at 1080p/2K/4K without overflowing Wi-Fi queues.
-    SetCodecU32(codec_api_.Get(), CODECAPI_AVEncCommonBufferSize, static_cast<UINT32>(std::max(131072, bitrate_bps / 4)));
+    // ~125 ms VBV keeps keyframes crisp while preventing oversized IDR bursts from tail-dropping on Wi-Fi / TURN.
+    SetCodecU32(codec_api_.Get(), CODECAPI_AVEncCommonBufferSize, static_cast<UINT32>(std::max(65536, bitrate_bps / 8)));
     SetCodecU32(codec_api_.Get(), CODECAPI_AVEncMPVDefaultBPictureCount, 0);
+    SetCodecU32(codec_api_.Get(), CODECAPI_AVEncVideoMaxNumRefFrame, 2);
     // Infinite GOP (PLI-driven IDR only, matching Mac VideoToolbox & Parsec/Sunshine) eliminates periodic 10s IDR hitches.
     SetCodecU32(codec_api_.Get(), CODECAPI_AVEncMPVGOPSize, 0xFFFFFFFFu);
-    SetCodecU32(codec_api_.Get(), CODECAPI_AVEncCommonQualityVsSpeed, is_hardware_ ? 50 : 33);
+    // 0 = fastest ultra-low-latency hardware preset (NVENC P1 / AMF Speed / QSV TU7).
+    SetCodecU32(codec_api_.Get(), CODECAPI_AVEncCommonQualityVsSpeed, 0);
     if (!hevc_) {
       SetCodecBool(codec_api_.Get(), CODECAPI_AVEncH264CABACEnable, h264_profile_ != eAVEncH264VProfile_Base);
     }
@@ -376,12 +434,15 @@ bool MediaFoundationVideoEncoder::ConfigureMft(int width, int height, int fps, i
 
   // Re-apply low-latency & bitrate after media types are locked (required by Intel QSV & AMD AMF).
   if (codec_api_) {
-    UINT32 max_bps = static_cast<UINT32>(std::min<int64_t>(50'000'000, static_cast<int64_t>(bitrate_bps) * 3 / 2));
+    UINT32 max_bps = static_cast<UINT32>(std::min<int64_t>(50'000'000, static_cast<int64_t>(bitrate_bps) * 5 / 4));
+    SetCodecU32(codec_api_.Get(), CODECAPI_AVScenarioInfo, eAVScenarioInfo_DisplayRemoting);
     SetCodecBool(codec_api_.Get(), CODECAPI_AVLowLatencyMode, true);
+    SetCodecU32(codec_api_.Get(), CODECAPI_AVEncCommonQualityVsSpeed, 0);
     SetCodecU32(codec_api_.Get(), CODECAPI_AVEncCommonMeanBitRate, static_cast<UINT32>(bitrate_bps));
     SetCodecU32(codec_api_.Get(), CODECAPI_AVEncCommonMaxBitRate, max_bps);
-    SetCodecU32(codec_api_.Get(), CODECAPI_AVEncCommonBufferSize, static_cast<UINT32>(std::max(131072, bitrate_bps / 4)));
+    SetCodecU32(codec_api_.Get(), CODECAPI_AVEncCommonBufferSize, static_cast<UINT32>(std::max(65536, bitrate_bps / 8)));
     SetCodecU32(codec_api_.Get(), CODECAPI_AVEncMPVDefaultBPictureCount, 0);
+    SetCodecU32(codec_api_.Get(), CODECAPI_AVEncVideoMaxNumRefFrame, 2);
   }
 
   mft_->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0);
@@ -433,10 +494,10 @@ void MediaFoundationVideoEncoder::SetRates(const RateControlParameters& paramete
 
   // Live in-place rate change: ZERO encoder restart, ZERO freeze!
   if (codec_api_) {
-    UINT32 max_bps = static_cast<UINT32>(std::min<int64_t>(50'000'000, static_cast<int64_t>(next_bps) * 3 / 2));
+    UINT32 max_bps = static_cast<UINT32>(std::min<int64_t>(50'000'000, static_cast<int64_t>(next_bps) * 5 / 4));
     SetCodecU32(codec_api_.Get(), CODECAPI_AVEncCommonMeanBitRate, static_cast<UINT32>(next_bps));
     SetCodecU32(codec_api_.Get(), CODECAPI_AVEncCommonMaxBitRate, max_bps);
-    SetCodecU32(codec_api_.Get(), CODECAPI_AVEncCommonBufferSize, static_cast<UINT32>(std::max(131072, next_bps / 4)));
+    SetCodecU32(codec_api_.Get(), CODECAPI_AVEncCommonBufferSize, static_cast<UINT32>(std::max(65536, next_bps / 8)));
   }
 }
 
@@ -700,11 +761,31 @@ HRESULT MediaFoundationVideoEncoder::GetAsyncEventWithTimeout(
     int timeout_ms,
     ComPtr<IMFMediaEvent>* out_ev) {
   if (!event_gen_ || !out_ev) return E_POINTER;
+  out_ev->Reset();
+  HRESULT hr = event_gen_->GetEvent(MF_EVENT_FLAG_NO_WAIT, out_ev->GetAddressOf());
+  if (hr != MF_E_NO_EVENTS_AVAILABLE) return hr;
+
+  ComPtr<AsyncEventWaiter> waiter;
+  waiter.Attach(new AsyncEventWaiter());
+  if (waiter->event()) {
+    hr = event_gen_->BeginGetEvent(waiter.Get(), nullptr);
+    if (SUCCEEDED(hr)) {
+      DWORD wait_rc = WaitForSingleObject(waiter->event(), static_cast<DWORD>(std::max(1, timeout_ms)));
+      if (wait_rc != WAIT_OBJECT_0) {
+        return HRESULT_FROM_WIN32(ERROR_TIMEOUT);
+      }
+      auto result = waiter->TakeResult();
+      if (!result) return E_FAIL;
+      return event_gen_->EndGetEvent(result.Get(), out_ev->GetAddressOf());
+    }
+  }
+
+  // Fallback polling only if BeginGetEvent could not subscribe.
   const int64_t start_us = NowMicros();
   const int64_t deadline_us = start_us + static_cast<int64_t>(timeout_ms) * 1000;
   for (;;) {
     out_ev->Reset();
-    HRESULT hr = event_gen_->GetEvent(MF_EVENT_FLAG_NO_WAIT, out_ev->GetAddressOf());
+    hr = event_gen_->GetEvent(MF_EVENT_FLAG_NO_WAIT, out_ev->GetAddressOf());
     if (hr != MF_E_NO_EVENTS_AVAILABLE) return hr;
     int64_t now_us = NowMicros();
     if (now_us >= deadline_us) return HRESULT_FROM_WIN32(ERROR_TIMEOUT);

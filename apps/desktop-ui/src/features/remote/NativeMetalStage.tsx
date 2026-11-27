@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type JSX } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type JSX } from "react";
 import { DESKTOP_NATIVE_SCREEN_EVENT } from "../../bridge/desktop-bridge";
 import {
   getOpenOverlayRects,
@@ -214,8 +214,9 @@ export function NativeMetalStage({
   // A retry scheduled by a session that is gone must not restart its successor.
   useEffect(() => () => clearTimeout(retryTimerRef.current), []);
 
-  // Measure debounced auto stage width on resize.
-  useEffect(() => {
+  // Measure initial stage width before starting the native session so `startTarget` and
+  // `desiredTargetRef` match from frame 0, then debounce subsequent window resizes.
+  useLayoutEffect(() => {
     if (widthChoice !== "auto" || !stageRef.current) return undefined;
     const node = stageRef.current;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -518,15 +519,9 @@ export function NativeMetalStage({
                     capabilities.configure = sess.configure === true;
                     capabilities.pause = sess.pause === true;
                     clearTimeout(capabilitiesTimer);
-                    const desired = desiredTargetRef.current;
-                    if (
-                      capabilities.configure &&
-                      !(desired.paused && !capabilities.pause)
-                    ) {
-                      sendConfigure(desired);
-                    } else {
-                      sessionHandle.apply(desired);
-                    }
+                    // Only send `screen.configure` when target display/width/fps/paused actually
+                    // changed since `/stream` opened, avoiding an immediate capture restart.
+                    sessionHandle.apply(desiredTargetRef.current);
                   } else if (
                     sess?.t === "configured" &&
                     sess.requestId === awaitingPauseId &&

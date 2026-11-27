@@ -275,8 +275,23 @@ bool ScreenSession::Open(const json& request) {
 
   ApplySenderParameters();
 
+  bool has_turn = false;
+  for (const auto& srv : config.servers) {
+    for (const auto& url : srv.urls) {
+      if (url.rfind("turn:", 0) == 0 || url.rfind("turns:", 0) == 0) {
+        has_turn = true;
+        break;
+      }
+    }
+    if (has_turn) break;
+  }
+
   webrtc::BitrateSettings bwe;
-  bwe.start_bitrate_bps = tuning::kStartBitrateBps;
+  // Avoid blasting a 6 Mbps initial burst before OnStats knows whether ICE selected a TURN relay;
+  // LAN connections immediately jump to 16+ Mbps via LanFloor + GCC once connected.
+  bwe.start_bitrate_bps = has_turn
+                              ? std::min(tuning::kStartBitrateBps, std::max(1'500'000, relay_kbps_ * 1000))
+                              : tuning::kStartBitrateBps;
   pc_->SetBitrate(bwe);
 
   // Create the 5 LinkShell DataChannels (exact Mac parity).
@@ -577,6 +592,17 @@ void ScreenSession::OnConnectionState(webrtc::PeerConnectionInterface::PeerConne
   connected_.store(is_conn);
   if (is_conn) {
     ever_connected_.store(true);
+    webrtc::scoped_refptr<webrtc::PeerConnectionInterface> pc;
+    {
+      std::lock_guard<std::mutex> lock(mu_);
+      pc = pc_;
+    }
+    // Immediately inspect the nominated candidate pair so relayed_ ceiling or LAN floor applies
+    // within milliseconds of connect rather than waiting up to 1 s for MonitorLoop.
+    if (pc) {
+      auto cb = webrtc::make_ref_counted<StatsCallback>(this, life_);
+      pc->GetStats(cb.get());
+    }
     if (source_ && !paused_.load()) source_->ResendLatest();
   }
   ipc_->Emit({{"t", "rtc.state"}, {"v", viewer_id_}, {"connection", ConnectionStateString(state)}});

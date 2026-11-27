@@ -379,12 +379,12 @@ const ZH_COPY = (locale: Locale): RemoteCopy => ({
     "120": "120 FPS (高刷)",
   },
   codecChoices: {
-    auto: "自动 (优先 HEVC)",
+    auto: "自动 (Mac HEVC / Win 低延迟 H.264)",
     h264: "兼容 H.264",
   },
   pacingChoices: {
-    immediate: "最低延迟 (跟手优先)",
-    smooth: "平滑防抖 (Wi-Fi 稳帧)",
+    immediate: "零缓冲直出 (最跟手)",
+    smooth: "抗抖动缓冲 (+50ms 仅观看)",
   },
 });
 
@@ -586,17 +586,25 @@ const EN_COPY = (locale: Locale): RemoteCopy => ({
     "120": "120 FPS (ProMotion)",
   },
   codecChoices: {
-    auto: "Auto (Prefer HEVC)",
+    auto: "Auto (Mac HEVC / Win Low-Latency H.264)",
     h264: "Compatible H.264",
   },
   pacingChoices: {
-    immediate: "Lowest Latency",
-    smooth: "Smooth Pacing (Wi-Fi)",
+    immediate: "Zero-Buffer Direct (Lowest Latency)",
+    smooth: "Jitter Buffer (+50ms View Only)",
   },
 });
 
 const JA_COPY = (locale: Locale): RemoteCopy => ({
   ...EN_COPY(locale),
+  codecChoices: {
+    auto: "自動 (Mac HEVC / Win 低遅延 H.264)",
+    h264: "互換 H.264",
+  },
+  pacingChoices: {
+    immediate: "ゼロバッファ直出力 (最低遅延)",
+    smooth: "ジッタバッファ (+50ms 表示のみ)",
+  },
   fullDesktop: "フルデスクトップ",
   fusionMode: "融合モード",
   modeSwitchLabel: "リモート表示モード",

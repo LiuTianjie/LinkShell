@@ -91,10 +91,10 @@ final class DesktopMedia {
 }
 
 /// Bounded in-flight IOSurface tokens (transit + current + GPU + 1 newest decoded frame).
-/// Six slots give 120 fps presentation headroom so GPU completion + pipe release never starves
-/// the pipeline, while single-slot `pending` replacement still prevents any queue buildup.
+/// Eight slots give 120 fps presentation headroom so GPU completion + pipe release never starves
+/// VideoToolbox's surface pool, while single-slot `pending` replacement prevents any queue buildup.
 private final class DesktopMediaOutput: NSObject, DesktopScreenOutput {
-  private static let maxOutstanding = 6
+  private static let maxOutstanding = 8
   var onInput: (([String: Any], Bool) -> Void)?
   var onFirstFrame: (() -> Void)?
   var onFailure: ((String) -> Void)?
@@ -123,9 +123,13 @@ private final class DesktopMediaOutput: NSObject, DesktopScreenOutput {
     send(frame, token: token)
   }
   private func send(_ frame: RTCVideoFrame, token: UInt64) {
-    guard let picture = desktopPicture(frame), let surface = CVPixelBufferGetIOSurface(picture.buffer)?.takeUnretainedValue(),
-          port.send(surface, token: token, metadata: picture.metadata) else {
-      released(token); onFailure?("硬件解码画面无法共享，请重新连接"); return
+    let sent = autoreleasepool { () -> Bool in
+      guard let picture = desktopPicture(frame),
+            let surface = CVPixelBufferGetIOSurface(picture.buffer)?.takeUnretainedValue() else { return false }
+      return port.send(surface, token: token, metadata: picture.metadata)
+    }
+    if !sent {
+      released(token); onFailure?("硬件解码画面无法共享，请重新连接")
     }
   }
   func released(_ token: UInt64) {

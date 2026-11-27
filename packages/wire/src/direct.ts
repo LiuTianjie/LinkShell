@@ -24,7 +24,7 @@ export const DIRECT_MAX_FRAME_BYTES = 16 * 1024 * 1024;
  * useless srflx. The two Chinese servers answer in tens of milliseconds here;
  * Cloudflare is the one abroad, for a host whose network reaches it directly.
  */
-export const DEFAULT_ICE_SERVERS = ["stun:stun.chat.bilibili.com:3478", "stun:stun.miwifi.com:3478", "stun:stun.cloudflare.com:3478"];
+export const DEFAULT_ICE_SERVERS = ["stun:110.40.187.233:3478", "stun:stun.chat.bilibili.com:3478", "stun:stun.miwifi.com:3478"];
 
 export type DirectFrame =
   | { type: "data"; stream: number; data: Uint8Array }

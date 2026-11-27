@@ -57,16 +57,20 @@ public final class DesktopFramePort {
       }
       var bytes = [UInt8](repeating: 0, count: 1024)
       while true {
-        lock.lock(); let finished = stopped; lock.unlock()
-        if finished { return }
-        var shared: mach_port_t = 0, size: UInt32 = 0
-        var token: UInt64 = 0
-        let result = ls_screen_receive(port, child, &shared, &token, &bytes, &size)
-        if result < 0 { return }
-        guard result == 1 else { continue }
-        let surface = IOSurfaceLookupFromMachPort(shared)
-        ls_screen_close(shared, 0)
-        each(surface, token, Data(bytes.prefix(Int(size))))
+        let shouldStop = autoreleasepool { () -> Bool in
+          lock.lock(); let finished = stopped; lock.unlock()
+          if finished { return true }
+          var shared: mach_port_t = 0, size: UInt32 = 0
+          var token: UInt64 = 0
+          let result = ls_screen_receive(port, child, &shared, &token, &bytes, &size)
+          if result < 0 { return true }
+          guard result == 1 else { return false }
+          let surface = IOSurfaceLookupFromMachPort(shared)
+          ls_screen_close(shared, 0)
+          each(surface, token, Data(bytes.prefix(Int(size))))
+          return false
+        }
+        if shouldStop { return }
       }
     }
     thread.name = "linkshell.frame.mach"
@@ -118,13 +122,17 @@ public final class DesktopMediaPipe {
         let count = Darwin.read(input.fileDescriptor, &chunk, chunk.count)
         if count < 0, errno == EINTR { continue }
         if count <= 0 { break }
-        buffer.append(chunk, count: count)
-        while let newline = buffer.firstIndex(of: 10) {
-          let line = buffer.subdata(in: buffer.startIndex..<newline)
-          buffer.removeSubrange(buffer.startIndex...newline)
-          guard let message = DesktopMediaIPC.message(line) else { end(); return }
-          each(message)
+        let malformed = autoreleasepool { () -> Bool in
+          buffer.append(chunk, count: count)
+          while let newline = buffer.firstIndex(of: 10) {
+            let line = buffer.subdata(in: buffer.startIndex..<newline)
+            buffer.removeSubrange(buffer.startIndex...newline)
+            guard let message = DesktopMediaIPC.message(line) else { return true }
+            each(message)
+          }
+          return false
         }
+        if malformed { end(); return }
         if buffer.count > 262_144 { break }
       }
       end()

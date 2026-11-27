@@ -721,7 +721,13 @@ export function RemoteScreenWorkspace({
     [copy],
   );
 
-  const codecShortBadge = prefs.codec === "auto" ? "HEVC" : "H.264";
+  const isWindowsRemote =
+    remotePlatform === "win32" || remotePlatform === "windows";
+  // Windows hardware H.264 MFTs run in deterministic 0-lookahead DisplayRemoting mode (~1-2ms),
+  // whereas vendor HEVC MFTs on Windows laptops frequently add multi-frame reordering latency.
+  const effectiveCodecChoice: ScreenCodecChoice =
+    prefs.codec === "auto" && isWindowsRemote ? "h264" : prefs.codec;
+  const codecShortBadge = effectiveCodecChoice === "auto" ? "HEVC" : "H.264";
 
   const needsPermission = accessState.data?.recording === false;
   const unsupportedHost = accessState.data?.supported === false;
@@ -1366,7 +1372,7 @@ export function RemoteScreenWorkspace({
               display={selectedDisplay}
               widthChoice={prefs.width}
               fpsChoice={prefs.maxFps}
-              codecChoice={prefs.codec}
+              codecChoice={effectiveCodecChoice}
               matchResolution={prefs.match}
               pacingChoice={prefs.pacing}
               transportMode={transportMode}
@@ -1397,7 +1403,7 @@ export function RemoteScreenWorkspace({
               display={selectedDisplay}
               widthChoice={prefs.width}
               fpsChoice={prefs.maxFps}
-              codecChoice={prefs.codec}
+              codecChoice={effectiveCodecChoice}
               matchResolution={prefs.match}
               pacingChoice={prefs.pacing}
               transportMode={transportMode}

@@ -506,6 +506,72 @@ final class DesktopScreenSurfaceTests: XCTestCase {
     }
   }
 
+  @MainActor
+  func testMetalDisplayLinkNeverCallsNextDrawableAcrossResizeFreezeResetAndDeactivate() throws {
+    var pixelBuffer: CVPixelBuffer?
+    let attrs: [String: Any] = [
+      kCVPixelBufferIOSurfacePropertiesKey as String: [:],
+      kCVPixelBufferMetalCompatibilityKey as String: true,
+    ]
+    XCTAssertEqual(
+      CVPixelBufferCreate(nil, 128, 72, kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange, attrs as CFDictionary, &pixelBuffer),
+      kCVReturnSuccess
+    )
+    let buffer = try XCTUnwrap(pixelBuffer)
+    let makeFrame = {
+      DesktopScreenFrame(buffer: buffer, width: 128, height: 72, rotation: 0, crop: CGRect(x: 0, y: 0, width: 128, height: 72))
+    }
+
+    let window = NSWindow(
+      contentRect: CGRect(x: 0, y: 0, width: 640, height: 400),
+      styleMask: [.titled, .resizable],
+      backing: .buffered,
+      defer: false
+    )
+    window.isReleasedWhenClosed = false
+    let surface = DesktopScreenSurface(frame: CGRect(x: 0, y: 0, width: 640, height: 400))
+    defer {
+      surface.stop()
+      window.contentView = nil
+      window.close()
+    }
+    var failures: [String] = []
+    surface.onFailure = { failures.append($0) }
+    window.contentView = surface
+    surface.layoutSubtreeIfNeeded()
+    surface.setActive(true)
+
+    // Deliver frames on both standard and immediate paths while resizing the live CAMetalDisplayLink-owned layer.
+    surface.receive(makeFrame())
+    surface.receiveImmediate(makeFrame())
+    RunLoop.main.run(until: Date().addingTimeInterval(0.03))
+
+    for size in [CGSize(width: 960, height: 540), CGSize(width: 1280, height: 720), CGSize(width: 520, height: 360)] {
+      window.setContentSize(size)
+      surface.frame = CGRect(origin: .zero, size: size)
+      surface.layoutSubtreeIfNeeded()
+      surface.receiveImmediate(makeFrame())
+      RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+    }
+
+    // Freeze/unfreeze with flushPicture + resize, resetPresentation, and deactivate/reactivate must never call nextDrawable().
+    surface.setPresentationFrozen(true)
+    surface.frame = CGRect(x: 0, y: 0, width: 800, height: 500)
+    surface.layoutSubtreeIfNeeded()
+    surface.setPresentationFrozen(false, flushPicture: makeFrame())
+    RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+
+    surface.resetPresentation()
+    RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+    surface.setActive(false)
+    RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+    surface.setActive(true)
+    surface.receiveImmediate(makeFrame())
+    RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+
+    XCTAssertTrue(failures.isEmpty, "Unexpected Metal surface failure: \(failures)")
+  }
+
   private func commandDescription(_ command: [String: Any]) -> String {
     guard let kind = command["t"] as? String else { return "missing-kind" }
     return kind + ":" + ((command[kind == "text" ? "s" : "k"] as? String) ?? "missing-value")

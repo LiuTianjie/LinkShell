@@ -41,7 +41,7 @@ export const SCREEN_WIDTH_CHOICES = [
 ] as const;
 export const SCREEN_FPS_CHOICES = ["30", "60", "120"] as const;
 export const SCREEN_CODEC_CHOICES = ["auto", "h264"] as const;
-export const SCREEN_PACING_CHOICES = ["smooth", "immediate"] as const;
+export const SCREEN_PACING_CHOICES = ["immediate", "smooth"] as const;
 export const SCREEN_MODE_CHOICES = ["view", "trackpad", "touch"] as const;
 
 export type ScreenWidthChoice = (typeof SCREEN_WIDTH_CHOICES)[number];
@@ -125,17 +125,24 @@ function readFirstLegacyValue<T>(keys: readonly string[]): T | undefined {
 
 /** Reads unified v2 preferences, migrating split legacy Web/Mac/RemoteScreen keys once if needed. */
 export function loadUnifiedScreenPreferences(): UnifiedScreenPreferences {
-  const stored = readLocal<Partial<UnifiedScreenPreferences> | null>(
+  const stored = readLocal<(Partial<UnifiedScreenPreferences> & { pacingLowLatencyDefaultV2?: boolean }) | null>(
     STORAGE_KEYS.screenPreferences,
     null,
   );
   if (stored && typeof stored === "object") {
-    return {
+    const control = typeof stored.control === "boolean" ? stored.control : true;
+    // Earlier builds listed `smooth` (+50ms WebRTC jitter buffer) as the first dropdown item,
+    // silently adding 50-75ms lag during interactive control; reset once to 0ms `immediate`.
+    const needsPacingHeal =
+      stored.pacingLowLatencyDefaultV2 !== true &&
+      control &&
+      stored.pacing === "smooth";
+    const resolved: UnifiedScreenPreferences = {
       width: sanitizeWidthChoice(stored.width),
       maxFps: sanitizeFpsChoice(stored.maxFps),
       codec: sanitizeCodecChoice(stored.codec),
-      pacing: sanitizePacingChoice(stored.pacing),
-      control: typeof stored.control === "boolean" ? stored.control : true,
+      pacing: needsPacingHeal ? "immediate" : sanitizePacingChoice(stored.pacing),
+      control,
       mode: sanitizeModeChoice(stored.mode),
       match: typeof stored.match === "boolean" ? stored.match : true,
       byComputer:
@@ -143,6 +150,10 @@ export function loadUnifiedScreenPreferences(): UnifiedScreenPreferences {
           ? { ...stored.byComputer }
           : {},
     };
+    if (needsPacingHeal) {
+      persistUnifiedScreenPreferences(resolved);
+    }
+    return resolved;
   }
 
   const legacyWidth = readFirstLegacyValue<string>([
@@ -207,6 +218,7 @@ function persistUnifiedScreenPreferences(state: UnifiedScreenPreferences): void 
     maxFps: state.maxFps,
     codec: state.codec,
     pacing: state.pacing,
+    pacingLowLatencyDefaultV2: true,
     control: state.control,
     mode: state.mode,
     match: state.match,

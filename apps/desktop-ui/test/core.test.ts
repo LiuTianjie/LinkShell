@@ -3,6 +3,7 @@ import type { HostStream, HostStreamEvents } from "@linkshell/client-core";
 import type { ProjectSummary, SessionSummary } from "@linkshell/wire";
 import { DESKTOP_FUSION_TUNNEL_EVENT, DESKTOP_LOCAL } from "../src/bridge/desktop-bridge";
 import { getOpenOverlayRects, registerOverlayOpen } from "../src/bridge/top-layer-registry";
+import { SCREEN_PACING_CHOICES } from "../src/core/screen-client";
 import {
   DESKTOP_DICTIONARIES,
   FUSION_ICON_BATCH_SIZE,
@@ -920,6 +921,27 @@ describe("Slice 2A-4 Core Engine, Fusion, Management, Screen & Unified Router", 
         maxFps: "120",
         pacing: "immediate",
       });
+      expect(SCREEN_PACING_CHOICES[0]).toBe("immediate");
+
+      // One-time heal: interactive (`control: true`) configs saved with legacy `"smooth"` (+50ms buffer)
+      // reset once to zero-buffer `"immediate"`, while subsequent explicit `"smooth"` selection sticks.
+      resetDesktopStorageForTests({
+        [STORAGE_KEYS.screenPreferences]: {
+          width: "auto",
+          maxFps: "120",
+          codec: "auto",
+          pacing: "smooth",
+          match: true,
+          control: true,
+          displayByComputer: {},
+        },
+      });
+      const healedPrefs = createScreenPreferencesStore();
+      expect(healedPrefs.getState().pacing).toBe("immediate");
+      healedPrefs.getState().setPacing("smooth");
+      expect(healedPrefs.getState().pacing).toBe("smooth");
+      const reloadedPrefs = createScreenPreferencesStore();
+      expect(reloadedPrefs.getState().pacing).toBe("smooth");
 
       // Phase 7 Wave 2 (`#73` B.3): Native Metal ScreenClip stays live at snapped stage bounds
       // when HTML popovers/dialogs open (cutout holes mask the overlay instead of collapsing to 0x0):

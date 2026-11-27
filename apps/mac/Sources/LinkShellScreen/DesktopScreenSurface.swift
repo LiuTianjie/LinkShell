@@ -187,9 +187,8 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
       picture: { [weak self] size in self?.pictureSize = size; self?.positionOverlays() },
       firstFrame: { [weak self] in self?.onFirstFrame?() },
       failure: { [weak self] message in self?.onFailure?(message) })
-    metalView.onDrawableSize = { [weak self] in
-      self?.renderer.drawableSizeChanged()
-      self?.renderer.drawNow()
+    metalView.onDrawableSize = { [weak self] size, scale in
+      self?.renderer.setDrawableTarget(size: size, scale: scale)
     }
     cursorView.image = NSCursor.arrow.image
     cursorView.imageScaling = .scaleAxesIndependently
@@ -374,7 +373,13 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
       image.size = size
       cursorView.image = image; cursorSize = size; cursorHotspot = hotspot
       localCursor = NSCursor(image: image, hotSpot: hotspot)
+      if canControl, pointerInside { localCursor.set() }
+      updateCursorVisibility()
       window?.invalidateCursorRects(for: self)
+      if !cursorView.isHidden || !compositionLabel.isHidden {
+        placeCursor()
+      }
+      return
     }
     positionOverlays()
   }
@@ -739,7 +744,9 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
 private final class DesktopScreenMetalView: NSView {
   let metalLayer = CAMetalLayer()
   var drawableSizeFrozen = false
-  var onDrawableSize: (() -> Void)?
+  var onDrawableSize: ((CGSize, CGFloat) -> Void)?
+  private var lastReportedSize = CGSize.zero
+  private var lastReportedScale: CGFloat = 0
   override init(frame: NSRect) { super.init(frame: frame); wantsLayer = true }
   required init?(coder: NSCoder) { nil }
   override func makeBackingLayer() -> CALayer { metalLayer }
@@ -753,12 +760,15 @@ private final class DesktopScreenMetalView: NSView {
   @discardableResult
   private func updateDrawableSize() -> Bool {
     guard !drawableSizeFrozen else { return false }
-    let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
-    let size = CGSize(width: max(1, (bounds.width * scale).rounded()), height: max(1, (bounds.height * scale).rounded()))
-    guard metalLayer.drawableSize != size || metalLayer.contentsScale != scale else { return false }
-    metalLayer.contentsScale = scale
-    metalLayer.drawableSize = size
-    onDrawableSize?()
+    let rawScale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+    let scale = rawScale.isFinite && rawScale > 0 ? min(4, max(1, rawScale)) : 2
+    let rawW = bounds.width.isFinite ? (bounds.width * scale).rounded() : 1
+    let rawH = bounds.height.isFinite ? (bounds.height * scale).rounded() : 1
+    let size = CGSize(width: min(16384, max(1, rawW)), height: min(16384, max(1, rawH)))
+    guard lastReportedSize != size || lastReportedScale != scale else { return false }
+    lastReportedSize = size
+    lastReportedScale = scale
+    onDrawableSize?(size, scale)
     return true
   }
 }
@@ -798,10 +808,14 @@ private final class DesktopScreenMetalRenderer: DesktopScreenFrameSink {
   private var failureReported = false
   private var fillsBounds = false
   private var frozen = false
+  private var targetDrawableSize = CGSize(width: 1, height: 1)
+  private var targetContentsScale: CGFloat = 2
   private var framesSinceCacheFlush = 0
-  // Match `layer.maximumDrawableCount = 2` so encoding frame N+1 never drops on a 120 Hz
-  // VSync tick while frame N's GPU completion handler finishes scanout.
-  private let inFlight = DispatchSemaphore(value: 2)
+  private let timingLock = NSLock()
+  private var gpuSeconds = 0.0005
+  // Single in-flight GPU submission (matching iOS ScreenMetalView) prevents +1 frame swapchain
+  // queueing in WindowServer so every 120 Hz VSync presents the newest decoded mailbox frame.
+  private let inFlight = DispatchSemaphore(value: 1)
   private var link: CVDisplayLink?
   private var legacyLinkStopped = false
   private var metalLinkStorage: AnyObject?
@@ -888,21 +902,63 @@ private final class DesktopScreenMetalRenderer: DesktopScreenFrameSink {
     }
   }
 
-  func receive(_ picture: DesktopScreenFrame) {
+  private var usesMetalDisplayLink: Bool {
+    if #available(macOS 14.0, *) {
+      return metalLinkStorage != nil
+    }
+    return false
+  }
+
+  /// Wakes `CAMetalDisplayLink` on its dedicated render thread without ever calling `layer.nextDrawable()`
+  /// directly (which throws `NSInternalInconsistencyException` once `CAMetalDisplayLink` owns the layer).
+  private func wakeMetalLinkIfNeeded() {
+    guard #available(macOS 14.0, *) else { return }
     lock.lock()
-    if accepting && !stopped { pending = picture; received &+= 1 }
+    let shouldWake = !stopped && !frozen && !metalLinkStopped && (running || (clearRequested && current == nil))
+    let metalLink = shouldWake ? (metalLinkStorage as? CAMetalDisplayLink) : nil
+    let thread = shouldWake ? (renderThreadStorage as? DesktopRenderThread) : nil
     lock.unlock()
+    if let metalLink, let thread {
+      thread.perform { metalLink.isPaused = false }
+    }
+  }
+
+  func receive(_ picture: DesktopScreenFrame) {
+    var dropped: Picture?
+    lock.lock()
+    if accepting && !stopped {
+      dropped = pending
+      pending = picture
+      received &+= 1
+    }
+    lock.unlock()
+    _ = dropped
+    wakeMetalLinkIfNeeded()
   }
   func receiveImmediate(_ picture: DesktopScreenFrame) {
+    var dropped: Picture?
     lock.lock()
     let ready = accepting && !stopped && running && !frozen
-    if accepting && !stopped { pending = picture; received &+= 1 }
+    if accepting && !stopped {
+      dropped = pending
+      pending = picture
+      received &+= 1
+    }
     lock.unlock()
-    if ready { draw() }
+    _ = dropped
+    if usesMetalDisplayLink {
+      if ready { wakeMetalLinkIfNeeded() }
+    } else if ready {
+      draw()
+    }
   }
   /// Draws only while the surface is on screen; `display` and `refreshRate` follow the window's screen.
   func setRunning(_ value: Bool, display: CGDirectDisplayID?, refreshRate: Int = 60) {
-    lock.lock(); let was = running; running = value && !stopped; let now = running
+    lock.lock()
+    let was = running
+    running = value && !stopped
+    let now = running
+    let needsClear = !stopped && !frozen && clearRequested && current == nil
     if now && !was { changes &+= 1 }
     lock.unlock()
     if #available(macOS 14.0, *),
@@ -911,9 +967,10 @@ private final class DesktopScreenMetalRenderer: DesktopScreenFrameSink {
       let maxHz = Float(max(30, min(240, refreshRate)))
       let minHz = min(60, maxHz)
       let range = CAFrameRateRange(minimum: minHz, maximum: maxHz, preferred: maxHz)
+      let keepUnpaused = now || needsClear
       thread.perform {
         metalLink.preferredFrameRateRange = range
-        metalLink.isPaused = !now
+        metalLink.isPaused = !keepUnpaused
       }
       return
     }
@@ -921,48 +978,90 @@ private final class DesktopScreenMetalRenderer: DesktopScreenFrameSink {
     if let display { CVDisplayLinkSetCurrentCGDisplay(link, display) }
     if now && !was { CVDisplayLinkStart(link) } else if !now && was { CVDisplayLinkStop(link) }
   }
-  func drawableSizeChanged() { lock.lock(); changes &+= 1; lock.unlock() }
-  func setFillsBounds(_ value: Bool) { lock.lock(); fillsBounds = value; changes &+= 1; lock.unlock() }
+  func setDrawableTarget(size: CGSize, scale: CGFloat) {
+    lock.lock()
+    targetDrawableSize = size
+    targetContentsScale = scale
+    changes &+= 1
+    lock.unlock()
+    if usesMetalDisplayLink {
+      wakeMetalLinkIfNeeded()
+    } else {
+      if layer.contentsScale != scale { layer.contentsScale = scale }
+      if layer.drawableSize != size { layer.drawableSize = size }
+      drawNow()
+    }
+  }
+  func setFillsBounds(_ value: Bool) { lock.lock(); fillsBounds = value; changes &+= 1; lock.unlock(); wakeMetalLinkIfNeeded() }
   func setFrozen(_ value: Bool) {
     lock.lock()
     let was = frozen
     frozen = value
     if !value && was { changes &+= 1 }
     lock.unlock()
+    if !value && was { wakeMetalLinkIfNeeded() }
   }
   func drawNow() {
+    if usesMetalDisplayLink {
+      wakeMetalLinkIfNeeded()
+      return
+    }
     draw(waitTimeout: .now() + .milliseconds(8))
   }
   func setActive(_ value: Bool) {
+    var droppedPending: Picture?
+    var droppedCurrent: Picture?
     lock.lock()
-    accepting = value && !stopped; if !accepting { pending = nil }
+    accepting = value && !stopped
+    if !accepting { droppedPending = pending; pending = nil }
     generation &+= 1
-    if !value { current = nil; clearRequested = true; changes &+= 1; reportedSize = .zero; reportedFirst = false }
+    if !value {
+      droppedCurrent = current
+      current = nil
+      clearRequested = true
+      changes &+= 1
+      reportedSize = .zero
+      reportedFirst = false
+    }
+    let hasDrawableTarget = targetDrawableSize.width >= 1 && targetDrawableSize.height >= 1
     lock.unlock()
+    _ = droppedPending
+    _ = droppedCurrent
     if !value {
       layer.isOpaque = false
-      if layer.drawableSize.width >= 1, layer.drawableSize.height >= 1 { drawNow() }
+      if hasDrawableTarget { drawNow() }
     }
   }
   func resetPresentation() {
+    var droppedPending: Picture?
+    var droppedCurrent: Picture?
     lock.lock()
-    pending = nil; current = nil; generation &+= 1; clearRequested = true; changes &+= 1
+    droppedPending = pending; pending = nil
+    droppedCurrent = current; current = nil
+    generation &+= 1; clearRequested = true; changes &+= 1
     reportedSize = .zero; reportedFirst = false
+    let hasDrawableTarget = targetDrawableSize.width >= 1 && targetDrawableSize.height >= 1
     lock.unlock()
+    _ = droppedPending
+    _ = droppedCurrent
     layer.isOpaque = false
-    if layer.drawableSize.width >= 1, layer.drawableSize.height >= 1 { drawNow() }
+    if hasDrawableTarget { drawNow() }
   }
   func stop() {
+    var droppedPending: Picture?
+    var droppedCurrent: Picture?
     lock.lock()
     stopped = true
     accepting = false
-    pending = nil
-    current = nil
+    droppedPending = pending; pending = nil
+    droppedCurrent = current; current = nil
     generation &+= 1
     onPicture = nil
     onFirstFrame = nil
     onFailure = nil
     lock.unlock()
+    _ = droppedPending
+    _ = droppedCurrent
     setRunning(false, display: nil)
     teardownDisplayLinks()
     cacheLock.lock()
@@ -970,21 +1069,60 @@ private final class DesktopScreenMetalRenderer: DesktopScreenFrameSink {
     cacheLock.unlock()
   }
 
-  fileprivate func draw(drawable providedDrawable: CAMetalDrawable? = nil, waitTimeout: DispatchTime = .now()) {
+  fileprivate func draw(
+    drawable providedDrawable: CAMetalDrawable? = nil,
+    waitTimeout: DispatchTime = .now(),
+    deadline: Double? = nil,
+    expectedPresentation: Double? = nil
+  ) {
+    if usesMetalDisplayLink, providedDrawable == nil {
+      wakeMetalLinkIfNeeded()
+      return
+    }
+    var superseded: Picture?
     lock.lock()
     if stopped || frozen { lock.unlock(); return }
     // Allow clearing a stale drawable even after the surface becomes inactive or pauses its display link.
     let clearOnly = clearRequested && current == nil && (!accepting || !running)
     guard clearOnly || (accepting && running) else { lock.unlock(); return }
-    if accepting, let next = pending { current = next; pending = nil; changes &+= 1 }
+    let desiredSize = targetDrawableSize
+    let desiredScale = targetContentsScale
+    if accepting, let next = pending {
+      superseded = current
+      current = next
+      pending = nil
+      changes &+= 1
+    }
     let picture = current, mark = changes, ticket = generation, stretch = fillsBounds
     let clear = clearRequested && picture == nil
+    let alreadyPresentedFirst = reportedFirst
     let needed = clear || (accepting && running && picture != nil && mark != drawn)
     lock.unlock()
-    guard needed, inFlight.wait(timeout: waitTimeout) == .success else { return }
+    // Release any superseded frame outside `lock` so cross-process pipe token release never blocks callers.
+    _ = superseded
+    guard needed else { return }
+
+    // Synchronize CAMetalLayer size on the render thread before touching the drawable (parity with iOS ScreenMetalView).
+    if layer.contentsScale != desiredScale { layer.contentsScale = desiredScale }
+    if layer.drawableSize != desiredSize { layer.drawableSize = desiredSize }
+    if !clear, let providedDrawable,
+       (providedDrawable.texture.width != Int(desiredSize.width) || providedDrawable.texture.height != Int(desiredSize.height)) {
+      return
+    }
+
+    if !clear, alreadyPresentedFirst, let targetDeadline = expectedPresentation ?? deadline {
+      timingLock.lock(); let cost = gpuSeconds; timingLock.unlock()
+      let now = CACurrentMediaTime()
+      if targetDeadline > 0, targetDeadline <= now || (targetDeadline - now) < max(0.0005, cost * 1.25) {
+        return
+      }
+    }
+
+    guard inFlight.wait(timeout: waitTimeout) == .success else { return }
     var committed = false
     defer { if !committed { inFlight.signal() } }
-    guard let queue, let command = queue.makeCommandBuffer(), let drawable = providedDrawable ?? layer.nextDrawable() else { return }
+    let drawable: CAMetalDrawable? = usesMetalDisplayLink ? providedDrawable : (providedDrawable ?? layer.nextDrawable())
+    guard let queue, let command = queue.makeCommandBuffer(), let drawable else { return }
     let pass = MTLRenderPassDescriptor()
     pass.colorAttachments[0].texture = drawable.texture
     pass.colorAttachments[0].loadAction = .clear
@@ -995,7 +1133,15 @@ private final class DesktopScreenMetalRenderer: DesktopScreenFrameSink {
       encoder.endEncoding()
       command.addCompletedHandler { [inFlight] _ in inFlight.signal() }
       command.present(drawable); command.commit(); committed = true
-      lock.lock(); drawn = mark; clearRequested = false; lock.unlock()
+      lock.lock()
+      drawn = mark
+      clearRequested = false
+      let pauseAfterClear = !running || stopped
+      let metalLink = pauseAfterClear ? metalLinkStorage : nil
+      lock.unlock()
+      if #available(macOS 14.0, *), let link = metalLink as? CAMetalDisplayLink {
+        link.isPaused = true
+      }
       return
     }
     guard let picture, let cache, let pipeline else { return }
@@ -1039,6 +1185,11 @@ private final class DesktopScreenMetalRenderer: DesktopScreenFrameSink {
     encoder.endEncoding()
     command.addCompletedHandler { [weak self, heldTextures, inFlight] buffer in
       _ = heldTextures; _ = picture
+      if let self, buffer.gpuEndTime > buffer.gpuStartTime {
+        self.timingLock.lock()
+        self.gpuSeconds = self.gpuSeconds * 0.8 + (buffer.gpuEndTime - buffer.gpuStartTime) * 0.2
+        self.timingLock.unlock()
+      }
       inFlight.signal()
       self?.presented(ticket: ticket, size: size, failed: buffer.status == .error)
     }
@@ -1116,7 +1267,11 @@ private final class DesktopMetalDisplayLinkDriver: NSObject, CAMetalDisplayLinkD
   weak var renderer: DesktopScreenMetalRenderer?
   init(renderer: DesktopScreenMetalRenderer) { self.renderer = renderer }
   func metalDisplayLink(_ link: CAMetalDisplayLink, needsUpdate update: CAMetalDisplayLink.Update) {
-    renderer?.draw(drawable: update.drawable)
+    renderer?.draw(
+      drawable: update.drawable,
+      deadline: update.targetTimestamp,
+      expectedPresentation: update.targetPresentationTimestamp
+    )
   }
 }
 
@@ -1188,7 +1343,14 @@ private final class DesktopRenderThread: Thread {
     cancel()
     lock.lock()
     let target = loop
+    let done = loopExited
     lock.unlock()
-    if let target { CFRunLoopWakeUp(target.getCFRunLoop()) }
+    if !done, let target {
+      let cfLoop = target.getCFRunLoop()
+      CFRunLoopPerformBlock(cfLoop, CFRunLoopMode.commonModes.rawValue) {
+        CFRunLoopStop(cfLoop)
+      }
+      CFRunLoopWakeUp(cfLoop)
+    }
   }
 }

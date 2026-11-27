@@ -23,6 +23,7 @@ final class DesktopScreenReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataC
   private var heldButtons: [String: [String: Any]] = [:]
   private var eventNumber = 0
   private var cursorNumber = 0
+  private var lastLocalMoveAt: Double = -10
   private var publishedControl: Bool?
   private var publishedControlRequested: Bool?
   private var publishedAudioAvailable: Bool?
@@ -343,6 +344,9 @@ final class DesktopScreenReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataC
       if !replaceable { fail("控制连接已中断，请重新连接") }
       return
     }
+    if message["t"] as? String == "move" {
+      lastLocalMoveAt = CACurrentMediaTime()
+    }
     if let button = message["b"] as? String, ["left", "right", "middle"].contains(button) {
       if message["t"] as? String == "down" { heldButtons[button] = message }
       if message["t"] as? String == "up" { heldButtons.removeValue(forKey: button) }
@@ -356,9 +360,16 @@ final class DesktopScreenReceiver: NSObject, RTCPeerConnectionDelegate, RTCDataC
   }
 
   private func cursorMessage(_ message: [String: Any]) {
-    if message["t"] as? String == "cursor", let number = DesktopScreenBridge.integer(message["i"]) {
-      guard number > cursorNumber else { return }
-      cursorNumber = number
+    if message["t"] as? String == "cursor" {
+      if let number = DesktopScreenBridge.integer(message["i"]) {
+        guard number > cursorNumber else { return }
+        cursorNumber = number
+      }
+      // While actively controlling, the local hardware NSCursor is authoritative and `cursorView`
+      // is hidden; suppress high-rate position echoes so Electron's main thread stays completely idle.
+      if publishedControl == true, CACurrentMediaTime() - lastLocalMoveAt < 0.25 {
+        return
+      }
     }
     DispatchQueue.main.async { [weak self] in self?.surface.updateCursor(message) }
   }

@@ -47,10 +47,11 @@ services:
       - --denied-peer-ip=192.168.0.0-192.168.255.255
       - --denied-peer-ip=fc00::-fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff
       - --denied-peer-ip=fe80::-febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff
-      # Bytes a second. One picture is held to 3 Mbit/s by the sender (the gateway's TURN_MAX_KBPS);
-      # 4 Mbit/s a session leaves room for its channels and retransmissions, 100 Mbit/s caps the whole node.
-      - --max-bps=500000
-      - --bps-capacity=12500000
+      # Bytes a second. One picture is held to TURN_MAX_KBPS (6 Mbit/s) by the sender;
+      # 12 Mbit/s (1.5 MB/s) per session gives IDR keyframes & RTX headroom without tail-dropping packets,
+      # and 200 Mbit/s (25 MB/s) caps the whole node.
+      - --max-bps=1500000
+      - --bps-capacity=25000000
       # One username is one computer's (expiry:computer): its pictures and the viewers it lends it to.
       - --user-quota=12
       - --total-quota=400
