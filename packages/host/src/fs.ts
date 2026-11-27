@@ -22,10 +22,18 @@ function isProject(names: Set<string>): boolean {
   return PROJECT_MARKERS.some((marker) => names.has(marker));
 }
 
+/** Strips stray leading slashes before a Windows drive root (`/D:/foo` -> `D:/foo`) so `path.resolve` never prepends the host's current drive. */
+export function normalizeHostPath(raw: string, platform: NodeJS.Platform = process.platform): string {
+  if (platform === "win32" && /^[\\/]+[A-Za-z]:[\\/]/.test(raw)) {
+    return raw.replace(/^[\\/]+/, "");
+  }
+  return raw;
+}
+
 function expand(path: string | undefined): string {
   if (!path || path === "~") return homedir();
-  if (path.startsWith("~/")) return join(homedir(), path.slice(2));
-  return resolve(path);
+  if (path.startsWith("~/") || path.startsWith("~\\")) return join(homedir(), path.slice(2));
+  return resolve(normalizeHostPath(path));
 }
 
 const SUBDIR_CONCURRENCY = 16;
@@ -167,6 +175,9 @@ const IMAGE_TYPES: Record<string, string> = {
   webp: "image/webp",
   svg: "image/svg+xml",
   heic: "image/heic",
+  avif: "image/avif",
+  bmp: "image/bmp",
+  ico: "image/x-icon",
 };
 
 /** Preview limits keep the viewer bounded; original downloads use a separate chunked reader. */
@@ -258,7 +269,7 @@ function safeName(name: string): string {
 }
 
 async function existingDirectory(path: string): Promise<string> {
-  const dir = resolve(path.replace(/^~(?=$|\/)/, homedir()));
+  const dir = expand(path);
   const info = await stat(dir).catch(() => undefined);
   if (!info?.isDirectory()) throw RpcError.app("not_found", `找不到文件夹：${path}`);
   return dir;
@@ -347,8 +358,9 @@ export async function uploadFile(input: {
  * never over a revision the editor didn't see.
  */
 export async function writeTextFile(input: { path: string; text: string; expectedModifiedAt?: number }) {
-  if (!input.path.startsWith("~") && !isAbsolute(input.path)) throw RpcError.app("invalid_params", "需要文件的完整路径");
-  const path = expand(input.path);
+  const normalized = normalizeHostPath(input.path);
+  if (!normalized.startsWith("~") && !isAbsolute(normalized)) throw RpcError.app("invalid_params", "需要文件的完整路径");
+  const path = expand(normalized);
   const bytes = Buffer.from(input.text, "utf8");
   if (bytes.length > MAX_TEXT_FILE) throw RpcError.app("too_large", `文件太大（${megabytes(bytes.length)}），无法保存`);
   const dir = dirname(path);
@@ -395,8 +407,9 @@ function expandFullPath(raw: string): string {
   if (!raw || raw.includes("\0")) throw RpcError.app("invalid_params", "路径无效");
   if (raw === "~") return resolve(homedir());
   if (raw.startsWith("~/") || raw.startsWith("~\\")) return resolve(homedir(), raw.slice(2));
-  if (!isAbsolute(raw)) throw RpcError.app("invalid_params", "需要文件或文件夹的完整路径");
-  return resolve(raw);
+  const normalized = normalizeHostPath(raw);
+  if (!isAbsolute(normalized)) throw RpcError.app("invalid_params", "需要文件或文件夹的完整路径");
+  return resolve(normalized);
 }
 
 const PROTECTED_POSIX_PATHS = new Set([

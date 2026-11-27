@@ -2,7 +2,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { deletePath, downloadFile, listDirectory, makeDirectory, readFile, renamePath, uploadFile, writeTextFile } from "../src/fs.js";
+import { deletePath, downloadFile, listDirectory, makeDirectory, normalizeHostPath, readFile, renamePath, uploadFile, writeTextFile } from "../src/fs.js";
 import { startHost } from "../src/host.js";
 import { connectHost } from "../src/rpc/client.js";
 
@@ -57,13 +57,25 @@ describe("fs.list", () => {
     const root = mkdtempSync(join(tmpdir(), "lsh-read-"));
     writeFileSync(join(root, "CHANGELOG.md"), "# 0.2.79\n- 修复");
     writeFileSync(join(root, "a.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    writeFileSync(join(root, "anim.gif"), Buffer.from("GIF89a\x01\x00\x01\x00", "latin1"));
     writeFileSync(join(root, "blob.bin"), Buffer.from([1, 0, 2, 0]));
     writeFileSync(join(root, "big.txt"), "x".repeat(100));
     expect(await readFile({ path: join(root, "CHANGELOG.md"), maxBytes: 1000 })).toMatchObject({ kind: "text", text: "# 0.2.79\n- 修复", truncated: false });
     expect(await readFile({ path: join(root, "a.png"), maxBytes: 1000 })).toMatchObject({ kind: "image", mimeType: "image/png" });
+    expect(await readFile({ path: join(root, "anim.gif"), maxBytes: 1000 })).toMatchObject({ kind: "image", mimeType: "image/gif" });
     expect(await readFile({ path: join(root, "blob.bin"), maxBytes: 1000 })).toMatchObject({ kind: "binary" });
     expect(await readFile({ path: join(root, "big.txt"), maxBytes: 10 })).toMatchObject({ truncated: true, text: "x".repeat(10) });
     await expect(readFile({ path: root, maxBytes: 10 })).rejects.toThrow();
+  });
+
+  it("normalizes leading-slash Windows drive paths on win32 without altering POSIX or UNC paths", () => {
+    expect(normalizeHostPath("/D:/DEV/xian/_artifacts/attack-effects-v82.html", "win32")).toBe(
+      "D:/DEV/xian/_artifacts/attack-effects-v82.html",
+    );
+    expect(normalizeHostPath("///C:\\Users\\dev\\demo.gif", "win32")).toBe("C:\\Users\\dev\\demo.gif");
+    expect(normalizeHostPath("\\\\server\\share\\demo.gif", "win32")).toBe("\\\\server\\share\\demo.gif");
+    expect(normalizeHostPath("/D:/DEV/xian/a.html", "darwin")).toBe("/D:/DEV/xian/a.html");
+    expect(normalizeHostPath("/Users/dev/a.html", "linux")).toBe("/Users/dev/a.html");
   });
 
   it("lists a project's files after its directories, when asked", async () => {

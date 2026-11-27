@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 import {
+  parseFileLink,
   presentError,
   proposedPlan,
   toolCommand,
@@ -1228,115 +1229,13 @@ export function resolveFileHrefTarget(
   href: string,
   cwd?: string,
 ): { path: string; line?: number; endLine?: number } | null {
-  const clean = href.trim();
-  if (
-    !clean ||
-    /^(?:https?:|mailto:|tel:|data:|javascript:|vbscript:|blob:|about:|#)/i.test(
-      clean,
-    )
-  ) {
-    return null;
-  }
-
-  let rawPath = clean;
-  const editorUriMatch =
-    /^(?:vscode|vscode-insiders|cursor|zed|windsurf):\/\/file(\/.*)$/i.exec(
-      rawPath,
-    );
-  if (editorUriMatch) {
-    rawPath = editorUriMatch[1]!;
-    try {
-      rawPath = decodeURIComponent(rawPath);
-    } catch {
-      // Preserve rawPath when literal `%` appears.
-    }
-    if (/^\/+[A-Za-z]:[\\/]/.test(rawPath)) {
-      rawPath = rawPath.replace(/^\/+/, "");
-    }
-  } else if (/^file:\/\//i.test(rawPath)) {
-    let hashSuffix = "";
-    const hashIdx = rawPath.indexOf("#");
-    const urlPart = hashIdx >= 0 ? rawPath.slice(0, hashIdx) : rawPath;
-    if (hashIdx >= 0) {
-      hashSuffix = rawPath.slice(hashIdx);
-    }
-    const afterScheme = urlPart.replace(/^file:\/\//i, "");
-    let extractedPath: string;
-    if (/^(?:localhost)?\/+[A-Za-z]:[\\/]/i.test(afterScheme)) {
-      extractedPath = afterScheme.replace(/^(?:localhost)?\/+/i, "");
-    } else if (/^[A-Za-z]:[\\/]/.test(afterScheme)) {
-      extractedPath = afterScheme;
-    } else if (/^localhost\//i.test(afterScheme)) {
-      extractedPath = afterScheme.slice("localhost".length);
-    } else if (afterScheme.startsWith("/")) {
-      extractedPath = afterScheme;
-    } else if (/^[A-Za-z0-9._-]+[\\/].+/.test(afterScheme)) {
-      extractedPath = `\\\\${afterScheme.replace(/\//g, "\\")}`;
-    } else {
-      extractedPath = afterScheme;
-    }
-    try {
-      extractedPath = decodeURIComponent(extractedPath);
-    } catch {
-      // Preserve literal `%` if not valid percent-encoding.
-    }
-    if (/^\/+[A-Za-z]:[\\/]/.test(extractedPath)) {
-      extractedPath = extractedPath.replace(/^\/+/, "");
-    }
-    rawPath = extractedPath + hashSuffix;
-  }
-
-  let line: number | undefined;
-  let endLine: number | undefined;
-  const hashMatch = /^(.*)#L(\d+)(?:C\d+)?(?:-L?(\d+)(?:C\d+)?)?$/i.exec(
-    rawPath,
-  );
-  if (hashMatch) {
-    rawPath = hashMatch[1]!;
-    line = Number(hashMatch[2]);
-    if (hashMatch[3]) {
-      endLine = Number(hashMatch[3]);
-    }
-  } else {
-    const colonMatch = /^(.*?):(\d+)(?::\d+)?$/.exec(rawPath);
-    if (colonMatch && !/^[A-Za-z]$/.test(colonMatch[1]!)) {
-      rawPath = colonMatch[1]!;
-      line = Number(colonMatch[2]);
-    }
-  }
-
-  try {
-    rawPath = decodeURIComponent(rawPath);
-  } catch {
-    // Keep rawPath if it contains literal `%` characters.
-  }
-
-  if (/^\/+[A-Za-z]:[\\/]/.test(rawPath)) {
-    rawPath = rawPath.replace(/^\/+/, "");
-  }
-
-  if (!rawPath) return null;
-  const isAbsolute =
-    rawPath.startsWith("/") ||
-    /^[A-Za-z]:[\\/]/.test(rawPath) ||
-    rawPath.startsWith("\\\\");
-  if (!isAbsolute && cwd) {
-    const sep = cwd.includes("\\") ? "\\" : "/";
-    const base = cwd.replace(/[\\/]+$/, "");
-    const strippedRel = rawPath.replace(/^\.[\\/]/, "");
-    const rel =
-      sep === "\\" ? strippedRel.replace(/\//g, "\\") : strippedRel;
-    return { path: `${base}${sep}${rel}`, line, endLine };
-  }
-  if (
-    isAbsolute ||
-    /\.[a-z0-9]{1,8}$/i.test(rawPath) ||
-    rawPath.includes("/") ||
-    rawPath.includes("\\")
-  ) {
-    return { path: rawPath, line, endLine };
-  }
-  return null;
+  const parsed = parseFileLink(href, cwd, { allowRelativeWithoutBase: true });
+  if (!parsed) return null;
+  return {
+    path: parsed.path,
+    line: parsed.line,
+    endLine: parsed.endLine,
+  };
 }
 
 const VALUE_NAME_MAP: Record<string, string> = {

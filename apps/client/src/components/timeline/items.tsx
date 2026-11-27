@@ -1,4 +1,4 @@
-import { presentError, reconnectLabel, reconnectOf, type TimelineItem } from "@linkshell/client-core";
+import { isImageResource, presentError, reconnectLabel, reconnectOf, type TimelineItem } from "@linkshell/client-core";
 import type { UserContext } from "@linkshell/wire";
 import * as Clipboard from "expo-clipboard";
 import { memo, useMemo, useState, type ComponentProps } from "react";
@@ -54,8 +54,10 @@ export const UserMessage = memo(function UserMessage({
   const raw = view.text;
   const replies = questionReplies(raw);
   const text = replies ? replies.map((reply) => reply.answer || "已跳过").join("\n\n") : raw;
-  const images = item.blocks.filter((block) => block.type === "image" || block.type === "audio" || block.type === "resource");
-  const links = item.blocks.filter((block) => block.type === "resource_link");
+  const isImageLink = (block: (typeof item.blocks)[number]) =>
+    block.type === "resource_link" && block.kind !== "skill" && isImageResource(block.uri, block.mimeType);
+  const images = item.blocks.filter((block) => block.type === "image" || block.type === "audio" || block.type === "resource" || isImageLink(block));
+  const links = item.blocks.filter((block) => block.type === "resource_link" && !isImageLink(block));
   // A slash command or skill the user ran: `/review src`, `/pdf`.
   const command = /^\/[\w:.-]+/.exec(text);
   const long = text.length > 900 || text.split("\n").length > LONG_MESSAGE_LINES;

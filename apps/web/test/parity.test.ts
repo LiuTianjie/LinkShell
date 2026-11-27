@@ -86,6 +86,19 @@ describe("host file links", () => {
       line: 3,
     });
     expect(fileTarget("/tmp/a.ts:7")).toEqual({ path: "/tmp/a.ts", line: 7 });
+    expect(
+      fileTarget("file:///D:/DEV/xian/_artifacts/attack-effects-v82.html#weapons-001"),
+    ).toEqual({
+      path: "D:/DEV/xian/_artifacts/attack-effects-v82.html",
+    });
+    expect(
+      fileTarget("D:\\DEV\\xian\\_artifacts\\slash.gif#preview"),
+    ).toEqual({
+      path: "D:\\DEV\\xian\\_artifacts\\slash.gif",
+    });
+    expect(fileTarget("./_artifacts/slash.gif", "D:\\DEV\\xian")).toEqual({
+      path: "D:\\DEV\\xian\\_artifacts\\slash.gif",
+    });
   });
   it("keeps web URLs, anchors and executable schemes out of filesystem RPC", () => {
     for (const value of [

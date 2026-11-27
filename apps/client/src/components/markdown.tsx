@@ -1,9 +1,11 @@
+import { normalizeMarkdownForDisplay, splitMarkdownImages } from "@linkshell/client-core";
 import { memo, useMemo } from "react";
-import { Platform, useColorScheme } from "react-native";
+import { Platform, View, useColorScheme } from "react-native";
 import { openLink, useLinkBase } from "@/lib/links";
 import { EnrichedMarkdownText, type MarkdownStyle, type TextContextMenuItem, type TextSelectionMenuConfig } from "react-native-enriched-markdown";
 import { palette, type Palette } from "@/theme/colors";
 import { mono, radius, type } from "@/theme/type";
+import { MarkdownImage } from "./timeline/attachments";
 
 function markdownStyle(p: Palette, dark: boolean, variant: "chat" | "thought"): MarkdownStyle {
   const body =
@@ -90,19 +92,49 @@ export const Markdown = memo(function Markdown({
   const dark = useColorScheme() === "dark";
   const base = useLinkBase();
   const style = useMemo(() => markdownStyle(dark ? palette.dark : palette.light, dark, variant), [dark, variant]);
+  const segments = useMemo(() => splitMarkdownImages(normalizeMarkdownForDisplay(text)), [text]);
+  const selectionColor = dark ? palette.dark.accent : palette.light.accent;
+
+  if (segments.length === 1 && segments[0]!.kind === "markdown") {
+    return (
+      <EnrichedMarkdownText
+        allowFontScaling={false}
+        maxFontSizeMultiplier={1}
+        markdown={segments[0]!.text}
+        flavor="github"
+        markdownStyle={style}
+        streamingAnimation={streaming}
+        enableTaskListItemToggle={false}
+        selectionColor={selectionColor}
+        onLinkPress={({ url }) => openLink(url, base)}
+        contextMenuItems={menu}
+        selectionMenuConfig={SELECTION_MENU}
+      />
+    );
+  }
+
   return (
-    <EnrichedMarkdownText
-      allowFontScaling={false}
-      maxFontSizeMultiplier={1}
-      markdown={text}
-      flavor="github"
-      markdownStyle={style}
-      streamingAnimation={streaming}
-      enableTaskListItemToggle={false}
-      selectionColor={dark ? palette.dark.accent : palette.light.accent}
-      onLinkPress={({ url }) => openLink(url, base)}
-      contextMenuItems={menu}
-      selectionMenuConfig={SELECTION_MENU}
-    />
+    <View style={{ gap: 8 }}>
+      {segments.map((segment, index) =>
+        segment.kind === "image" ? (
+          <MarkdownImage key={`img:${index}:${segment.url}`} url={segment.url} alt={segment.alt} />
+        ) : (
+          <EnrichedMarkdownText
+            key={`md:${index}`}
+            allowFontScaling={false}
+            maxFontSizeMultiplier={1}
+            markdown={segment.text}
+            flavor="github"
+            markdownStyle={style}
+            streamingAnimation={streaming && index === segments.length - 1}
+            enableTaskListItemToggle={false}
+            selectionColor={selectionColor}
+            onLinkPress={({ url }) => openLink(url, base)}
+            contextMenuItems={menu}
+            selectionMenuConfig={SELECTION_MENU}
+          />
+        ),
+      )}
+    </View>
   );
 });

@@ -63,6 +63,9 @@ describe("paths on the computer", () => {
     expect(shortPath("/data/people/me")).toBe("~");
     // Another directory that only starts with the same letters isn't inside it.
     expect(shortPath("/data/people/meera/code")).toBe("/data/people/meera/code");
+    setHostHome("C:\\Users\\dev\\");
+    expect(shortPath("C:\\Users\\dev\\xian")).toBe("~\\xian");
+    expect(shortPath("C:\\Users\\dev")).toBe("~");
   });
 
   it("guesses the home directory before the computer has said where it is", () => {

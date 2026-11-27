@@ -264,12 +264,14 @@ describe("codex mapper", () => {
         { type: "text", text: "look" },
         { type: "image", mimeType: "image/png", data: "AAAA" },
         { type: "resource_link", uri: "file:///w/shot.png", name: "shot.png" },
+        { type: "resource_link", uri: "file:///D:/DEV/xian/_artifacts/slash.gif", name: "slash.gif" },
         { type: "resource_link", uri: "file:///w/src/a.ts", name: "a.ts" },
       ]),
     ).toEqual([
       { type: "text", text: "look", text_elements: [] },
       { type: "image", url: "data:image/png;base64,AAAA" },
       { type: "localImage", path: "/w/shot.png" },
+      { type: "localImage", path: "D:/DEV/xian/_artifacts/slash.gif" },
       { type: "text", text: "@/w/src/a.ts", text_elements: [] },
     ]);
   });

@@ -1,4 +1,5 @@
 import { createHash, type Hash } from "node:crypto";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { unwrapShellCommand } from "@linkshell/wire";
 import { sessionGoalSchema } from "@linkshell/wire";
 import type {
@@ -183,7 +184,20 @@ function userContent(item: Json): ContentBlock[] {
       }
       case "localImage":
         if (str(input.path)) {
-          blocks.push(imageFromPath(str(input.path)) ?? { type: "resource_link", uri: `file://${str(input.path)}`, name: str(input.path)! });
+          const rawPath = str(input.path)!;
+          let uri: string;
+          if (/^[A-Za-z]:[\\/]/.test(rawPath)) {
+            uri = `file:///${rawPath.replace(/\\/g, "/")}`;
+          } else if (rawPath.startsWith("/")) {
+            uri = `file://${rawPath}`;
+          } else {
+            try {
+              uri = pathToFileURL(rawPath).href;
+            } catch {
+              uri = `file://${rawPath}`;
+            }
+          }
+          blocks.push(imageFromPath(rawPath) ?? { type: "resource_link", uri, name: rawPath });
         }
         break;
       case "skill":
@@ -1257,8 +1271,19 @@ export function toCodexInput(content: ContentBlock[]): Json[] {
         if (block.data) return [{ type: "image", url: `data:${block.mimeType};base64,${block.data}` }];
         return [];
       case "resource_link": {
-        if (block.kind === "skill") return [{ type: "skill", name: block.name, path: block.uri.replace(/^file:\/\//, "") }];
-        const path = block.uri.startsWith("file://") ? block.uri.slice("file://".length) : block.uri;
+        const unwrapFileUri = (raw: string): string => {
+          if (!raw.startsWith("file://")) return raw;
+          const clean = raw.replace(/[?#].*$/, "");
+          const after = clean.slice("file://".length);
+          if (/^\/+[A-Za-z]:[\\/]/.test(after)) return after.replace(/^\/+/, "");
+          try {
+            return fileURLToPath(clean);
+          } catch {
+            return after;
+          }
+        };
+        if (block.kind === "skill") return [{ type: "skill", name: block.name, path: unwrapFileUri(block.uri) }];
+        const path = unwrapFileUri(block.uri);
         return /\.(png|jpe?g|gif|webp|heic)$/i.test(path)
           ? [{ type: "localImage", path }]
           : [{ type: "text", text: `@${path}`, text_elements: [] }];

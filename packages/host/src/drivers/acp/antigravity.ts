@@ -703,9 +703,18 @@ function readStepMediaBlocks(media: TranscriptMedia[] | undefined): ContentBlock
     const isImage = mimeType.toLowerCase().startsWith("image/");
     const inline = entry.inline_data || entry.inlineData;
     const rawUri = entry.uri;
-    const filePath = typeof rawUri === "string" && rawUri.length > 0
-      ? (rawUri.startsWith("file://") ? fileURLToPath(rawUri) : rawUri)
-      : undefined;
+    let filePath: string | undefined;
+    if (typeof rawUri === "string" && rawUri.length > 0) {
+      if (rawUri.startsWith("file://")) {
+        try {
+          filePath = fileURLToPath(rawUri.replace(/[?#].*$/, ""));
+        } catch {
+          filePath = rawUri.replace(/^file:\/\//i, "").replace(/[?#].*$/, "");
+        }
+      } else {
+        filePath = rawUri;
+      }
+    }
 
     if (!isImage) {
       // Never stuff non-image binaries (e.g. multi-MB PDFs) into image blocks / SQLite.

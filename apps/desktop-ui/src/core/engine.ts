@@ -682,6 +682,13 @@ export class DesktopEngine {
     return computerAtKey(state.computers, key, state.localComputer);
   }
 
+  /** Returns an already-open connection for `key` without retaining a new reference. */
+  connectionForKey(key: string): Connection | undefined {
+    const active = this.state.getState().connection;
+    if (active?.computer.key === key) return active;
+    return this.connections.get(key);
+  }
+
   retainComputer(computer: Computer, options?: { metadataOnly?: boolean }) {
     if (!this.identity || !this.active) throw new Error("桌面连接引擎尚未就绪");
     return this.connections.acquire(this.computerForKey(computer.key) ?? computer, options);

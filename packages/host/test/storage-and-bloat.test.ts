@@ -10,6 +10,7 @@ import { HostStore } from "../src/store.js";
 import { SessionHub, type Subscriber } from "../src/hub.js";
 import { HostRpcServer } from "../src/rpc/server.js";
 import { mapNotification, itemToHistory, type CodexThreadState } from "../src/drivers/codex/mapper.js";
+import { MAX_INLINE_IMAGE } from "../src/drivers/images.js";
 import type { AgentDriver, DriverHost } from "../src/drivers/types.js";
 import type { DriverBehavior } from "../src/drivers/behavior.js";
 
@@ -289,8 +290,8 @@ describe("external BlobStore, SQLite bloat prevention, indexes & maintenance", (
     expect((completed[0]!.update as { appendOutput?: string }).appendOutput).toBeUndefined();
     expect((completed[0]!.update as { rawOutput?: Record<string, unknown> }).rawOutput?.aggregatedOutput).toBeUndefined();
 
-    // Oversized >12 MB data: URL on userMessage is dropped cleanly with a notice instead of bloating SQLite.
-    const hugeDataUrl = `data:image/png;base64,${"A".repeat(13 * 1024 * 1024)}`;
+    // Oversized >MAX_INLINE_IMAGE data: URL on userMessage is dropped cleanly with a notice instead of bloating SQLite.
+    const hugeDataUrl = `data:image/png;base64,${"A".repeat(MAX_INLINE_IMAGE + 1)}`;
     const userHistory = itemToHistory({
       id: "u-huge",
       type: "userMessage",

@@ -17,6 +17,7 @@ import {
   describeSteps,
   exitNote,
   foldStepRuns,
+  isImageResource,
   isQuietTool,
   liveActivity,
   openWrapUp,
@@ -70,13 +71,14 @@ import {
 } from "@/primitives";
 import { ApprovalCard, AsyncQuestionsBar } from "./ApprovalQuestionCards";
 import { DiffBlock, DiffStatBadge } from "./DiffBlock";
-import { MarkdownView } from "./MarkdownView";
+import { MarkdownView, desktopHostImageCache } from "./MarkdownView";
 import { openSubagentInInspector, useInspectorTabs } from "../inspector";
 import { SelectionActions } from "./SelectionActions";
 import {
   describeActionError,
   openFileInInspector,
   reportOnFailure,
+  resolveFileHrefTarget,
   sessionKeyOf,
   timelineItemSearchText,
   useClientSelector,
@@ -728,7 +730,14 @@ function UserTurnRow({
     [rawText],
   );
   const imageBlocks = useMemo(
-    () => item.blocks.filter((b): b is Extract<ContentBlock, { type: "image" }> => b.type === "image"),
+    () =>
+      item.blocks.flatMap((b): Extract<ContentBlock, { type: "image" }>[] => {
+        if (b.type === "image") return [b];
+        if (b.type === "resource_link" && b.kind !== "skill" && isImageResource(b.uri, b.mimeType)) {
+          return [{ type: "image", mimeType: b.mimeType || "image/*", uri: b.uri }];
+        }
+        return [];
+      }),
     [item.blocks],
   );
 
@@ -787,9 +796,11 @@ function UserTurnRow({
             <MarkdownView
               text={parsedView.text}
               computerKey={connection.computer.key}
+              connection={connection}
               sessionId={sessionId}
               cwd={cwd}
               searchQuery={searchQuery}
+              onOpenImage={onOpenImage}
             />
           )
         )}
@@ -802,6 +813,7 @@ function UserTurnRow({
                 block={img}
                 connection={connection}
                 sessionId={sessionId}
+                cwd={cwd}
                 onOpen={onOpenImage}
               />
             ))}
@@ -850,46 +862,92 @@ function UserTurnRow({
   );
 }
 
+const DIRECT_THUMB_URI = /^(?:data:image\/|https?:\/\/|blob:)/i;
+
 function SessionImageThumb({
   block,
   connection,
   sessionId,
+  cwd,
   onOpen,
 }: {
   block: Extract<ContentBlock, { type: "image" }>;
   connection: Connection;
   sessionId: string;
+  cwd?: string;
   onOpen: (src: string, alt: string) => void;
 }) {
   const copy = useSessionCopy();
   const inlineSrc = block.data
     ? `data:${block.mimeType || "image/png"};base64,${block.data}`
     : undefined;
-  const [resolvedSrc, setResolvedSrc] = useState<string | undefined>(inlineSrc);
+  const rawUri = (block as { uri?: string }).uri;
+  const isDirectUri = Boolean(rawUri && DIRECT_THUMB_URI.test(rawUri));
+  const hostTarget = useMemo(
+    () =>
+      !inlineSrc && rawUri && !rawUri.startsWith("linkshell-event:") && !isDirectUri
+        ? resolveFileHrefTarget(rawUri, cwd)
+        : null,
+    [cwd, inlineSrc, isDirectUri, rawUri],
+  );
+  const hostCacheKey = hostTarget ? `${connection.computer.key}\0${hostTarget.path}` : undefined;
+  const [resolvedSrc, setResolvedSrc] = useState<string | undefined>(() =>
+    inlineSrc ?? (isDirectUri ? rawUri : hostCacheKey ? desktopHostImageCache.peek(hostCacheKey) : undefined),
+  );
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
+    setFailed(false);
     if (inlineSrc) {
       setResolvedSrc(inlineSrc);
       return;
     }
-    const uri = (block as { uri?: string }).uri;
-    if (!uri) return;
-    if (!uri.startsWith("linkshell-event:")) {
-      setResolvedSrc(uri);
+    if (!rawUri) {
+      setResolvedSrc(undefined);
+      return;
+    }
+    if (isDirectUri) {
+      setResolvedSrc(rawUri);
       return;
     }
     let alive = true;
-    void connection.store
-      .getState()
-      .loadImage(sessionId, uri)
-      .then((dataUri) => {
-        if (alive) setResolvedSrc(dataUri);
-      })
-      .catch(() => undefined);
+    if (rawUri.startsWith("linkshell-event:")) {
+      void connection.store
+        .getState()
+        .loadImage(sessionId, rawUri)
+        .then(
+          (dataUri) => {
+            if (alive) setResolvedSrc(dataUri);
+          },
+          () => {
+            if (alive) setFailed(true);
+          },
+        );
+    } else if (hostTarget && hostCacheKey) {
+      const hit = desktopHostImageCache.peek(hostCacheKey);
+      if (hit) {
+        setResolvedSrc(hit);
+        return;
+      }
+      setResolvedSrc(undefined);
+      void desktopHostImageCache
+        .load(hostCacheKey, connection.link, hostTarget.path)
+        .then(
+          (dataUri) => {
+            if (alive) setResolvedSrc(dataUri);
+          },
+          () => {
+            if (alive) setFailed(true);
+          },
+        );
+    } else {
+      setResolvedSrc(undefined);
+      setFailed(true);
+    }
     return () => {
       alive = false;
     };
-  }, [block, connection.store, inlineSrc, sessionId]);
+  }, [connection.link, connection.store, hostCacheKey, hostTarget, inlineSrc, isDirectUri, rawUri, sessionId]);
 
   if (!resolvedSrc) {
     return (
@@ -901,7 +959,14 @@ function SessionImageThumb({
           display: "grid",
           placeItems: "center",
           background: "var(--ls-inset)",
+          cursor: failed && hostTarget ? "pointer" : undefined,
         }}
+        title={failed && hostTarget ? hostTarget.path : undefined}
+        onClick={
+          failed && hostTarget
+            ? () => openFileInInspector(connection.computer.key, sessionId, hostTarget.path)
+            : undefined
+        }
       >
         <DesktopIcon name="image" size="sm" />
       </div>
@@ -914,6 +979,10 @@ function SessionImageThumb({
       alt={copy.attachedImage}
       className="ls-user-image-thumb"
       onClick={() => onOpen(resolvedSrc, copy.attachedImage)}
+      onError={() => {
+        setResolvedSrc(undefined);
+        setFailed(true);
+      }}
     />
   );
 }
@@ -942,9 +1011,13 @@ function AgentTurnRow({
   const cleaned = useMemo(() => cleanAgentHeartbeatText(item.text), [item.text]);
   const attachmentImages = useMemo(
     () =>
-      (item.attachments ?? []).filter(
-        (b): b is Extract<ContentBlock, { type: "image" }> => b.type === "image",
-      ),
+      (item.attachments ?? []).flatMap((b): Extract<ContentBlock, { type: "image" }>[] => {
+        if (b.type === "image") return [b];
+        if (b.type === "resource_link" && b.kind !== "skill" && isImageResource(b.uri, b.mimeType)) {
+          return [{ type: "image", mimeType: b.mimeType || "image/*", uri: b.uri }];
+        }
+        return [];
+      }),
     [item.attachments],
   );
 
@@ -955,9 +1028,11 @@ function AgentTurnRow({
           text={cleaned.text}
           streaming={item.streaming}
           computerKey={connection.computer.key}
+          connection={connection}
           sessionId={sessionId}
           cwd={cwd}
           searchQuery={searchQuery}
+          onOpenImage={onOpenImage}
         />
       )}
 
@@ -969,6 +1044,7 @@ function AgentTurnRow({
               block={img}
               connection={connection}
               sessionId={sessionId}
+              cwd={cwd}
               onOpen={onOpenImage}
             />
           ))}
@@ -1084,10 +1160,18 @@ function ToolCallRow({
     (c): c is Extract<typeof c, { type: "diff" | "patch" }> =>
       c.type === "diff" || c.type === "patch",
   );
-  const imageOutputs = item.content.filter(
-    (c): c is Extract<typeof c, { type: "content" }> =>
-      c.type === "content" && c.content.type === "image",
-  );
+  const imageOutputs = item.content.flatMap((c): Extract<ContentBlock, { type: "image" }>[] => {
+    if (c.type !== "content") return [];
+    if (c.content.type === "image") return [c.content];
+    if (
+      c.content.type === "resource_link" &&
+      c.content.kind !== "skill" &&
+      isImageResource(c.content.uri, c.content.mimeType)
+    ) {
+      return [{ type: "image", mimeType: c.content.mimeType || "image/*", uri: c.content.uri }];
+    }
+    return [];
+  });
 
   const totalStat = diffChanges.reduce(
     (acc, change) => {
@@ -1163,9 +1247,11 @@ function ToolCallRow({
           <MarkdownView
             text={planMarkdown}
             computerKey={connection.computer.key}
+            connection={connection}
             sessionId={sessionId}
             cwd={cwd}
             searchQuery={searchQuery}
+            onOpenImage={onOpenImage}
           />
         )}
 
@@ -1192,17 +1278,16 @@ function ToolCallRow({
           </pre>
         )}
 
-        {imageOutputs.map((entry, idx) =>
-          entry.content.type === "image" ? (
-            <SessionImageThumb
-              key={idx}
-              block={entry.content}
-              connection={connection}
-              sessionId={sessionId}
-              onOpen={onOpenImage}
-            />
-          ) : null,
-        )}
+        {imageOutputs.map((block, idx) => (
+          <SessionImageThumb
+            key={idx}
+            block={block}
+            connection={connection}
+            sessionId={sessionId}
+            cwd={cwd}
+            onOpen={onOpenImage}
+          />
+        ))}
 
         {note && <div className="ls-tool-exit-note">{note}</div>}
       </div>
@@ -1396,6 +1481,7 @@ function PlanTurnCard({
           <MarkdownView
             text={item.markdown}
             computerKey={connection.computer.key}
+            connection={connection}
             sessionId={sessionId}
             cwd={cwd}
             searchQuery={searchQuery}
@@ -1455,6 +1541,7 @@ function WrapUpTurnCard({
           <MarkdownView
             text={wrap.recap}
             computerKey={connection.computer.key}
+            connection={connection}
             sessionId={sessionId}
             cwd={cwd}
             searchQuery={searchQuery}

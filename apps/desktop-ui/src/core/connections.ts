@@ -169,6 +169,10 @@ export class ComputerConnections {
     };
   }
 
+  get(key: string): Connection | undefined {
+    return this.entries.get(key)?.connection;
+  }
+
   values(): Connection[] {
     return [...this.entries.values()].map(({ connection }) => connection);
   }

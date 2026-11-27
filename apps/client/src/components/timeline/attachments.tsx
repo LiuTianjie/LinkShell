@@ -1,6 +1,7 @@
+import { HostImageCache, isImageResource } from "@linkshell/client-core";
 import type { ContentBlock } from "@linkshell/wire";
 import { Image } from "expo-image";
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { File, Paths } from "expo-file-system";
 import { Buffer } from "buffer";
 import { ActivityIndicator, Modal, Pressable, StatusBar, StyleSheet, View } from "react-native";
@@ -13,10 +14,10 @@ import { LayoutProbe } from "../../../modules/link-layout";
 import { useLayoutGeometry } from "@/lib/use-layout-geometry";
 import { safeContentInsets } from "@/lib/adaptive-insets";
 import { nativeStatusBar } from "@/lib/native-status-bar";
-import { useActions } from "@/lib/client";
+import { useOptionalConnection } from "@/lib/client";
 import { useContentWidth } from "@/lib/content-width";
 import { baseName } from "@/lib/format";
-import { openLink } from "@/lib/links";
+import { fileTarget, openFile, openLink, useLinkBase } from "@/lib/links";
 import { haptics } from "@/lib/haptics";
 import { colors } from "@/theme/colors";
 import { radius, type } from "@/theme/type";
@@ -34,6 +35,7 @@ export function imageSource(block: ImageBlock | AudioBlock): { uri: string } {
 
 /** A picture the host kept back: fetched from it when shown (`loadImage`). */
 const REFERENCE = /^linkshell-event:/;
+const DIRECT_URI = /^(?:data:|https?:\/\/)/i;
 
 /** A row flung past unmounts before this long, and never asks the computer for its picture. */
 const FETCH_DELAY = 180;
@@ -41,6 +43,7 @@ const FETCH_DELAY = 180;
 /** Pictures already asked for: a row that comes back shows its picture without that wait. */
 const requested = new Set<string>();
 const resolvedUris = new Map<string, string>();
+const hostImages = new HostImageCache();
 
 /** Width ÷ height of pictures seen, so a row keeps its height when it comes back. */
 const ratios = new Map<string, number>();
@@ -51,27 +54,38 @@ export interface LoadedImage {
   /** True when the URI was already resolved before this mount (no fade-in needed). */
   cached: boolean;
   failed: boolean;
+  errorMessage?: string;
   retry: () => void;
 }
 
 /**
  * What to draw for an image block. Pictures in history arrive as a reference
  * and are fetched when the row mounts: the list is virtualized, so that is
- * when they are about to be seen. Nothing loads a session's pictures up front.
+ * when they are about to be seen. Local/Windows file paths on the connected
+ * computer are also fetched via `fs.read` and cached in memory.
  */
 export function useImage(block: ImageBlock | AudioBlock): LoadedImage {
   const sessionId = useTimelineSession();
-  const { loadImage } = useActions();
+  const connection = useOptionalConnection();
+  const base = useLinkBase();
   const reference = sessionId && !block.data && block.uri && REFERENCE.test(block.uri) ? block.uri : undefined;
-  const key = reference ? `${sessionId} ${reference}` : undefined;
-  const cachedUri = key ? resolvedUris.get(key) : undefined;
+  const hostFile = useMemo(
+    () => (!block.data && block.uri && !reference && !DIRECT_URI.test(block.uri) ? fileTarget(block.uri, base) : undefined),
+    [block.data, block.uri, reference, base],
+  );
+  const key = reference
+    ? `event:${sessionId} ${reference}`
+    : hostFile && connection
+      ? `file:${connection.key}\0${hostFile.path}`
+      : undefined;
+  const cachedUri = key ? (reference ? resolvedUris.get(key) : hostImages.peek(key)) : undefined;
   const [loaded, setLoaded] = useState<{ key: string; uri: string } | null>(() => (key && cachedUri ? { key, uri: cachedUri } : null));
-  const [failed, setFailed] = useState<string | null>(null);
+  const [failed, setFailed] = useState<{ key: string; message?: string } | null>(null);
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
-    if (!sessionId || !reference || !key) return;
-    const hit = resolvedUris.get(key);
+    if (!key) return;
+    const hit = reference ? resolvedUris.get(key) : hostImages.peek(key);
     if (hit) {
       setLoaded((current) => (current?.key === key && current.uri === hit ? current : { key, uri: hit }));
       return;
@@ -79,14 +93,22 @@ export function useImage(block: ImageBlock | AudioBlock): LoadedImage {
     let cancelled = false;
     const load = () => {
       requested.add(key);
-      loadImage(sessionId, reference).then(
+      const task = reference && sessionId && connection
+        ? connection.store.getState().loadImage(sessionId, reference).then((uri) => {
+            resolvedUris.set(key, uri);
+            return uri;
+          })
+        : hostFile && connection
+          ? hostImages.load(key, connection.link, hostFile.path)
+          : Promise.reject(new Error("未连接到电脑"));
+      task.then(
         (uri) => {
-          resolvedUris.set(key, uri);
           if (!cancelled) setLoaded({ key, uri });
         },
-        () => {
+        (reason: unknown) => {
           requested.delete(key);
-          if (!cancelled) setFailed(key);
+          const message = reason instanceof Error && reason.message ? reason.message : undefined;
+          if (!cancelled) setFailed({ key, message });
         },
       );
     };
@@ -101,17 +123,28 @@ export function useImage(block: ImageBlock | AudioBlock): LoadedImage {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [sessionId, reference, key, loadImage, attempt]);
+  }, [sessionId, reference, hostFile, connection, key, attempt]);
 
   const retry = useCallback(() => {
     setFailed(null);
     setAttempt((value) => value + 1);
   }, []);
 
-  if (!key) return { uri: imageSource(block).uri, cached: true, failed: false, retry };
+  if (!key) {
+    if (!block.data && block.uri && !DIRECT_URI.test(block.uri)) {
+      return { uri: undefined, cached: false, failed: true, retry };
+    }
+    return { uri: imageSource(block).uri, cached: true, failed: false, retry };
+  }
   if (cachedUri) return { uri: cachedUri, cached: true, failed: false, retry };
   // State from another picture (a recycled row) doesn't count.
-  return { uri: loaded?.key === key ? loaded.uri : undefined, cached: false, failed: failed === key, retry };
+  return {
+    uri: loaded?.key === key ? loaded.uri : undefined,
+    cached: false,
+    failed: failed?.key === key,
+    errorMessage: failed?.key === key ? failed.message : undefined,
+    retry,
+  };
 }
 
 /** Pinch, pan and double-tap zoom; a downward swipe at 1× dismisses. */
@@ -283,15 +316,27 @@ export const ImageThumb = memo(function ImageThumb({
   block,
   size,
   onRatio,
+  contentFit = "cover",
+  accessibilityLabel,
+  onError,
 }: {
   block: ImageBlock;
   size: number | { width: number; height: number };
   /** Reports the picture's width ÷ height once it has loaded. */
   onRatio?: (ratio: number) => void;
+  contentFit?: "cover" | "contain";
+  accessibilityLabel?: string;
+  onError?: (message?: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const image = useImage(block);
+  const [decodeFailedUri, setDecodeFailedUri] = useState<string | null>(null);
+  const [reloadNonce, setReloadNonce] = useState(0);
+  const failed = image.failed || (Boolean(image.uri) && decodeFailedUri === image.uri);
   const frame = typeof size === "number" ? { width: size, height: size } : size;
+  useEffect(() => {
+    if (failed) onError?.(image.errorMessage);
+  }, [failed, image.errorMessage, onError]);
   return (
     <>
       <PressableFeedback
@@ -299,11 +344,16 @@ export const ImageThumb = memo(function ImageThumb({
         onPress={() => {
           haptics.selection();
           // The viewer loads the picture itself, so it opens on one that isn't here yet.
-          if (image.failed) image.retry();
-          else setOpen(true);
+          if (failed) {
+            setDecodeFailedUri(null);
+            setReloadNonce((value) => value + 1);
+            image.retry();
+          } else {
+            setOpen(true);
+          }
         }}
         accessibilityRole="imagebutton"
-        accessibilityLabel={image.failed ? "图片加载失败，点按重试" : "查看图片"}
+        accessibilityLabel={failed ? "图片加载失败，点按重试" : accessibilityLabel || "查看图片"}
       >
         <View
           style={{
@@ -316,11 +366,13 @@ export const ImageThumb = memo(function ImageThumb({
             justifyContent: "center",
           }}
         >
-          {image.uri ? (
+          {image.uri && !failed ? (
             <Image
+              key={reloadNonce}
               source={{ uri: image.uri }}
               style={frame}
-              contentFit="cover"
+              contentFit={contentFit}
+              autoplay
               transition={image.cached ? 0 : 120}
               onLoad={
                 onRatio
@@ -330,8 +382,11 @@ export const ImageThumb = memo(function ImageThumb({
                     }
                   : undefined
               }
+              onError={() => {
+                if (image.uri) setDecodeFailedUri(image.uri);
+              }}
             />
-          ) : image.failed ? (
+          ) : failed ? (
             <View style={{ alignItems: "center", gap: 4, paddingHorizontal: 6 }}>
               <Icon sf="arrow.clockwise" md="refresh" size={15} color={colors.secondaryLabel} />
               <Text style={[type.caption, { color: colors.secondaryLabel, textAlign: "center" }]}>加载失败，点按重试</Text>
@@ -354,15 +409,17 @@ function linkIcon(uri: string): { sf: "globe" | "folder" | "doc"; md: "language"
 
 /** A file or URL the message refers to. Web links open; local files just name themselves. */
 export const LinkChip = memo(function LinkChip({ block, onBubble = false }: { block: LinkBlock; onBubble?: boolean }) {
+  const base = useLinkBase();
   const web = /^https?:/i.test(block.uri);
   const skill = block.kind === "skill";
+  const resolved = !web && !skill ? fileTarget(block.uri, base) : undefined;
   const name = skill
     ? block.name
     : block.name && block.name !== block.uri
       ? block.name
       : web
         ? block.uri.replace(/^https?:\/\//i, "")
-        : baseName(block.uri.replace(/^file:\/\//, ""));
+        : baseName(resolved?.path ?? block.uri.replace(/^file:\/\//i, ""));
   const icon = skill
     ? ({ sf: "wand.and.stars", md: "auto_fix_high" } as const)
     : block.kind === "agent"
@@ -371,7 +428,7 @@ export const LinkChip = memo(function LinkChip({ block, onBubble = false }: { bl
   const tint = skill ? colors.accent : colors.secondaryLabel;
   return (
     <Pressable
-      onPress={() => openLink(block.uri)}
+      onPress={() => openLink(block.uri, base)}
       accessibilityRole="link"
       accessibilityLabel={skill ? `技能 ${name}` : name}
       style={{
@@ -397,17 +454,40 @@ export const LinkChip = memo(function LinkChip({ block, onBubble = false }: { bl
   );
 });
 
+/** Image `resource_link` (such as a >3 MB GIF kept on disk): preview inline, fall back to a file chip on error. */
+function ResourceLinkImage({ block, maxWidth, maxHeight }: { block: LinkBlock; maxWidth: number; maxHeight: number }) {
+  const [failed, setFailed] = useState(false);
+  const imageBlock = useMemo<ImageBlock>(
+    () => ({ type: "image", mimeType: block.mimeType ?? "image/*", uri: block.uri }),
+    [block.mimeType, block.uri],
+  );
+  if (failed) return <LinkChip block={block} />;
+  return (
+    <SingleImage
+      block={imageBlock}
+      maxWidth={maxWidth}
+      maxHeight={maxHeight}
+      contentFit="contain"
+      accessibilityLabel={block.name || "查看图片"}
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
 /** Images as a thumbnail strip, then link chips. */
 export function Attachments({ blocks, align = "start", thumb = 120 }: { blocks: ContentBlock[]; align?: "start" | "end"; thumb?: number }) {
+  const base = useLinkBase();
   const images = blocks.filter((b): b is ImageBlock => b.type === "image");
   const links = blocks.filter((b): b is LinkBlock => b.type === "resource_link");
   const media = blocks.filter((block) => block.type === "audio" || block.type === "resource");
   if (!images.length && !links.length && !media.length) return null;
   const justify = align === "end" ? "flex-end" : "flex-start";
+  const singleMaxWidth = thumb >= 116 ? 240 : 200;
+  const singleMaxHeight = thumb >= 116 ? 240 : 160;
   return (
     <View style={{ gap: 6, alignItems: align === "end" ? "flex-end" : "flex-start" }}>
       {images.length === 1 ? (
-        <SingleImage block={images[0]!} maxWidth={thumb >= 116 ? 240 : 200} maxHeight={thumb >= 116 ? 240 : 160} />
+        <SingleImage block={images[0]!} maxWidth={singleMaxWidth} maxHeight={singleMaxHeight} />
       ) : images.length ? (
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, justifyContent: justify, maxWidth: thumb * 2 + 6 }}>
           {images.map((image, index) => (
@@ -415,9 +495,13 @@ export function Attachments({ blocks, align = "start", thumb = 120 }: { blocks: 
           ))}
         </View>
       ) : null}
-      {links.map((link, index) => (
-        <LinkChip key={index} block={link} />
-      ))}
+      {links.map((link, index) =>
+        link.kind !== "skill" && isImageResource(link.uri, link.mimeType) && (fileTarget(link.uri, base) || /^https?:\/\//i.test(link.uri)) ? (
+          <ResourceLinkImage key={index} block={link} maxWidth={singleMaxWidth} maxHeight={singleMaxHeight} />
+        ) : (
+          <LinkChip key={index} block={link} />
+        ),
+      )}
       {media.map((block, index) => block.type === "audio" ? <AudioAttachment key={index} block={block} /> : block.type === "resource" ? <EmbeddedResource key={index} block={block} /> : null)}
     </View>
   );
@@ -510,9 +594,25 @@ function EmbeddedResource({ block }: { block: Extract<ContentBlock, { type: "res
 }
 
 /** One image keeps its own aspect ratio, bounded to a comfortable size. */
-function SingleImage({ block, maxWidth: widest, maxHeight }: { block: ImageBlock; maxWidth: number; maxHeight: number }) {
+function SingleImage({
+  block,
+  maxWidth: widest,
+  maxHeight,
+  widthFactor = 0.66,
+  contentFit = "cover",
+  accessibilityLabel,
+  onError,
+}: {
+  block: ImageBlock;
+  maxWidth: number;
+  maxHeight: number;
+  widthFactor?: number;
+  contentFit?: "cover" | "contain";
+  accessibilityLabel?: string;
+  onError?: (message?: string) => void;
+}) {
   const sessionId = useTimelineSession();
-  const known = sessionId && !block.data && block.uri ? `${sessionId} ${block.uri}` : undefined;
+  const known = !block.data && block.uri ? `${sessionId ?? ""} ${block.uri}` : undefined;
   const [ratio, setRatio] = useState(() => (known ? ratios.get(known) : undefined) ?? 4 / 3);
   const onRatio = useCallback(
     (value: number) => {
@@ -522,13 +622,93 @@ function SingleImage({ block, maxWidth: widest, maxHeight }: { block: ImageBlock
     [known],
   );
   const screen = useContentWidth();
-  const maxWidth = Math.min(screen * 0.66, widest);
+  const maxWidth = Math.min(screen * widthFactor, widest);
   // Fit inside maxWidth × maxHeight, but never narrower than a comfortable tap target.
   const width = Math.max(Math.min(maxWidth, maxHeight * ratio), 96);
   const height = Math.min(width / ratio, maxHeight);
   return (
     <View>
-      <ImageThumb block={block} size={{ width, height }} onRatio={onRatio} />
+      <ImageThumb
+        block={block}
+        size={{ width, height }}
+        onRatio={onRatio}
+        contentFit={contentFit}
+        accessibilityLabel={accessibilityLabel}
+        onError={onError}
+      />
     </View>
   );
 }
+
+/**
+ * Renders an image embedded in Markdown (`![alt](url)`) using `expo-image`, so
+ * animated GIFs play natively and host files (`file:///D:/...`, `/path`, `./...`)
+ * load over `fs.read`.
+ */
+export const MarkdownImage = memo(function MarkdownImage({ url, alt }: { url: string; alt?: string }) {
+  const base = useLinkBase();
+  const hostFile = useMemo(() => (DIRECT_URI.test(url) ? undefined : fileTarget(url, base)), [url, base]);
+  const block = useMemo<ImageBlock>(() => ({ type: "image", mimeType: "image/*", uri: url }), [url]);
+  const [failed, setFailed] = useState<{ message?: string } | null>(null);
+
+  useEffect(() => {
+    setFailed(null);
+  }, [url]);
+
+  if (failed && hostFile) {
+    const label = alt?.trim() || baseName(hostFile.path);
+    return (
+      <View style={{ gap: 4 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <Pressable
+            onPress={() => openFile(hostFile)}
+            accessibilityRole="link"
+            accessibilityLabel={`打开文件 ${label}`}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 6,
+              minHeight: 40,
+              paddingHorizontal: 10,
+              paddingVertical: 6,
+              borderRadius: radius.chip,
+              borderCurve: "continuous",
+              backgroundColor: colors.fill,
+              maxWidth: "100%",
+            }}
+          >
+            <Icon sf="photo" md="image" size={14} color={colors.secondaryLabel} />
+            <Text numberOfLines={1} style={[type.footnote, { flexShrink: 1, color: colors.label, fontWeight: "500" }]}>
+              {label}
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setFailed(null)}
+            accessibilityRole="button"
+            accessibilityLabel="重试加载图片"
+            style={{ minHeight: 36, justifyContent: "center", paddingHorizontal: 6 }}
+          >
+            <Text style={[type.footnote, { color: colors.accent, fontWeight: "500" }]}>重试</Text>
+          </Pressable>
+        </View>
+        {failed.message ? (
+          <Text numberOfLines={2} style={[type.caption, { color: colors.secondaryLabel }]}>
+            {failed.message}
+          </Text>
+        ) : null}
+      </View>
+    );
+  }
+
+  return (
+    <SingleImage
+      block={block}
+      maxWidth={480}
+      maxHeight={320}
+      widthFactor={1}
+      contentFit="contain"
+      accessibilityLabel={alt?.trim() || (hostFile ? baseName(hostFile.path) : "查看图片")}
+      onError={hostFile ? (message) => setFailed({ message }) : undefined}
+    />
+  );
+});

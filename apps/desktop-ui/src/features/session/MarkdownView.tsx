@@ -3,21 +3,29 @@ import {
   cloneElement,
   isValidElement,
   memo,
+  useEffect,
   useMemo,
+  useState,
   type ReactElement,
   type ReactNode,
 } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { HostImageCache, normalizeMarkdownForDisplay } from "@linkshell/client-core";
 import { openExternalUrl } from "@/bridge/desktop-bridge";
 import {
+  engine,
   markdownBlocks,
   renderHighlightedTokens,
   useHighlight,
   useSmoothText,
+  type Connection,
 } from "@/core";
 import { CopyButton } from "@/primitives";
-import { openFileInInspector, resolveFileHrefTarget } from "./session-helpers";
+import { basenameOfPath, openFileInInspector, resolveFileHrefTarget } from "./session-helpers";
+
+export const desktopHostImageCache = new HostImageCache();
+const DIRECT_IMAGE_URL = /^(?:data:image\/|https?:\/\/|blob:)/i;
 
 const REMARK_PLUGINS = [remarkGfm];
 
@@ -124,22 +132,185 @@ export function CodeFence({
   );
 }
 
+export interface MarkdownImageProps {
+  src?: string;
+  alt?: string;
+  computerKey?: string;
+  connection?: Connection;
+  sessionId?: string;
+  cwd?: string;
+  onOpenImage?: (src: string, alt: string) => void;
+}
+
+/**
+ * Renders an image embedded in Markdown (`![alt](src)`). Host paths (`file:///D:/...`,
+ * `/path/to/a.gif`, `./_artifacts/a.gif`) are fetched over `fs.read` so Chromium never blocks
+ * `file://` resources and remote computers work identically to local ones; GIFs animate natively.
+ */
+export function MarkdownImage({
+  src,
+  alt,
+  computerKey,
+  connection,
+  sessionId,
+  cwd,
+  onOpenImage,
+}: MarkdownImageProps) {
+  const cleanSrc = typeof src === "string" ? src.trim() : "";
+  const isDirect = Boolean(cleanSrc && DIRECT_IMAGE_URL.test(cleanSrc));
+  const hostTarget = useMemo(
+    () => (!isDirect && cleanSrc ? resolveFileHrefTarget(cleanSrc, cwd) : null),
+    [cleanSrc, cwd, isDirect],
+  );
+  const resolvedConnection =
+    connection ?? (computerKey ? engine.connectionForKey(computerKey) : undefined);
+  const cacheKey =
+    hostTarget && resolvedConnection
+      ? `${resolvedConnection.computer.key}\0${hostTarget.path}`
+      : undefined;
+
+  const [resolvedSrc, setResolvedSrc] = useState<string | undefined>(() =>
+    isDirect ? cleanSrc : cacheKey ? desktopHostImageCache.peek(cacheKey) : undefined,
+  );
+  const [failedMessage, setFailedMessage] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    setFailedMessage(null);
+    if (isDirect) {
+      setResolvedSrc(cleanSrc);
+      return;
+    }
+    if (!hostTarget || !resolvedConnection || !cacheKey) {
+      setResolvedSrc(undefined);
+      setFailedMessage(cleanSrc ? "图片加载失败" : null);
+      return;
+    }
+    const hit = desktopHostImageCache.peek(cacheKey);
+    if (hit) {
+      setResolvedSrc(hit);
+      return;
+    }
+    setResolvedSrc(undefined);
+    let alive = true;
+    void desktopHostImageCache
+      .load(cacheKey, resolvedConnection.link, hostTarget.path)
+      .then(
+        (dataUri) => {
+          if (alive) setResolvedSrc(dataUri);
+        },
+        (reason: unknown) => {
+          if (alive) {
+            const msg = reason instanceof Error && reason.message ? reason.message : "图片加载失败";
+            setFailedMessage(msg);
+          }
+        },
+      );
+    return () => {
+      alive = false;
+    };
+  }, [attempt, cacheKey, cleanSrc, hostTarget, isDirect, resolvedConnection]);
+
+  if (!cleanSrc) return null;
+
+  const label = alt?.trim() || (hostTarget ? basenameOfPath(hostTarget.path) : "图片");
+
+  if (resolvedSrc && !failedMessage) {
+    return (
+      <img
+        className="ls-md-image"
+        src={resolvedSrc}
+        alt={label}
+        loading="lazy"
+        referrerPolicy="no-referrer"
+        data-zoomable={onOpenImage ? "true" : undefined}
+        onClick={
+          onOpenImage
+            ? (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onOpenImage(resolvedSrc, label);
+              }
+            : undefined
+        }
+        onError={() => {
+          setResolvedSrc(undefined);
+          setFailedMessage("图片加载失败");
+        }}
+      />
+    );
+  }
+
+  if (failedMessage) {
+    return (
+      <span className="ls-md-image-state" role="status">
+        {hostTarget && computerKey ? (
+          <a
+            href={`file://${hostTarget.path}`}
+            className="ls-md-file-link"
+            onClick={(event) => {
+              event.preventDefault();
+              openFileInInspector(computerKey, sessionId, hostTarget.path, hostTarget.line, hostTarget.endLine);
+            }}
+          >
+            {label}
+          </a>
+        ) : isDirect && /^https?:\/\//i.test(cleanSrc) ? (
+          <a
+            href={cleanSrc}
+            onClick={(event) => {
+              event.preventDefault();
+              openExternalUrl(cleanSrc);
+            }}
+          >
+            {label}
+          </a>
+        ) : (
+          <span>{label}</span>
+        )}
+        <span className="ls-md-image-status">（{failedMessage}）</span>
+        <button
+          type="button"
+          className="ls-md-image-retry"
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            setAttempt((value) => value + 1);
+          }}
+        >
+          重试
+        </button>
+      </span>
+    );
+  }
+
+  return (
+    <span className="ls-md-image-state" role="status">
+      图片加载中…
+    </span>
+  );
+}
+
 interface MarkdownBlockProps {
   block: string;
   streaming: boolean;
   computerKey?: string;
+  connection?: Connection;
   sessionId?: string;
   cwd?: string;
   searchQuery?: string;
+  onOpenImage?: (src: string, alt: string) => void;
 }
 
 const SingleMarkdownBlock = memo(function SingleMarkdownBlock({
   block,
   streaming,
   computerKey,
+  connection,
   sessionId,
   cwd,
   searchQuery,
+  onOpenImage,
 }: MarkdownBlockProps) {
   const components = useMemo<Components>(
     () => ({
@@ -161,7 +332,11 @@ const SingleMarkdownBlock = memo(function SingleMarkdownBlock({
           );
         }
         const fileTarget = computerKey ? resolveFileHrefTarget(rawText, cwd) : null;
-        if (fileTarget && computerKey && (rawText.includes("/") || /\.[a-z]{1,6}(:\d+)?$/i.test(rawText))) {
+        if (
+          fileTarget &&
+          computerKey &&
+          (rawText.includes("/") || rawText.includes("\\") || /\.[a-z]{1,6}(:\d+)?$/i.test(rawText))
+        ) {
           return (
             <code
               role="button"
@@ -182,6 +357,19 @@ const SingleMarkdownBlock = memo(function SingleMarkdownBlock({
           );
         }
         return <code>{searchQuery ? highlightTextNodes(children, searchQuery) : children}</code>;
+      },
+      img({ src, alt }) {
+        return (
+          <MarkdownImage
+            src={src}
+            alt={alt}
+            computerKey={computerKey}
+            connection={connection}
+            sessionId={sessionId}
+            cwd={cwd}
+            onOpenImage={onOpenImage}
+          />
+        );
       },
       a({ href, children }) {
         const safeHref = href ?? "";
@@ -254,7 +442,7 @@ const SingleMarkdownBlock = memo(function SingleMarkdownBlock({
         return <th>{searchQuery ? highlightTextNodes(children, searchQuery) : children}</th>;
       },
     }),
-    [computerKey, cwd, searchQuery, sessionId, streaming],
+    [computerKey, connection, cwd, onOpenImage, searchQuery, sessionId, streaming],
   );
 
   return (
@@ -272,21 +460,26 @@ export interface MarkdownViewProps {
   text: string;
   streaming?: boolean;
   computerKey?: string;
+  connection?: Connection;
   sessionId?: string;
   cwd?: string;
   searchQuery?: string;
+  onOpenImage?: (src: string, alt: string) => void;
 }
 
 export function MarkdownView({
   text,
   streaming = false,
   computerKey,
+  connection,
   sessionId,
   cwd,
   searchQuery,
+  onOpenImage,
 }: MarkdownViewProps) {
   const smoothed = useSmoothText(text, streaming);
-  const blocks = useMemo(() => markdownBlocks(smoothed), [smoothed]);
+  const normalized = useMemo(() => normalizeMarkdownForDisplay(smoothed), [smoothed]);
+  const blocks = useMemo(() => markdownBlocks(normalized), [normalized]);
 
   if (!smoothed) return null;
 
@@ -300,9 +493,11 @@ export function MarkdownView({
             block={block}
             streaming={streaming && isTail}
             computerKey={computerKey}
+            connection={connection}
             sessionId={sessionId}
             cwd={cwd}
             searchQuery={searchQuery}
+            onOpenImage={onOpenImage}
           />
         );
       })}

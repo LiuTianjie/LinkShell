@@ -36,6 +36,7 @@ import { messageTime } from "./session-time";
 import remarkGfm from "remark-gfm";
 import type { ContentBlock, ToolCallContent, UserContext } from "@linkshell/wire";
 import {
+  HostImageCache,
   answeredQuestions,
   askedQuestions,
   compactionLabel,
@@ -44,7 +45,9 @@ import {
   exitNote,
   foldStepRuns,
   formatElapsed,
+  isImageResource,
   isQuietTool,
+  normalizeMarkdownForDisplay,
   presentError,
   proposedPlan,
   reconnectLabel,
@@ -69,6 +72,8 @@ import { ChevronRight, ClipboardPaste, FileText, GitMerge, GitPullRequest, Globe
 import {
   AgentMark,
   ErrorNotice,
+  Runtime,
+  baseName,
   useActions,
   useConnection,
   useSessionOnline,
@@ -457,9 +462,121 @@ function MarkdownLink({ href, children }: { href?: string; children?: React.Reac
   );
 }
 
+const webHostImages = new HostImageCache();
+const WEB_DIRECT_IMAGE_URL = /^(?:data:image\/|https?:\/\/|blob:)/i;
+
+function MarkdownImage({ src, alt }: { src?: string; alt?: string }) {
+  const navigation = useContext(TimelineNavigation);
+  const connection = useContext(Runtime);
+  const cleanSrc = typeof src === "string" ? src.trim() : "";
+  const isDirect = Boolean(cleanSrc && WEB_DIRECT_IMAGE_URL.test(cleanSrc));
+  const target = useMemo(
+    () => (!isDirect && cleanSrc ? fileTarget(cleanSrc, navigation?.cwd) : undefined),
+    [cleanSrc, isDirect, navigation?.cwd],
+  );
+  const cacheKey =
+    target && connection ? `${connection.computer.key}\0${target.path}` : undefined;
+  const [uri, setUri] = useState<string | undefined>(() =>
+    isDirect ? cleanSrc : cacheKey ? webHostImages.peek(cacheKey) : undefined,
+  );
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    setErrorMessage(null);
+    if (isDirect) {
+      setUri(cleanSrc);
+      return;
+    }
+    if (!target || !connection || !cacheKey) {
+      setUri(undefined);
+      setErrorMessage(cleanSrc ? "图片加载失败" : null);
+      return;
+    }
+    const hit = webHostImages.peek(cacheKey);
+    if (hit) {
+      setUri(hit);
+      return;
+    }
+    setUri(undefined);
+    let alive = true;
+    void webHostImages.load(cacheKey, connection.link, target.path).then(
+      (value) => {
+        if (alive) setUri(value);
+      },
+      (reason: unknown) => {
+        if (alive) {
+          setErrorMessage(reason instanceof Error && reason.message ? reason.message : "图片加载失败");
+        }
+      },
+    );
+    return () => {
+      alive = false;
+    };
+  }, [attempt, cacheKey, cleanSrc, connection, isDirect, target]);
+
+  if (!cleanSrc) return null;
+  const label = alt?.trim() || (target ? baseName(target.path) : "查看图片");
+
+  if (uri && !errorMessage) {
+    return (
+      <ImageLightbox
+        uri={uri}
+        alt={label}
+        download={target ? baseName(target.path) : undefined}
+        onError={() => {
+          setUri(undefined);
+          setErrorMessage("图片加载失败");
+        }}
+      />
+    );
+  }
+
+  if (errorMessage) {
+    return (
+      <span className="message-asset-state" role="status">
+        {target && navigation ? (
+          <Button
+            variant="ghost"
+            size="plain"
+            className="resource-chip"
+            onClick={() => navigation.open(target.path, target.line)}
+          >
+            文件 · {label}
+          </Button>
+        ) : isDirect && /^https?:\/\//i.test(cleanSrc) ? (
+          <a href={cleanSrc} target="_blank" rel="noreferrer">
+            {label} <ArrowUpRight className="external-link-icon" aria-hidden />
+          </a>
+        ) : (
+          <span>{label}</span>
+        )}
+        <span>{errorMessage}</span>
+        <Button
+          variant="link"
+          size="sm"
+          onClick={() => setAttempt((value) => value + 1)}
+        >
+          重试图片
+        </Button>
+      </span>
+    );
+  }
+
+  return (
+    <span className="message-asset-state" role="status">
+      图片加载中…
+    </span>
+  );
+}
+
 // Stable, so a block whose text didn't change is not parsed again when its message re-renders.
 const markdownPlugins = [remarkGfm];
-const markdownURL = (url: string) => (url.startsWith("file://") ? url : defaultUrlTransform(url));
+const markdownURL = (url: string) => {
+  const trimmed = url.trim();
+  if (/^(?:file:\/\/|data:image\/|[A-Za-z]:[\\/])/i.test(trimmed)) return trimmed;
+  return defaultUrlTransform(trimmed);
+};
 const markdownComponents: Components = {
   pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
   a: ({ href, children }) => <MarkdownLink href={href}>{children}</MarkdownLink>,
@@ -469,11 +586,7 @@ const markdownComponents: Components = {
     </div>
   ),
   th: ({ children, ...props }) => <th scope="col" {...props}>{children}</th>,
-  img: ({ src, alt }) => (
-    <a href={typeof src === "string" ? src : undefined} target="_blank" rel="noreferrer">
-      {alt || "查看图片"} <ArrowUpRight className="external-link-icon" aria-hidden />
-    </a>
-  ),
+  img: ({ src, alt }) => <MarkdownImage src={typeof src === "string" ? src : undefined} alt={alt} />,
 };
 
 const MarkdownBlock = memo(function MarkdownBlock({ text }: { text: string }) {
@@ -498,9 +611,10 @@ const MarkdownBlock = memo(function MarkdownBlock({ text }: { text: string }) {
       ),
     };
   }, [searchQuery]);
+  const normalized = useMemo(() => normalizeMarkdownForDisplay(text), [text]);
   return (
     <Markdown remarkPlugins={markdownPlugins} urlTransform={markdownURL} components={components}>
-      {text}
+      {normalized}
     </Markdown>
   );
 });
@@ -611,12 +725,28 @@ function Picture({
   sessionId: string;
 }) {
   const actions = useActions();
+  const navigation = useContext(TimelineNavigation);
+  const connection = useContext(Runtime);
+  const hostFile = useMemo(
+    () =>
+      !block.data &&
+      block.uri &&
+      !block.uri.startsWith("linkshell-event:") &&
+      !WEB_DIRECT_IMAGE_URL.test(block.uri)
+        ? fileTarget(block.uri, navigation?.cwd)
+        : undefined,
+    [block.data, block.uri, navigation?.cwd],
+  );
+  const hostCacheKey =
+    hostFile && connection ? `${connection.computer.key}\0${hostFile.path}` : undefined;
   const [uri, setUri] = useState(
     block.data
       ? `data:${block.mimeType};base64,${block.data}`
-      : block.uri && /^(data:image\/|https?:\/\/)/.test(block.uri)
+      : block.uri && WEB_DIRECT_IMAGE_URL.test(block.uri)
         ? block.uri
-        : undefined,
+        : hostCacheKey
+          ? webHostImages.peek(hostCacheKey)
+          : undefined,
   );
   const [error, setError] = useState<string>();
   const [attempt, setAttempt] = useState(0);
@@ -624,14 +754,20 @@ function Picture({
   useEffect(() => {
     let alive = true;
     setError(undefined);
-    setUri(
-      block.data
-        ? `data:${block.mimeType};base64,${block.data}`
-        : block.uri && /^(data:image\/|https?:\/\/)/.test(block.uri)
-          ? block.uri
-          : undefined,
-    );
-    if (block.uri?.startsWith("linkshell-event:"))
+    const direct = block.data
+      ? `data:${block.mimeType};base64,${block.data}`
+      : block.uri && WEB_DIRECT_IMAGE_URL.test(block.uri)
+        ? block.uri
+        : hostCacheKey
+          ? webHostImages.peek(hostCacheKey)
+          : undefined;
+    setUri(direct);
+    if (direct) {
+      return () => {
+        alive = false;
+      };
+    }
+    if (block.uri?.startsWith("linkshell-event:")) {
       void loadImage(sessionId, block.uri).then(
         (value) => {
           if (alive) setUri(value);
@@ -640,10 +776,22 @@ function Picture({
           if (alive) setError("图片加载失败");
         },
       );
+    } else if (hostFile && connection && hostCacheKey) {
+      void webHostImages.load(hostCacheKey, connection.link, hostFile.path).then(
+        (value) => {
+          if (alive) setUri(value);
+        },
+        () => {
+          if (alive) setError("图片加载失败");
+        },
+      );
+    } else if (block.uri) {
+      setError("图片加载失败");
+    }
     return () => {
       alive = false;
     };
-  }, [loadImage, block.uri, block.data, block.mimeType, sessionId, attempt]);
+  }, [loadImage, block.uri, block.data, block.mimeType, sessionId, attempt, hostFile, connection, hostCacheKey]);
   return uri ? (
     <ImageLightbox
       uri={uri}
@@ -735,6 +883,7 @@ export function Blocks({
   sessionId: string;
   onFile: (path: string, line?: number) => void;
 }) {
+  const navigation = useContext(TimelineNavigation);
   return (
     <>
       {blocks.map((block, index) =>
@@ -771,6 +920,8 @@ export function Blocks({
               />
             )}
           </details>
+        ) : block.kind !== "skill" && isImageResource(block.uri, block.mimeType) ? (
+          <MarkdownImage key={index} src={block.uri} alt={block.name} />
         ) : /^https?:\/\//.test(block.uri) ? (
           <a
             key={index}
@@ -787,7 +938,10 @@ export function Blocks({
             size="plain"
             key={index}
             className="resource-chip"
-            onClick={() => onFile(block.uri.replace(/^file:\/\//, ""))}
+            onClick={() => {
+              const target = fileTarget(block.uri, navigation?.cwd);
+              onFile(target ? target.path : block.uri.replace(/^file:\/\//i, ""), target?.line);
+            }}
           >
             {block.kind === "skill" ? "技能 · " : "文件 · "}
             {block.name}

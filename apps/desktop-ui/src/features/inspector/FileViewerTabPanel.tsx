@@ -9,7 +9,7 @@ import {
 } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { downloadFile, downloadName } from "@linkshell/client-core";
+import { downloadFile, downloadName, normalizeMarkdownForDisplay } from "@linkshell/client-core";
 import {
   RPC_METHOD_NOT_FOUND,
   RpcError,
@@ -34,6 +34,10 @@ import {
   Badge,
   Button,
   CopyButton,
+  Dialog,
+  DialogBody,
+  DialogHeader,
+  DialogTitle,
   EmptyState,
   IconButton,
   Menu,
@@ -60,8 +64,10 @@ import {
   setFileDraft,
 } from "./inspector-tabs-store";
 import {
+  parentOfPath,
   resolveFileHrefTarget,
 } from "../session/session-helpers";
+import { MarkdownImage } from "../session/MarkdownView";
 
 function safeMarkdownUrlTransform(url: string): string {
   const trimmed = url.trim();
@@ -121,31 +127,40 @@ export interface ParsedFileSpec {
 }
 
 export function parseFileSpec(spec: string): ParsedFileSpec {
-  const hashIdx = spec.lastIndexOf("#L");
+  let clean = spec.trim();
+  const hashIdx = clean.lastIndexOf("#L");
   if (hashIdx > 0) {
-    const basePath = spec.slice(0, hashIdx);
-    const anchor = spec.slice(hashIdx + 2);
+    const basePath = clean.slice(0, hashIdx);
+    const anchor = clean.slice(hashIdx + 2);
     const match = /^(\d+)(?:C\d+)?(?:-L?(\d+)(?:C\d+)?)?$/i.exec(anchor);
     if (match) {
       const start = Number(match[1]);
       const end = match[2] ? Number(match[2]) : start;
+      const normalized = /^\/+[A-Za-z]:[\\/]/.test(basePath) ? basePath.replace(/^\/+/, "") : basePath;
       return {
-        path: basePath,
+        path: normalized,
         startLine: Math.min(start, end),
         endLine: Math.max(start, end),
       };
     }
   }
-  const colonMatch = /^(.*?):(\d+)(?::\d+)?$/.exec(spec);
+  // Strip non-line URL fragments (e.g. `attack-effects-v82.html#weapons-001`) while keeping `#` in dirs.
+  const nonLineHash = /^(.*?)#[^/\\]*$/.exec(clean);
+  if (nonLineHash && nonLineHash[1]) {
+    clean = nonLineHash[1];
+  }
+  const colonMatch = /^(.*?):(\d+)(?::\d+)?$/.exec(clean);
   if (colonMatch && colonMatch[1] && !/^[A-Za-z]$/.test(colonMatch[1])) {
     const start = Number(colonMatch[2]);
+    const basePath = /^\/+[A-Za-z]:[\\/]/.test(colonMatch[1]) ? colonMatch[1].replace(/^\/+/, "") : colonMatch[1];
     return {
-      path: colonMatch[1],
+      path: basePath,
       startLine: start,
       endLine: start,
     };
   }
-  return { path: spec };
+  const normalized = /^\/+[A-Za-z]:[\\/]/.test(clean) ? clean.replace(/^\/+/, "") : clean;
+  return { path: normalized };
 }
 
 export function formatByteSize(bytes: number | undefined): string {
@@ -382,6 +397,7 @@ export function FileViewerTabPanel({
   const [reloadTick, setReloadTick] = useState(0);
   const [saveUnsupported, setSaveUnsupported] = useState(false);
 
+  const [lightboxImage, setLightboxImage] = useState<{ src: string; alt: string } | null>(null);
   const [markdownMode, setMarkdownMode] = useState<"preview" | "source">(() =>
     isMarkdownPath(effectivePath) ? "preview" : "source",
   );
@@ -1346,7 +1362,7 @@ export function FileViewerTabPanel({
                   const safeHref = anchorProps.href ?? "";
                   const fileTarget = resolveFileHrefTarget(
                     safeHref,
-                    cwd,
+                    parentOfPath(loadedFile.path) || cwd,
                   );
                   return (
                     <a
@@ -1386,6 +1402,19 @@ export function FileViewerTabPanel({
                     </div>
                   );
                 },
+                img(imgProps) {
+                  return (
+                    <MarkdownImage
+                      src={imgProps.src}
+                      alt={imgProps.alt}
+                      computerKey={computerKey}
+                      connection={connection}
+                      sessionId={sessionId}
+                      cwd={parentOfPath(loadedFile.path) || cwd}
+                      onOpenImage={(src, alt) => setLightboxImage({ src, alt })}
+                    />
+                  );
+                },
                 code(codeProps) {
                   const { className, children } = codeProps;
                   const langMatch = /language-([\w+-]+)/.exec(className ?? "");
@@ -1402,8 +1431,26 @@ export function FileViewerTabPanel({
                 },
               }}
             >
-              {loadedFile.text}
+              {normalizeMarkdownForDisplay(loadedFile.text)}
             </ReactMarkdown>
+            <Dialog
+              open={Boolean(lightboxImage)}
+              onOpenChange={(open) => {
+                if (!open) setLightboxImage(null);
+              }}
+              size="lg"
+            >
+              <DialogHeader>
+                <DialogTitle>{lightboxImage?.alt || "图片"}</DialogTitle>
+              </DialogHeader>
+              <DialogBody>
+                {lightboxImage && (
+                  <div className="ls-lightbox-frame">
+                    <img src={lightboxImage.src} alt={lightboxImage.alt} />
+                  </div>
+                )}
+              </DialogBody>
+            </Dialog>
           </div>
         ) : (
           <>

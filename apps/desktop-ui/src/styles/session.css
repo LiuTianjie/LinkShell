@@ -764,6 +764,46 @@
     text-underline-offset: 2px;
   }
 
+  .ls-markdown .ls-md-image {
+    display: block;
+    max-inline-size: min(100%, 560px);
+    max-block-size: 420px;
+    object-fit: contain;
+    margin-block: 8px;
+    border-radius: var(--ls-radius-md);
+    border: 1px solid var(--ls-border);
+    background: var(--ls-inset);
+  }
+
+  .ls-markdown .ls-md-image[data-zoomable="true"] {
+    cursor: zoom-in;
+  }
+
+  .ls-markdown .ls-md-image-state {
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-block: 4px;
+    font-size: var(--ls-text-sm);
+    color: var(--ls-fg-2);
+  }
+
+  .ls-markdown .ls-md-image-status {
+    color: var(--ls-fg-3);
+  }
+
+  .ls-markdown .ls-md-image-retry {
+    border: 0;
+    background: none;
+    padding: 0 4px;
+    color: var(--ls-accent);
+    font-size: var(--ls-text-sm);
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
   .ls-markdown :not(pre) > code {
     font-family: var(--font-mono);
     font-size: 12px;

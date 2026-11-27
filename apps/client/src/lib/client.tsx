@@ -404,6 +404,11 @@ function useConnectionContext(): ConnectionContextValue {
   return value;
 }
 
+/** Returns the active connection if inside `ClientProvider`, or undefined in isolated previews/tests. */
+export function useOptionalConnection(): Connection | undefined {
+  return use(ConnectionContext)?.connection;
+}
+
 /** False until the first computer is added (pairing or a member account). */
 export function useHasComputer(): boolean {
   return useConnectionContext().connection.key !== NO_COMPUTER_KEY;

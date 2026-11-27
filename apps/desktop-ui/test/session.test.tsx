@@ -28,12 +28,14 @@ import {
 import { DialogProvider } from "../src/primitives";
 import {
   INSPECTOR_OPEN_FILE_EVENT,
+  MarkdownView,
   NewSessionWorkspace,
   SessionHeaderActions,
   SessionWorkspace,
   sessionKeyOf,
   sessionUiStore,
 } from "../src/features/session";
+import { desktopHostImageCache } from "../src/features/session/MarkdownView";
 import { resolveFileHrefTarget } from "../src/features/session/session-helpers";
 import {
   inspectorTabsStore,
@@ -1652,5 +1654,83 @@ describe("Slice 2B-2: New Session, Streaming Timeline, Approvals/Questions & Cod
       line: undefined,
       endLine: undefined,
     });
+    expect(
+      resolveFileHrefTarget("file:///D:/DEV/xian/_artifacts/attack-effects-v82.html#weapons-001"),
+    ).toEqual({
+      path: "D:/DEV/xian/_artifacts/attack-effects-v82.html",
+      line: undefined,
+      endLine: undefined,
+    });
+  });
+
+  it("loads embedded Windows GIF images in MarkdownView via fs.read and opens lightbox on click", async () => {
+    desktopHostImageCache.clear();
+    const gifBase64 = "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+    const rpcCall = vi.fn(async (method: string, params: unknown) => {
+      if (method === "fs.read") {
+        expect(params).toMatchObject({ path: "D:/DEV/xian/_artifacts/slash.gif" });
+        return {
+          path: "D:/DEV/xian/_artifacts/slash.gif",
+          size: 42,
+          modifiedAt: Date.now(),
+          kind: "image" as const,
+          data: gifBase64,
+          mimeType: "image/gif",
+          truncated: false,
+        };
+      }
+      return {};
+    });
+    const { connection } = createMockConnection({ rpcCall });
+    const onOpenImage = vi.fn();
+
+    await act(async () => {
+      root.render(
+        <MarkdownView
+          text="特效预览：\n\n![剑气动图](file:///D:/DEV/xian/_artifacts/slash.gif)"
+          computerKey={connection.computer.key}
+          connection={connection}
+          cwd="D:\\DEV\\xian"
+          onOpenImage={onOpenImage}
+        />,
+      );
+    });
+    await flushAsync();
+
+    const img = container.querySelector<HTMLImageElement>("img.ls-md-image");
+    expect(img).not.toBeNull();
+    expect(img?.getAttribute("src")).toBe(`data:image/gif;base64,${gifBase64}`);
+    expect(img?.getAttribute("alt")).toBe("剑气动图");
+
+    await act(async () => {
+      img!.click();
+    });
+    expect(onOpenImage).toHaveBeenCalledWith(`data:image/gif;base64,${gifBase64}`, "剑气动图");
+
+    // Also verifies Windows backslash paths (`\_artifacts` must not lose `\` to CommonMark escaping)
+    // and raw HTML `<img ...>` tags in Markdown.
+    desktopHostImageCache.clear();
+    rpcCall.mockClear();
+    await act(async () => {
+      root.render(
+        <MarkdownView
+          text={[
+            "反斜杠路径：![剑气反斜杠](D:\\DEV\\xian\\_artifacts\\slash.gif)",
+            "",
+            '<img src="file:///D:/DEV/xian/_artifacts/slash.gif" alt="HTML动图" />',
+          ].join("\n")}
+          computerKey={connection.computer.key}
+          connection={connection}
+          cwd="D:\\DEV\\xian"
+          onOpenImage={onOpenImage}
+        />,
+      );
+    });
+    await flushAsync();
+
+    const imgs = [...container.querySelectorAll<HTMLImageElement>("img.ls-md-image")];
+    expect(imgs).toHaveLength(2);
+    expect(imgs[0]?.getAttribute("src")).toBe(`data:image/gif;base64,${gifBase64}`);
+    expect(imgs[1]?.getAttribute("src")).toBe(`data:image/gif;base64,${gifBase64}`);
   });
 });

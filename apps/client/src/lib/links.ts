@@ -1,3 +1,4 @@
+import { parseFileLink } from "@linkshell/client-core";
 import { router } from "expo-router";
 import * as WebBrowser from "expo-web-browser";
 import { createContext, use } from "react";
@@ -22,33 +23,9 @@ export interface FileTarget {
 
 /** A link that names a file on the computer, or undefined for anything else. */
 export function fileTarget(url: string, base?: string): FileTarget | undefined {
-  let target = url.trim();
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(target) && !target.startsWith("file://")) return undefined;
-  if (/^(mailto|tel|sms):/i.test(target)) return undefined;
-  target = target.replace(/^file:\/\//, "");
-  try {
-    target = decodeURI(target);
-  } catch {
-    // Keep it as written.
-  }
-  let line: number | undefined;
-  const hash = /#L(\d+)(?:-L?\d+)?$/.exec(target);
-  if (hash) {
-    line = Number(hash[1]);
-    target = target.slice(0, hash.index);
-  } else {
-    const suffix = /:(\d+)(?::\d+)?$/.exec(target);
-    if (suffix) {
-      line = Number(suffix[1]);
-      target = target.slice(0, suffix.index);
-    }
-  }
-  if (!target) return undefined;
-  if (!target.startsWith("/") && !target.startsWith("~")) {
-    if (!base) return undefined;
-    target = `${base.replace(/\/$/, "")}/${target.replace(/^\.\//, "")}`;
-  }
-  return { path: target, line };
+  const parsed = parseFileLink(url, base);
+  if (!parsed) return undefined;
+  return parsed.line !== undefined ? { path: parsed.path, line: parsed.line } : { path: parsed.path };
 }
 
 export function openFile(target: FileTarget): void {

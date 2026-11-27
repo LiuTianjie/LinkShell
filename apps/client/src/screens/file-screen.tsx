@@ -1,3 +1,4 @@
+import { parentDirectory } from "@linkshell/client-core";
 import { RpcError } from "@linkshell/wire";
 import * as Clipboard from "expo-clipboard";
 import { Image } from "expo-image";
@@ -260,7 +261,7 @@ export function FileContent({
 
   const name = baseName(currentPath);
   const markdown = MARKDOWN.test(currentPath);
-  const directory = currentPath.slice(0, currentPath.length - name.length).replace(/\/$/, "");
+  const directory = parentDirectory(currentPath);
   const footer = file ? <MoreRow file={file} state={more} onPress={loadMore} /> : undefined;
 
   const submitRename = useCallback(
