@@ -3,6 +3,10 @@
     border-color: var(--separator);
   }
 :root {
+    color-scheme: light dark;
+    accent-color: var(--accent);
+    --scrollbar-thumb: color-mix(in oklab, var(--label) 24%, transparent);
+    --scrollbar-track: transparent;
     /* Lead with the platform UI face (SF Pro on macOS, Segoe on Windows, Inter
        elsewhere). */
     font-family:
@@ -41,8 +45,52 @@
       "JetBrains Mono", "Menlo", "Consolas", monospace;
     --mono: var(--font-mono);
   }
+:root[data-theme="light"] {
+    color-scheme: light;
+  }
+:root[data-theme="dark"] {
+    color-scheme: dark;
+  }
 * {
     box-sizing: border-box;
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+  }
+@media (prefers-contrast: more) {
+    :root {
+      --scrollbar-thumb: #3b404a;
+      --scrollbar-track: #eceef2;
+    }
+    :root[data-theme="dark"] {
+      --scrollbar-thumb: #aeb5c4;
+      --scrollbar-track: #181a20;
+    }
+  }
+@supports not (scrollbar-color: auto) {
+    * {
+      scrollbar-width: auto;
+    }
+    *::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    *::-webkit-scrollbar-thumb {
+      background: var(--scrollbar-thumb);
+      border-radius: 999px;
+    }
+    *::-webkit-scrollbar-track {
+      background: var(--scrollbar-track);
+    }
+  }
+@media (forced-colors: active) {
+    button:focus-visible,
+    a:focus-visible,
+    input:focus-visible,
+    textarea:focus-visible,
+    select:focus-visible {
+      outline: 2px solid Highlight;
+      outline-offset: 2px;
+    }
   }
 body {
     margin: 0;

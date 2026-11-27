@@ -165,10 +165,31 @@ function applyAppearance() {
   updateWindowSurface(true);
 }
 
+let activeNativeScreenId: string | undefined;
+let nativeScreenHideTimer: ReturnType<typeof setTimeout> | undefined;
+
 function setNativeScreenShown(value: boolean) {
-  if (nativeScreenShown === value) return;
-  nativeScreenShown = value;
-  updateWindowSurface();
+  if (value) {
+    if (nativeScreenHideTimer) {
+      clearTimeout(nativeScreenHideTimer);
+      nativeScreenHideTimer = undefined;
+    }
+    if (nativeScreenShown) return;
+    nativeScreenShown = true;
+    updateWindowSurface();
+    return;
+  }
+  if (!nativeScreenShown) return;
+  // Switching computers stops screen A right before starting screen B; briefly debounce vibrancy
+  // restoration so AppKit does not thrash NSVisualEffectView while replacing the Metal subview.
+  if (nativeScreenHideTimer) return;
+  nativeScreenHideTimer = setTimeout(() => {
+    nativeScreenHideTimer = undefined;
+    if (activeNativeScreenId) return;
+    if (!nativeScreenShown) return;
+    nativeScreenShown = false;
+    updateWindowSurface();
+  }, 60);
 }
 
 /** Vibrancy only while it is worth it: focused, and below 4K, where the blur costs frames. */
@@ -791,7 +812,8 @@ ipcMain.on("linkshell:message", (event, body: unknown) => {
     }
     case "contentFocus": return;
     case "screen": {
-      if (!MAC || typeof message.id !== "string") return;
+      if (!MAC || typeof message.id !== "string" || !window || window.isDestroyed()) return;
+      const screenId = message.id;
       try {
         if (!nativeModule || !runtime.helper) throw new Error("原生屏幕组件不可用，请重新安装 LinkShell");
         const zoom = window.webContents.getZoomFactor();
@@ -815,8 +837,12 @@ ipcMain.on("linkshell:message", (event, body: unknown) => {
         if (message.type === "start") {
           if ("audioMuted" in message) adjusted.audioMuted = Boolean(message.audioMuted);
           if ("systemShortcutCapture" in message) adjusted.systemShortcutCapture = Boolean(message.systemShortcutCapture);
+          activeNativeScreenId = screenId;
           nativeModule.screenStart(window.getNativeWindowHandle(), runtime.helper, adjusted, (detail) => {
-            if ((detail as { type?: unknown }).type === "error") setNativeScreenShown(false);
+            if ((detail as { type?: unknown }).type === "error" && activeNativeScreenId === screenId) {
+              activeNativeScreenId = undefined;
+              setNativeScreenShown(false);
+            }
             send("linkshell-native-screen", detail);
           });
           nativeModule.screenVisible(visible);
@@ -827,14 +853,18 @@ ipcMain.on("linkshell:message", (event, body: unknown) => {
             if ("enabled" in message) adjusted.enabled = Boolean(message.enabled);
           }
           nativeModule.screenMessage(adjusted);
-          if (message.type === "stop") {
+          if (message.type === "stop" && activeNativeScreenId === screenId) {
+            activeNativeScreenId = undefined;
             resetSystemShortcutCapture();
             setNativeScreenShown(false);
           }
         }
       } catch (error) {
-        setNativeScreenShown(false);
-        send("linkshell-native-screen", { id: message.id, type: "error", error: error instanceof Error ? error.message : String(error) });
+        if (activeNativeScreenId === screenId) {
+          activeNativeScreenId = undefined;
+          setNativeScreenShown(false);
+        }
+        send("linkshell-native-screen", { id: screenId, type: "error", error: error instanceof Error ? error.message : String(error) });
       }
       return;
     }

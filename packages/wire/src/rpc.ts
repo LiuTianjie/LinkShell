@@ -305,6 +305,12 @@ const coreMethods = {
        * What it skipped is read with `sessions.history`, as the user scrolls up to it.
        */
       latest: z.boolean().optional(),
+      /**
+       * Opt-in batched event delivery (`session.events` notifications instead of one
+       * `session.event` per chunk). Older hosts ignore this field and continue sending
+       * `session.event`; older clients omit it and continue receiving `session.event`.
+       */
+      batchEvents: z.boolean().optional(),
     }),
     /**
      * A fresh subscription starts at the session's latest turns, not at its
@@ -934,6 +940,8 @@ export const notifications = {
   "agent.interaction": z.object({ agent: z.string(), request: z.union([pendingPermissionSchema, z.object({ requestId: z.string(), resolved: z.literal(true) })]) }),
   "session.notice": z.object({ sessionId: z.string(), notice: sessionNoticeSchema }),
   "session.event": sessionEventSchema,
+  /** Batched session events (opt-in via `sessions.subscribe` `batchEvents: true`), in strictly increasing `seq` order. */
+  "session.events": z.object({ sessionId: z.string(), events: z.array(sessionEventSchema) }),
   /**
    * Sent before a subscription's backlog when it doesn't continue from the
    * client's `fromSeq`: the events that follow start after `startSeq`, so a

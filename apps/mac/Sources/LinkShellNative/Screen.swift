@@ -4,13 +4,97 @@ import Foundation
 import IOSurface
 import LinkShellScreen
 
+/// Non-AppKit relay for background Mach/pipe/process callbacks so `NativeScreen` and its
+/// `NSView` hierarchy are never retained or deallocated off the main thread during rapid switching.
+private final class NativeScreenRelay {
+  private let lock = NSLock()
+  private var closed = false
+  private var lastFrameToken: UInt64 = 0
+  private var wantedSmooth: Bool
+  private var frameSink: DesktopScreenFrameSink?
+  private weak var screen: NativeScreen?
+
+  init(screen: NativeScreen, frameSink: DesktopScreenFrameSink, smooth: Bool) {
+    self.screen = screen
+    self.frameSink = frameSink
+    self.wantedSmooth = smooth
+  }
+
+  func setSmooth(_ value: Bool) {
+    lock.lock()
+    wantedSmooth = value
+    lock.unlock()
+  }
+
+  func close() {
+    lock.lock()
+    closed = true
+    frameSink = nil
+    screen = nil
+    lock.unlock()
+  }
+
+  func receiveFrame(_ shared: IOSurface?, token: UInt64, metadata: Data, release: @escaping () -> Void) {
+    lock.lock()
+    let accepted = !closed && token > lastFrameToken
+    if accepted { lastFrameToken = token }
+    let smooth = wantedSmooth
+    let sink = accepted ? frameSink : nil
+    lock.unlock()
+    // Decoder and release callbacks can send concurrently; never present an older arrival.
+    guard accepted, let sink, let shared,
+          let picture = DesktopScreenFrame.importSurface(shared, metadata: metadata, release: release) else {
+      release()
+      return
+    }
+    // Thread-safe mailbox: never schedule frames on the Electron/AppKit main thread.
+    // On macOS 14+, CAMetalDisplayLink drives tear-free 120 Hz ProMotion VSync at 1-frame latency.
+    // On macOS 13 (legacy 60 Hz CVDisplayLink), draw immediately in low-latency mode to avoid 16.7ms stalls.
+    if #available(macOS 14.0, *) {
+      sink.receive(picture)
+    } else if !smooth {
+      sink.receiveImmediate(picture)
+    } else {
+      sink.receive(picture)
+    }
+  }
+
+  func dispatchEvent(_ value: [String: Any]) {
+    lock.lock()
+    let isClosed = closed
+    lock.unlock()
+    guard !isClosed else { return }
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+      self.lock.lock()
+      let target = self.closed ? nil : self.screen
+      self.lock.unlock()
+      target?.handleMainEvent(value)
+    }
+  }
+
+  func dispatchFailure(_ message: String) {
+    lock.lock()
+    let isClosed = closed
+    lock.unlock()
+    guard !isClosed else { return }
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+      self.lock.lock()
+      let target = self.closed ? nil : self.screen
+      self.lock.unlock()
+      target?.fail(message)
+    }
+  }
+}
+
 /// A real NSView in Electron's window, not a floating window or Chromium video surface.
 /// Only signalling/status reaches Node. Mach IPC delivers IOSurfaces directly to the Metal mailbox.
 final class NativeScreen: NSObject {
   static var current: NativeScreen?
   static var desiredSystemShortcutCapture = false
   let id: String
-  private let host: NSView
+  private weak var host: NSView?
   private let clip = DesktopScreenClipView(frame: .zero)
   private let surface = DesktopScreenSurface(frame: .zero)
   private let shortcutCapture = SystemShortcutCapture(physicalKeys: false, forwardsModifiers: false)
@@ -20,9 +104,8 @@ final class NativeScreen: NSObject {
   private let output = Pipe()
   private let pipe: DesktopMediaPipe
   private let callback: Callback
-  private let lock = NSLock()
+  private var relay: NativeScreenRelay!
   private var closed = false
-  private var lastFrameToken: UInt64 = 0
   private var ready = false
   private var pending: [[String: Any]] = []
   private var rect: CGRect
@@ -68,6 +151,8 @@ final class NativeScreen: NSObject {
     self.systemShortcutCaptureEnabled = systemShortcutCapture
     self.callback = callback
     super.init()
+    let relay = NativeScreenRelay(screen: self, frameSink: surface.frameSink, smooth: smooth)
+    self.relay = relay
     surface.fullScreen = fullScreen
     clip.overlayOpen = overlayOpen
     clip.addSubview(surface)
@@ -98,20 +183,20 @@ final class NativeScreen: NSObject {
     process.standardInput = input
     process.standardOutput = output
     process.standardError = FileHandle.standardError
-    process.terminationHandler = { [weak self] _ in
-      DispatchQueue.main.async { self?.fail("原生画面进程已退出，请重新连接") }
+    process.terminationHandler = { [weak relay] _ in
+      relay?.dispatchFailure("原生画面进程已退出，请重新连接")
     }
     do {
       try process.run()
       // Close the parent's duplicate child ends so EOF reflects actual child termination.
       try? input.fileHandleForReading.close()
       try? output.fileHandleForWriting.close()
-      port.receive(child: process.processIdentifier) { [weak self, pipe] shared, token, metadata in
-        guard let self else { pipe.send(["type": "release", "token": token]); return }
-        self.picture(shared, token: token, metadata: metadata) { pipe.send(["type": "release", "token": token]) }
+      port.receive(child: process.processIdentifier) { [weak relay, pipe] shared, token, metadata in
+        guard let relay else { pipe.send(["type": "release", "token": token]); return }
+        relay.receiveFrame(shared, token: token, metadata: metadata) { pipe.send(["type": "release", "token": token]) }
       }
-      DesktopMediaPipe.read(output.fileHandleForReading, each: { [weak self] in self?.event($0) }, end: { [weak self] in
-        DispatchQueue.main.async { self?.fail("原生画面连接已关闭，请重新连接") }
+      DesktopMediaPipe.read(output.fileHandleForReading, each: { [weak relay] in relay?.dispatchEvent($0) }, end: { [weak relay] in
+        relay?.dispatchFailure("原生画面连接已关闭，请重新连接")
       })
       pipe.send(["type": "start", "port": port.name, "smooth": smooth, "preferH264": preferH264, "audioMuted": audioMuted])
     } catch { stop(); throw error }
@@ -140,6 +225,7 @@ final class NativeScreen: NSObject {
   }
 
   deinit {
+    relay?.close()
     for observer in observers { NotificationCenter.default.removeObserver(observer) }
     observers.removeAll()
     shortcutCapture.teardown()
@@ -149,7 +235,7 @@ final class NativeScreen: NSObject {
   private var reportedRate: Int?
   private func reportDisplayRate() {
     guard !closed else { return }
-    let screen = host.window?.screen ?? NSScreen.main
+    let screen = host?.window?.screen ?? NSScreen.main
     let refresh = screen?.maximumFramesPerSecond ?? 60
     let constrained = ProcessInfo.processInfo.isLowPowerModeEnabled
       || [.serious, .critical].contains(ProcessInfo.processInfo.thermalState)
@@ -159,49 +245,28 @@ final class NativeScreen: NSObject {
     callback.call(["id": id, "type": "status", "status": ["displayFps": rate]])
   }
 
-  func event(_ value: [String: Any]) {
-    DispatchQueue.main.async { [weak self] in
-      guard let self, !self.closed else { return }
-      switch value["type"] as? String {
-      case "ready":
-        self.ready = true; self.startup?.cancel(); self.startup = nil
-        let showing = self.visible && !self.clip.isHidden
-        self.lastSentVisible = showing
-        self.pipe.send(["type": "visible", "enabled": showing])
-        self.pipe.send(["type": "control", "enabled": self.wantedControl])
-        self.pipe.send(["type": "pacing", "smooth": self.wantedSmooth])
-        for message in self.pending { self.pipe.send(message) }
-        self.pending.removeAll()
-      case "surfaceControl":
-        self.surface.controlEnabled = value["enabled"] as? Bool == true
-        self.syncSystemShortcutCapture()
-      case "surfaceKeys":
-        self.surface.physicalKeys = value["enabled"] as? Bool == true
-        self.shortcutCapture.physicalKeys = self.surface.physicalKeys
-      case "cursor": if let cursor = value["message"] as? [String: Any] { self.surface.updateCursor(cursor) }
-      case "error": self.fail(value["error"] as? String ?? "原生画面连接失败")
-      case "signal", "status": self.callback.call(value.merging(["id": self.id]) { _, new in new })
-      default: break
-      }
-    }
-  }
-
-  func picture(_ shared: IOSurface?, token: UInt64, metadata: Data, release: @escaping () -> Void) {
-    lock.lock()
-    let accepted = !closed && token > lastFrameToken
-    if accepted { lastFrameToken = token }
-    lock.unlock()
-    // Decoder and release callbacks can send concurrently; never present an older arrival.
-    guard accepted, let shared, let picture = DesktopScreenFrame.importSurface(shared, metadata: metadata, release: release) else { release(); return }
-    // Thread-safe mailbox: never schedule frames on the Electron/AppKit main thread.
-    // On macOS 14+, CAMetalDisplayLink drives tear-free 120 Hz ProMotion VSync at 1-frame latency.
-    // On macOS 13 (legacy 60 Hz CVDisplayLink), draw immediately in low-latency mode to avoid 16.7ms stalls.
-    if #available(macOS 14.0, *) {
-      surface.receive(picture)
-    } else if !wantedSmooth {
-      surface.receiveImmediate(picture)
-    } else {
-      surface.receive(picture)
+  fileprivate func handleMainEvent(_ value: [String: Any]) {
+    guard !closed else { return }
+    switch value["type"] as? String {
+    case "ready":
+      ready = true; startup?.cancel(); startup = nil
+      let showing = visible && !clip.isHidden
+      lastSentVisible = showing
+      pipe.send(["type": "visible", "enabled": showing])
+      pipe.send(["type": "control", "enabled": wantedControl])
+      pipe.send(["type": "pacing", "smooth": wantedSmooth])
+      for message in pending { pipe.send(message) }
+      pending.removeAll()
+    case "surfaceControl":
+      surface.controlEnabled = value["enabled"] as? Bool == true
+      syncSystemShortcutCapture()
+    case "surfaceKeys":
+      surface.physicalKeys = value["enabled"] as? Bool == true
+      shortcutCapture.physicalKeys = surface.physicalKeys
+    case "cursor": if let cursor = value["message"] as? [String: Any] { surface.updateCursor(cursor) }
+    case "error": fail(value["error"] as? String ?? "原生画面连接失败")
+    case "signal", "status": callback.call(value.merging(["id": id]) { _, new in new })
+    default: break
     }
   }
 
@@ -243,6 +308,7 @@ final class NativeScreen: NSObject {
     case "pacing":
       if let smooth = DesktopScreenBridge.boolean(value["smooth"]) {
         wantedSmooth = smooth
+        relay.setSmooth(smooth)
         if ready { pipe.send(["type": "pacing", "smooth": smooth]) }
       }
     case "systemShortcutCapture":
@@ -283,7 +349,7 @@ final class NativeScreen: NSObject {
       return false
     }
     shortcutCapture.physicalKeys = surface.physicalKeys
-    let windowIsKey = host.window?.isKeyWindow == true
+    let windowIsKey = host?.window?.isKeyWindow == true
     let appIsActive = NSApp.map { $0.isActive && !$0.isHidden } ?? false
     let surfaceActive = visible && !clip.isHidden && !overlayOpen && surface.controlEnabled && !closed
     let surfaceFocused = surface.hasControlFocus
@@ -298,6 +364,7 @@ final class NativeScreen: NSObject {
 
   func setVisible(_ visible: Bool) { self.visible = visible; layout() }
   private func layout() {
+    guard !closed, let host else { return }
     let requested = CGRect(x: rect.minX, y: host.isFlipped ? rect.minY : host.bounds.height - rect.maxY, width: rect.width, height: rect.height)
     let clipped = requested.intersection(host.bounds)
     let showing = visible && !clipped.isEmpty && !clipped.isNull
@@ -347,17 +414,21 @@ final class NativeScreen: NSObject {
       fullScreenOverlay = nil
     }
   }
-  private func fail(_ error: String) {
+  fileprivate func fail(_ error: String) {
     guard !closed else { return }
     callback.call(["id": id, "type": "error", "error": error])
     stop()
   }
   func stop() {
-    lock.lock(); guard !closed else { lock.unlock(); return }; closed = true; lock.unlock()
+    guard !closed else { return }
+    closed = true
+    relay.close()
     startup?.cancel(); startup = nil
     for observer in observers { NotificationCenter.default.removeObserver(observer) }
     observers.removeAll()
     shortcutCapture.teardown()
+    shortcutCapture.onInput = nil
+    shortcutCapture.onReleaseAll = nil
     MainActor.assumeIsolated {
       fullScreenOverlay?.detach()
       fullScreenOverlay = nil
@@ -368,6 +439,7 @@ final class NativeScreen: NSObject {
     port.stop()
     process.terminationHandler = nil
     if process.isRunning { process.terminate() }
+    callback.release()
     if NativeScreen.current === self { NativeScreen.current = nil }
   }
 }

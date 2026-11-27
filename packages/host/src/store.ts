@@ -348,6 +348,9 @@ export class HostStore {
   private readonly path: string;
   private readonly db: DatabaseSync;
   private readonly stmts: PreparedStatements;
+  /** Read-through caches for hot-path streaming (`ingest`/`applyToSummary`) invalidated on every write. */
+  private readonly sessionsCache = new Map<string, SessionSummary>();
+  private readonly nativeMissingCache = new Map<string, boolean>();
   private closed = false;
 
   constructor(path: string, options?: { blobsDir?: string; maxBlobBytes?: number }) {
@@ -567,6 +570,7 @@ export class HostStore {
     this.db
       .prepare("UPDATE sessions SET state = 'offline', pending_permissions = 0 WHERE state IN ('running', 'waiting') OR pending_permissions > 0")
       .run();
+    this.sessionsCache.clear();
     for (const id of affected) {
       this.stmts.deleteDriverState.run(id, "asyncQuestions");
     }
@@ -584,6 +588,8 @@ export class HostStore {
       }
       this.db.prepare("INSERT OR REPLACE INTO removed_sessions (id, ts) VALUES (?, ?)").run(id, Date.now());
       this.db.exec("COMMIT");
+      this.sessionsCache.delete(id);
+      this.nativeMissingCache.delete(id);
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
@@ -600,11 +606,16 @@ export class HostStore {
     if (this.closed) return;
     if (missing) this.setDriverState(id, "native-missing", "1");
     else this.stmts.deleteDriverState.run(id, "native-missing");
+    this.nativeMissingCache.set(id, missing);
   }
 
   isNativeMissing(id: string): boolean {
     if (this.closed) return false;
-    return this.getDriverState(id, "native-missing") === "1";
+    const cached = this.nativeMissingCache.get(id);
+    if (cached !== undefined) return cached;
+    const missing = this.getDriverState(id, "native-missing") === "1";
+    this.nativeMissingCache.set(id, missing);
+    return missing;
   }
 
   nativeMissingSessionIds(): string[] {
@@ -661,6 +672,8 @@ export class HostStore {
   close(): void {
     if (this.closed) return;
     this.closed = true;
+    this.sessionsCache.clear();
+    this.nativeMissingCache.clear();
     this.db.close();
     enforcePrivateDbPermissions(this.path);
   }
@@ -847,6 +860,7 @@ export class HostStore {
     }
     if (sets.length > 0) {
       this.db.prepare(`UPDATE sessions SET ${sets.join(", ")} WHERE id = ?`).run(...values, id);
+      this.sessionsCache.delete(id);
     }
     const summary = this.getSession(id);
     if (!summary) throw new Error(`unknown session ${id}`);
@@ -855,8 +869,13 @@ export class HostStore {
 
   getSession(id: string): SessionSummary | undefined {
     if (this.closed) return undefined;
+    const cached = this.sessionsCache.get(id);
+    if (cached) return cached;
     const row = this.stmts.getSession.get(id) as SessionRow | undefined;
-    return row ? toSummary(row) : undefined;
+    if (!row) return undefined;
+    const summary = toSummary(row);
+    this.sessionsCache.set(id, summary);
+    return summary;
   }
 
   listSessions(
@@ -985,7 +1004,13 @@ export class HostStore {
    */
   appendEvent(sessionId: string, update: SessionUpdate, ts = Date.now(), activity = true): SessionEvent {
     if (this.closed) return { sessionId, seq: 1, ts, update };
-    const stored = attachBlobStore(capStoredUpdate(this.blobs.externalizeUpdate(update)), this.blobs);
+    const plainSmallChunk =
+      (update.sessionUpdate === "agent_message_chunk" || update.sessionUpdate === "agent_thought_chunk") &&
+      update.content.type === "text" &&
+      update.content.text.length <= 16_384;
+    const stored = plainSmallChunk
+      ? update
+      : attachBlobStore(capStoredUpdate(this.blobs.externalizeUpdate(update)), this.blobs);
     const inOuterTx = this.db.isTransaction;
     if (!inOuterTx) this.db.exec("BEGIN IMMEDIATE");
     try {
@@ -1015,6 +1040,14 @@ export class HostStore {
       );
       this.stmts.updateSessionSeq.run(seq, activity ? ts : 0, sessionId);
       if (!inOuterTx) this.db.exec("COMMIT");
+      const cached = this.sessionsCache.get(sessionId);
+      if (cached) {
+        this.sessionsCache.set(sessionId, {
+          ...cached,
+          lastSeq: seq,
+          updatedAt: activity ? Math.max(cached.updatedAt, ts) : cached.updatedAt,
+        });
+      }
       return { sessionId, seq, ts, update: stored };
     } catch (error) {
       if (!inOuterTx) this.db.exec("ROLLBACK");

@@ -72,13 +72,34 @@ interface EarlyBuffer<T> {
   overflowed?: boolean;
 }
 
+interface NodeBufferInstance extends Uint8Array {
+  toString(encoding?: "base64"): string;
+}
+interface NodeBufferCtor {
+  from(text: string, encoding: "base64"): NodeBufferInstance;
+  from(buffer: ArrayBufferLike, byteOffset: number, byteLength: number): NodeBufferInstance;
+}
+function nodeBuffer(): NodeBufferCtor | undefined {
+  const buf = (globalThis as { Buffer?: unknown }).Buffer;
+  return typeof buf === "function" ? (buf as unknown as NodeBufferCtor) : undefined;
+}
+
 const base64 = {
   encode(bytes: Uint8Array): string {
+    const BufferCtor = nodeBuffer();
+    if (BufferCtor) {
+      return BufferCtor.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("base64");
+    }
     let binary = "";
     for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
     return btoa(binary);
   },
   decode(text: string): Uint8Array {
+    const BufferCtor = nodeBuffer();
+    if (BufferCtor) {
+      const buf = BufferCtor.from(text, "base64");
+      return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+    }
     const binary = atob(text);
     const bytes = new Uint8Array(binary.length);
     for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);

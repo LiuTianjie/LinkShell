@@ -4,7 +4,7 @@ import type { SessionNotice, SessionSummary } from "@linkshell/wire";
 import { DESKTOP_LOCAL, DESKTOP_SHORTCUTS, FOCUS_COMPOSER_EVENT, matchesShortcut } from "@/bridge";
 import { isLocalHostUnavailable, useManagement, useT } from "@/core";
 import { DesktopIcon } from "@/icons";
-import { ErrorBoundary, IconButton, Input, isImeComposing } from "@/primitives";
+import { Button, ErrorBoundary, IconButton, Input, isImeComposing } from "@/primitives";
 import { LocalHostRecovery } from "../shell/LocalHostRecovery";
 import { SessionComposer } from "./SessionComposer";
 import { TimelineView } from "./TimelineView";
@@ -226,14 +226,47 @@ export function SessionWorkspace({
         </div>
       )}
 
-      {/* Offline / Reconnecting status bar */}
-      {status !== "online" && statusDetail && (
+      {/* Offline / Reconnecting / Locked recovery bar */}
+      {status !== "online" && (statusDetail || status === "reconnecting" || status === "locked") && (
         <div
-          className="ls-notice-card"
-          style={{ borderRadius: 0, borderInline: 0, borderTop: 0 }}
+          className="ls-session-connection-bar"
+          data-tone={status === "locked" ? "waiting" : status === "connecting" || status === "reconnecting" ? "waiting" : "danger"}
+          role={status === "locked" || status === "stopped" ? "alert" : "status"}
         >
-          <DesktopIcon name="spinner" size="xs" />
-          <span>{statusDetail}</span>
+          <span className="ls-session-connection-bar__main">
+            <DesktopIcon
+              name={
+                status === "locked"
+                  ? "lock"
+                  : status === "connecting" || status === "reconnecting"
+                    ? "spinner"
+                    : "info"
+              }
+              size="xs"
+            />
+            <span className="ls-session-connection-bar__title">
+              {status === "locked"
+                ? copy.connectionLocked
+                : status === "connecting" || status === "reconnecting"
+                  ? copy.connectionReconnecting
+                  : copy.connectionOffline}
+            </span>
+            {statusDetail ? (
+              <span className="ls-session-connection-bar__detail" title={statusDetail}>
+                {statusDetail}
+              </span>
+            ) : null}
+          </span>
+          {status !== "locked" && typeof connection.link?.reconnectNow === "function" ? (
+            <Button
+              size="xs"
+              variant="secondary"
+              leadingIcon="refresh"
+              onClick={() => connection.link.reconnectNow(true)}
+            >
+              {copy.reconnectNow}
+            </Button>
+          ) : null}
         </div>
       )}
 

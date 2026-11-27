@@ -1358,6 +1358,7 @@ export function RemoteScreenWorkspace({
         {canRenderStage && connection ? (
           useNativeMetal ? (
             <NativeMetalStage
+              key={computerKey}
               link={connection.link}
               streams={connection.streams}
               active={stageActive}
@@ -1388,6 +1389,7 @@ export function RemoteScreenWorkspace({
             />
           ) : (
             <WebRtcScreenStage
+              key={computerKey}
               link={connection.link}
               streams={connection.streams}
               active={stageActive}

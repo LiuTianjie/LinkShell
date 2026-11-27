@@ -682,13 +682,25 @@ export class DesktopEngine {
       active.link.reconnectNow();
       return;
     }
-    const retained = this.retainComputer(resolved);
-    this.disconnect();
-    this.releaseSelected = retained.release;
-    this.state.setState({ connection: retained.connection, error: undefined });
     this.selected = resolved.key;
     saveLocal(STORAGE_KEYS.selected, resolved.key);
     saveLocal(STORAGE_KEYS.currentComputer, resolved.key);
+    if (!this.identity || !this.active) {
+      return;
+    }
+    const retained = this.retainComputer(resolved);
+    const previousRelease = this.releaseSelected;
+    this.releaseSelected = retained.release;
+    // Swap the active connection atomically before releasing the old lease so React subscribers
+    // never churn through a transient `connection: undefined` teardown between two computers.
+    this.state.setState({ connection: retained.connection, error: undefined });
+    if (previousRelease) {
+      try {
+        previousRelease();
+      } catch (err) {
+        this.report(err);
+      }
+    }
   }
 
   computerForKey(key: string): Computer | undefined {

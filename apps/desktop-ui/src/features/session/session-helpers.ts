@@ -408,6 +408,10 @@ export interface SessionCopy {
   retryModels: string;
   loadingDirectory: string;
   directoryLoadFailed: string;
+  reconnectNow: string;
+  connectionReconnecting: string;
+  connectionOffline: string;
+  connectionLocked: string;
 }
 
 const COPY_BY_LOCALE: Record<Locale, SessionCopy> = {
@@ -549,6 +553,10 @@ const COPY_BY_LOCALE: Record<Locale, SessionCopy> = {
     retryModels: "重新加载模型",
     loadingDirectory: "正在读取目录",
     directoryLoadFailed: "无法读取此目录",
+    reconnectNow: "立即重连",
+    connectionReconnecting: "正在恢复连接",
+    connectionOffline: "连接已断开",
+    connectionLocked: "需要输入访问密码",
   },
   en: {
     newSessionHeading: "New session",
@@ -688,6 +696,10 @@ const COPY_BY_LOCALE: Record<Locale, SessionCopy> = {
     retryModels: "Reload models",
     loadingDirectory: "Reading folder",
     directoryLoadFailed: "Couldn't read this folder",
+    reconnectNow: "Reconnect",
+    connectionReconnecting: "Reconnecting",
+    connectionOffline: "Disconnected",
+    connectionLocked: "Access password required",
   },
   ja: {
     newSessionHeading: "新しいセッション",
@@ -827,6 +839,10 @@ const COPY_BY_LOCALE: Record<Locale, SessionCopy> = {
     retryModels: "モデルを再読込",
     loadingDirectory: "フォルダを読み込み中",
     directoryLoadFailed: "このフォルダを読み込めません",
+    reconnectNow: "今すぐ再接続",
+    connectionReconnecting: "再接続中",
+    connectionOffline: "切断されました",
+    connectionLocked: "パスワードが必要です",
   },
 };
 

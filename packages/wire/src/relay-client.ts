@@ -347,14 +347,66 @@ export class RelayClient {
       if (this.socket !== socket) return;
       this.heardAt = Date.now();
       this.heardSeq += 1;
-      let frame;
+      let raw: unknown;
       try {
-        const parsed = serverFrameSchema.safeParse(JSON.parse(String(event.data)));
-        if (!parsed.success) return;
-        frame = parsed.data;
+        raw = JSON.parse(String(event.data));
       } catch {
         return;
       }
+      if (!raw || typeof raw !== "object") return;
+      const obj = raw as Record<string, unknown>;
+      // Fast-path hot inbound frames (`pong` and encrypted `from`/`data`) to avoid
+      // per-message Zod allocations on steady-state tunnel traffic.
+      if (obj.t === "pong") return;
+      if (obj.t === "from") {
+        const sender = obj.from as Record<string, unknown> | null | undefined;
+        const via = obj.via;
+        const payload = obj.d;
+        if (
+          sender &&
+          typeof sender === "object" &&
+          typeof sender.id === "string" &&
+          typeof sender.signKey === "string" &&
+          typeof sender.boxKey === "string" &&
+          (via === "paired" || via === "account") &&
+          typeof payload === "string"
+        ) {
+          let innerRaw: unknown;
+          try {
+            innerRaw = JSON.parse(payload);
+          } catch {
+            return;
+          }
+          let inner: TunnelFrame;
+          if (
+            innerRaw &&
+            typeof innerRaw === "object" &&
+            (innerRaw as Record<string, unknown>).k === "data" &&
+            typeof (innerRaw as Record<string, unknown>).ch === "string" &&
+            typeof (innerRaw as Record<string, unknown>).box === "string"
+          ) {
+            inner = {
+              k: "data",
+              ch: (innerRaw as Record<string, unknown>).ch as string,
+              box: (innerRaw as Record<string, unknown>).box as string,
+            };
+          } else {
+            const parsedInner = tunnelFrameSchema.safeParse(innerRaw);
+            if (!parsedInner.success) return;
+            inner = parsedInner.data;
+          }
+          const fromId: PublicIdentity = {
+            id: sender.id,
+            signKey: sender.signKey,
+            boxKey: sender.boxKey,
+          };
+          for (const listener of this.frameListeners) listener(fromId, via, inner);
+          return;
+        }
+      }
+      const parsed = serverFrameSchema.safeParse(raw);
+      if (!parsed.success) return;
+      const frame = parsed.data;
       switch (frame.t) {
         case "challenge":
           void this.authenticate(frame.nonce, socket);

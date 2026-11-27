@@ -985,7 +985,12 @@ export class SessionHub {
       if (!missed || !options.latest || page > fromSeq) {
         startSeq = page;
         if (startSeq !== fromSeq) subscriber.window?.(startSeq);
-        for (const event of this.standingBefore(sessionId, startSeq, live)) subscriber.event(event);
+        const standing = this.standingBefore(sessionId, startSeq, live);
+        if (subscriber.events) {
+          if (standing.length > 0) subscriber.events(standing);
+        } else {
+          for (const event of standing) subscriber.event(event);
+        }
       }
     }
     let cursor = startSeq;
@@ -1013,9 +1018,14 @@ export class SessionHub {
       for (;;) {
         const batch = this.store.readEvents(sessionId, cursor, batchSize);
         if (batch.length === 0) break;
-        for (const event of batch) {
-          if (cancelled) break;
-          if (!this.store.isHistoryLoadEvent(event)) subscriber.event(event);
+        if (subscriber.events) {
+          const filtered = batch.filter((event) => !this.store.isHistoryLoadEvent(event));
+          if (!cancelled && filtered.length > 0) subscriber.events(filtered);
+        } else {
+          for (const event of batch) {
+            if (cancelled) break;
+            if (!this.store.isHistoryLoadEvent(event)) subscriber.event(event);
+          }
         }
         if (cancelled) break;
         cursor = batch[batch.length - 1]!.seq;
@@ -1043,8 +1053,11 @@ export class SessionHub {
       return { session: this.getSession(sessionId), startSeq };
     }
     if (liveQueue) {
-      for (const event of liveQueue) {
-        if (event.seq > cursor && !this.store.isHistoryLoadEvent(event)) subscriber.event(event);
+      const tail = liveQueue.filter((event) => event.seq > cursor && !this.store.isHistoryLoadEvent(event));
+      if (subscriber.events) {
+        if (tail.length > 0) subscriber.events(tail);
+      } else {
+        for (const event of tail) subscriber.event(event);
       }
     }
     live.subscribers.add(subscriber);
@@ -1176,6 +1189,7 @@ export class SessionHub {
   }
 
   unsubscribe(sessionId: string, subscriber: Subscriber): void {
+    subscriber.close?.();
     const cancelPacing = this.pacingCancels.get(subscriber);
     if (cancelPacing) {
       this.pacingCancels.delete(subscriber);

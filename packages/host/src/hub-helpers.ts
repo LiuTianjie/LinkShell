@@ -16,11 +16,132 @@ import { outputRange } from "./task-output.js";
 
 export interface Subscriber {
   event(event: SessionEvent): void;
+  /** Optional batched delivery used for backlog replay and opt-in `session.events` subscribers. */
+  events?(events: SessionEvent[]): void;
+  /** Called when the subscriber is removed so pending coalescing timers can be cleared. */
+  close?(): void;
   notice?(notice: SessionNotice): void;
   /** The backlog that follows starts after `startSeq`, not where the subscriber left off. */
   window?(startSeq: number): void;
   /** Underlying transport write buffer bytes, used to pace large backlog replays. */
   bufferedAmount?: () => number;
+}
+
+const MAX_COALESCED_CHARS = 64 * 1024;
+
+function isAppendOnlyToolOutput(update: SessionUpdate): update is Extract<SessionUpdate, { sessionUpdate: "tool_call_update" }> & { appendOutput: string } {
+  if (update.sessionUpdate !== "tool_call_update" || typeof update.appendOutput !== "string") return false;
+  return (
+    update.title === undefined &&
+    update.kind === undefined &&
+    update.status === undefined &&
+    update.content === undefined &&
+    update.locations === undefined &&
+    update.rawInput === undefined &&
+    update.rawOutput === undefined &&
+    update.detail === undefined
+  );
+}
+
+/**
+ * Coalesces contiguous pure-text chunks and append-only tool output deltas within a wire batch.
+ * Preserves the first chunk's `ts` and advances `seq` to the latest merged event so client
+ * `lastSeq` cursors and reconnect catch-up stay exact.
+ */
+export function coalesceWireEvents(events: readonly SessionEvent[]): SessionEvent[] {
+  if (events.length <= 1) return events.slice();
+  const out: SessionEvent[] = [];
+  for (const event of events) {
+    const prev = out[out.length - 1];
+    if (prev && prev.sessionId === event.sessionId) {
+      const a = prev.update;
+      const b = event.update;
+      if (
+        a.sessionUpdate === "agent_message_chunk" &&
+        b.sessionUpdate === "agent_message_chunk" &&
+        a.content.type === "text" &&
+        b.content.type === "text" &&
+        !b.replace &&
+        a.messageId === b.messageId &&
+        a.parentToolCallId === b.parentToolCallId &&
+        a.content.text.length + b.content.text.length <= MAX_COALESCED_CHARS
+      ) {
+        out[out.length - 1] = {
+          sessionId: prev.sessionId,
+          seq: event.seq,
+          ts: prev.ts,
+          update: {
+            ...a,
+            content: { type: "text", text: a.content.text + b.content.text },
+          },
+        };
+        continue;
+      }
+      if (
+        a.sessionUpdate === "agent_thought_chunk" &&
+        b.sessionUpdate === "agent_thought_chunk" &&
+        a.content.type === "text" &&
+        b.content.type === "text" &&
+        !b.replace &&
+        a.messageId === b.messageId &&
+        a.parentToolCallId === b.parentToolCallId &&
+        a.content.text.length + b.content.text.length <= MAX_COALESCED_CHARS
+      ) {
+        out[out.length - 1] = {
+          sessionId: prev.sessionId,
+          seq: event.seq,
+          ts: prev.ts,
+          update: {
+            ...a,
+            content: { type: "text", text: a.content.text + b.content.text },
+          },
+        };
+        continue;
+      }
+      if (
+        isAppendOnlyToolOutput(a) &&
+        isAppendOnlyToolOutput(b) &&
+        a.toolCallId === b.toolCallId &&
+        a.parentToolCallId === b.parentToolCallId &&
+        a.appendOutput.length + b.appendOutput.length <= MAX_COALESCED_CHARS
+      ) {
+        out[out.length - 1] = {
+          sessionId: prev.sessionId,
+          seq: event.seq,
+          ts: prev.ts,
+          update: {
+            ...a,
+            appendOutput: a.appendOutput + b.appendOutput,
+          },
+        };
+        continue;
+      }
+    }
+    out.push(event);
+  }
+  return out;
+}
+
+/** Updates that should never wait in a 16 ms coalescing buffer (turns, approvals, errors, prompts). */
+export function isImmediateWireEvent(update: SessionUpdate): boolean {
+  switch (update.sessionUpdate) {
+    case "ls_turn":
+    case "ls_permission":
+    case "ls_permission_resolved":
+    case "ls_status":
+    case "ls_error":
+    case "ls_notice":
+    case "user_message_chunk":
+    case "ls_message":
+    case "ls_message_done":
+    case "ls_async_questions":
+    case "ls_driver":
+    case "ls_goal":
+    case "tool_call":
+      return true;
+    default:
+      return false;
+  }
 }
 
 /**

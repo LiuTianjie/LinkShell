@@ -75,6 +75,13 @@ public enum DesktopScreenInput {
   }
 }
 
+/// Thread-safe, non-AppKit frame receiver exposed by `DesktopScreenSurface` so background Mach/IPC
+/// threads can deliver IOSurfaces without ever retaining an `NSView` off the main thread.
+public protocol DesktopScreenFrameSink: AnyObject {
+  func receive(_ picture: DesktopScreenFrame)
+  func receiveImmediate(_ picture: DesktopScreenFrame)
+}
+
 /// The video never enters WebKit. VideoToolbox's pixel buffer is retained until Metal has
 /// consumed it; incoming frames replace a single mailbox slot instead of building a FIFO.
 public final class DesktopScreenSurface: NSView, NSTextInputClient {
@@ -132,6 +139,8 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
   private var pressedKeys: Set<UInt16> = []
   private var pressedModifiers: Set<UInt16> = []
   public var receivedFrameCount: UInt64 { renderer.receivedFrameCount }
+  /// Non-AppKit frame sink safe to retain and invoke from background Mach/decoder threads.
+  public var frameSink: DesktopScreenFrameSink { renderer }
   private let metalView = DesktopScreenMetalView(frame: .zero)
   private var renderer: DesktopScreenMetalRenderer!
   private var pictureSize = CGSize.zero
@@ -296,9 +305,15 @@ public final class DesktopScreenSurface: NSView, NSTextInputClient {
     dragTakenOver = false
     releaseInput()
     stopped = true; active = false
+    metalView.onDrawableSize = nil
     renderer.stop()
     cursorShapes.removeAll(); cursorView.isHidden = true
     notifyFocusChanged()
+    onInput = nil
+    onFirstFrame = nil
+    onFailure = nil
+    onExitFullScreen = nil
+    onFocusChanged = nil
   }
   private func notifyFocusChanged() {
     let focused = hasControlFocus
@@ -757,15 +772,17 @@ private final class DesktopScreenTextLabel: NSTextField {
 /// Draws on the display link's own thread, as the phone does: a busy main thread (the page,
 /// cursor and status updates) can no longer hold back the next frame. Incoming frames replace a
 /// single mailbox slot; the pixel buffer is retained until the GPU has finished with it.
-private final class DesktopScreenMetalRenderer {
+private final class DesktopScreenMetalRenderer: DesktopScreenFrameSink {
   private typealias Picture = DesktopScreenFrame
   private let layer: CAMetalLayer
-  private let onPicture: (CGSize) -> Void
-  private let onFirstFrame: () -> Void
-  private let onFailure: (String) -> Void
+  private var onPicture: ((CGSize) -> Void)?
+  private var onFirstFrame: (() -> Void)?
+  private var onFailure: ((String) -> Void)?
   /// Guards everything below it up to `failureReported`: the decoder, the main thread, the
   /// display link and the GPU's completion handlers all touch it.
   private let lock = NSLock()
+  /// Serializes `CVMetalTextureCache` creation and flush between `draw()` and `stop()`.
+  private let cacheLock = NSLock()
   private var pending: Picture?
   private var current: Picture?
   private var accepting = true
@@ -786,6 +803,7 @@ private final class DesktopScreenMetalRenderer {
   // VSync tick while frame N's GPU completion handler finishes scanout.
   private let inFlight = DispatchSemaphore(value: 2)
   private var link: CVDisplayLink?
+  private var legacyLinkStopped = false
   private var metalLinkStorage: AnyObject?
   private var metalDriverStorage: AnyObject?
   private var renderThreadStorage: AnyObject?
@@ -843,24 +861,30 @@ private final class DesktopScreenMetalRenderer {
   }
 
   private func teardownDisplayLinks() {
-    if let link { CVDisplayLinkStop(link) }
+    lock.lock()
+    let legacyLink = legacyLinkStopped ? nil : link
+    legacyLinkStopped = true
+    link = nil
+    lock.unlock()
+    if let legacyLink { CVDisplayLinkStop(legacyLink) }
     if #available(macOS 14.0, *) {
       lock.lock()
       let alreadyStopped = metalLinkStopped
       metalLinkStopped = true
+      let metalLink = metalLinkStorage as? CAMetalDisplayLink
+      let thread = renderThreadStorage as? DesktopRenderThread
+      metalLinkStorage = nil
+      metalDriverStorage = nil
+      renderThreadStorage = nil
       lock.unlock()
       guard !alreadyStopped else { return }
-      if let metalLink = metalLinkStorage as? CAMetalDisplayLink,
-         let thread = renderThreadStorage as? DesktopRenderThread {
+      if let metalLink, let thread {
         thread.performSync {
           metalLink.isPaused = true
           metalLink.invalidate()
         }
         thread.shutdown()
       }
-      metalLinkStorage = nil
-      metalDriverStorage = nil
-      renderThreadStorage = nil
     }
   }
 
@@ -929,10 +953,21 @@ private final class DesktopScreenMetalRenderer {
     if layer.drawableSize.width >= 1, layer.drawableSize.height >= 1 { drawNow() }
   }
   func stop() {
-    lock.lock(); stopped = true; accepting = false; pending = nil; current = nil; generation &+= 1; lock.unlock()
+    lock.lock()
+    stopped = true
+    accepting = false
+    pending = nil
+    current = nil
+    generation &+= 1
+    onPicture = nil
+    onFirstFrame = nil
+    onFailure = nil
+    lock.unlock()
     setRunning(false, display: nil)
     teardownDisplayLinks()
+    cacheLock.lock()
     if let cache { CVMetalTextureCacheFlush(cache, 0) }
+    cacheLock.unlock()
   }
 
   fileprivate func draw(drawable providedDrawable: CAMetalDrawable? = nil, waitTimeout: DispatchTime = .now()) {
@@ -971,7 +1006,10 @@ private final class DesktopScreenMetalRenderer {
     var heldTextures: [CVMetalTexture] = []
     func texture(_ plane: Int, _ format: MTLPixelFormat) -> MTLTexture? {
       var cv: CVMetalTexture?
-      guard CVMetalTextureCacheCreateTextureFromImage(nil, cache, buffer, nil, format, CVPixelBufferGetWidthOfPlane(buffer, plane), CVPixelBufferGetHeightOfPlane(buffer, plane), plane, &cv) == kCVReturnSuccess,
+      let status: CVReturn = cacheLock.withLock {
+        CVMetalTextureCacheCreateTextureFromImage(nil, cache, buffer, nil, format, CVPixelBufferGetWidthOfPlane(buffer, plane), CVPixelBufferGetHeightOfPlane(buffer, plane), plane, &cv)
+      }
+      guard status == kCVReturnSuccess,
             let cv, let texture = CVMetalTextureGetTexture(cv) else { return nil }
       heldTextures.append(cv); return texture
     }
@@ -1011,7 +1049,11 @@ private final class DesktopScreenMetalRenderer {
     let shouldFlush = framesSinceCacheFlush >= 120
     if shouldFlush { framesSinceCacheFlush = 0 }
     lock.unlock()
-    if shouldFlush { CVMetalTextureCacheFlush(cache, 0) }
+    if shouldFlush {
+      cacheLock.lock()
+      CVMetalTextureCacheFlush(cache, 0)
+      cacheLock.unlock()
+    }
   }
   /// Runs on Metal's completion thread; the main thread hears only about a new size or the first frame.
   private func presented(ticket: UInt64, size: CGSize, failed: Bool) {
@@ -1024,12 +1066,16 @@ private final class DesktopScreenMetalRenderer {
     guard newSize || first else { return }
     DispatchQueue.main.async { [weak self] in
       guard let self else { return }
-      self.lock.lock(); let live = self.generation == ticket && self.accepting && !self.stopped; self.lock.unlock()
+      self.lock.lock()
+      let live = self.generation == ticket && self.accepting && !self.stopped
+      let pictureCb = live ? self.onPicture : nil
+      let firstCb = live ? self.onFirstFrame : nil
+      self.lock.unlock()
       guard live else { return }
-      if newSize { self.onPicture(size) }
+      if newSize { pictureCb?(size) }
       // With a picture every pixel is drawn opaque (black beside it): the window server can then
       // skip blending this layer with the page beneath it on every frame.
-      if first { self.layer.isOpaque = true; self.onFirstFrame() }
+      if first { self.layer.isOpaque = true; firstCb?() }
     }
   }
   private func fail(_ message: String) {
@@ -1038,8 +1084,9 @@ private final class DesktopScreenMetalRenderer {
       self.lock.lock()
       let report = !self.stopped && !self.failureReported
       self.failureReported = true
+      let failureCb = report ? self.onFailure : nil
       self.lock.unlock()
-      if report { self.onFailure(message) }
+      if report { failureCb?(message) }
     }
   }
   private static let shader = """

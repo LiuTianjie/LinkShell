@@ -62,12 +62,19 @@ export function WorkspaceTopBar({
   const names = useStore(computerNames.store);
 
   const sessionsMap = useConnectionStore(activeConnection, (s) => s.sessions);
+  const linkStatus = useConnectionStore(activeConnection, (s) => s.status);
 
   const activeComputer: Computer | undefined =
     activeConnection?.computer ?? localComputer ?? computers[0];
   const activeComputerTitle = displayComputerName(activeComputer, names, locale);
   const routeBadge = connectionRouteBadge(activeComputer, undefined, locale);
   const isRemote = Boolean(activeComputer && !isLocalComputer(activeComputer));
+  const computerDotTone =
+    linkStatus === "connecting" || linkStatus === "reconnecting" || linkStatus === "locked"
+      ? "waiting"
+      : linkStatus === "online" || activeComputer?.machine.online
+        ? "online"
+        : "offline";
 
   const currentSession =
     activeRoute.kind === "session" ? sessionsMap[activeRoute.sessionId] : undefined;
@@ -133,6 +140,18 @@ export function WorkspaceTopBar({
                   {waitingLabel(currentSession, locale)}
                 </Badge>
               ) : null}
+
+              {sidebarHidden && isRemote ? (
+                <button
+                  type="button"
+                  className="workspace-computer-chip"
+                  onClick={() => navigate({ kind: "computers" })}
+                >
+                  <StatusDot tone={computerDotTone} size="sm" />
+                  <span className="ls-truncate">{activeComputerTitle}</span>
+                  <span className="workspace-computer-chip__tag">{routeBadge.label}</span>
+                </button>
+              ) : null}
             </>
           ) : activeRoute.kind === "new-session" ? (
             <>
@@ -156,10 +175,7 @@ export function WorkspaceTopBar({
                   className="workspace-computer-chip"
                   onClick={() => navigate({ kind: "computers" })}
                 >
-                  <StatusDot
-                    tone={activeComputer?.machine.online ? "online" : "offline"}
-                    size="sm"
-                  />
+                  <StatusDot tone={computerDotTone} size="sm" />
                   <span className="ls-truncate">{activeComputerTitle}</span>
                   <span className="workspace-computer-chip__tag">{routeBadge.label}</span>
                 </button>
@@ -222,10 +238,7 @@ export function WorkspaceTopBar({
                   className="workspace-computer-chip"
                   onClick={() => navigate({ kind: "computers" })}
                 >
-                  <StatusDot
-                    tone={activeComputer?.machine.online ? "online" : "offline"}
-                    size="sm"
-                  />
+                  <StatusDot tone={computerDotTone} size="sm" />
                   <span className="ls-truncate">{activeComputerTitle}</span>
                   <span className="workspace-computer-chip__tag">{routeBadge.label}</span>
                 </button>

@@ -12,6 +12,8 @@ final class DesktopMedia {
   private let pipe = DesktopMediaPipe(output: .standardOutput)
 
   static func run() -> Never {
+    // Ignore SIGPIPE so a parent closing the pipe during rapid computer switching never aborts the helper.
+    signal(SIGPIPE, SIG_IGN)
     let app = NSApplication.shared
     app.setActivationPolicy(.prohibited)
     let service = DesktopMedia()

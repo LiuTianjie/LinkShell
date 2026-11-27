@@ -212,24 +212,46 @@
     font-size: 13px;
   }
   .console-current-computer {
-    display: flex;
+    display: inline-flex;
     align-items: center;
     height: 28px;
-    margin-right: 6px;
+    margin-right: 4px;
     padding: 0 8px;
-    gap: 7px;
+    gap: 6px;
+    border: 1px solid var(--separator);
     border-radius: var(--radius-control);
+    background: var(--card);
+    color: var(--label);
     font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition:
+      background-color var(--transition),
+      border-color var(--transition),
+      color var(--transition);
+  }
+  .console-current-computer:hover {
+    background: var(--fill);
+    border-color: var(--separatorStrong);
+  }
+  .console-current-computer:active,
+  .console-current-computer[data-state="open"] {
+    background: var(--fillStrong);
+    border-color: var(--separatorStrong);
   }
   .console-current-computer > span:not(.console-presence) {
     overflow: hidden;
-    max-width: 240px;
+    max-width: 200px;
     white-space: nowrap;
     text-overflow: ellipsis;
   }
+  .console-current-computer-caret {
+    color: var(--tertiaryLabel);
+    flex-shrink: 0;
+  }
   .console-presence {
-    width: 8px;
-    height: 8px;
+    width: 7px;
+    height: 7px;
     flex-shrink: 0;
     border-radius: 50%;
     background: var(--tertiaryLabel);
@@ -405,10 +427,11 @@
       border-radius: 0;
     }
     .console-context {
-      padding-inline: 8px 12px;
+      gap: 8px;
+      padding-inline: 8px 10px;
     }
-    .console-current-computer {
-      display: none;
+    .console-current-computer > span:not(.console-presence) {
+      max-width: 100px;
     }
     .overview,
     .live-overview {
@@ -416,6 +439,11 @@
     }
     .page-heading h1 {
       font-size: 20px;
+    }
+  }
+  @media (max-width: 600px) {
+    .console-current-computer {
+      display: none;
     }
   }
   @media (prefers-reduced-motion: reduce) {

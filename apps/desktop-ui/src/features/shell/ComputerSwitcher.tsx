@@ -64,17 +64,19 @@ export function ComputerSwitcher({
   const activeName = displayComputerName(activeComputer, names, locale);
   const activeRouteTag = connectionRouteBadge(activeComputer, undefined, locale);
 
-  const dotTone = locked
+  const dotTone = locked || linkStatus === "locked"
     ? "waiting"
     : activeComputer?.key === DESKTOP_LOCAL
       ? linkStatus === "online" || activeComputer.machine.online
         ? "online"
-        : "offline"
-      : activeComputer?.machine.online
-        ? linkStatus === "connecting"
+        : linkStatus === "connecting" || linkStatus === "reconnecting"
           ? "waiting"
-          : "online"
-        : "offline";
+          : "offline"
+      : linkStatus === "connecting" || linkStatus === "reconnecting"
+        ? "waiting"
+        : linkStatus === "online" || activeComputer?.machine.online
+          ? "online"
+          : "offline";
 
   const handleSelectComputer = (computer: Computer) => {
     switchToComputer(computer);

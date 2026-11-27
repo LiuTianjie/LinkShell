@@ -1,6 +1,6 @@
 import type { SessionSummary } from "@linkshell/wire";
 import { memo } from "react";
-import { View } from "react-native";
+import { StyleSheet, View } from "react-native";
 import { PressableFeedback } from "./pressable-feedback";
 import { Text } from "@/components/fixed-text";
 import { useActions, useClient } from "@/lib/client";
@@ -36,6 +36,8 @@ export const NeedCard = memo(function NeedCard({ session, now, onPress }: { sess
         backgroundColor: colors.card,
         borderRadius: radius.card,
         borderCurve: "continuous",
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: colors.separator,
         padding: 16,
         gap: 12,
       }}
@@ -53,7 +55,7 @@ export const NeedCard = memo(function NeedCard({ session, now, onPress }: { sess
             <Text numberOfLines={1} style={[type.headline, { flex: 1, color: colors.label }]}>
               {sessionTitle(session)}
             </Text>
-            <Text style={[type.footnote, { color: colors.tertiaryLabel }]}>{relativeTime(session.updatedAt, now)}</Text>
+            <Text style={[type.footnote, { color: colors.tertiaryLabel, fontVariant: ["tabular-nums"] }]}>{relativeTime(session.updatedAt, now)}</Text>
           </View>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
             <Text numberOfLines={1} style={[type.footnote, { flex: 1, color: colors.secondaryLabel }]}>
@@ -72,15 +74,19 @@ export const NeedCard = memo(function NeedCard({ session, now, onPress }: { sess
             size={14}
             color={colors.waiting}
           />
-          <Text numberOfLines={3} style={[type.subhead, { flex: 1, color: colors.label }]}>
+          <Text numberOfLines={3} style={[type.subhead, { flex: 1, color: colors.label, fontWeight: "500" }]}>
             {prompt}
           </Text>
           {extra ? (
-            <Text style={[type.caption, { color: colors.secondaryLabel, fontWeight: "500" }]}>{pick({ zh: `还有 ${extra} 项`, en: `${extra} more`, ja: `他 ${extra} 件` })}</Text>
+            <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: radius.chip, borderCurve: "continuous", backgroundColor: colors.waitingSoft }}>
+              <Text style={[type.caption, { color: colors.waiting, fontWeight: "600", fontVariant: ["tabular-nums"] }]}>
+                {pick({ zh: `+${extra}`, en: `+${extra}`, ja: `+${extra}` })}
+              </Text>
+            </View>
           ) : null}
         </View>
         {permission?.detail && permission.detail !== prompt ? (
-          <View style={{ backgroundColor: colors.code, borderRadius: radius.control, borderCurve: "continuous", paddingHorizontal: 10, paddingVertical: 8 }}>
+          <View style={{ backgroundColor: colors.code, borderRadius: radius.control, borderCurve: "continuous", borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator, paddingHorizontal: 10, paddingVertical: 8 }}>
             <Text selectable numberOfLines={4} style={{ fontFamily: mono, fontSize: 13, lineHeight: 18, color: colors.codeText }}>
               {permission.detail}
             </Text>

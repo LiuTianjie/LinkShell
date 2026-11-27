@@ -2,11 +2,16 @@ import { useEffect, useState, type ReactNode, type CSSProperties } from "react";
 import { useStore } from "zustand";
 import {
   BookOpen,
+  Check,
   ChevronRight,
+  ChevronsUpDown,
   CircleHelp,
+  LockKeyhole,
   Monitor,
   Moon,
+  Plus,
   Search,
+  Server,
   Sun,
 } from "lucide-react";
 import appMark from "../../../client/assets/mark.png";
@@ -30,6 +35,14 @@ import { CommandCenter } from "./CommandCenter";
 import { Icon, type IconName } from "../icons";
 import { Choice } from "./Choice";
 import { Button } from "./ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 import {
   Sidebar,
@@ -56,8 +69,8 @@ function useNavGroups(): {
       title: "工作空间",
       items: [
         { id: "home", title: t("nav.sessions"), icon: "grid" },
-        { id: "projects", title: t("nav.projects"), icon: "grid" },
-        { id: "computers", title: t("nav.computers"), icon: "computer" },
+        { id: "projects", title: t("nav.projects"), icon: "folder" },
+        { id: "computers", title: t("nav.computers"), icon: "server" },
         { id: "archive", title: t("nav.archived"), icon: "clock" },
       ],
     },
@@ -221,6 +234,10 @@ export function ConsoleShell({
     theme === "system" ? (systemDark ? "dark" : "light") : theme;
   useEffect(() => {
     document.documentElement.dataset.theme = resolvedTheme;
+    const themeMeta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+    if (themeMeta) {
+      themeMeta.content = resolvedTheme === "dark" ? "#0b0c0e" : "#F2F2F7";
+    }
     saveLocal("theme", theme);
   }, [resolvedTheme, theme]);
   useWorkspaceCommand((command) => {
@@ -253,9 +270,17 @@ export function ConsoleShell({
   const currentComputer = state.computers.find(
     (computer) => computer.key === state.connection?.computer.key,
   );
+  const currentComputerLabel = state.connection
+    ? computerName(state.connection.computer, names)
+    : "未选择电脑";
   const title =
     groups.flatMap((group) => group.items).find((item) => item.id === view)
       ?.title ?? t("nav.sessions");
+  useEffect(() => {
+    document.title = state.connection
+      ? `${title} · ${currentComputerLabel} · LinkShell`
+      : `${title} · LinkShell`;
+  }, [title, currentComputerLabel, state.connection]);
   return (
     <div className="console-root">
       <a
@@ -289,22 +314,64 @@ export function ConsoleShell({
               <strong>{title}</strong>
             </div>
             <div className="console-context-actions">
-              <div className="console-current-computer">
-                <Monitor size={14} />
-                <span>
-                  {state.connection
-                    ? computerName(state.connection.computer, names)
-                    : "未选择电脑"}
-                </span>
-                {state.connection && (
-                  <span
-                    className="console-presence"
-                    data-online={currentComputer?.machine.online ? "" : undefined}
-                    role="img"
-                    aria-label={currentComputer?.machine.online ? t("connection.online") : t("connection.offline")}
-                  />
-                )}
-              </div>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className="console-current-computer"
+                    aria-label={`当前电脑：${currentComputerLabel}，点击切换`}
+                  >
+                    <Monitor size={14} aria-hidden="true" />
+                    <span>{currentComputerLabel}</span>
+                    {state.connection && (
+                      <span
+                        className="console-presence"
+                        data-online={currentComputer?.machine.online ? "" : undefined}
+                        role="img"
+                        aria-label={currentComputer?.machine.online ? t("connection.online") : t("connection.offline")}
+                      />
+                    )}
+                    <ChevronsUpDown size={12} className="console-current-computer-caret" aria-hidden="true" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-64">
+                  <DropdownMenuLabel>切换电脑</DropdownMenuLabel>
+                  {state.computers.length > 0 ? (
+                    state.computers.map((computer) => {
+                      const active = computer.key === state.connection?.computer.key;
+                      const label = computerName(computer, names);
+                      return (
+                        <DropdownMenuItem
+                          key={computer.key}
+                          onSelect={() => selectComputer(computer)}
+                        >
+                          <span
+                            className="console-presence"
+                            data-online={computer.machine.online ? "" : undefined}
+                            aria-hidden="true"
+                          />
+                          <span className="flex-1 truncate">{label}</span>
+                          {computer.machine.locked && (
+                            <LockKeyhole size={12} className="text-muted-foreground" aria-hidden="true" />
+                          )}
+                          {active && <Check size={14} className="text-primary" aria-hidden="true" />}
+                        </DropdownMenuItem>
+                      );
+                    })
+                  ) : (
+                    <DropdownMenuItem disabled>暂无已连接电脑</DropdownMenuItem>
+                  )}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={() => navigate("computers")}>
+                    <Server size={14} aria-hidden="true" />
+                    <span>管理所有电脑</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={connect}>
+                    <Plus size={14} aria-hidden="true" />
+                    <span>连接新电脑</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button

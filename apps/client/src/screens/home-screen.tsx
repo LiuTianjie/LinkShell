@@ -300,9 +300,13 @@ function Summary({ small = false, batteryPercent, lowBattery }: { small?: boolea
         alignItems: "center",
         alignSelf: "flex-start",
         gap: 6,
-        paddingHorizontal: 4,
-        paddingTop: 2,
-        opacity: pressed ? 0.6 : 1,
+        minHeight: small ? 24 : 28,
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        marginTop: 2,
+        borderRadius: radius.control,
+        borderCurve: "continuous",
+        backgroundColor: pressed ? colors.fillStrong : colors.fill,
       })}
     >
       <LinkDot health={status === "online" ? "online" : status === "connecting" ? "connecting" : "offline"} />

@@ -1173,3 +1173,250 @@ describe("presenting the track's frames from the decoder", () => {
     expect(own.state().diagnoses.length).toBe(diagnoses);
   });
 });
+
+/** Drive the shipped touch state machine in `controls-script.ts` with a deterministic clock. */
+function viewerTouch(options: { mode?: "touch" | "trackpad" | "view"; zoom?: number; windowsHost?: boolean } = {}) {
+  const page = viewerPage();
+  const start = page.indexOf("// ---- Touch ----");
+  const end = page.indexOf("// ---- Mouse (a desktop browser) ----", start);
+  const source = page.slice(start, end);
+  return new Function("opts", `
+    let now = 0, serial = 0;
+    const timers = new Map();
+    const events = [], haptics = [], pans = [], zooms = [], moves = [];
+    const classes = new Set();
+    const listeners = new Map();
+    let mode = opts.mode || "touch";
+    let zoom = opts.zoom || 1;
+    const windowsHost = !!opts.windowsHost;
+    const content = { w: 1000, h: 500 }, fit = 1, pan = { x: 0, y: 0 };
+    const shown = { x: 0, y: 0, w: 1000, h: 500 };
+    const cursor = { x: 0.5, y: 0.5 };
+    const mods = new Set();
+    const presentation = { active: false };
+    const controls = { target: 0 };
+    const session = { active: () => true };
+    const performance = { now: () => now };
+    const setTimeout = (fn, delay) => { timers.set(++serial, { at: now + delay, fn }); return serial; };
+    const clearTimeout = (id) => { timers.delete(id); };
+    const clamp = (n, low, high) => Math.min(high, Math.max(low, n));
+    const controlling = () => mode !== "view";
+    const immersiveControls = () => false;
+    const wake = () => {};
+    const closeMenu = () => false;
+    const closeSheet = () => false;
+    const refresh = () => {};
+    const layout = () => {};
+    const glow = () => {};
+    const explain = () => {};
+    const toggleKeys = () => events.push({ t: "toggleKeys" });
+    const takeMods = () => undefined;
+    const tellApp = (msg) => { if (msg.type === "haptic") haptics.push(msg.kind); };
+    const panBy = (dx, dy) => pans.push({ dx, dy });
+    const zoomTo = (z, at) => { zoom = z; zooms.push({ z, at }); };
+    const pointAt = (x, y) => {
+      const u = (x - shown.x) / shown.w, v = (y - shown.y) / shown.h;
+      if (u < 0 || u > 1 || v < 0 || v > 1) return false;
+      cursor.x = u; cursor.y = v;
+      moves.push({ x, y, u, v });
+      return true;
+    };
+    const nudge = (dx, dy) => {
+      cursor.x = clamp(cursor.x + dx / shown.w, 0, 1);
+      cursor.y = clamp(cursor.y + dy / shown.h, 0, 1);
+      moves.push({ dx, dy, u: cursor.x, v: cursor.y });
+    };
+    const act = (msg) => events.push({ ...msg, at: { x: Math.round(cursor.x * shown.w), y: Math.round(cursor.y * shown.h) } });
+    const click = (b, n) => {
+      act({ t: "down", b, n });
+      act({ t: "up", b, n });
+    };
+    const pointer = { classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c), contains: (c) => classes.has(c) } };
+    const stage = {
+      addEventListener: (name, fn) => listeners.set(name, fn),
+      setPointerCapture() {},
+    };
+    const addEventListener = () => {};
+    const mouseDown = () => {}, mouseMove = () => {}, mouseUp = () => {};
+    ${source}
+    const emit = (name, id, x, y) => listeners.get(name)?.({
+      pointerId: id, pointerType: "touch", clientX: x, clientY: y, preventDefault() {},
+    });
+    const advance = (ms) => {
+      const target = now + ms;
+      while (true) {
+        let nextId = null, nextAt = Infinity;
+        for (const [id, entry] of timers) {
+          if (entry.at <= target && entry.at < nextAt) { nextId = id; nextAt = entry.at; }
+        }
+        if (nextId === null) break;
+        const entry = timers.get(nextId);
+        timers.delete(nextId);
+        now = entry.at;
+        entry.fn();
+      }
+      now = target;
+    };
+    return {
+      down: (x, y, id = 1) => emit("pointerdown", id, x, y),
+      move: (x, y, id = 1) => emit("pointermove", id, x, y),
+      up: (x, y, id = 1) => emit("pointerup", id, x, y),
+      cancel: (x, y, id = 1) => emit("pointercancel", id, x, y),
+      advance,
+      state: () => ({ events: [...events], haptics: [...haptics], pans: [...pans], zooms: [...zooms], moves: [...moves], pressed: classes.has("pressed"), zoom }),
+    };
+  `)(options) as {
+    down(x: number, y: number, id?: number): void;
+    move(x: number, y: number, id?: number): void;
+    up(x: number, y: number, id?: number): void;
+    cancel(x: number, y: number, id?: number): void;
+    advance(ms: number): void;
+    state(): {
+      events: Array<Record<string, unknown>>;
+      haptics: string[];
+      pans: Array<{ dx: number; dy: number }>;
+      zooms: Array<{ z: number; at: { x: number; y: number } }>;
+      moves: Array<Record<string, unknown>>;
+      pressed: boolean;
+      zoom: number;
+    };
+  };
+}
+
+describe("mobile remote-desktop touch gestures", () => {
+  it("triggers stationary long-press right-click even with slight fingertip jitter", () => {
+    const touch = viewerTouch({ mode: "touch", zoom: 1 });
+    touch.down(300, 200);
+    // Natural 12px thumb resting drift must not cancel long-press.
+    touch.advance(200);
+    touch.move(310, 206);
+    touch.advance(300);
+    touch.up(310, 206);
+
+    const { events, haptics } = touch.state();
+    expect(events.map((e) => `${e.t}:${e.b}:${e.n}`)).toEqual(["down:right:1", "up:right:1"]);
+    expect(haptics).toEqual(["medium"]);
+  });
+
+  it("recognizes tap-to-focus then tap-and-move as a left-button drag without misfiring double-click", () => {
+    // Even after a natural 600ms pause between selecting a window and dragging it.
+    for (const gap of [180, 600]) {
+      for (const mode of ["touch", "trackpad"] as const) {
+        const touch = viewerTouch({ mode, zoom: mode === "touch" ? 2 : 1 });
+        // Tap 1: select/focus the window.
+        touch.down(400, 120);
+        touch.advance(60);
+        touch.up(400, 120);
+        // Pause, then Tap 2 + move without lifting.
+        touch.advance(gap);
+        touch.down(404, 122);
+        touch.advance(50);
+        touch.move(430, 140);
+        expect(touch.state().pressed).toBe(true);
+        touch.advance(50);
+        touch.move(520, 180);
+        touch.up(520, 180);
+
+        const { events, pressed } = touch.state();
+        expect(pressed).toBe(false);
+        // Must NEVER emit n:2 double-click!
+        expect(events.some((e) => e.n === 2)).toBe(false);
+        expect(events.map((e) => `${e.t}:${e.b}:${e.n ?? 1}`)).toEqual([
+          "down:left:1", "up:left:1",
+          "down:left:1", "up:left:1",
+        ]);
+      }
+    }
+  });
+
+  it("locks left-button drag on tap-then-hold without turning into a double-click on lift or delayed move", () => {
+    const touch = viewerTouch({ mode: "touch", zoom: 2 });
+    // Tap 1
+    touch.down(300, 100);
+    touch.advance(50);
+    touch.up(300, 100);
+    // Tap 2 within 160ms, hold stationary 260ms, then slide and lift
+    touch.advance(160);
+    touch.down(302, 101);
+    touch.advance(260);
+    expect(touch.state().pressed).toBe(true);
+    touch.move(420, 160);
+    touch.up(420, 160);
+
+    const { events, haptics } = touch.state();
+    expect(events.some((e) => e.n === 2)).toBe(false);
+    expect(events.map((e) => `${e.t}:${e.b}:${e.n ?? 1}`)).toEqual([
+      "down:left:1", "up:left:1",
+      "down:left:1", "up:left:1",
+    ]);
+    expect(haptics).toEqual(["light"]);
+  });
+
+  it("avoids Windows OS double-click collision when dragging a titlebar right after a focus tap", () => {
+    const touch = viewerTouch({ mode: "touch", zoom: 1, windowsHost: true });
+    touch.down(400, 100);
+    touch.advance(50);
+    touch.up(400, 100);
+    // 180ms later, press on same pixel and slide 15px right.
+    touch.advance(180);
+    touch.down(400, 100);
+    touch.advance(30);
+    touch.move(415, 100);
+    touch.up(480, 100);
+
+    const { events } = touch.state();
+    const secondDown = events.filter((e) => e.t === "down")[1] as { at: { x: number; y: number } };
+    expect(Math.hypot(secondDown.at.x - 400, secondDown.at.y - 100)).toBeGreaterThanOrEqual(10);
+  });
+
+  it("supports direct single-finger drag in unzoomed touch mode and pans when zoomed in", () => {
+    const unzoomed = viewerTouch({ mode: "touch", zoom: 1 });
+    unzoomed.down(200, 150);
+    unzoomed.advance(40);
+    unzoomed.move(260, 180);
+    expect(unzoomed.state().pressed).toBe(true);
+    unzoomed.up(260, 180);
+    expect(unzoomed.state().events.map((e) => `${e.t}:${e.b}`)).toEqual(["down:left", "up:left"]);
+
+    const zoomed = viewerTouch({ mode: "touch", zoom: 2 });
+    zoomed.down(200, 150);
+    zoomed.advance(40);
+    zoomed.move(260, 180);
+    zoomed.up(260, 180);
+    expect(zoomed.state().events).toEqual([]);
+    expect(zoomed.state().pans.length).toBeGreaterThan(0);
+  });
+
+  it("preserves genuine quick double-tap click, two-finger tap right-click, and view-mode double-tap zoom", () => {
+    const quick = viewerTouch({ mode: "touch", zoom: 1 });
+    quick.down(250, 250);
+    quick.advance(50);
+    quick.up(250, 250);
+    quick.advance(140);
+    quick.down(255, 252);
+    quick.advance(60);
+    quick.up(255, 252);
+    expect(quick.state().events.map((e) => `${e.t}:${e.b}:${e.n}`)).toEqual([
+      "down:left:1", "up:left:1",
+      "down:left:2", "up:left:2",
+    ]);
+
+    const twoFinger = viewerTouch({ mode: "touch", zoom: 1 });
+    twoFinger.down(200, 200, 1);
+    twoFinger.down(260, 200, 2);
+    twoFinger.advance(80);
+    twoFinger.up(200, 200, 1);
+    twoFinger.up(260, 200, 2);
+    expect(twoFinger.state().events.map((e) => `${e.t}:${e.b}:${e.n}`)).toEqual(["down:right:1", "up:right:1"]);
+
+    const view = viewerTouch({ mode: "view", zoom: 1 });
+    view.down(300, 200);
+    view.advance(50);
+    view.up(300, 200);
+    view.advance(150);
+    view.down(302, 201);
+    view.advance(50);
+    view.up(302, 201);
+    expect(view.state().zoom).toBe(2.5);
+  });
+});

@@ -60,6 +60,7 @@ private func throwError(_ env: napi_env?, _ message: String) -> napi_value? {
 
 /// A JS function kept alive and callable from any thread; delivered on the main thread.
 final class Callback {
+  private let lock = NSLock()
   private var function: napi_threadsafe_function?
 
   init?(env: napi_env?, function value: napi_value?) {
@@ -85,11 +86,25 @@ final class Callback {
     self.function = function
   }
 
-  deinit { if let function { _ = napi_release_threadsafe_function(function, napi_tsfn_release) } }
+  deinit { release() }
+
+  /// Releases the underlying N-API threadsafe function at most once, serialized with `call(_:)`.
+  /// Calling this explicitly during main-thread teardown ensures the TSFN is never released on a
+  /// background thread and stale callbacks cannot fire after a screen session stops.
+  func release() {
+    lock.lock()
+    let current = function
+    function = nil
+    if let current { _ = napi_release_threadsafe_function(current, napi_tsfn_release) }
+    lock.unlock()
+  }
 
   func call(_ value: Any) {
+    let encoded = json(value)
+    lock.lock()
+    defer { lock.unlock() }
     guard let function else { return }
-    let text = Unmanaged.passRetained(json(value) as NSString).toOpaque()
+    let text = Unmanaged.passRetained(encoded as NSString).toOpaque()
     if napi_call_threadsafe_function(function, text, napi_tsfn_nonblocking) != 0 {
       Unmanaged<NSString>.fromOpaque(text).release()
     }
@@ -493,7 +508,10 @@ public func linkshellNativeInit(_ env: napi_env?, _ exports: napi_value?) -> nap
         callback: callback
       )
     }
-    catch { return throwError(env, error.localizedDescription) }
+    catch {
+      callback.release()
+      return throwError(env, error.localizedDescription)
+    }
     return undefined(env)
   }
   define(env, exports, "screenMessage") { env, info in

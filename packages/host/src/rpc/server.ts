@@ -26,6 +26,7 @@ import {
 } from "@linkshell/wire";
 import type { GatewayLink } from "../gateway.js";
 import type { SessionHub, Subscriber } from "../hub.js";
+import { coalesceWireEvents, isImmediateWireEvent } from "../hub-helpers.js";
 import { deletePath, downloadFile, listDirectory, listProjectFiles, makeDirectory, readFile, renamePath, searchDirectories, uploadFile, writeTextFile } from "../fs.js";
 import { gitCommit, gitDiff, gitRevertFile } from "../git-diff.js";
 import { isNamedPipe } from "../local-transport.js";
@@ -462,12 +463,91 @@ export class HostRpcServer {
         if (previous) hub.unsubscribe(params.sessionId, previous);
         const slim = { lazyImages: params.lazyImages };
         const current = () => context.subscriptions.get(params.sessionId) === subscriber;
-        const subscriber: Subscriber = {
-          notice: (notice) => { if (current()) context.peer.notify("session.notice", { sessionId: params.sessionId, notice }); },
-          event: (event) => { if (current()) context.peer.notify("session.event", slimEvent(event, slim)); },
-          window: (startSeq) => { if (current()) context.peer.notify("session.window", { sessionId: params.sessionId, startSeq }); },
-          bufferedAmount: context.bufferedAmount,
-        };
+        let subscriber: Subscriber;
+        if (params.batchEvents) {
+          let liveQueue: import("@linkshell/wire").SessionEvent[] = [];
+          let liveTimer: ReturnType<typeof setTimeout> | undefined;
+          let lastLiveFlushAt = 0;
+          const LIVE_COALESCE_MS = 16;
+          const LIVE_MAX_EVENTS = 64;
+          const MAX_BATCH_EVENTS = 128;
+
+          const sendBatched = (rawEvents: readonly import("@linkshell/wire").SessionEvent[]) => {
+            if (!current() || rawEvents.length === 0) return;
+            const coalesced = coalesceWireEvents(rawEvents.map((event) => slimEvent(event, slim)));
+            for (let i = 0; i < coalesced.length; i += MAX_BATCH_EVENTS) {
+              if (!current()) return;
+              context.peer.notify("session.events", {
+                sessionId: params.sessionId,
+                events: coalesced.slice(i, i + MAX_BATCH_EVENTS),
+              });
+            }
+          };
+
+          const flushLive = () => {
+            if (liveTimer) {
+              clearTimeout(liveTimer);
+              liveTimer = undefined;
+            }
+            if (liveQueue.length === 0) return;
+            const batch = liveQueue;
+            liveQueue = [];
+            lastLiveFlushAt = Date.now();
+            sendBatched(batch);
+          };
+
+          const clearLive = () => {
+            if (liveTimer) {
+              clearTimeout(liveTimer);
+              liveTimer = undefined;
+            }
+            liveQueue = [];
+          };
+
+          subscriber = {
+            notice: (notice) => { if (current()) context.peer.notify("session.notice", { sessionId: params.sessionId, notice }); },
+            events: (batch) => {
+              flushLive();
+              sendBatched(batch);
+            },
+            event: (event) => {
+              if (!current()) return;
+              const immediate = isImmediateWireEvent(event.update);
+              const now = Date.now();
+              // Leading-edge immediate flush keeps idle first-token latency at 0 ms,
+              // while subsequent bursts coalesce within 16 ms and boundary updates flush right away.
+              if (liveQueue.length === 0 && !liveTimer && (immediate || now - lastLiveFlushAt >= LIVE_COALESCE_MS)) {
+                // Boundary events (e.g. ls_turn: started right before the first token) must not
+                // start a coalescing cooldown that delays the very first streaming chunk.
+                lastLiveFlushAt = immediate ? 0 : now;
+                sendBatched([event]);
+                return;
+              }
+              liveQueue.push(event);
+              if (immediate || liveQueue.length >= LIVE_MAX_EVENTS) {
+                flushLive();
+                if (immediate) lastLiveFlushAt = 0;
+                return;
+              }
+              if (!liveTimer) {
+                liveTimer = setTimeout(flushLive, LIVE_COALESCE_MS);
+              }
+            },
+            window: (startSeq) => {
+              clearLive();
+              if (current()) context.peer.notify("session.window", { sessionId: params.sessionId, startSeq });
+            },
+            close: () => clearLive(),
+            bufferedAmount: context.bufferedAmount,
+          };
+        } else {
+          subscriber = {
+            notice: (notice) => { if (current()) context.peer.notify("session.notice", { sessionId: params.sessionId, notice }); },
+            event: (event) => { if (current()) context.peer.notify("session.event", slimEvent(event, slim)); },
+            window: (startSeq) => { if (current()) context.peer.notify("session.window", { sessionId: params.sessionId, startSeq }); },
+            bufferedAmount: context.bufferedAmount,
+          };
+        }
         context.subscriptions.set(params.sessionId, subscriber);
         try {
           const result = await hub.subscribe(params.sessionId, params.fromSeq, subscriber, { latest: params.latest });
@@ -999,6 +1079,7 @@ export class HostRpcServer {
         this.options.hub.onSummary((session) => context.peer.notify("session.summary", { session })),
         this.options.hub.onSide((sessionId, side, closed) => context.peer.notify("session.side", closed ? { sessionId, side, closed } : { sessionId, side })),
         this.options.hub.onRemoved((sessionId) => {
+          context.subscriptions.get(sessionId)?.close?.();
           context.subscriptions.delete(sessionId);
           context.peer.notify("session.removed", { sessionId });
         }),

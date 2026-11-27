@@ -239,8 +239,9 @@
       --ls-border-subtle: light-dark(rgba(20, 22, 26, 0.18), rgba(255, 255, 255, 0.18));
       --ls-border: light-dark(rgba(20, 22, 26, 0.28), rgba(255, 255, 255, 0.28));
       --ls-border-strong: light-dark(rgba(20, 22, 26, 0.44), rgba(255, 255, 255, 0.44));
-      --ls-scrollbar-thumb: light-dark(#565b66, #9097a6);
-      --ls-scrollbar-thumb-hover: light-dark(#373b44, #bac0ce);
+      --ls-scrollbar-thumb: light-dark(#3b404a, #aeb5c4);
+      --ls-scrollbar-thumb-hover: light-dark(#1f232a, #d5dae5);
+      --ls-scrollbar-track: light-dark(#eceef2, #181a20);
     }
   }
 }
@@ -273,7 +274,27 @@
   /* Thin AA-compliant scrollbars; never animate scrollbar-color */
   * {
     scrollbar-width: thin;
-    scrollbar-color: var(--ls-scrollbar-thumb) transparent;
+    scrollbar-color: var(--ls-scrollbar-thumb) var(--ls-scrollbar-track, transparent);
+  }
+
+  @supports not (scrollbar-color: auto) {
+    * {
+      scrollbar-width: auto;
+    }
+
+    *::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+
+    *::-webkit-scrollbar-thumb {
+      background: var(--ls-scrollbar-thumb);
+      border-radius: 999px;
+    }
+
+    *::-webkit-scrollbar-track {
+      background: var(--ls-scrollbar-track, transparent);
+    }
   }
 
   code,
@@ -297,6 +318,13 @@
   :focus-visible {
     outline: 2px solid var(--ls-accent);
     outline-offset: 1px;
+  }
+
+  @media (forced-colors: active) {
+    :focus-visible {
+      outline: 2px solid Highlight;
+      outline-offset: 2px;
+    }
   }
 
   /* Pure-CSS modal scroll lock (Chromium 144+) */

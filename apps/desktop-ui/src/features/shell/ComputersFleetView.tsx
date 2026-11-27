@@ -102,7 +102,13 @@ function FleetComputerRow({
       setMetricsState({ history: [] });
       return undefined;
     }
-    const retained = engine.retainComputer(computerRef.current, { metadataOnly: true });
+    let retained: ReturnType<typeof engine.retainComputer>;
+    try {
+      retained = engine.retainComputer(computerRef.current, { metadataOnly: true });
+    } catch {
+      setMetricsState({ history: [] });
+      return undefined;
+    }
     const syncStore = () => {
       const state = retained.connection.store.getState();
       setSessionCount(
@@ -155,8 +161,9 @@ function FleetComputerRow({
       setRenameError(undefined);
       return;
     }
-    const retained = engine.retainComputer(computer, { metadataOnly: true });
+    let retained: ReturnType<typeof engine.retainComputer> | undefined;
     try {
+      retained = engine.retainComputer(computer, { metadataOnly: true });
       await computerNames.rename(computer, trimmed, retained.connection.link);
       setRenaming(false);
       setRenameError(undefined);
@@ -168,7 +175,7 @@ function FleetComputerRow({
           : describeActionError(error, locale),
       );
     } finally {
-      retained.release();
+      retained?.release();
     }
   };
 

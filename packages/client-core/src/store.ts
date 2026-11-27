@@ -263,6 +263,7 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
   let suppressOutboxSave = false;
   let pending: SessionEvent[] = [];
   let flushTimer: ReturnType<typeof setTimeout> | undefined;
+  let lastFlushAt = 0;
   // A subscription's backlog can span many socket frames. Keep it off screen until its
   // response arrives; cached messages remain readable while this snapshot is assembled.
   const replaying = new Map<string, { events: SessionEvent[]; seqs: Map<number, number>; startSeq?: number }>();
@@ -291,6 +292,9 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
     let promptProgress = state.promptProgress;
     let outbox = state.outbox;
     const bySession = new Map<string, SessionEvent[]>();
+    const hasSubagentViews = Object.keys(subagentViews).length > 0;
+    const subagentEntries = hasSubagentViews ? Object.entries(subagentViews) : undefined;
+    const bySubagent = hasSubagentViews ? new Map<string, SessionEvent[]>() : undefined;
     for (const event of batch) {
       if (event.update.sessionUpdate === "user_message_chunk" && event.update.messageId?.startsWith("local-")) {
         const confirmedId = event.update.messageId.slice("local-".length);
@@ -307,19 +311,32 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
       const runs = workflows[event.sessionId] ?? {};
       const nextRuns = applyWorkflowEvent(runs, event);
       if (nextRuns !== runs) workflows = { ...workflows, [event.sessionId]: nextRuns };
-      const list = bySession.get(event.sessionId) ?? [];
+      let list = bySession.get(event.sessionId);
+      if (!list) bySession.set(event.sessionId, (list = []));
       list.push(event);
-      bySession.set(event.sessionId, list);
       // A sub-agent opened on its own follows along too.
-      const prefix = `${event.sessionId}\n`;
-      // The parent's history may still be loading, so filter this buffer only
-      // after we know which nested calls belong to that view.
-      for (const [key, buffer] of loadingSubagents) if (key.startsWith(prefix)) buffer.push(event);
-      for (const [key, current] of Object.entries(subagentViews)) {
-        if (!key.startsWith(prefix)) continue;
-        const own = eventForSubagent(current, key.slice(prefix.length), event);
-        if (!own) continue;
-        const next = applyEvents(current, [own]);
+      if (loadingSubagents.size > 0 || subagentEntries) {
+        const prefix = `${event.sessionId}\n`;
+        // The parent's history may still be loading, so filter this buffer only
+        // after we know which nested calls belong to that view.
+        for (const [key, buffer] of loadingSubagents) if (key.startsWith(prefix)) buffer.push(event);
+        if (subagentEntries) {
+          for (const [key, current] of subagentEntries) {
+            if (!key.startsWith(prefix)) continue;
+            const own = eventForSubagent(current, key.slice(prefix.length), event);
+            if (!own) continue;
+            let subList = bySubagent!.get(key);
+            if (!subList) bySubagent!.set(key, (subList = []));
+            subList.push(own);
+          }
+        }
+      }
+    }
+    if (bySubagent) {
+      for (const [key, subEvents] of bySubagent) {
+        const current = subagentViews[key];
+        if (!current) continue;
+        const next = applyEvents(current, subEvents);
         if (next !== current) subagentViews = { ...subagentViews, [key]: next };
       }
     }
@@ -347,6 +364,7 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
     if (pending.length === 0) return;
     const batch = pending;
     pending = [];
+    lastFlushAt = Date.now();
     store.setState((state) => applyBatch(state, batch));
   };
 
@@ -1213,25 +1231,62 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
     });
   });
   // Only live events animate as they arrive. A history replay becomes one ready snapshot.
-  link.onEvent((event) => {
+  const ingestIncomingEvents = (incoming: SessionEvent[]) => {
     const state = store.getState();
-    // A bookmark lookup can use a temporary RPC subscription just to find its summary.
-    // Its replay must not spill into a view created before this batch's timer flushes.
-    if (!state.open[event.sessionId]) return;
-    if (!state.ready[event.sessionId]) {
-      let replay = replaying.get(event.sessionId);
-      if (!replay) replaying.set(event.sessionId, (replay = { events: [], seqs: new Map() }));
-      // Deduplicate by seq so subscribe retries never double-buffer the same replay backlog.
-      const existing = replay.seqs.get(event.seq);
-      if (existing !== undefined) replay.events[existing] = event;
-      else {
-        replay.seqs.set(event.seq, replay.events.length);
-        replay.events.push(event);
+    let liveBatch: SessionEvent[] | undefined;
+    for (const event of incoming) {
+      // A bookmark lookup can use a temporary RPC subscription just to find its summary.
+      // Its replay must not spill into a view created before this batch's timer flushes.
+      if (!state.open[event.sessionId]) continue;
+      if (!state.ready[event.sessionId]) {
+        let replay = replaying.get(event.sessionId);
+        if (!replay) replaying.set(event.sessionId, (replay = { events: [], seqs: new Map() }));
+        // Deduplicate by seq so subscribe retries never double-buffer the same replay backlog.
+        const existing = replay.seqs.get(event.seq);
+        if (existing !== undefined) replay.events[existing] = event;
+        else {
+          replay.seqs.set(event.seq, replay.events.length);
+          replay.events.push(event);
+        }
+        continue;
       }
+      (liveBatch ??= []).push(event);
+    }
+    if (!liveBatch) return;
+    // Leading-edge immediate flush eliminates 16 ms TTFT lag when idle, while continuous
+    // high-rate token bursts still coalesce to one store update per animation frame.
+    // Boundary/control events (ls_turn, ls_permission, etc.) flush immediately without
+    // starting a cooldown that would delay the very first token right after ls_turn:started.
+    const hasStreamingChunk = liveBatch.some(
+      (event) =>
+        event.update.sessionUpdate === "agent_message_chunk" ||
+        event.update.sessionUpdate === "agent_thought_chunk",
+    );
+    const hasBoundary = liveBatch.some(
+      (event) =>
+        event.update.sessionUpdate === "ls_turn" ||
+        event.update.sessionUpdate === "ls_permission" ||
+        event.update.sessionUpdate === "ls_permission_resolved" ||
+        event.update.sessionUpdate === "ls_error" ||
+        event.update.sessionUpdate === "user_message_chunk",
+    );
+    const now = Date.now();
+    if (!flushTimer && pending.length === 0 && (hasBoundary || now - lastFlushAt >= 16)) {
+      lastFlushAt = hasStreamingChunk && !hasBoundary ? now : 0;
+      store.setState((current) => applyBatch(current, liveBatch!));
       return;
     }
-    pending.push(event);
+    for (const event of liveBatch) pending.push(event);
+    if (hasBoundary) {
+      flushEvents();
+      lastFlushAt = 0;
+      return;
+    }
     flushTimer ??= setTimeout(flushEvents, 16);
+  };
+  link.onEvent((event) => ingestIncomingEvents([event]));
+  link.on("session.events", ({ events }) => {
+    if (Array.isArray(events) && events.length > 0) ingestIncomingEvents(events);
   });
   // Opened while the link was down, or back after a break: the backlog is in, the session can show.
   link.onRestored((summary) => subscribed(summary, true));

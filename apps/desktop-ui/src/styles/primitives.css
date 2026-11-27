@@ -42,14 +42,7 @@
     transition:
       background-color 80ms ease-out,
       color 80ms ease-out,
-      border-color 80ms ease-out,
-      transform 90ms cubic-bezier(0.22, 1, 0.36, 1);
-  }
-
-  @media (prefers-reduced-motion: no-preference) {
-    .ls-btn:active:not(:disabled) {
-      transform: scale(0.98);
-    }
+      border-color 80ms ease-out;
   }
 
   .ls-btn[data-size="xs"] {

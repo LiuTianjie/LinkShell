@@ -1,7 +1,7 @@
 import { translateSocketError } from "@linkshell/client-core";
 import { HOST_PROTOCOL } from "@linkshell/wire";
 import { router } from "expo-router";
-import { ActivityIndicator, View } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, View } from "react-native";
 import { Text } from "@/components/fixed-text";
 import { useClient, useConnection, useConnectionStatus } from "@/lib/client";
 import { colors } from "@/theme/colors";
@@ -58,9 +58,11 @@ export function ConnectionBanner() {
   const { link } = useConnection();
   // An absent revision is a host from before revisions: older than this app either way.
   const outdated = useClient((state) => !!state.machine && (state.machine.protocol ?? 0) < HOST_PROTOCOL);
+  const hairline = StyleSheet.hairlineWidth ?? 0.5;
+  const cardBorder = { borderWidth: hairline, borderColor: colors.separator };
   if (status === "online" && outdated) {
     return (
-      <View style={{ marginTop: 8, flexDirection: "row", alignItems: "center", gap: 12, padding: 14, borderRadius: radius.card, borderCurve: "continuous", backgroundColor: colors.card }}>
+      <View style={{ marginTop: 8, flexDirection: "row", alignItems: "center", gap: 12, padding: 14, borderRadius: radius.card, borderCurve: "continuous", backgroundColor: colors.card, ...cardBorder }}>
         <Icon sf="arrow.down.circle" md="system_update" size={18} color={colors.secondaryLabel} />
         <View style={{ flex: 1, gap: 2 }}>
           <Text style={[type.subhead, { color: colors.label, fontWeight: "600" }]}>电脑上的 LinkShell 比 App 旧</Text>
@@ -77,7 +79,7 @@ export function ConnectionBanner() {
         accessibilityRole="button"
         accessibilityHint="输入访问密码"
         outerStyle={{ marginTop: 8 }}
-        style={{ flexDirection: "row", alignItems: "center", gap: 12, padding: 14, borderRadius: radius.card, borderCurve: "continuous", backgroundColor: colors.card, overflow: "hidden" }}
+        style={{ flexDirection: "row", alignItems: "center", gap: 12, padding: 14, borderRadius: radius.card, borderCurve: "continuous", backgroundColor: colors.card, ...cardBorder, overflow: "hidden" }}
       >
         <Icon sf="lock.fill" md="lock" size={18} color={colors.secondaryLabel} />
         <View style={{ flex: 1, gap: 2 }}>
@@ -89,6 +91,7 @@ export function ConnectionBanner() {
     );
   }
   const connecting = status === "connecting";
+  const reconnecting = status === "reconnecting";
   // Refused, not unreachable: retrying changes nothing, and the next step is pairing again.
   const repair = !connecting && needsRepairing(formattedDetail);
   return (
@@ -106,24 +109,46 @@ export function ConnectionBanner() {
         borderRadius: radius.card,
         borderCurve: "continuous",
         backgroundColor: colors.card,
+        ...cardBorder,
         overflow: "hidden",
       }}
     >
       {/* A connection that fails is an error (danger), not something waiting on the user (amber). */}
-      {connecting ? (
+      {connecting || reconnecting ? (
         <ActivityIndicator color={colors.secondaryLabel} />
       ) : (
         <Icon sf="wifi.exclamationmark" md="wifi_off" size={20} color={colors.danger} />
       )}
       <View style={{ flex: 1, gap: 2 }}>
         <Text style={[type.subhead, { color: colors.label, fontWeight: "600" }]}>
-          {connecting ? "正在连接电脑…" : repair ? "需要重新配对" : "电脑暂时连不上"}
+          {connecting ? "正在连接电脑…" : repair ? "需要重新配对" : reconnecting ? "正在恢复连接…" : "电脑暂时连不上"}
         </Text>
         <Text numberOfLines={2} style={[type.footnote, { color: colors.secondaryLabel }]}>
           {connecting ? "稍等片刻" : repair ? `${formattedDetail} · 轻点重新配对` : `${formattedDetail ? `${formattedDetail} · ` : ""}会自动重试，轻点查看连接设置`}
         </Text>
       </View>
-      <Icon sf="chevron.right" md="chevron_right" size={13} color={colors.tertiaryLabel} weight="semibold" />
+      {!connecting && !repair ? (
+        <Pressable
+          onPress={(event) => {
+            event.stopPropagation?.();
+            link.reconnectNow(true);
+          }}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="立即重试连接"
+          style={({ pressed }) => ({
+            paddingHorizontal: 10,
+            paddingVertical: 5,
+            borderRadius: radius.control ?? 6,
+            borderCurve: "continuous",
+            backgroundColor: pressed ? colors.fillStrong : colors.fill,
+          })}
+        >
+          <Text style={[type.caption, { color: colors.label, fontWeight: "600" }]}>重试</Text>
+        </Pressable>
+      ) : (
+        <Icon sf="chevron.right" md="chevron_right" size={13} color={colors.tertiaryLabel} weight="semibold" />
+      )}
     </PressableFeedback>
   );
 }

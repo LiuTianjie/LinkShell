@@ -92,8 +92,17 @@ function walk(value: Json, state: { images: number }, replace: (image: LargeMedi
   return value;
 }
 
+/** Fast-path check for common small text chunks that contain no media or oversized strings. */
+function isSmallTextChunk(update: SessionUpdate, limit: number): boolean {
+  if (update.sessionUpdate === "agent_message_chunk" || update.sessionUpdate === "agent_thought_chunk") {
+    return update.content.type === "text" && update.content.text.length <= limit;
+  }
+  return false;
+}
+
 /** The event as sent to a client; the same object when nothing in it is heavy. */
 export function slimEvent(event: SessionEvent, options: SlimOptions = {}): SessionEvent {
+  if (isSmallTextChunk(event.update, MAX_TEXT)) return event;
   const update = walk(
     event.update,
     { images: 0 },
@@ -178,6 +187,7 @@ function capRawField(raw: unknown): unknown {
  * Call after `BlobStore.externalizeUpdate()` so media > 16 KB is already a short URI.
  */
 export function capStoredUpdate(update: SessionUpdate): SessionUpdate {
+  if (isSmallTextChunk(update, MAX_STORED_TEXT)) return update;
   let next: unknown = update;
   if (update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") {
     const rec = update as Record<string, unknown>;

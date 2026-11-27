@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { router } from "expo-router";
-import { Pressable, StyleSheet, View } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, View } from "react-native";
 import { ComputerArt } from "./computer-art";
 import { ComputerSwipe, computerRemovable } from "./computer-swipe";
 import { Text } from "./fixed-text";
@@ -32,7 +32,7 @@ export function ComputerList({ onSelect }: { onSelect: (key: string) => void }) 
       <View
         style={{ paddingHorizontal: 8, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}
       >
-        <Text style={[type.footnote, { flex: 1, color: colors.secondaryLabel }]}>
+        <Text style={[type.footnote, { flex: 1, color: colors.secondaryLabel, fontVariant: ["tabular-nums"] }]}>
           {pick({
             zh: `可访问的电脑 · ${computers.length} 台`,
             en: `Your computers · ${computers.length}`,
@@ -139,11 +139,18 @@ export function ComputerList({ onSelect }: { onSelect: (key: string) => void }) 
                       </Text>
                     ) : null}
                   </View>
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 4, maxWidth: "31%" }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 5, maxWidth: "34%" }}>
                     {editing ? (
                       <Icon sf="pencil" md="edit" size={16} color={colors.accent} />
+                    ) : locked ? (
+                      <Icon sf="lock.fill" md="lock" size={13} color={colors.waiting} />
+                    ) : connecting ? (
+                      <ActivityIndicator size="small" color={colors.secondaryLabel} />
                     ) : selected ? (
-                      <Icon sf="checkmark" md="check" size={15} color={colors.accent} />
+                      <>
+                        {online ? <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: colors.ok }} /> : null}
+                        <Icon sf="checkmark" md="check" size={15} color={colors.accent} />
+                      </>
                     ) : online ? (
                       <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: colors.ok }} />
                     ) : null}
@@ -151,7 +158,7 @@ export function ComputerList({ onSelect }: { onSelect: (key: string) => void }) 
                       numberOfLines={2}
                       style={[
                         type.footnote,
-                        { flexShrink: 1, color: selected ? colors.accent : colors.secondaryLabel },
+                        { flexShrink: 1, color: locked ? colors.waiting : selected ? colors.accent : colors.secondaryLabel },
                       ]}
                     >
                       {editing ? renameCopy : label}

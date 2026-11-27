@@ -444,6 +444,68 @@ final class DesktopScreenSurfaceTests: XCTestCase {
     XCTAssertNil(weakOverlay, "Overlay must deallocate cleanly and remove its local NSEvent monitor in deinit")
   }
 
+  func testDesktopMediaPipeSurvivesBrokenPipeDuringRapidSwitch() throws {
+    let pipe = Pipe()
+    let mediaPipe = DesktopMediaPipe(output: pipe.fileHandleForWriting)
+    try pipe.fileHandleForReading.close()
+    let group = DispatchGroup()
+    for index in 0..<64 {
+      group.enter()
+      DispatchQueue.global(qos: .userInteractive).async {
+        mediaPipe.send(["type": "release", "token": index])
+        group.leave()
+      }
+    }
+    XCTAssertEqual(group.wait(timeout: .now() + 5), .success)
+    mediaPipe.close()
+  }
+
+  @MainActor
+  func testSurfaceStopAndDeallocUnderConcurrentBackgroundFrameDelivery() throws {
+    var pixelBuffer: CVPixelBuffer?
+    let attrs: [String: Any] = [
+      kCVPixelBufferIOSurfacePropertiesKey as String: [:],
+      kCVPixelBufferMetalCompatibilityKey as String: true,
+    ]
+    let status = CVPixelBufferCreate(
+      nil, 64, 64, kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange, attrs as CFDictionary, &pixelBuffer
+    )
+    XCTAssertEqual(status, kCVReturnSuccess)
+    let buffer = try XCTUnwrap(pixelBuffer)
+    let ioSurface = try XCTUnwrap(CVPixelBufferGetIOSurface(buffer)?.takeUnretainedValue())
+    let metadata = DesktopScreenFrame(
+      buffer: buffer, width: 64, height: 64, rotation: 0, crop: CGRect(x: 0, y: 0, width: 64, height: 64)
+    ).metadata
+
+    for _ in 0..<8 {
+      weak var weakSurface: DesktopScreenSurface?
+      var sink: DesktopScreenFrameSink?
+      autoreleasepool {
+        let surface = DesktopScreenSurface(frame: CGRect(x: 0, y: 0, width: 320, height: 180))
+        weakSurface = surface
+        sink = surface.frameSink
+        surface.onInput = { _, _ in }
+        surface.onFirstFrame = {}
+        surface.onFailure = { _ in }
+        let group = DispatchGroup()
+        for _ in 0..<24 {
+          group.enter()
+          DispatchQueue.global(qos: .userInteractive).async { [sink] in
+            if let frame = DesktopScreenFrame.importSurface(ioSurface, metadata: metadata, release: {}) {
+              sink?.receive(frame)
+            }
+            group.leave()
+          }
+        }
+        surface.stop()
+        XCTAssertEqual(group.wait(timeout: .now() + 5), .success)
+      }
+      // Even while a background caller still holds `frameSink`, the AppKit NSView must deallocate on main.
+      XCTAssertNil(weakSurface, "DesktopScreenSurface NSView must not be retained by non-AppKit frameSink after stop()")
+      sink = nil
+    }
+  }
+
   private func commandDescription(_ command: [String: Any]) -> String {
     guard let kind = command["t"] as? String else { return "missing-kind" }
     return kind + ":" + ((command[kind == "text" ? "s" : "k"] as? String) ?? "missing-value")

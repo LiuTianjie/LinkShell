@@ -84,6 +84,9 @@ interface Peer {
   admissionCheckedAt: number;
   admissionCheck?: Promise<string | undefined>;
   admissionRefusal?: string;
+  /** Pre-serialized `"from"` frame prefixes to avoid re-encoding identity metadata per routed frame. */
+  fromPrefixPaired: string;
+  fromPrefixAccount: string;
 }
 
 interface Offer {
@@ -326,13 +329,31 @@ export class Gateway {
           return;
         }
       }
-      let parsed;
+      let raw: unknown;
       try {
-        parsed = clientFrameSchema.safeParse(JSON.parse(data.toString()));
+        raw = JSON.parse(data.toString());
       } catch {
-        parsed = undefined;
+        send({ t: "error", code: "bad_frame", message: "无法解析的消息" });
+        return;
       }
-      if (!parsed?.success) {
+      // Hot path for already-authenticated peers: bypass Zod object validation for routed `to` and `ping` frames.
+      if (peer && raw && typeof raw === "object") {
+        const obj = raw as Record<string, unknown>;
+        if (obj.t === "to" && typeof obj.to === "string" && typeof obj.d === "string" && obj.d.length <= 40 * 1024 * 1024) {
+          if (this.peers.get(peer.record.id)?.socket !== socket) return;
+          if (peer.admissionRefusal) return;
+          this.route(peer, obj.to, obj.d);
+          return;
+        }
+        if (obj.t === "ping") {
+          if (this.peers.get(peer.record.id)?.socket !== socket) return;
+          if (peer.admissionRefusal) return;
+          send({ t: "pong" });
+          return;
+        }
+      }
+      const parsed = clientFrameSchema.safeParse(raw);
+      if (!parsed.success) {
         send({ t: "error", code: "bad_frame", message: "无法解析的消息" });
         return;
       }
@@ -457,7 +478,16 @@ export class Gateway {
       }
     }
     const previous = this.peers.get(record.id);
-    const peer: Peer = { record, socket, email, formFactor, admissionCheckedAt: Date.now() };
+    const fromJson = JSON.stringify({ id: record.id, signKey: record.signKey, boxKey: record.boxKey });
+    const peer: Peer = {
+      record,
+      socket,
+      email,
+      formFactor,
+      admissionCheckedAt: Date.now(),
+      fromPrefixPaired: `{"t":"from","from":${fromJson},"via":"paired","d":`,
+      fromPrefixAccount: `{"t":"from","from":${fromJson},"via":"account","d":`,
+    };
     this.peers.set(record.id, peer);
     // One live connection per identity: the newest wins.
     previous?.socket.close(4000, "replaced by a newer connection");
@@ -501,16 +531,11 @@ export class Gateway {
     if (!via) return undeliverable("not_allowed");
     if (!target || target.socket.readyState !== WebSocket.OPEN) return undeliverable("offline");
     const limit = this.options.maxBufferedBytes ?? MAX_BUFFERED_BYTES;
-    const frame = JSON.stringify({
-      t: "from",
-      from: { id: from.record.id, signKey: from.record.signKey, boxKey: from.record.boxKey },
-      via,
-      d: data,
-    } satisfies ServerFrame);
-    const frameBytes = Buffer.byteLength(frame);
+    const frame = `${via === "paired" ? from.fromPrefixPaired : from.fromPrefixAccount}${JSON.stringify(data)}}`;
+    const buffered = target.socket.bufferedAmount;
     if (
-      target.socket.bufferedAmount > limit ||
-      (target.socket.bufferedAmount > 0 && target.socket.bufferedAmount + frameBytes > limit)
+      buffered > limit ||
+      (buffered > 0 && buffered + Buffer.byteLength(frame) > limit)
     ) {
       // Never pause the sender's multiplexed socket: closing only the slow receiver avoids
       // freezing other devices and heartbeats sharing the machine's WebSocket.

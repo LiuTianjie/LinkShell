@@ -80,13 +80,30 @@ public final class DesktopMediaPipe {
   private let output: FileHandle
   private let lock = NSLock()
   private var closed = false
-  public init(output: FileHandle) { self.output = output }
+  public init(output: FileHandle) {
+    self.output = output
+    // Prevent SIGPIPE from killing Electron or the media helper when the peer closes mid-switch.
+    _ = fcntl(output.fileDescriptor, F_SETNOSIGPIPE, 1)
+  }
   public func send(_ message: [String: Any]) {
     guard var data = DesktopMediaIPC.data(message) else { return }
     data.append(10)
     lock.lock(); defer { lock.unlock() }
     guard !closed else { return }
-    do { try output.write(contentsOf: data) } catch { closed = true; try? output.close() }
+    let fd = output.fileDescriptor
+    guard fd >= 0 else { closed = true; return }
+    let ok = data.withUnsafeBytes { raw -> Bool in
+      guard let base = raw.baseAddress else { return true }
+      var written = 0
+      while written < raw.count {
+        let count = Darwin.write(fd, base.advanced(by: written), raw.count - written)
+        if count > 0 { written += count; continue }
+        if count < 0 && errno == EINTR { continue }
+        return false
+      }
+      return true
+    }
+    if !ok { closed = true; try? output.close() }
   }
   public func close() {
     lock.lock(); defer { lock.unlock() }

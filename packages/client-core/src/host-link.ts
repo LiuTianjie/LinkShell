@@ -110,6 +110,7 @@ export class HostLink {
   private readonly waiters = new Set<() => void>();
   private readonly statusListeners = new Set<(status: LinkStatus, error?: string) => void>();
   private readonly eventListeners = new Set<(event: SessionEvent) => void>();
+  private readonly eventsListeners = new Set<(events: SessionEvent[]) => void>();
   private readonly summaryListeners = new Set<(summary: SessionSummary) => void>();
   private readonly onlineListeners = new Set<() => void>();
   private readonly restoredListeners = new Set<(summary: SessionSummary) => void>();
@@ -140,6 +141,12 @@ export class HostLink {
   onEvent(listener: (event: SessionEvent) => void): () => void {
     this.eventListeners.add(listener);
     return () => this.eventListeners.delete(listener);
+  }
+
+  /** Receives batched session events (from `session.events` or single `session.event` fallback). */
+  onEvents(listener: (events: SessionEvent[]) => void): () => void {
+    this.eventsListeners.add(listener);
+    return () => this.eventsListeners.delete(listener);
   }
 
   onSummary(listener: (summary: SessionSummary) => void): () => void {
@@ -498,6 +505,7 @@ export class HostLink {
         fromSeq: subscription.cursor(),
         lazyImages: this.options.lazyImages,
         latest: latest || undefined,
+        batchEvents: true,
       })
       // A closed and reopened conversation owns a new subscription: an older response
       // must not make its unfinished history appear ready.
@@ -528,8 +536,25 @@ export class HostLink {
   }
 
   private onNotification(method: string, params: unknown): void {
-    if (method === "session.event") {
-      for (const listener of this.eventListeners) listener(params as SessionEvent);
+    if (method === "session.events") {
+      const events = (params as { events?: SessionEvent[] } | null)?.events;
+      if (Array.isArray(events) && events.length > 0) {
+        const hasBatchConsumer =
+          this.eventsListeners.size > 0 || (this.notificationListeners.get("session.events")?.size ?? 0) > 0;
+        for (const listener of this.eventsListeners) listener(events);
+        if (!hasBatchConsumer && this.eventListeners.size > 0) {
+          for (const event of events) {
+            for (const listener of this.eventListeners) listener(event);
+          }
+        }
+      }
+    } else if (method === "session.event") {
+      const event = params as SessionEvent;
+      if (this.eventsListeners.size > 0) {
+        const single = [event];
+        for (const listener of this.eventsListeners) listener(single);
+      }
+      for (const listener of this.eventListeners) listener(event);
     } else if (method === "session.summary") {
       const summary = (params as { session?: SessionSummary }).session;
       if (summary) for (const listener of this.summaryListeners) listener(summary);

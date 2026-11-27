@@ -157,6 +157,11 @@
     content-visibility: auto;
     contain-intrinsic-size: auto none auto 120px;
   }
+  @supports not (content-visibility: auto) {
+    .live-timeline > [data-historical] {
+      contain: layout style paint;
+    }
+  }
   mark.timeline-search-hit {
     padding: 0 1px;
     border-radius: 2px;
@@ -217,6 +222,7 @@
     max-width: 90%;
     margin-left: auto;
     padding: 10px 14px;
+    border: 1px solid var(--separator);
     border-radius: var(--radius-panel);
     background: var(--userBubble);
     color: var(--label);
@@ -571,6 +577,7 @@
     border-radius: var(--radius-card);
     overflow: hidden;
     background: var(--code);
+    contain: layout style;
   }
   .code-toolbar {
     display: flex;
@@ -1253,10 +1260,11 @@
 
   /* ---- Approval / permission card ---- */
   .approval-card {
-    border: 1px solid var(--separator);
+    border: 1px solid var(--separatorStrong);
     border-radius: var(--radius-card);
     padding: 16px;
     background: var(--card);
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
   }
   .approval-heading {
     display: flex;
