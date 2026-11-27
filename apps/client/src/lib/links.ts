@@ -33,18 +33,22 @@ export function openFile(target: FileTarget): void {
 }
 
 export function openLink(url: string, base?: string): void {
-  const file = fileTarget(url, base);
+  const trimmed = url.trim();
+  if (!trimmed) return;
+  const file = fileTarget(trimmed, base);
   if (file) {
     openFile(file);
     return;
   }
-  if (/^https?:\/\//i.test(url)) {
-    void WebBrowser.openBrowserAsync(url, {
+  if (/^https?:\/\//i.test(trimmed)) {
+    void WebBrowser.openBrowserAsync(trimmed, {
       presentationStyle: WebBrowser.WebBrowserPresentationStyle.PAGE_SHEET,
       controlsColor: colors.accent as string,
       dismissButtonStyle: "close",
-    }).catch(() => Linking.openURL(url).catch(() => {}));
+    }).catch(() => Linking.openURL(trimmed).catch(() => {}));
     return;
   }
-  void Linking.openURL(url).catch(() => {});
+  if (/^mailto:/i.test(trimmed)) {
+    void Linking.openURL(trimmed).catch(() => {});
+  }
 }

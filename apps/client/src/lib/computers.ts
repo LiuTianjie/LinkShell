@@ -215,7 +215,8 @@ export function dropRelayIfUnused(gateway: string): void {
   const { saved } = useComputers.getState();
   const used =
     saved.relay.some((entry) => entry.gateway === url) ||
-    saved.direct.some((entry) => entry.fallbackGateway === url) ||
+    saved.direct.some((entry) => entry.fallbackGateway === url || (entry.machine && normalizeGateway(entry.url) === url)) ||
+    Object.values(saved.lanUrls ?? {}).some((entry) => normalizeGateway(typeof entry === "string" ? entry : entry.url) === url) ||
     (url === normalizeGateway(DEFAULT_GATEWAY) && !!useAccount.getState().session);
   if (used) return;
   // Out of the map first: its last status is nobody's any more.

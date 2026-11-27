@@ -267,6 +267,7 @@ const MAX_STREAMS = 96;
 /** One device connection's open streams; all end when the connection does. */
 export class ProxyStreams {
   private readonly streams = new Map<string, Socket>();
+  private readonly cleanups = new Map<string, () => void>();
   private readonly pausedForRpc = new Set<Socket>();
   private rpcDrainTimer?: ReturnType<typeof setInterval>;
   private closed = false;
@@ -349,11 +350,19 @@ export class ProxyStreams {
       return { streamId };
     }
     let unwatchDrain: (() => void) | undefined;
+    let detached = false;
+    const detachDirect = () => {
+      if (detached) return;
+      detached = true;
+      unwatchDrain?.();
+      unwatchDrain = undefined;
+      direct.detach(channel);
+    };
     const channel = direct.attach({
       data: (bytes) => socket.write(bytes),
       close: (lost) => {
-        unwatchDrain?.();
-        unwatchDrain = undefined;
+        detachDirect();
+        this.cleanups.delete(streamId);
         this.streams.delete(streamId);
         if (lost) socket.destroy();
         else {
@@ -362,6 +371,7 @@ export class ProxyStreams {
         }
       },
     });
+    this.cleanups.set(streamId, detachDirect);
     socket.on("data", (chunk: Buffer) => {
       for (let offset = 0; offset < chunk.length; offset += DIRECT_CHUNK) {
         if (!direct.send({ type: "data", stream: channel, data: chunk.subarray(offset, offset + DIRECT_CHUNK) })) {
@@ -381,10 +391,9 @@ export class ProxyStreams {
       }
     });
     socket.on("close", () => {
-      unwatchDrain?.();
-      unwatchDrain = undefined;
+      detachDirect();
+      this.cleanups.delete(streamId);
       if (!this.streams.delete(streamId)) return;
-      direct.detach(channel);
       direct.send({ type: "close", stream: channel, error: failure });
     });
     return { streamId, channel };
@@ -399,6 +408,9 @@ export class ProxyStreams {
   /** The device hung up: finish sending, then close. */
   close(streamId: string): void {
     const socket = this.streams.get(streamId);
+    const cleanup = this.cleanups.get(streamId);
+    this.cleanups.delete(streamId);
+    cleanup?.();
     if (!socket) return;
     this.streams.delete(streamId);
     this.unpauseSocket(socket);
@@ -413,6 +425,8 @@ export class ProxyStreams {
       this.rpcDrainTimer = undefined;
     }
     this.pausedForRpc.clear();
+    for (const cleanup of this.cleanups.values()) cleanup();
+    this.cleanups.clear();
     for (const socket of this.streams.values()) socket.destroy();
     this.streams.clear();
   }

@@ -276,7 +276,10 @@ namespace LinkShell.Windows {
                         // Only a clipboard is this long: a picture, base64.
                         if (line.Length > 64000 && !(line.StartsWith("{\"t\":\"clip\"") && line.Length < (24 << 20))) continue;
                         // Its own serializer: the main loop writes with the shared one at the same time.
-                        try { FusionCommands.Enqueue(reading.Deserialize<Dictionary<string, object>>(line)); CommandArrived.Set(); } catch { }
+                        try {
+                            var parsed = reading.Deserialize<Dictionary<string, object>>(line);
+                            if (parsed != null) { FusionCommands.Enqueue(parsed); CommandArrived.Set(); }
+                        } catch { }
                     }
                 } finally { ended = true; CommandArrived.Set(); }
             }) { IsBackground = true };
@@ -292,6 +295,7 @@ namespace LinkShell.Windows {
             while (!ended) {
                 Dictionary<string, object> command;
                 while (FusionCommands.TryDequeue(out command)) {
+                    if (command == null) continue;
                     try { FusionCommand(command); }
                     catch (Exception error) { Write(new { t = "log", message = error.Message, rid = command.ContainsKey("rid") ? command["rid"] : null }); }
                 }
@@ -310,8 +314,16 @@ namespace LinkShell.Windows {
                     continue;
                 }
                 try {
-                    var list = Json.Serialize(FusionWindowsJson());
-                    if (list != last) { lock (OutputLock) { Console.Out.WriteLine("{\"t\":\"windows\",\"windows\":" + list + "}"); Console.Out.Flush(); } last = list; }
+                    var windowsPayload = FusionWindowsJson();
+                    string list;
+                    lock (OutputLock) {
+                        list = Json.Serialize(windowsPayload);
+                        if (list != last) {
+                            Console.Out.WriteLine("{\"t\":\"windows\",\"windows\":" + list + "}");
+                            Console.Out.Flush();
+                            last = list;
+                        }
+                    }
                     if (idle || !FusedInFront) {
                         lastShapeId = null;
                     } else if (shapeAt.ElapsedMilliseconds >= 200) {
@@ -344,10 +356,13 @@ namespace LinkShell.Windows {
         static void WriteMonitors() {
             var screens = EnumerateDisplays();
             var list = screens.Select((s, i) => new { index = i, x = s.Bounds.X, y = s.Bounds.Y, w = s.Bounds.Width, h = s.Bounds.Height, scale = MonitorScale(new Point(s.Bounds.X + s.Bounds.Width / 2, s.Bounds.Y + s.Bounds.Height / 2)) }).ToArray();
-            var text = Json.Serialize(list);
-            if (text == lastMonitors) return;
-            lastMonitors = text;
-            Write(new { t = "monitors", monitors = list });
+            lock (OutputLock) {
+                var text = Json.Serialize(list);
+                if (text == lastMonitors) return;
+                lastMonitors = text;
+                Console.Out.WriteLine(Json.Serialize(new { t = "monitors", monitors = list }));
+                Console.Out.Flush();
+            }
         }
 
         static double MonitorScale(Point at) {

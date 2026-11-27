@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { constants as fsConstants, existsSync } from "node:fs";
 import { chmod, cp, lstat, mkdir, open, readdir, realpath, rename, rm, rmdir, stat, unlink, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
@@ -376,7 +377,7 @@ export async function writeTextFile(input: { path: string; text: string; expecte
       throw RpcError.app("conflict", "文件已在电脑上被修改，请重新载入或选择覆盖");
     }
   }
-  const temp = join(dir, `.${basename(path)}.linkshell-${process.pid}-${Date.now().toString(36)}.tmp`);
+  const temp = join(dir, `.${basename(path)}.linkshell-${process.pid}-${Date.now().toString(36)}-${randomBytes(6).toString("hex")}.tmp`);
   try {
     await writeFile(temp, bytes, { flag: "wx", mode: existing ? existing.mode & 0o7777 : 0o644 });
     if (existing) await chmod(temp, existing.mode & 0o7777);

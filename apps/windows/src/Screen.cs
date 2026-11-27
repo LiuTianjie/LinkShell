@@ -781,14 +781,23 @@ namespace LinkShell.Windows {
             if (SendInput(1, new[] { input }, Marshal.SizeOf(typeof(INPUT))) != 1) throw new InvalidOperationException("Windows 拒绝了输入；无法控制管理员窗口、锁屏或 UAC 安全桌面");
         }
         static void Mouse(uint flags, int x = 0, int y = 0, int data = 0) { Post(new INPUT { type = 0, data = new INPUTUNION { mouse = new MOUSEINPUT { dx = x, dy = y, mouseData = unchecked((uint)data), flags = flags } } }); }
+        static readonly HashSet<uint> HeldScans = new HashSet<uint>();
         static void Key(ushort vk, bool up, ushort scan = 0, bool unicode = false) {
             uint extended = (vk >= 0x21 && vk <= 0x2e) || vk == 0x5b ? 1u : 0u;
             Post(new INPUT { type = 1, data = new INPUTUNION { key = new KEYBDINPUT { vk = vk, scan = scan, flags = (up ? 2u : 0u) | (unicode ? 4u : extended) } } });
             if (!unicode) { if (up) HeldKeys.Remove(vk); else HeldKeys.Add(vk); }
         }
+        static void ScanKey(ushort scan, bool up, bool extended) {
+            // KEYEVENTF_SCANCODE (0x8) | KEYEVENTF_KEYUP (0x2) | KEYEVENTF_EXTENDEDKEY (0x1)
+            Post(new INPUT { type = 1, data = new INPUTUNION { key = new KEYBDINPUT { vk = 0, scan = scan, flags = 8u | (up ? 2u : 0u) | (extended ? 1u : 0u) } } });
+            uint packed = ((extended ? 1u : 0u) << 16) | scan;
+            if (up) HeldScans.Remove(packed); else HeldScans.Add(packed);
+        }
         static void Release() {
             if (dryRun) return;
             foreach (ushort key in HeldKeys.ToArray()) { try { Key(key, true); } catch {} }
+            foreach (uint packed in HeldScans.ToArray()) { try { ScanKey((ushort)(packed & 0xFFFFu), true, (packed >> 16) != 0); } catch {} }
+            HeldScans.Clear();
             try { if (leftDown) Mouse(0x0004); if (rightDown) Mouse(0x0010); } catch {}
             leftDown = rightDown = false;
         }
@@ -799,6 +808,14 @@ namespace LinkShell.Windows {
                 var x = bounds.Left + (int)(Math.Max(0, Math.Min(1, Number(e, "x"))) * (bounds.Width - 1));
                 var y = bounds.Top + (int)(Math.Max(0, Math.Min(1, Number(e, "y"))) * (bounds.Height - 1));
                 Mouse(0x8000 | 0x4000 | 0x0001, (int)((long)(x - all.Left) * 65535 / Math.Max(1, all.Width - 1)), (int)((long)(y - all.Top) * 65535 / Math.Max(1, all.Height - 1)));
+                return;
+            }
+            if (type == "keydown" || type == "keyup") {
+                ushort scan;
+                bool ext;
+                if (TryMapW3cCodeToScan(Str(e, "c"), out scan, out ext)) {
+                    ScanKey(scan, type == "keyup", ext);
+                }
                 return;
             }
             var modifiers = new List<ushort>();
@@ -852,6 +869,47 @@ namespace LinkShell.Windows {
             }
             int fn;
             return name.StartsWith("F", StringComparison.OrdinalIgnoreCase) && Int32.TryParse(name.Substring(1), out fn) && fn >= 1 && fn <= 24 ? (ushort)(0x6f + fn) : (ushort)0;
+        }
+        static readonly Dictionary<string, uint> W3cScanMap = new Dictionary<string, uint> {
+            { "Escape", 0x01u }, { "Digit1", 0x02u }, { "Digit2", 0x03u }, { "Digit3", 0x04u }, { "Digit4", 0x05u },
+            { "Digit5", 0x06u }, { "Digit6", 0x07u }, { "Digit7", 0x08u }, { "Digit8", 0x09u }, { "Digit9", 0x0Au },
+            { "Digit0", 0x0Bu }, { "Minus", 0x0Cu }, { "Equal", 0x0Du }, { "Backspace", 0x0Eu }, { "Tab", 0x0Fu },
+            { "KeyQ", 0x10u }, { "KeyW", 0x11u }, { "KeyE", 0x12u }, { "KeyR", 0x13u }, { "KeyT", 0x14u },
+            { "KeyY", 0x15u }, { "KeyU", 0x16u }, { "KeyI", 0x17u }, { "KeyO", 0x18u }, { "KeyP", 0x19u },
+            { "BracketLeft", 0x1Au }, { "BracketRight", 0x1Bu }, { "Enter", 0x1Cu }, { "ControlLeft", 0x1Du },
+            { "KeyA", 0x1Eu }, { "KeyS", 0x1Fu }, { "KeyD", 0x20u }, { "KeyF", 0x21u }, { "KeyG", 0x22u },
+            { "KeyH", 0x23u }, { "KeyJ", 0x24u }, { "KeyK", 0x25u }, { "KeyL", 0x26u }, { "Semicolon", 0x27u },
+            { "Quote", 0x28u }, { "Backquote", 0x29u }, { "ShiftLeft", 0x2Au }, { "Backslash", 0x2Bu },
+            { "KeyZ", 0x2Cu }, { "KeyX", 0x2Du }, { "KeyC", 0x2Eu }, { "KeyV", 0x2Fu }, { "KeyB", 0x30u },
+            { "KeyN", 0x31u }, { "KeyM", 0x32u }, { "Comma", 0x33u }, { "Period", 0x34u }, { "Slash", 0x35u },
+            { "ShiftRight", 0x36u }, { "NumpadMultiply", 0x37u }, { "AltLeft", 0x38u }, { "Space", 0x39u },
+            { "CapsLock", 0x3Au }, { "F1", 0x3Bu }, { "F2", 0x3Cu }, { "F3", 0x3Du }, { "F4", 0x3Eu },
+            { "F5", 0x3Fu }, { "F6", 0x40u }, { "F7", 0x41u }, { "F8", 0x42u }, { "F9", 0x43u },
+            { "F10", 0x44u }, { "F11", 0x57u }, { "F12", 0x58u }, { "ScrollLock", 0x46u },
+            { "Numpad7", 0x47u }, { "Numpad8", 0x48u }, { "Numpad9", 0x49u }, { "NumpadSubtract", 0x4Au },
+            { "Numpad4", 0x4Bu }, { "Numpad5", 0x4Cu }, { "Numpad6", 0x4Du }, { "NumpadAdd", 0x4Eu },
+            { "Numpad1", 0x4Fu }, { "Numpad2", 0x50u }, { "Numpad3", 0x51u }, { "Numpad0", 0x52u },
+            { "NumpadDecimal", 0x53u },
+            // Extended scan codes have bit 16 set.
+            { "NumLock", 0x10045u }, { "NumpadEnter", 0x1001Cu }, { "NumpadDivide", 0x10035u },
+            { "ControlRight", 0x1001Du }, { "AltRight", 0x10038u },
+            { "MetaLeft", 0x1005Bu }, { "OSLeft", 0x1005Bu }, { "MetaRight", 0x1005Cu }, { "OSRight", 0x1005Cu },
+            { "ContextMenu", 0x1005Du },
+            { "Home", 0x10047u }, { "ArrowUp", 0x10048u }, { "PageUp", 0x10049u },
+            { "ArrowLeft", 0x1004Bu }, { "ArrowRight", 0x1004Du },
+            { "End", 0x1004Fu }, { "ArrowDown", 0x10050u }, { "PageDown", 0x10051u },
+            { "Insert", 0x10052u }, { "Delete", 0x10053u }, { "PrintScreen", 0x10037u },
+        };
+        static bool TryMapW3cCodeToScan(string code, out ushort scan, out bool extended) {
+            uint packed;
+            if (!string.IsNullOrEmpty(code) && W3cScanMap.TryGetValue(code, out packed)) {
+                scan = (ushort)(packed & 0xFFFFu);
+                extended = (packed >> 16) != 0;
+                return true;
+            }
+            scan = 0;
+            extended = false;
+            return false;
         }
     }
 }

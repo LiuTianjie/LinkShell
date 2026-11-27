@@ -60,6 +60,7 @@ class MediaFoundationVideoEncoder : public webrtc::VideoEncoder {
 
   bool CreateMft(int width, int height, int fps, int bitrate_bps, bool try_hardware);
   bool ConfigureMft(int width, int height, int fps, int bitrate_bps);
+  HRESULT GetAsyncEventWithTimeout(int timeout_ms, Microsoft::WRL::ComPtr<IMFMediaEvent>* out_ev);
   bool DrainAsyncOutput();
   bool EmitSample(IMFSample* sample, const FrameMeta& meta);
   void CacheParameterSets(const uint8_t* data, size_t len, bool* out_is_key, bool* out_has_ps);

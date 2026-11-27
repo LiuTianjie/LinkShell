@@ -24,16 +24,22 @@ export const directConnector: DirectConnector = (iceServers) => {
   data.binaryType = "arraybuffer";
   const connection = peer as typeof peer & Listens;
   const channel = data as typeof data & Listens;
+  let disconnected: ReturnType<typeof setTimeout> | undefined;
   return {
     async offer() {
       await connection.setLocalDescription(await connection.createOffer({}));
       if (connection.iceGatheringState !== "complete") {
         await new Promise<void>((resolve) => {
-          const timer = setTimeout(resolve, GATHER_MS);
-          connection.addEventListener("icegatheringstatechange", () => {
-            if (connection.iceGatheringState !== "complete") return;
+          let settled = false;
+          const finish = () => {
+            if (settled) return;
+            settled = true;
             clearTimeout(timer);
             resolve();
+          };
+          const timer = setTimeout(finish, GATHER_MS);
+          connection.addEventListener("icegatheringstatechange", () => {
+            if (connection.iceGatheringState === "complete") finish();
           });
         });
       }
@@ -42,11 +48,17 @@ export const directConnector: DirectConnector = (iceServers) => {
       return sdp;
     },
     accept: (answer) => connection.setRemoteDescription(new RTCSessionDescription({ type: "answer", sdp: answer })),
-    send: (bytes) => channel.send(bytes),
+    send: (bytes) => {
+      if (channel.readyState !== "open") return;
+      try {
+        channel.send(bytes);
+      } catch {
+        try { connection.close(); } catch { /* ignore */ }
+      }
+    },
     onState(listener) {
       channel.addEventListener("open", () => listener("open"));
       channel.addEventListener("close", () => listener("closed"));
-      let disconnected: ReturnType<typeof setTimeout> | undefined;
       connection.addEventListener("connectionstatechange", () => {
         const state = connection.connectionState;
         clearTimeout(disconnected);
@@ -61,6 +73,10 @@ export const directConnector: DirectConnector = (iceServers) => {
         if (message instanceof ArrayBuffer) listener(new Uint8Array(message));
       });
     },
-    close: () => connection.close(),
+    close: () => {
+      clearTimeout(disconnected);
+      disconnected = undefined;
+      connection.close();
+    },
   };
 };

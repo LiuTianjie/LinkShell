@@ -122,7 +122,13 @@ export class LanE2eeSocket implements SocketLike {
 
   send(data: string): void {
     if (this.readyState !== OPEN || !this.channel || !this.raw) return;
-    this.raw.send(JSON.stringify({ frame: { k: "data", ch: this.ch, box: this.channel.seal(data) } }));
+    const payload = JSON.stringify({ frame: { k: "data", ch: this.ch, box: this.channel.seal(data) } });
+    try {
+      this.raw.send(payload);
+    } catch (error) {
+      // A sealed frame that failed to transmit advances the stream nonce; close to force clean re-keying.
+      this.fail(error instanceof Error ? error.message : String(error));
+    }
   }
 
   close(): void {

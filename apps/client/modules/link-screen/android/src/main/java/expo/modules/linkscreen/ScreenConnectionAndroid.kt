@@ -31,6 +31,7 @@ import org.webrtc.SurfaceViewRenderer
 import org.webrtc.VideoTrack
 import java.nio.ByteBuffer
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -333,26 +334,45 @@ internal class ScreenConnectionAndroid private constructor(
   private var senderStats: JSONObject? = null
   private var eventNumber = 0L
 
+  private fun post(block: () -> Unit) {
+    if (executor.isShutdown) return
+    try {
+      executor.execute(block)
+    } catch (_: RejectedExecutionException) {
+    }
+  }
+
+  private fun postDelayed(delayMs: Long, block: () -> Unit): ScheduledFuture<*>? {
+    if (executor.isShutdown) return null
+    return try {
+      executor.schedule(block, delayMs, TimeUnit.MILLISECONDS)
+    } catch (_: RejectedExecutionException) {
+      null
+    }
+  }
+
   fun start() {
-    executor.execute {
-      if (closed || webSocket != null) return@execute
+    post {
+      if (closed || webSocket != null) return@post
       ensureWebRtcInitialized(appContext)
       startedAtMs = SystemClock.elapsedRealtime()
       previousStatsAtMs = startedAtMs
-      monitorFuture = executor.scheduleWithFixedDelay(
-        { checkHealthAndStats(requested = false) },
-        500L,
-        500L,
-        TimeUnit.MILLISECONDS,
-      )
+      monitorFuture = runCatching {
+        executor.scheduleWithFixedDelay(
+          { checkHealthAndStats(requested = false) },
+          500L,
+          500L,
+          TimeUnit.MILLISECONDS,
+        )
+      }.getOrNull()
 
       val request = Request.Builder().url(wsUrl).build()
       webSocket = sharedHttpClient.newWebSocket(
         request,
         object : WebSocketListener() {
           override fun onOpen(ws: WebSocket, response: Response) {
-            executor.execute {
-              if (closed || webSocket !== ws) return@execute
+            post {
+              if (closed || webSocket !== ws) return@post
               ready = true
               if (controlRequested) signal(controlMessage)
               if (audioSyncPending) {
@@ -364,38 +384,38 @@ internal class ScreenConnectionAndroid private constructor(
           }
 
           override fun onMessage(ws: WebSocket, text: String) {
-            executor.execute {
-              if (closed || webSocket !== ws) return@execute
-              val parsed = runCatching { JSONObject(text) }.getOrNull() ?: return@execute
+            post {
+              if (closed || webSocket !== ws) return@post
+              val parsed = runCatching { JSONObject(text) }.getOrNull() ?: return@post
               handleSignalingMessage(parsed)
             }
           }
 
           override fun onMessage(ws: WebSocket, bytes: ByteString) {
-            executor.execute {
-              if (closed || webSocket !== ws) return@execute
+            post {
+              if (closed || webSocket !== ws) return@post
               fail("当前链路不支持原生视频")
             }
           }
 
           override fun onClosing(ws: WebSocket, code: Int, reason: String) {
             ws.close(1000, null)
-            executor.execute {
-              if (closed || webSocket !== ws) return@execute
+            post {
+              if (closed || webSocket !== ws) return@post
               fail("屏幕连接已结束")
             }
           }
 
           override fun onClosed(ws: WebSocket, code: Int, reason: String) {
-            executor.execute {
-              if (closed || webSocket !== ws) return@execute
+            post {
+              if (closed || webSocket !== ws) return@post
               fail("屏幕连接已结束")
             }
           }
 
           override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
-            executor.execute {
-              if (closed || webSocket !== ws) return@execute
+            post {
+              if (closed || webSocket !== ws) return@post
               fail("屏幕连接已中断")
             }
           }
@@ -405,12 +425,12 @@ internal class ScreenConnectionAndroid private constructor(
   }
 
   fun stop() {
-    executor.execute { close() }
+    post { close() }
     runCatching { executor.shutdown() }
   }
 
   fun pictureArrived() {
-    executor.execute {
+    post {
       if (!closed) {
         receivedPicture = true
       }
@@ -418,8 +438,8 @@ internal class ScreenConnectionAndroid private constructor(
   }
 
   fun setAudio(enabled: Boolean) {
-    executor.execute {
-      if (closed) return@execute
+    post {
+      if (closed) return@post
       val changed = audioEnabled != enabled
       audioEnabled = enabled
       audioPlayer.setMuted(!(enabled && session.active))
@@ -435,8 +455,8 @@ internal class ScreenConnectionAndroid private constructor(
   }
 
   fun setActive(active: Boolean) {
-    executor.execute {
-      if (closed || session.active == active) return@execute
+    post {
+      if (closed || session.active == active) return@post
       session.setActive(active)
       audioPlayer.setMuted(!(active && audioEnabled))
       if (!active) {
@@ -453,9 +473,9 @@ internal class ScreenConnectionAndroid private constructor(
   }
 
   fun configure(message: JSONObject, maxFps: Int) {
-    executor.execute {
-      if (closed) return@execute
-      val configuration = session.configuration(message, maxFps) ?: return@execute
+    post {
+      if (closed) return@post
+      val configuration = session.configuration(message, maxFps) ?: return@post
       this.maxFps = configuration.optInt("maxFps", maxFps)
       pendingConfiguration = configuration
       flushConfiguration()
@@ -463,18 +483,28 @@ internal class ScreenConnectionAndroid private constructor(
   }
 
   fun activity() {
-    executor.execute {
-      if (closed || !ready || !session.active) return@execute
+    post {
+      if (closed || !ready || !session.active) return@post
       signal(JSONObject().put("t", "activity"))
     }
   }
 
+  fun clipboard(message: JSONObject) {
+    post {
+      if (closed || !ready || !session.active) return@post
+      val kind = message.optString("t")
+      if (kind == "clipboard.read" || kind == "clipboard.write") {
+        signal(message)
+      }
+    }
+  }
+
   fun requestControl(message: JSONObject) {
-    executor.execute {
-      if (closed || !session.active || message.optString("t") != "control") return@execute
+    post {
+      if (closed || !session.active || message.optString("t") != "control") return@post
       val nextGen = ScreenSessionStateAndroid.jsonInt(message, "screenGeneration")
       val prevGen = ScreenSessionStateAndroid.jsonInt(controlMessage, "screenGeneration")
-      if (controlRequested && nextGen == prevGen) return@execute
+      if (controlRequested && nextGen == prevGen) return@post
       controlRequested = true
       controlMessage = message
       if (ready) signal(message)
@@ -482,25 +512,25 @@ internal class ScreenConnectionAndroid private constructor(
   }
 
   fun requestStats() {
-    executor.execute { checkHealthAndStats(requested = true) }
+    post { checkHealthAndStats(requested = true) }
   }
 
   fun input(message: JSONObject, replaceable: Boolean) {
-    executor.execute {
-      if (closed || !session.acceptsInput(message)) return@execute
-      if (!trusted && message.optString("t") != "prompt") return@execute
-      val channel = channels[if (replaceable) "pointer" else "input"] ?: return@execute
-      if (channel.state() != DataChannel.State.OPEN) return@execute
+    post {
+      if (closed || !session.acceptsInput(message)) return@post
+      if (!trusted && message.optString("t") != "prompt") return@post
+      val channel = channels[if (replaceable) "pointer" else "input"] ?: return@post
+      if (channel.state() != DataChannel.State.OPEN) return@post
       val limit = if (replaceable) 16_384L else 262_144L
       if (channel.bufferedAmount() > limit) {
         if (!replaceable) fail("控制连接拥堵，请重新连接")
-        return@execute
+        return@post
       }
       eventNumber += 1L
       val event = JSONObject(message.toString())
       event.put("i", eventNumber)
       val payload = event.toString().toByteArray(Charsets.UTF_8)
-      if (payload.size > 64_000) return@execute
+      if (payload.size > 64_000) return@post
       val buffer = DataChannel.Buffer(ByteBuffer.wrap(payload), false)
       if (!channel.send(buffer) && !replaceable) {
         fail("控制连接已中断，请重新连接")
@@ -539,6 +569,15 @@ internal class ScreenConnectionAndroid private constructor(
       trusted = state.optBoolean("available", false) && state.optBoolean("trusted", false)
       onMessage?.invoke(JSONObject().put("control", state))
     }
+    message.optJSONObject("clipboard")?.let { clip ->
+      onMessage?.invoke(JSONObject().put("clipboard", clip))
+    }
+    message.optJSONObject("clipboardResult")?.let { res ->
+      onMessage?.invoke(JSONObject().put("clipboardResult", res))
+    }
+    message.optJSONObject("privacy")?.let { priv ->
+      onMessage?.invoke(JSONObject().put("privacy", priv))
+    }
     val rtc = message.optJSONObject("rtc") ?: return
     when (rtc.optString("t")) {
       "config" -> {
@@ -573,8 +612,8 @@ internal class ScreenConnectionAndroid private constructor(
         currentPeer.setRemoteDescription(
           object : SdpObserverAdapter() {
             override fun onSetSuccess() {
-              executor.execute {
-                if (closed || peer !== currentPeer) return@execute
+              post {
+                if (closed || peer !== currentPeer) return@post
                 for (candidate in pendingCandidates) {
                   currentPeer.addIceCandidate(candidate)
                 }
@@ -583,21 +622,21 @@ internal class ScreenConnectionAndroid private constructor(
                 currentPeer.createAnswer(
                   object : SdpObserverAdapter() {
                     override fun onCreateSuccess(answer: SessionDescription) {
-                      executor.execute {
-                        if (closed || peer !== currentPeer) return@execute
+                      post {
+                        if (closed || peer !== currentPeer) return@post
                         currentPeer.setLocalDescription(
                           object : SdpObserverAdapter() {
                             override fun onSetSuccess() {
-                              executor.execute {
-                                if (closed || peer !== currentPeer) return@execute
+                              post {
+                                if (closed || peer !== currentPeer) return@post
                                 attachVideoTrack(currentPeer)
                                 signal(JSONObject().put("t", "rtc.answer").put("sdp", answer.description))
                               }
                             }
 
                             override fun onSetFailure(msg: String?) {
-                              executor.execute {
-                                if (closed || peer !== currentPeer) return@execute
+                              post {
+                                if (closed || peer !== currentPeer) return@post
                                 fail("视频连接应答失败")
                               }
                             }
@@ -608,8 +647,8 @@ internal class ScreenConnectionAndroid private constructor(
                     }
 
                     override fun onCreateFailure(msg: String?) {
-                      executor.execute {
-                        if (closed || peer !== currentPeer) return@execute
+                      post {
+                        if (closed || peer !== currentPeer) return@post
                         fail("无法应答电脑的视频连接")
                       }
                     }
@@ -620,8 +659,8 @@ internal class ScreenConnectionAndroid private constructor(
             }
 
             override fun onSetFailure(msg: String?) {
-              executor.execute {
-                if (closed || peer !== currentPeer) return@execute
+              post {
+                if (closed || peer !== currentPeer) return@post
                 fail("视频格式协商失败")
               }
             }
@@ -712,8 +751,8 @@ internal class ScreenConnectionAndroid private constructor(
     if (nowMs - previousStatsAtMs < minIntervalMs) return
     statsPending = true
     currentPeer.getStats { report ->
-      executor.execute {
-        if (closed || peer !== currentPeer) return@execute
+      post {
+        if (closed || peer !== currentPeer) return@post
         statsPending = false
         previousStatsAtMs = nowMs
         val stats = JSONObject().put("requestedFps", maxFps)
@@ -744,17 +783,17 @@ internal class ScreenConnectionAndroid private constructor(
       return
     }
     diagnosing = true
-    executor.schedule({ fail(message) }, 1_000L, TimeUnit.MILLISECONDS)
+    postDelayed(1_000L) { fail(message) }
     currentPeer.getStats { report ->
-      executor.execute {
-        if (closed) return@execute
+      post {
+        if (closed) return@post
         signal(
           JSONObject()
             .put("t", "rtc.diagnosis")
             .put("reason", reason)
             .put("ice", "ice ${currentPeer.iceConnectionState()}/${currentPeer.iceGatheringState()} (${report.statsMap.size} records, android)")
         )
-        executor.schedule({ fail(message) }, 300L, TimeUnit.MILLISECONDS)
+        postDelayed(300L) { fail(message) }
       }
     }
   }
@@ -792,8 +831,8 @@ internal class ScreenConnectionAndroid private constructor(
   override fun onSignalingChange(state: PeerConnection.SignalingState?) {}
 
   override fun onIceConnectionChange(newState: PeerConnection.IceConnectionState?) {
-    executor.execute {
-      if (closed) return@execute
+    post {
+      if (closed) return@post
       when (newState) {
         PeerConnection.IceConnectionState.CONNECTED,
         PeerConnection.IceConnectionState.COMPLETED -> {
@@ -817,8 +856,8 @@ internal class ScreenConnectionAndroid private constructor(
   override fun onIceGatheringChange(state: PeerConnection.IceGatheringState?) {}
 
   override fun onIceCandidate(candidate: IceCandidate) {
-    executor.execute {
-      if (closed) return@execute
+    post {
+      if (closed) return@post
       signal(
         JSONObject()
           .put("t", "rtc.ice")
@@ -836,8 +875,8 @@ internal class ScreenConnectionAndroid private constructor(
   override fun onRemoveStream(stream: MediaStream?) {}
 
   override fun onDataChannel(dataChannel: DataChannel) {
-    executor.execute {
-      if (closed) return@execute
+    post {
+      if (closed) return@post
       val label = dataChannel.label()
       channels[label] = dataChannel
       dataChannel.registerObserver(
@@ -846,8 +885,8 @@ internal class ScreenConnectionAndroid private constructor(
 
           override fun onStateChange() {
             if (label != "audio") return
-            executor.execute {
-              if (closed || channels[label] !== dataChannel) return@execute
+            post {
+              if (closed || channels[label] !== dataChannel) return@post
               updateAudioAvailabilityIfNeeded()
             }
           }
@@ -861,8 +900,8 @@ internal class ScreenConnectionAndroid private constructor(
               // WebRTC native memory backing buffer.data is invalidated once onMessage returns.
               val packetBytes = ByteArray(remaining)
               buffer.data.get(packetBytes)
-              executor.execute {
-                if (closed || !session.active || !audioEnabled || channels["audio"] !== dataChannel) return@execute
+              post {
+                if (closed || !session.active || !audioEnabled || channels["audio"] !== dataChannel) return@post
                 audioPlayer.enqueue(packetBytes)
               }
               return
@@ -870,9 +909,9 @@ internal class ScreenConnectionAndroid private constructor(
             if (buffer.binary || remaining > 256_000) return
             val jsonBytes = ByteArray(remaining)
             buffer.data.get(jsonBytes)
-            executor.execute {
-              if (closed || channels[label] !== dataChannel) return@execute
-              val message = runCatching { JSONObject(String(jsonBytes, Charsets.UTF_8)) }.getOrNull() ?: return@execute
+            post {
+              if (closed || channels[label] !== dataChannel) return@post
+              val message = runCatching { JSONObject(String(jsonBytes, Charsets.UTF_8)) }.getOrNull() ?: return@post
               onMessage?.invoke(message)
             }
           }
@@ -887,13 +926,13 @@ internal class ScreenConnectionAndroid private constructor(
   override fun onRenegotiationNeeded() {}
 
   override fun onAddTrack(receiver: RtpReceiver?, streams: Array<out MediaStream>?) {
-    executor.execute {
+    post {
       if (!closed) peer?.let { attachVideoTrack(it) }
     }
   }
 
   override fun onTrack(transceiver: RtpTransceiver?) {
-    executor.execute {
+    post {
       if (!closed) peer?.let { attachVideoTrack(it) }
     }
   }

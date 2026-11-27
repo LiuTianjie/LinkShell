@@ -69,6 +69,7 @@ export class DirectPeer {
       await connection.setRemoteDescription({ type: "offer", sdp });
       await connection.setLocalDescription(await connection.createAnswer());
       await gathered(connection);
+      if (this.connection !== connection) throw new Error("direct connection superseded");
       const answer = connection.localDescription?.sdp;
       if (!answer) throw new Error("no answer could be made");
       return answer;
@@ -154,7 +155,12 @@ export class DirectPeer {
     while (this.pending.length > 0 && this.open && (this.channel?.bufferedAmount ?? 0) <= HIGH_WATER) {
       const next = this.pending.shift()!;
       this.pendingBytes -= next.byteLength;
-      if (!this.writeNow(next)) break;
+      if (!this.writeNow(next)) {
+        // Ordered multiplexed streams cannot tolerate silently dropped mid-stream frames; tear down
+        // the direct channel so clients cleanly fall back to relay instead of hanging on corrupt framing.
+        if (this.connection) this.lose(this.connection);
+        break;
+      }
     }
   }
 

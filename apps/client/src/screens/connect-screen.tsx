@@ -65,7 +65,7 @@ export function ConnectScreen() {
     if (matched) {
       if (matched.kind === "relay") {
         computers.setLanUrl(matched.key, discoveredUrl, {
-          e2ee: matched.key === computer.key ? lanE2ee : matched.lanE2ee,
+          e2ee: matched.key === computer.key ? lanE2ee : (matched.lanE2ee ?? true),
         });
       }
       if (matched.key !== computer.key) {

@@ -35,7 +35,13 @@ final class DesktopWorkspaceTests: XCTestCase {
 
   func testExternalLinksCannotLaunchScriptsFilesOrLoopback() {
     XCTAssertTrue(DesktopWorkspacePolicy.externalURL(URL(string: "https://itool.tech/en/auth/linkshell")!))
-    for value in ["javascript:alert(1)", "file:///etc/passwd", "linkshell://pair", "https://user:password@example.com/", "http://127.0.0.1:8000/", "http://localhost:8000/", "http://[::1]:8000/"] {
+    for value in [
+      "javascript:alert(1)", "file:///etc/passwd", "linkshell://pair",
+      "https://user:password@example.com/", "http://127.0.0.1:8000/", "http://localhost:8000/",
+      "http://localhost./", "http://[::1]:8000/", "http://[::]:8000/", "http://0.0.0.0:8000/",
+      "http://[::ffff:7f00:1]:8000/", "http://[::ffff:127.0.0.1]:8000/",
+      "http://[::ffff:0:0]:8000/", "http://[fe80::1]:8000/",
+    ] {
       XCTAssertFalse(DesktopWorkspacePolicy.externalURL(URL(string: value)!), value)
     }
   }

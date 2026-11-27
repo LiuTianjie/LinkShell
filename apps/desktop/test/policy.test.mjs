@@ -44,8 +44,13 @@ test("previews and viewer frames may load, but are not trusted", () => {
 
 test("external links never open local files or loopback services", () => {
   assert.ok(WorkspacePolicy.externalURL("https://linkshell.itool.tech/"));
-  for (const bad of ["file:///etc/hosts", "http://localhost:3000", "http://127.0.0.1:8080", "http://[::1]/", "http://0.0.0.0/",
-    "http://169.254.169.254/latest", "https://user:pass@example.com/", "javascript:alert(1)", "http://a.localhost/"]) {
+  for (const bad of [
+    "file:///etc/hosts", "http://localhost:3000", "http://localhost./", "http://127.0.0.1:8080",
+    "http://[::1]/", "http://[0:0:0:0:0:0:0:1]/", "http://[::]/", "http://0.0.0.0/",
+    "http://[::ffff:7f00:1]/", "http://[::ffff:127.0.0.1]/", "http://[::ffff:0:0]/",
+    "http://[::ffff:a9fe:a9fe]/", "http://[fe80::1]/",
+    "http://169.254.169.254/latest", "https://user:pass@example.com/", "javascript:alert(1)", "http://a.localhost/",
+  ]) {
     assert.ok(!WorkspacePolicy.externalURL(bad), bad);
   }
 });

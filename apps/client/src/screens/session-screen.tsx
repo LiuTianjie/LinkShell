@@ -68,7 +68,10 @@ function ComputerPreviewProbe({
   onState: (active: boolean, mode: "shown" | "collapsed" | "hidden") => void;
 }) {
   const { frame, mode } = useComputerPreview(sessionId);
-  onState(!!frame, mode);
+  const active = !!frame;
+  useEffect(() => {
+    onState(active, mode);
+  }, [active, mode, onState]);
   return null;
 }
 

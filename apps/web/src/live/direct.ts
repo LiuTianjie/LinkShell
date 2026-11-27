@@ -28,7 +28,12 @@ export const browserDirect: DirectConnector = (iceServers) => {
     },
     accept: (sdp) => peer.setRemoteDescription({ type: "answer", sdp }),
     send(bytes) {
-      channel.send(bytes as Uint8Array<ArrayBuffer>);
+      if (channel.readyState !== "open") return;
+      try {
+        channel.send(bytes as Uint8Array<ArrayBuffer>);
+      } catch {
+        try { peer.close(); } catch { /* ignore */ }
+      }
     },
     onState(listener) {
       channel.addEventListener("open", () => listener("open"));

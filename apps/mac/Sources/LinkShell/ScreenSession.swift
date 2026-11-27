@@ -787,9 +787,9 @@ final class ScreenSession: NSObject, RTCPeerConnectionDelegate, RTCDataChannelDe
   func peerConnectionShouldNegotiate(_ peerConnection: RTCPeerConnection) {}
   func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCIceGatheringState) {
     guard newState == .complete else { return }
-    let dropped = droppedCandidates
     DispatchQueue.main.async {
       guard !self.closed else { return }
+      let dropped = self.droppedCandidates
       if dropped > 0 { self.link.log("gathering done: \(dropped) host candidate\(dropped == 1 ? "" : "s") on a virtual interface not offered") }
     }
   }

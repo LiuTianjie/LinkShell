@@ -531,6 +531,7 @@ class LinkScreenView(
           "control" -> if (active && applicationActive) connection?.requestControl(signal)
           "prompt" -> if (active && applicationActive) connection?.input(signal, replaceable = false)
           "activity" -> if (active && applicationActive) connection?.activity()
+          "clipboard.read", "clipboard.write" -> if (active && applicationActive) connection?.clipboard(signal)
         }
       }
       "stats" -> connection?.requestStats()

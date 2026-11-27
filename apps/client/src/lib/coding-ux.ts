@@ -305,19 +305,17 @@ export function parseShortcutUrl(rawUrl: string | null | undefined): ShortcutAct
   const trimmed = rawUrl.trim();
   if (!trimmed) return null;
   try {
-    if (trimmed.startsWith("/")) {
-      const path = trimmed.replace(/^\/+/, "").split(/[?#]/)[0];
-      if (path === "quick-voice" || path === "approve-latest") return path;
+    const isRelative = trimmed.startsWith("/") && !trimmed.startsWith("//");
+    const parsed = isRelative ? new URL(trimmed, "linkshell:///") : new URL(trimmed);
+    if (!isRelative && parsed.protocol !== "linkshell:" && parsed.protocol !== "linkshell-dev:") {
       return null;
     }
-    const parsed = new URL(trimmed);
     const hostOrPath = (parsed.hostname || parsed.pathname.replace(/^\/+/, "")).split("/")[0];
     if (hostOrPath === "quick-voice" || hostOrPath === "approve-latest") return hostOrPath;
     const param = parsed.searchParams.get("shortcut");
     if (param === "quick-voice" || param === "approve-latest") return param;
   } catch {
-    if (/quick-voice/i.test(trimmed)) return "quick-voice";
-    if (/approve-latest/i.test(trimmed)) return "approve-latest";
+    return null;
   }
   return null;
 }

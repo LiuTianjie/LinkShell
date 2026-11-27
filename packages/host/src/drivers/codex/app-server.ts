@@ -49,11 +49,16 @@ export function sharedServerSocket(env: NodeJS.ProcessEnv = process.env): string
 
 /** A client connection to an app-server socket. The socket speaks WebSocket; permessage-deflate must be off or the upgrade is reset. */
 async function openConnection(options: CodexConnectionOptions, closing: () => boolean): Promise<{ socket: WebSocket; peer: RpcPeer }> {
+  if (closing()) throw new Error("codex app-server closing");
   const socket = new WebSocket(`ws+unix://${options.socketPath}:/`, { perMessageDeflate: false, handshakeTimeout: 10_000 });
   await new Promise<void>((resolve, reject) => {
     socket.once("open", () => resolve());
     socket.once("error", reject);
   });
+  if (closing()) {
+    socket.close();
+    throw new Error("codex app-server closing");
+  }
   const peer = new RpcPeer({
     send: (text) => socket.send(text),
     onNotification: (method, params) => options.onNotification(method, params),
@@ -77,6 +82,11 @@ async function openConnection(options: CodexConnectionOptions, closing: () => bo
   } catch (error) {
     socket.close();
     throw error;
+  }
+  if (closing()) {
+    peer.close("stopping");
+    socket.close();
+    throw new Error("codex app-server closing");
   }
   peer.notify("initialized", {});
   ready = true;
@@ -252,13 +262,15 @@ export class CodexAppServer {
       child.once("error", (error) => reject(error));
     });
     exited.catch(() => {});
-    await Promise.race([process.platform === "win32" ? this.connectStdio(child) : this.connectWhenReady(), exited]);
+    await Promise.race([process.platform === "win32" ? this.connectStdio(child) : this.connectWhenReady(child), exited]);
   }
 
   async stop(): Promise<void> {
     this.stopping = true;
     this.peer?.close("stopping");
     this.socket?.close();
+    this.peer = undefined;
+    this.socket = undefined;
     const child = this.child;
     this.child = undefined;
     if (child) await stopAgent(child, { group: process.platform !== "win32" });
@@ -292,15 +304,18 @@ export class CodexAppServer {
     peer.notify("initialized", {});
   }
 
-  private async connectWhenReady(): Promise<void> {
+  private async connectWhenReady(child: ChildProcess): Promise<void> {
     const deadline = Date.now() + 15_000;
     let lastError: unknown;
+    const isStale = () => this.stopping || this.child !== child || child.exitCode !== null || child.killed;
     while (Date.now() < deadline) {
+      if (isStale()) throw new Error("codex app-server stopped before accepting connections");
       if (existsSync(this.options.socketPath)) {
         try {
-          await this.connect();
+          await this.connect(child);
           return;
         } catch (error) {
+          if (isStale()) throw error;
           lastError = error;
         }
       }
@@ -311,8 +326,14 @@ export class CodexAppServer {
     );
   }
 
-  private async connect(): Promise<void> {
-    const { socket, peer } = await openConnection(this.options, () => this.stopping);
+  private async connect(child: ChildProcess): Promise<void> {
+    const isStale = () => this.stopping || this.child !== child || child.exitCode !== null || child.killed;
+    const { socket, peer } = await openConnection(this.options, isStale);
+    if (isStale()) {
+      peer.close("stopping");
+      socket.close();
+      throw new Error("codex app-server stopped during connect");
+    }
     this.socket = socket;
     this.peer = peer;
   }
@@ -339,6 +360,11 @@ export class CodexSharedServer {
     this.closing = false;
     this.connecting ??= openConnection({ ...this.options, onDown: (reason) => this.dropped(reason) }, () => this.closing)
       .then(({ socket, peer }) => {
+        if (this.closing) {
+          peer.close("stopping");
+          socket.close();
+          return false;
+        }
         this.socket = socket;
         this.peer = peer;
         return true;

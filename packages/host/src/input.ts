@@ -616,6 +616,24 @@ export class HelperApp {
     }
   }
 
+  /** Applies macOS remote privacy curtain / lock-on-disconnect state on LinkShell.app. */
+  setPrivacy(params: { curtain?: boolean; lockOnDisconnect?: boolean }): void {
+    if (this.socket && !this.socket.destroyed) {
+      this.socket.write(`${JSON.stringify({ t: "screen.privacy", ...params })}\n`);
+    } else if (params.curtain || params.lockOnDisconnect) {
+      void this.write({ t: "screen.privacy", ...params }).catch(() => {});
+    }
+  }
+
+  /** Triggers immediate macOS screen lock (`⌃⌘Q` + display sleep) via LinkShell.app. */
+  lockScreen(): boolean {
+    if (this.socket && !this.socket.destroyed) {
+      this.socket.write(`${JSON.stringify({ t: "screen.lock" })}\n`);
+      return true;
+    }
+    return false;
+  }
+
   endVideo(id: string): void {
     this.cancelConfigurations(id);
     if (!this.routes.delete(id)) return;

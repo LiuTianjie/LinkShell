@@ -50,7 +50,7 @@ export function screenGestureEnabled(params: { fullscreen: boolean; pictureReady
  * keep the user's own shortcuts.
  */
 export function ScreenScreen() {
-  const { computer } = useConnection();
+  const { computer, link } = useConnection();
   const linkStatus = useConnectionStatus();
   const {
     viewer,
@@ -206,9 +206,21 @@ export function ScreenScreen() {
       } else if (message.type === "setDeviceClipboard") {
         // What the computer copied, fetched by the page over its own connection to the host.
         if (typeof message.text === "string" && message.text) void Clipboard.setStringAsync(message.text.slice(0, 100_000)).catch(() => {});
+      } else if (message.type === "screenPrivacy") {
+        const patch: { curtain?: boolean; lockOnDisconnect?: boolean } = {};
+        if (typeof message.curtain === "boolean") patch.curtain = message.curtain;
+        if (typeof message.lockOnDisconnect === "boolean") patch.lockOnDisconnect = message.lockOnDisconnect;
+        if (patch.curtain !== undefined || patch.lockOnDisconnect !== undefined) {
+          void link
+            .call("screen.privacy", patch)
+            .then((next) => {
+              inject(owner, `window.linkshellPrivacy && window.linkshellPrivacy(${JSON.stringify(next)}); true;`, generation);
+            })
+            .catch(() => {});
+        }
       } else if (message.type === "ready" && Platform.OS === "android") focus(owner);
     },
-    [present, focus, inject, owner],
+    [present, focus, inject, owner, link],
   );
 
   // The page ends above the keyboard, frame by frame, so its key bar sits on the keys.

@@ -49,6 +49,8 @@ export function webHandler(options: WebOptions = {}) {
       "content-length": Buffer.byteLength(body),
       "cache-control": path.startsWith("/assets/") ? "public, max-age=31536000, immutable" : "no-store",
       "x-content-type-options": "nosniff",
+      "x-frame-options": "DENY",
+      "content-security-policy": "frame-ancestors 'none'",
       "referrer-policy": "no-referrer",
     });
     response.end(request.method === "HEAD" ? undefined : body);

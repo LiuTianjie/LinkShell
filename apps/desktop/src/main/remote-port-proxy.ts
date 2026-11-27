@@ -200,7 +200,9 @@ export class RemotePortProxyManager {
       const name = rawName.trim();
       const lower = name.toLowerCase();
       if (!name || HOP_BY_HOP_HEADERS.has(lower)) continue;
-      if (/[\r\n]/.test(name) || /[\r\n]/.test(rawValue)) continue;
+      if (!/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(name)) continue;
+      // eslint-disable-next-line no-control-regex
+      if (/[\x00-\x08\x0a-\x1f\x7f]/.test(rawValue)) continue;
       const value =
         lower === "location" ? rewriteLoopbackLocation(rawValue, item.remotePort, item.localPort) : rawValue;
       const bucket = grouped.get(lower);
@@ -209,7 +211,11 @@ export class RemotePortProxyManager {
     }
     item.res.statusCode = rawStatus;
     for (const { name, values } of grouped.values()) {
-      item.res.setHeader(name, values.length === 1 ? values[0]! : values);
+      try {
+        item.res.setHeader(name, values.length === 1 ? values[0]! : values);
+      } catch {
+        // Skip invalid upstream headers instead of throwing and hanging the proxy response.
+      }
     }
   }
 

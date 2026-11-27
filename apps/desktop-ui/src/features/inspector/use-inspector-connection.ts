@@ -9,6 +9,7 @@ import type {
 import type {
   AgentInfo,
   BackgroundTask,
+  ContentBlock,
   MachineInfo,
   MethodResult,
   SessionSummary,
@@ -34,7 +35,7 @@ const EMPTY_CLIENT_STORE: StoreApi<Pick<
 }));
 
 export interface InspectorSessionActions {
-  send(text: string): Promise<void>;
+  send(content: string | ContentBlock[]): Promise<void>;
   loadTasks(): Promise<BackgroundTask[]>;
   loadTaskOutput(
     taskId: string,
@@ -180,8 +181,10 @@ export function useInspectorConnection(params: {
     if (!connection || !sessionId) return undefined;
     const getStore = () => connection.store.getState();
     return {
-      send: async (text: string) => {
-        await getStore().send(sessionId, [{ type: "text", text }]);
+      send: async (content: string | ContentBlock[]) => {
+        const blocks: ContentBlock[] =
+          typeof content === "string" ? [{ type: "text", text: content }] : content;
+        if (blocks.length > 0) await getStore().send(sessionId, blocks);
       },
       loadTasks: () => getStore().loadTasks(sessionId),
       loadTaskOutput: (taskId, before) =>

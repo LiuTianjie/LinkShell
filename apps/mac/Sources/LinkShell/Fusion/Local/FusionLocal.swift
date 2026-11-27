@@ -456,9 +456,9 @@ extension FusionLocal {
     let connection = NWConnection(host: NWEndpoint.Host(host), port: endpointPort, using: FusionWire.parameters(token: token))
     let wire = FusionWire(connection)
     self.wire = wire
-    wire.onReady = { [weak self] in
+    wire.onReady = { [weak self, weak wire] in
       // The remote answers every 1.5 s ping: 5 s of silence is a dead link, not frozen windows.
-      wire.startWatchdog(timeout: 5)
+      wire?.startWatchdog(timeout: 5)
       DispatchQueue.main.async { self?.hello() }
     }
     wire.onMessage = { [weak self] in self?.receive($0) }

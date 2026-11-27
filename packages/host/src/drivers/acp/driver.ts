@@ -107,6 +107,8 @@ export interface AcpSessionState {
   promptGen: number;
   runningGen: number;
   idleGen?: number;
+  /** Monotonic per-turn generation; prevents a timed-out cancelled session/prompt from mutating a newer turn. */
+  turnGen: number;
   reportedState?: SessionState;
   commands?: Extract<SessionUpdate, { sessionUpdate: "available_commands_update" }>;
   config: SourcedConfigOption[];
@@ -183,6 +185,7 @@ export class AcpDriver implements AgentDriver {
   async sideAsk(nativeId: string, request: SideRequest, out: SideOutput, signal: AbortSignal): Promise<void> {
     if (!this.hasSide()) throw RpcError.app("not_supported", `${this.label} 没有旁支对话`);
     if (!this.sessions.get(nativeId)?.loaded) throw RpcError.app("not_ready", "先打开这个会话，再问旁支问题");
+    if (signal.aborted) throw new Error("已停止");
     const question = request.history.length === 0
       ? request.question
       : `${request.history.map((turn) => `Earlier side question: ${turn.question}\nYour answer: ${turn.answer}`).join("\n\n")}\n\nSide question now: ${request.question}`;
@@ -191,11 +194,22 @@ export class AcpDriver implements AgentDriver {
         if (error instanceof RpcError && error.code === -32601) throw RpcError.app("not_supported", `这个版本的 ${this.label} 没有 /btw：请更新它`);
         throw error;
       });
+    // Prevent an unhandled rejection if abort wins the race before the RPC settles.
+    asked.catch(() => {});
     // Grok can't be told to stop one: the answer that comes after is dropped.
-    const stopped = new Promise<never>((_, reject) => signal.addEventListener("abort", () => reject(new Error("已停止")), { once: true }));
-    const response = await Promise.race([asked, stopped]);
-    const answer = typeof response?.answer === "string" ? response.answer : response?.result?.answer;
-    if (typeof answer === "string" && answer) out.text(answer);
+    let onAbort: (() => void) | undefined;
+    const stopped = new Promise<never>((_, reject) => {
+      onAbort = () => reject(new Error("已停止"));
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
+    try {
+      const response = await Promise.race([asked, stopped]);
+      if (signal.aborted) throw new Error("已停止");
+      const answer = typeof response?.answer === "string" ? response.answer : response?.result?.answer;
+      if (typeof answer === "string" && answer) out.text(answer);
+    } finally {
+      if (onAbort) signal.removeEventListener("abort", onAbort);
+    }
   }
 
   protected host?: DriverHost;
@@ -1075,6 +1089,7 @@ export class AcpDriver implements AgentDriver {
         deferredUserUpdates: [],
         promptGen: 0,
         runningGen: 0,
+        turnGen: 0,
         config: [],
         modeRevision: 0,
         turnActive: false,
@@ -1425,6 +1440,7 @@ export class AcpDriver implements AgentDriver {
     state.reportedState = undefined;
     state.idleReason = undefined;
     state.idleGen = undefined;
+    state.turnGen += 1;
     const gen = ++state.promptGen;
     state.runningGen = gen;
     this.echoUserMessage(nativeId, content, clientMessageId);
@@ -1441,11 +1457,13 @@ export class AcpDriver implements AgentDriver {
   }
 
   private async sendPrompt(nativeId: string, state: AcpSessionState, prompt: Record<string, unknown>[], clientMessageId: string, gen: number): Promise<void> {
+    const turnGen = state.turnGen;
     state.inflight += 1;
     const completion = this.acpBehavior.turnCompletion;
     let stopReason: StopReason | undefined;
     try {
       const result = await this.rpc<{ stopReason?: unknown; messageId?: string; usage?: unknown }>("session/prompt", { sessionId: nativeId, prompt }, 0);
+      if (state.turnGen !== turnGen) return;
       if (completion === "state-update") {
         if (typeof result.messageId !== "string") throw new Error("ACP 2 未返回已接收的消息 ID");
         state.messageAliases.set(result.messageId, `local-${clientMessageId}`);
@@ -1462,8 +1480,9 @@ export class AcpDriver implements AgentDriver {
       const usage = completion !== "state-update" && result.usage ? this.accountedUsage(result.usage, state, clientMessageId) : undefined;
       if (usage) this.emit(nativeId, usage);
     } catch (error) {
-      // Do not emit a stray ls_error on the rejection microtask after onExit/detach/stop/cancel-recovery
-      // has already torn down the turn.
+      // Do not emit a stray ls_error or mutate inflight after onExit/detach/stop/cancel-recovery
+      // has already torn down this turn (and possibly started a newer turn).
+      if (state.turnGen !== turnGen) return;
       if (this.stopped || !state.loaded || !state.turnActive) {
         state.inflight = Math.max(0, state.inflight - 1);
         return;
@@ -1481,6 +1500,7 @@ export class AcpDriver implements AgentDriver {
         this.emit(nativeId, { sessionUpdate: "ls_error", code: "turn_failed", message: described.message, hint: described.hint });
       }
     }
+    if (state.turnGen !== turnGen) return;
     state.inflight = Math.max(0, state.inflight - 1);
     if (!state.turnActive) return;
     // A steered prompt settles the earlier one; the turn ends with the last.
@@ -1494,6 +1514,7 @@ export class AcpDriver implements AgentDriver {
     clearTimeout(state.cancelTimer);
     state.cancelTimer = undefined;
     if (!state.turnActive) return;
+    state.turnGen += 1;
     this.closeMessage(nativeId);
     state.turnActive = false;
     state.cancelling = false;

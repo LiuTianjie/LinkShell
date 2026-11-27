@@ -157,6 +157,12 @@ export function SignInPairModal(props: {
       engine.connectLanHost(host);
       onOpenChange(false);
     } catch (err) {
+      const address = host.addresses[0];
+      const port = host.hostPort ?? (host.port > 0 ? host.port : host.srvPort);
+      if (address && port && port > 0) {
+        const hostPart = address.includes(":") ? `[${address}]` : address;
+        setGatewayUrl(`ws://${hostPart}:${port}`);
+      }
       setPairError({
         lan: err instanceof Error ? err.message : String(err),
       });

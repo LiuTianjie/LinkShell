@@ -1158,7 +1158,16 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
       ? (state.interactions[agent] ?? []).filter((pending) => pending.requestId !== request.requestId)
       : [...(state.interactions[agent] ?? []).filter((pending) => pending.requestId !== request.requestId), request] } }));
   });
-  link.on("agent.changed", ({ agent }) => store.setState((state) => state.machine ? { machine: { ...state.machine, agents: state.machine.agents.map((entry) => entry.id === agent.id ? agent : entry) } } : {}));
+  link.on("agent.changed", ({ agent }) =>
+    store.setState((state) => {
+      if (!state.machine) return {};
+      const exists = state.machine.agents.some((entry) => entry.id === agent.id);
+      const agents = exists
+        ? state.machine.agents.map((entry) => (entry.id === agent.id ? agent : entry))
+        : [...state.machine.agents, agent];
+      return { machine: { ...state.machine, agents } };
+    }),
+  );
   link.on("machine.changed", (machine) => store.setState({ machine }));
   link.on("session.notice", ({ sessionId, notice }) => {
     // Each retry of an agent's connection replaces the one before: one line counting up, not a stack.

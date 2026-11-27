@@ -330,15 +330,40 @@ describe("mDNS LAN Discovery, File Rename/Delete, Screen Audio, Drag-Drop Upload
     );
     expect(connectBtn).toBeDefined();
 
+    // Unpaired LAN host must NOT open an unencrypted raw `/` WS; it guides LAN gateway pairing and prefills ws://host:port.
+    await act(async () => {
+      connectBtn!.click();
+    });
+    expect(selectSpy).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain("ws://192.168.10.22:7878");
+
+    // Once paired (with real boxKey), clicking connects over the encrypted LAN gateway `/v2/connect` URL.
+    engine.state.setState({
+      computers: [
+        {
+          key: "wss://gateway.itool.tech#lan-machine-42",
+          gateway: "wss://gateway.itool.tech",
+          machine: {
+            id: "lan-machine-42",
+            name: "Office Mac Mini",
+            signKey: "sign-key-42",
+            boxKey: "box-key-42",
+            online: false,
+            via: "paired",
+          },
+        },
+      ],
+    });
     await act(async () => {
       connectBtn!.click();
     });
 
     expect(selectSpy).toHaveBeenCalledTimes(1);
     const chosen = selectSpy.mock.calls[0]![0];
-    expect(chosen.key).toBe("direct:ws://192.168.10.22:7878");
-    expect(chosen.gateway).toBe("direct");
+    expect(chosen.key).toBe("ws://192.168.10.22:7878#lan-machine-42");
+    expect(chosen.gateway).toBe("ws://192.168.10.22:7878");
     expect(chosen.machine.id).toBe("lan-machine-42");
+    expect(chosen.machine.boxKey).toBe("box-key-42");
     expect(onOpenChange).toHaveBeenCalledWith(false);
 
     await act(async () => {
@@ -628,8 +653,13 @@ describe("mDNS LAN Discovery, File Rename/Delete, Screen Audio, Drag-Drop Upload
   });
 
   it("ScreenAudioPlayer unlocks AudioContext synchronously and decodes PCM16 + Opus @linkshell/wire packets", async () => {
-    const resumeSpy = vi.fn(async () => {});
-    const closeSpy = vi.fn(async () => {});
+    let ctxState: AudioContextState = "suspended";
+    const resumeSpy = vi.fn(async () => {
+      ctxState = "running";
+    });
+    const closeSpy = vi.fn(async () => {
+      ctxState = "closed";
+    });
     const startSpy = vi.fn();
     const createdBuffers: Float32Array[][] = [];
     const gainNode = {
@@ -638,7 +668,9 @@ describe("mDNS LAN Discovery, File Rename/Delete, Screen Audio, Drag-Drop Upload
       disconnect: vi.fn(),
     } as unknown as GainNode;
     const fakeCtx = {
-      state: "suspended" as AudioContextState,
+      get state() {
+        return ctxState;
+      },
       sampleRate: SCREEN_AUDIO_SAMPLE_RATE,
       currentTime: 1.0,
       destination: {} as AudioNode,

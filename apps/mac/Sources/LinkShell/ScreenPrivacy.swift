@@ -103,6 +103,10 @@ final class ScreenPrivacy {
     return shouldLock
   }
 
+  func lockNow() {
+    lockHostHandler()
+  }
+
   private func syncCurtainWindows(enabled: Bool) -> Set<CGWindowID> {
     let work = { [self] () -> Set<CGWindowID> in
       for window in self.windows {

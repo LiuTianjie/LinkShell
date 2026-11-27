@@ -74,6 +74,12 @@ function scheduleAudioChannels(channelArrays, sampleRate) {
   if (!audioEnabled || !channelArrays.length || !channelArrays[0].length) return;
   const ctx = ensureAudioContext();
   if (!ctx || ctx.state === "closed") return;
+  // Drop audio frames while AudioContext is suspended/interrupted so AudioBufferSourceNodes
+  // never pile up at a frozen currentTime and blast on resume.
+  if (ctx.state !== "running") {
+    audioNextTime = 0;
+    return;
+  }
   const frames = channelArrays[0].length;
   const chCount = Math.max(1, channelArrays.length);
   const rate = sampleRate || ctx.sampleRate || AUDIO_SAMPLE_RATE;
@@ -219,6 +225,9 @@ function toggleAudio() {
   }
   refreshAudioButton();
   send({ t: "audio", enabled: audioEnabled });
+  if (typeof window !== "undefined" && !window.__linkshellSyncingAudio && window.ReactNativeWebView && typeof window.ReactNativeWebView.postMessage === "function") {
+    window.ReactNativeWebView.postMessage(JSON.stringify({ type: "audio", enabled: audioEnabled }));
+  }
 }
 
 if (audioEnabled && typeof addEventListener === "function") {

@@ -282,14 +282,22 @@ let presenter = null;
 
 async function presentTrack(track) {
   if (!canPresent) return false;
+  stopPresenting();
   let adapter, device;
   try {
     adapter = await navigator.gpu.requestAdapter();
     device = adapter && (await adapter.requestDevice());
   } catch { device = null; }
   if (!device) return false;
+  if (!rtc || track.readyState === "ended") {
+    try { device.destroy(); } catch {}
+    return false;
+  }
   const context = gpu.getContext("webgpu");
-  if (!context) return false;
+  if (!context) {
+    try { device.destroy(); } catch {}
+    return false;
+  }
   const format = navigator.gpu.getPreferredCanvasFormat();
   context.configure({ device, format, alphaMode: "opaque" });
   // One triangle pair, the frame sampled onto it. An external texture is bound per frame: its
@@ -319,7 +327,7 @@ async function presentTrack(track) {
   const reader = new MediaStreamTrackProcessor({ track }).readable.getReader();
   // The mailbox: one frame, the newest. A frame that arrives before the display asked for the
   // last one replaces it — the old one is closed, not queued, so the picture never shows the past.
-  const mine = { stopped: false, latest: null, drawing: false, shown: 0, dropped: 0, w: 0, h: 0 };
+  const mine = { stopped: false, latest: null, drawing: false, shown: 0, dropped: 0, w: 0, h: 0, reader, device };
   presenter = mine;
 
   const draw = () => {
@@ -407,6 +415,14 @@ function stopPresenting(reason) {
   presenter = null;
   if (mine.latest) mine.latest.close();
   mine.latest = null;
+  if (mine.reader) {
+    try { void mine.reader.cancel().catch(() => {}); } catch {}
+    mine.reader = null;
+  }
+  if (mine.device) {
+    try { mine.device.destroy(); } catch {}
+    mine.device = null;
+  }
   gpu.classList.add("gone");
   if (reason) send({ t: "rtc.diagnosis", reason: "gpu presentation stopped: " + reason, ice: "" });
   // The track is still there: the <video> shows it from here on.

@@ -348,6 +348,7 @@ final class LinkScreenView: ExpoView {
       case "control": if active && applicationActive { connection?.requestControl(signal) }
       case "prompt": if active && applicationActive { connection?.input(signal) }
       case "activity": if active && applicationActive { connection?.activity() }
+      case "clipboard.read", "clipboard.write": if active && applicationActive { connection?.clipboard(signal) }
       default: break
       }
     case "stats": connection?.requestStats()

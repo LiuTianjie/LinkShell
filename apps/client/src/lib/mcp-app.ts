@@ -93,22 +93,57 @@ export function appCsp(csp: AppCsp): string {
     .join("; ");
 }
 
+function injectIntoDocumentHead(html: string, injection: string): string {
+  const len = html.length;
+  let pos = 0;
+  const skipPreamble = (allowDoctype: boolean) => {
+    while (pos < len) {
+      const ws = /^\s+/.exec(html.slice(pos));
+      if (ws) { pos += ws[0].length; continue; }
+      if (html.startsWith("<!--", pos)) {
+        const end = html.indexOf("-->", pos + 4);
+        pos = end >= 0 ? end + 3 : len;
+        continue;
+      }
+      if (allowDoctype) {
+        const dt = /^<!doctype\b[^>]*>/i.exec(html.slice(pos));
+        if (dt) { pos += dt[0].length; continue; }
+      }
+      break;
+    }
+  };
+  skipPreamble(true);
+  const htmlTag = /^<html(?:\s[^>]*)?>/i.exec(html.slice(pos));
+  if (htmlTag) {
+    const afterHtml = pos + htmlTag[0].length;
+    pos = afterHtml;
+    skipPreamble(false);
+    const headTag = /^<head(?:\s[^>]*)?>/i.exec(html.slice(pos));
+    if (headTag) {
+      const insertAt = pos + headTag[0].length;
+      return `${html.slice(0, insertAt)}${injection}${html.slice(insertAt)}`;
+    }
+    return `${html.slice(0, afterHtml)}<head>${injection}</head>${html.slice(afterHtml)}`;
+  }
+  const headTag = /^<head(?:\s[^>]*)?>/i.exec(html.slice(pos));
+  if (headTag) {
+    const insertAt = pos + headTag[0].length;
+    return `${html.slice(0, insertAt)}${injection}${html.slice(insertAt)}`;
+  }
+  return `<!doctype html><html><head>${injection}</head><body>${html}</body></html>`;
+}
+
 /**
  * Wraps the MCP App HTML with its strict CSP `<meta>` and a zero-loop postMessage shim
  * routing SEP-1865 JSON-RPC calls over `window.ReactNativeWebView.postMessage`.
  */
 export function appDocument(html: string, csp: string): string {
-  const meta = `<meta http-equiv="Content-Security-Policy" content="${csp.replace(/"/g, "&quot;")}">`;
+  const safeCsp = csp.replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const meta = `<meta http-equiv="Content-Security-Policy" content="${safeCsp}">`;
   const viewport = `<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">`;
   const shim = `<script>(function(){if(window.__linkshellMcpBridgeInit)return;window.__linkshellMcpBridgeInit=true;var origPost=typeof window.postMessage==="function"?window.postMessage.bind(window):null;window.postMessage=function(msg,target,transfer){if(msg&&typeof msg==="object"&&msg.jsonrpc==="2.0"){if(window.ReactNativeWebView&&typeof window.ReactNativeWebView.postMessage==="function"){window.ReactNativeWebView.postMessage(JSON.stringify({__linkshellMcp:true,payload:msg}));}return;}if(origPost)return origPost(msg,target||"*",transfer);};window.__linkshellMcpDeliver=function(payload){try{var ev=new MessageEvent("message",{data:payload,origin:window.location&&window.location.origin?window.location.origin:""});window.dispatchEvent(ev);}catch(_){if(typeof window.onmessage==="function")window.onmessage({data:payload});}};})();</script>`;
   const injection = `${meta}${viewport}${shim}`;
-  if (/<head[^>]*>/i.test(html)) {
-    return html.replace(/<head[^>]*>/i, (head) => `${head}${injection}`);
-  }
-  if (/<html[^>]*>/i.test(html)) {
-    return html.replace(/<html[^>]*>/i, (root) => `${root}<head>${injection}</head>`);
-  }
-  return `<!doctype html><html><head>${injection}</head><body>${html}</body></html>`;
+  return injectIntoDocumentHead(html, injection);
 }
 
 export function decodeBase64Utf8(blob: string): string {
@@ -134,14 +169,20 @@ export function isSafeExternalUrl(raw: string): boolean {
 
 export function mcpContentBlocks(
   content: unknown,
-): Array<{ type: "text"; text: string } | { type: "other" }> {
+): Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string } | { type: "other" }> {
   if (!Array.isArray(content)) return [];
-  const out: Array<{ type: "text"; text: string } | { type: "other" }> = [];
+  const out: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string } | { type: "other" }> = [];
   for (const item of content) {
     const record = asObject(item);
     if (!record) continue;
     if (record.type === "text" && typeof record.text === "string") {
       out.push({ type: "text", text: record.text });
+    } else if (
+      record.type === "image" &&
+      typeof record.data === "string" &&
+      typeof record.mimeType === "string"
+    ) {
+      out.push({ type: "image", data: record.data, mimeType: record.mimeType });
     } else {
       out.push({ type: "other" });
     }

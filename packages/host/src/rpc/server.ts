@@ -411,7 +411,11 @@ export class HostRpcServer {
       "agents.authenticate": (params: P<"agents.authenticate">) => hub.authenticate(params.agent, params.methodId, params.logout),
       "agents.respond": async (params: P<"agents.respond">) => { await hub.respondInteraction(params.agent, params.requestId, params); return {}; },
       "agents.providers": async (params: P<"agents.providers">) => ({ providers: await hub.providers(params.agent, params.operation, params.config) }),
-      "agents.custom": async (params: P<"agents.custom">) => ({ agents: await hub.customAgents(params.save, params.remove) }),
+      "agents.custom": async (params: P<"agents.custom">) => {
+        const agents = await hub.customAgents(params.save, params.remove);
+        if (params.save || params.remove) this.broadcast("machine.changed", options.machineInfo());
+        return { agents };
+      },
       "machine.info": (params: P<"machine.info">, context) => {
         if (!context.unlocked) {
           const info = options.machineInfo();

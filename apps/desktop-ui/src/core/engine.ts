@@ -74,6 +74,23 @@ export function withHostName(computer: Computer, name: string, configured: boole
   return { ...computer, machine: { ...computer.machine, name, namingConfigured: configured } };
 }
 
+function isLocalOrLanHostname(hostname: string): boolean {
+  const lower = hostname.toLowerCase();
+  if (lower === "localhost" || lower === "127.0.0.1" || lower === "[::1]" || lower.endsWith(".local")) {
+    return true;
+  }
+  if (/^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(lower)) return true;
+  if (/^192\.168\.\d{1,3}\.\d{1,3}$/.test(lower)) return true;
+  if (/^169\.254\.\d{1,3}\.\d{1,3}$/.test(lower)) return true;
+  const rfc172 = /^172\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/.exec(lower);
+  if (rfc172) {
+    const second = Number(rfc172[1]);
+    if (second >= 16 && second <= 31) return true;
+  }
+  if (/^\[(?:fe80:|fc|fd)/i.test(lower)) return true;
+  return false;
+}
+
 export function validateGateway(value: string): string {
   let url: URL;
   try {
@@ -91,11 +108,8 @@ export function validateGateway(value: string): string {
     throw new Error("请输入网关根地址，不需要附加路径");
   }
   const pageHttps = typeof location !== "undefined" && location.protocol === "https:";
-  if (
-    url.protocol === "ws:" &&
-    (pageHttps || !["localhost", "127.0.0.1", "[::1]"].includes(url.hostname))
-  ) {
-    throw new Error("请使用 wss:// 安全连接；ws:// 仅限本地 HTTP 开发环境");
+  if (url.protocol === "ws:" && (pageHttps || !isLocalOrLanHostname(url.hostname))) {
+    throw new Error("请使用 wss:// 安全连接；ws:// 仅限本地或局域网 HTTP 环境");
   }
   return url.origin;
 }
@@ -863,25 +877,37 @@ export class DesktopEngine {
 
     const hostPart = address.includes(":") ? `[${address}]` : address;
     const wsUrl = `ws://${hostPart}:${port}`;
-    const directKey = `direct:${wsUrl}`;
+    const lanGatewayKey = `${wsUrl}#${host.machineId}`;
+    const existingOnLan = currentState.computers.find(
+      (item) => item.key === lanGatewayKey || (item.gateway === wsUrl && item.machine.id === host.machineId),
+    );
+    if (existingOnLan) {
+      this.select(existingOnLan);
+      return existingOnLan;
+    }
+
+    // `linkshell host --lan` serves an encrypted Gateway at `/v2/connect` rather than a raw WS.
+    // Reuse a paired machine's real Ed25519/X25519 identity over the LAN gateway when known;
+    // otherwise prompt the user to complete 6-digit / QR pairing against the LAN gateway URL.
+    if (!existing?.machine.boxKey) {
+      throw new Error(`该局域网主机运行在加密网关 ${wsUrl}，请使用该地址通过 6 位配对码或二维码完成配对`);
+    }
+
     const computer: Computer = {
-      key: directKey,
-      gateway: "direct",
+      key: lanGatewayKey,
+      gateway: wsUrl,
       machine: {
-        id: host.machineId,
-        name: host.name || host.host || address,
-        namingConfigured: Boolean(host.name),
-        signKey: host.fingerprint || host.machineId,
-        boxKey: "",
+        ...existing.machine,
+        name: host.name || existing.machine.name || host.host || address,
+        namingConfigured: Boolean(host.name) || existing.machine.namingConfigured,
         online: true,
-        via: "paired",
       },
     };
     this.paired = [
       ...this.paired.filter(
         (item) =>
-          item.key !== directKey &&
-          !(item.gateway === "direct" && item.machine.id === host.machineId),
+          item.key !== lanGatewayKey &&
+          !(item.gateway === wsUrl && item.machine.id === host.machineId),
       ),
       computer,
     ];
@@ -891,8 +917,8 @@ export class DesktopEngine {
         [
           ...state.computers.filter(
             (item) =>
-              item.key !== directKey &&
-              !(item.gateway === "direct" && item.machine.id === host.machineId),
+              item.key !== lanGatewayKey &&
+              !(item.gateway === wsUrl && item.machine.id === host.machineId),
           ),
           computer,
         ],

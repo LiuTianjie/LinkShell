@@ -232,47 +232,64 @@ export async function openWebSocket(
     events.close(reason);
   };
   const timeout = setTimeout(() => close("WebSocket 握手超时"), 15000);
-  const opened = await streams.open(port, {
-    data(bytes) {
-      try {
-        if (handshake) {
-          buffer = joinBytes([buffer, bytes]);
-          const text = new TextDecoder().decode(buffer);
-          const end = text.indexOf("\r\n\r\n");
-          if (end < 0) {
-            if (buffer.length > 32768) close("无效的 WebSocket 响应");
-            return;
+  let opened: HostStream;
+  try {
+    opened = await streams.open(port, {
+      data(bytes) {
+        try {
+          if (handshake) {
+            buffer = joinBytes([buffer, bytes]);
+            // Locate CRLFCRLF in raw bytes so non-ASCII UTF-8 header bytes never shift the body slice offset.
+            let endByte = -1;
+            for (let i = 0; i <= buffer.length - 4; i++) {
+              if (
+                buffer[i] === 0x0d &&
+                buffer[i + 1] === 0x0a &&
+                buffer[i + 2] === 0x0d &&
+                buffer[i + 3] === 0x0a
+              ) {
+                endByte = i;
+                break;
+              }
+            }
+            if (endByte < 0) {
+              if (buffer.length > 32768) close("无效的 WebSocket 响应");
+              return;
+            }
+            const header = new TextDecoder().decode(buffer.subarray(0, endByte));
+            if (
+              !/^HTTP\/1\.[01] 101\b/.test(header) ||
+              !header
+                .toLowerCase()
+                .includes(`sec-websocket-accept: ${expected}`.toLowerCase())
+            )
+              return close("WebSocket 握手被拒绝");
+            handshake = false;
+            clearTimeout(timeout);
+            bytes = buffer.slice(endByte + 4);
+            buffer = new Uint8Array();
+            events.open();
           }
-          const header = text.slice(0, end);
-          if (
-            !/^HTTP\/1\.[01] 101\b/.test(header) ||
-            !header
-              .toLowerCase()
-              .includes(`sec-websocket-accept: ${expected}`.toLowerCase())
-          )
-            return close("WebSocket 握手被拒绝");
-          handshake = false;
-          clearTimeout(timeout);
-          bytes = buffer.slice(end + 4);
-          buffer = new Uint8Array();
-          events.open();
-        }
-        for (const frame of decoder.push(bytes)) {
-          if (frame.opcode === 8) {
-            close();
-            break;
+          for (const frame of decoder.push(bytes)) {
+            if (frame.opcode === 8) {
+              close();
+              break;
+            }
+            if (frame.opcode === 9) stream?.write(encodeWs(frame.bytes, 10));
+            if (frame.opcode === 1)
+              events.data(new TextDecoder().decode(frame.bytes));
+            if (frame.opcode === 2) events.data(frame.bytes.slice().buffer);
           }
-          if (frame.opcode === 9) stream?.write(encodeWs(frame.bytes, 10));
-          if (frame.opcode === 1)
-            events.data(new TextDecoder().decode(frame.bytes));
-          if (frame.opcode === 2) events.data(frame.bytes.slice().buffer);
+        } catch (error) {
+          close(String(error));
         }
-      } catch (error) {
-        close(String(error));
-      }
-    },
-    closed: close,
-  });
+      },
+      closed: close,
+    });
+  } catch (error) {
+    clearTimeout(timeout);
+    throw error;
+  }
   if (closed) opened.close();
   else {
     stream = opened;

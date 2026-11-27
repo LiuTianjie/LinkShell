@@ -167,6 +167,10 @@ export class ScreenAudioPlayer {
     if (frames === 0) return;
     const ctx = this.ensureContext();
     if (!ctx || ctx.state === "closed") return;
+    if (ctx.state !== "running") {
+      this.nextTime = 0;
+      return;
+    }
 
     const chCount = Math.max(1, channelArrays.length);
     const rate = sampleRate || ctx.sampleRate || SCREEN_AUDIO_SAMPLE_RATE;

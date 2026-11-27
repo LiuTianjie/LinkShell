@@ -351,4 +351,21 @@ describe("Gateway HoL avoidance, machine replacement presence, and cleanup", () 
     expect(store.route("m1", "d1")).toBeUndefined();
     expect(store.route("m2", "d2")).toBe("account");
   });
+
+  it("closes unauthenticated sockets that send >64KB frames before auth with 1009", () => {
+    const dir = mkdtempSync(join(tmpdir(), "lsh-preauth-"));
+    cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+
+    const gateway = new Gateway({
+      port: 0,
+      databasePath: join(dir, "relay.db"),
+      log: () => {},
+    });
+    cleanups.push(() => gateway.stop());
+
+    const socket = new MockSocket();
+    gateway.acceptTransport(socket);
+    socket.emit("message", "x".repeat(70 * 1024));
+    expect(socket.closed).toEqual([{ code: 1009, reason: "message too big" }]);
+  });
 });

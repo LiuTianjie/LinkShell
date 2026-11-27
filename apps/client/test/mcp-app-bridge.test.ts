@@ -54,6 +54,10 @@ describe("MCP App sandbox, CSP, and JSON-RPC bridge", () => {
     expect(doc).toContain('http-equiv="Content-Security-Policy"');
     expect(doc).toContain("__linkshellMcpBridgeInit");
     expect(doc).toContain("__linkshellMcpDeliver");
+
+    const spoofed = appDocument("<!-- <head> --><script>evil()</script><head></head>", csp);
+    expect(spoofed.indexOf("Content-Security-Policy")).toBeLessThan(spoofed.indexOf("<script>evil()</script>"));
+    expect(spoofed).not.toMatch(/<!--[^>]*Content-Security-Policy/);
   });
 
   it("validates external URL schemes and parses WebView envelopes safely", () => {

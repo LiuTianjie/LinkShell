@@ -186,7 +186,7 @@ class Terminal {
   }
 
   get running(): boolean {
-    return this.exitCode === undefined;
+    return !this.closed && this.exitCode === undefined;
   }
 
   /** Re-reads the foreground process; reports whether the title changed. */
@@ -246,6 +246,16 @@ class Terminal {
     catch { this.state?.dispose(); this.state = undefined; this.stateSnapshot = undefined; }
   }
 
+  private readonly closeHooks = new Set<() => void>();
+
+  onClose(hook: () => void): void {
+    if (this.closed) {
+      hook();
+      return;
+    }
+    this.closeHooks.add(hook);
+  }
+
   close(discardFrames = false): void {
     if (!this.closed && !discardFrames) {
       this.flush();
@@ -258,11 +268,16 @@ class Terminal {
       this.pendingFrames.length = 0;
       this.pendingFrameBytes = 0;
     }
+    const wasRunning = this.running;
     this.closed = true;
+    for (const hook of this.closeHooks) {
+      try { hook(); } catch {}
+    }
+    this.closeHooks.clear();
     this.listeners.clear();
     this.mirror.dispose();
     this.state?.dispose(); this.state = undefined; this.stateSnapshot = undefined;
-    if (this.running) {
+    if (wasRunning) {
       try {
         this.pty.kill(process.platform === "win32" ? undefined : "SIGHUP");
       } catch {
@@ -486,16 +501,34 @@ export class TerminalManager {
     // command above the prompt and it shows twice.
     if (command) {
       let typed = false;
-      const type = () => {
-        if (typed || !terminal.running) return;
+      let delayTimer: ReturnType<typeof setTimeout> | undefined;
+      const cleanup = () => {
         typed = true;
         first.dispose();
+        clearTimeout(delayTimer);
         clearTimeout(fallback);
-        pty.write(`${command}\r`);
+      };
+      const type = () => {
+        if (typed || !terminal.running) {
+          cleanup();
+          return;
+        }
+        cleanup();
+        try {
+          pty.write(`${command}\r`);
+        } catch {
+          // PTY may have exited between check and write.
+        }
       };
       // A little after the first output, so a prompt drawn in pieces is complete.
-      const first = pty.onData(() => setTimeout(type, 60));
+      const first = pty.onData(() => {
+        if (typed || delayTimer) return;
+        delayTimer = setTimeout(type, 60);
+        delayTimer.unref?.();
+      });
       const fallback = setTimeout(type, 3000);
+      fallback.unref?.();
+      terminal.onClose(cleanup);
     }
     this.save(terminal);
     this.emit(terminal.info());

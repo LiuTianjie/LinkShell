@@ -314,3 +314,37 @@ test("RemotePortProxyManager streams response chunks incrementally and propagate
     false,
   );
 });
+
+test("RemotePortProxyManager skips malformed upstream response headers instead of throwing and hanging", async (t) => {
+  const manager = new RemotePortProxyManager({
+    requestTimeoutMs: 500,
+    dispatch(payload) {
+      queueMicrotask(() => {
+        manager.reply({
+          reqId: payload.reqId,
+          phase: "head",
+          status: 200,
+          headers: [
+            ["bad header name", "nope"],
+            ["x-bad-val", "ok\x00bad"],
+            ["content-type", "text/plain"],
+          ],
+        });
+        manager.reply({
+          reqId: payload.reqId,
+          phase: "chunk",
+          bodyBase64: Buffer.from("survived").toString("base64"),
+        });
+        manager.reply({ reqId: payload.reqId, phase: "end" });
+      });
+      return true;
+    },
+  });
+  t.after(() => manager.stopAll());
+
+  const port = await manager.ensureProxy("machine:headers", 4100);
+  const res = await fetch(`http://127.0.0.1:${port}/`);
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("content-type"), "text/plain");
+  assert.equal(await res.text(), "survived");
+});

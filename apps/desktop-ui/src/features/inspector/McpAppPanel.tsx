@@ -1,11 +1,12 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
-import type { McpApp } from "@linkshell/wire";
+import type { ContentBlock, McpApp } from "@linkshell/wire";
 import { openExternalUrl } from "../../bridge/desktop-bridge";
 import type { Connection } from "../../core/connections";
 import {
@@ -14,7 +15,9 @@ import {
   appDocument,
   appResourceMeta,
   appTabId,
+  decodeBase64Utf8,
   isAppPage,
+  isSafeExternalUrl,
   mcpContentBlocks,
   type AppHostContext,
 } from "../../core/mcp-bridge";
@@ -140,7 +143,7 @@ export function McpAppPanel({
       })
       .then((res) => {
         if (cancelled) return;
-        const html = res.text ?? (res.blob ? atob(res.blob) : "");
+        const html = res.text ?? (res.blob ? decodeBase64Utf8(res.blob) : "");
         if (!html || (res.mimeType && !isAppPage(res.mimeType))) {
           setLoadedPage(null);
           setPageError(ti("noMcpAppsDesc"));
@@ -167,7 +170,8 @@ export function McpAppPanel({
     };
   }, [connection, online, sessionId, selectedApp, ti, reloadSeq]);
 
-  useEffect(() => {
+  // Register the postMessage listener synchronously before srcDoc scripts emit ui/initialize.
+  useLayoutEffect(() => {
     const frameEl = iframeRef.current;
     if (
       !frameEl ||
@@ -179,6 +183,7 @@ export function McpAppPanel({
       return undefined;
     }
 
+    let live = true;
     const initialContext: AppHostContext = {
       theme: getResolvedTheme(),
       displayMode: "fullscreen",
@@ -187,42 +192,83 @@ export function McpAppPanel({
       locale,
     };
 
+    const callTool = async (name: string, args: Record<string, unknown>) => {
+      const result = await connection.link.call("mcp.call", {
+        sessionId,
+        server: selectedApp.server,
+        tool: name,
+        arguments: args,
+        connector: selectedApp.connector,
+      });
+      return {
+        content: result.content,
+        structuredContent: result.structuredContent,
+        isError: result.isError,
+        _meta: result.meta,
+      };
+    };
+
     const bridge = new AppBridge(
       frameEl,
       {
-        callTool: async (name, args) =>
-          connection.link.call("mcp.call", {
-            sessionId,
-            server: selectedApp.server,
-            tool: name,
-            arguments: args,
-            connector: selectedApp.connector,
-          }),
-        readResource: async (uri) =>
-          connection.link.call("mcp.resource", {
+        callTool,
+        readResource: async (uri) => {
+          const resource = await connection.link.call("mcp.resource", {
             sessionId,
             server: selectedApp.server,
             uri,
             connector: selectedApp.connector,
-          }),
+          });
+          return {
+            contents: [
+              {
+                uri,
+                mimeType: resource.mimeType,
+                ...(resource.blob !== undefined
+                  ? { blob: resource.blob }
+                  : { text: resource.text ?? "" }),
+                _meta: resource.meta,
+              },
+            ],
+          };
+        },
         openLink: (url) => {
-          if (/^https?:\/\//i.test(url)) {
+          if (isSafeExternalUrl(url)) {
             openExternalUrl(url);
           }
         },
         message: actions
           ? async (content) => {
-              const blocks = mcpContentBlocks(content);
-              const texts = blocks
-                .filter((b) => b.type === "text" && b.text)
-                .map((b) => b.text!)
-                .join("\n\n");
-              if (texts.trim()) {
-                await actions.send(texts);
+              const extracted = mcpContentBlocks(content);
+              const blocks: ContentBlock[] = extracted.flatMap((b): ContentBlock[] => {
+                if (b.type === "text" && b.text?.trim()) return [{ type: "text", text: b.text }];
+                if (b.type === "image" && b.data && b.mimeType) {
+                  return [{ type: "image", data: b.data, mimeType: b.mimeType }];
+                }
+                return [];
+              });
+              if (blocks.length > 0) {
+                await actions.send(blocks);
               }
             }
           : undefined,
-        ready: () => undefined,
+        ready: () => {
+          void callTool(selectedApp.tool, {}).then(
+            (result) => {
+              if (!live) return;
+              bridge.notify("ui/notifications/tool-input", { arguments: {} });
+              bridge.notify("ui/notifications/tool-result", result);
+            },
+            (reason: unknown) => {
+              if (!live) return;
+              bridge.notify("ui/notifications/tool-input", { arguments: {} });
+              bridge.notify("ui/notifications/tool-result", {
+                content: [{ type: "text", text: reason instanceof Error ? reason.message : String(reason) }],
+                isError: true,
+              });
+            },
+          );
+        },
       },
       initialContext,
       { name: "LinkShell Desktop", version: "2.0.0" },
@@ -241,6 +287,7 @@ export function McpAppPanel({
     });
 
     return () => {
+      live = false;
       observer?.disconnect();
       void bridge.teardown().finally(() => bridge.dispose());
     };

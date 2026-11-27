@@ -18,7 +18,7 @@ import {
 } from "@linkshell/client-core";
 import { rememberComputerProfile, probeRelays, relayFor, reconnectRelays, selectedComputer, startRelays, useComputers, type Computer } from "./computers";
 import { deviceIdentity } from "./identity";
-import { HybridLanGatewaySocket, LanE2eeSocket } from "./lan-socket";
+import { HybridLanGatewaySocket } from "./lan-socket";
 import { DEFAULT_HOST_URL } from "./settings";
 import * as socketTransport from "./socket";
 import { directConnector } from "./direct";
@@ -124,12 +124,12 @@ function createConnection(computer: Computer): Connection {
               const machine = latest.machine;
               const fallbackGateway = latest.fallbackGateway;
               return new HybridLanGatewaySocket({
-                openLan: () => new LanE2eeSocket(targetUrl, openRawSocket, deviceIdentity(), machine),
+                openLan: () => new TunnelSocket(relayFor(targetUrl), deviceIdentity(), machine),
                 openGateway: () => new TunnelSocket(relayFor(fallbackGateway), deviceIdentity(), machine),
               });
             }
             if (latest.kind === "direct" && latest.machine) {
-              return new LanE2eeSocket(targetUrl, openRawSocket, deviceIdentity(), latest.machine);
+              return new TunnelSocket(relayFor(targetUrl), deviceIdentity(), latest.machine);
             }
             return openRawSocket(targetUrl);
           },
@@ -149,7 +149,7 @@ function createConnection(computer: Computer): Connection {
             return new HybridLanGatewaySocket({
               openLan: () =>
                 lanE2ee
-                  ? new LanE2eeSocket(lanUrl, openRawSocket, deviceIdentity(), active.machine)
+                  ? new TunnelSocket(relayFor(lanUrl), deviceIdentity(), active.machine)
                   : openRawSocket(lanUrl),
               openGateway,
             });
@@ -288,7 +288,8 @@ export function ClientProvider({ children }: { children: ReactNode }) {
     const bgWatchdog = setInterval(() => {
       if (!hasComputer) return;
       if (AppState.currentState !== "active" && !hasActiveWork()) return;
-      if (store.getState().status !== "online") {
+      const st = store.getState().status;
+      if (st !== "online" && st !== "locked" && st !== "stopped") {
         reconnectRelays();
         link.reconnectNow();
       }

@@ -351,6 +351,14 @@ function withAppendedContent<T extends TimelineItem>(item: T, appended: boolean)
   return item;
 }
 
+function preserveToolMeta<T extends TimelineItem>(next: T, prev?: TimelineItem): T {
+  if (!prev) return next;
+  return withAppendedContent(
+    withReplacedOutput(next, replacedOutput.has(prev)),
+    appendedContent.has(prev),
+  );
+}
+
 /** Stops every streaming message (turn ended, or a message boundary). */
 function settleStreaming(view: SessionView, ts: number, batch?: BatchState): SessionView {
   if (batch && batch.items.has(view.items)) {
@@ -394,7 +402,7 @@ function settleAll(view: SessionView, ts: number, batch?: BatchState): SessionVi
       if (item.kind !== "tool" || !item.sub) continue;
       const sub = settleAll(item.sub, ts, batch);
       if (sub !== item.sub) {
-        settled.items[i] = withReplacedOutput({ ...item, sub }, replacedOutput.has(item));
+        settled.items[i] = preserveToolMeta({ ...item, sub }, item);
       }
     }
     return settled;
@@ -406,7 +414,7 @@ function settleAll(view: SessionView, ts: number, batch?: BatchState): SessionVi
     const sub = settleAll(item.sub, ts, batch);
     if (sub !== item.sub) {
       items ??= mutableItems(settled, batch);
-      items[i] = withReplacedOutput({ ...item, sub }, replacedOutput.has(item));
+      items[i] = preserveToolMeta({ ...item, sub }, item);
     }
   }
   return items ? patchView(settled, { items }, batch) : settled;
@@ -450,7 +458,7 @@ function applyToChild(view: SessionView, parentId: string, update: SessionUpdate
     for (const item of view.items) {
       if (item.kind !== "tool" || !item.sub || !findTool(item.sub, parentId)) continue;
       const nextSub = applyToChild(item.sub, parentId, update, ts, key, batch);
-      return nextSub === item.sub ? view : upsert(view, withReplacedOutput({ ...item, sub: nextSub }, replacedOutput.has(item)), batch);
+      return nextSub === item.sub ? view : upsert(view, preserveToolMeta({ ...item, sub: nextSub }, item), batch);
     }
   }
   const parent: Extract<TimelineItem, { kind: "tool" }> = get(view, parentId, "tool") ?? {
@@ -468,7 +476,7 @@ function applyToChild(view: SessionView, parentId: string, update: SessionUpdate
   const baseSub = parent.sub ?? emptyView(view.sessionId);
   if (!parent.sub && batch) batch.views.add(baseSub);
   const sub = applyUpdateInternal(baseSub, inner, ts, key, batch);
-  return sub === parent.sub ? view : upsert(view, withReplacedOutput({ ...parent, sub }, replacedOutput.has(parent)), batch);
+  return sub === parent.sub ? view : upsert(view, preserveToolMeta({ ...parent, sub }, parent), batch);
 }
 
 /** The Claude app's end-of-turn box (its `wrap_up` tool): the recap, and what it asks. */
@@ -658,25 +666,28 @@ function applyUpdateInternal(view: SessionView, update: SessionUpdate, ts: numbe
       const done = update.status === "completed" || update.status === "failed";
       return upsert(
         settleStreaming(view, ts, batch),
-        withReplacedOutput(
-          {
-            kind: "tool",
-            id: update.toolCallId,
-            title: update.title,
-            name: update.name ?? existing?.name,
-            toolKind: update.kind,
-            status: update.status,
-            rawInput: update.rawInput ?? existing?.rawInput,
-            rawOutput: update.rawOutput ?? existing?.rawOutput,
-            locations: update.locations ?? existing?.locations,
-            detail: update.detail ?? existing?.detail,
-            sub: existing?.sub,
-            content: update.content ?? existing?.content ?? [],
-            output: existing?.output ?? "",
-            ts: existing?.ts ?? ts,
-            endedTs: done ? ts : existing?.endedTs,
-          },
-          Boolean(existing && replacedOutput.has(existing)),
+        withAppendedContent(
+          withReplacedOutput(
+            {
+              kind: "tool",
+              id: update.toolCallId,
+              title: update.title,
+              name: update.name ?? existing?.name,
+              toolKind: update.kind,
+              status: update.status,
+              rawInput: update.rawInput ?? existing?.rawInput,
+              rawOutput: update.rawOutput ?? existing?.rawOutput,
+              locations: update.locations ?? existing?.locations,
+              detail: update.detail ?? existing?.detail,
+              sub: existing?.sub,
+              content: update.content ?? existing?.content ?? [],
+              output: existing?.output ?? "",
+              ts: existing?.ts ?? ts,
+              endedTs: done ? ts : existing?.endedTs,
+            },
+            Boolean(existing && replacedOutput.has(existing)),
+          ),
+          Boolean(update.content === undefined && existing && appendedContent.has(existing)),
         ),
         batch,
       );

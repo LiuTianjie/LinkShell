@@ -339,6 +339,12 @@ export class ScreenShare {
   privacy(params: { curtain?: boolean; lockOnDisconnect?: boolean } = {}): ScreenPrivacyState {
     if (params.curtain !== undefined) this.privacyState.curtain = params.curtain;
     if (params.lockOnDisconnect !== undefined) this.privacyState.lockOnDisconnect = params.lockOnDisconnect;
+    if (process.platform === "darwin" && !process.env.VITEST && (params.curtain !== undefined || params.lockOnDisconnect !== undefined)) {
+      inputApp(this.log)?.setPrivacy({
+        curtain: this.privacyState.curtain,
+        lockOnDisconnect: this.privacyState.lockOnDisconnect,
+      });
+    }
     const supported = process.platform === "darwin" || process.platform === "win32" || process.platform === "linux";
     return {
       curtain: this.privacyState.curtain,
@@ -358,7 +364,14 @@ export class ScreenShare {
   }
 
   private triggerDisconnectLockIfEnabled(): void {
-    if (!this.privacyState.lockOnDisconnect || this.viewers.size > 0) return;
+    if (this.viewers.size > 0) return;
+    if (this.privacyState.curtain) {
+      this.privacyState.curtain = false;
+      if (process.platform === "darwin" && !process.env.VITEST) {
+        inputApp(this.log)?.setPrivacy({ curtain: false });
+      }
+    }
+    if (!this.privacyState.lockOnDisconnect) return;
     if (this.onLockScreen) {
       void Promise.resolve(this.onLockScreen()).catch((error: unknown) => {
         this.log(`[screen] lockOnDisconnect hook failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -367,7 +380,11 @@ export class ScreenShare {
     }
     if (process.env.VITEST) return;
     if (process.platform === "darwin") {
-      void run("/usr/bin/pmset", ["displaysleepnow"], { timeout: 3000 }).catch(() => {});
+      // Prefer LinkShell.app's real screen lock (⌃⌘Q + displaysleepnow); fall back to pmset.
+      const lockedByApp = inputApp(this.log)?.lockScreen() === true;
+      if (!lockedByApp) {
+        void run("/usr/bin/pmset", ["displaysleepnow"], { timeout: 3000 }).catch(() => {});
+      }
     } else if (process.platform === "win32") {
       void run("rundll32.exe", ["user32.dll,LockWorkStation"], { timeout: 3000 }).catch(() => {});
     } else if (process.platform === "linux") {
@@ -910,13 +927,22 @@ export class ScreenShare {
       if (this.video === mine) this.video = undefined;
       return "refused";
     }
-    return { id, reconfigure: status.videoReconfigure === true, keys: status.keys === true, configure: configuration => app.configureVideo(id, configuration), signal: message => app.signal(id, message), setAudio: enabled => app.setAudio(id, enabled), end: () => app.endVideo(id) };
+    return {
+      id,
+      reconfigure: status.videoReconfigure === true,
+      keys: status.keys === true,
+      configure: configuration => app.configureVideo(id, configuration),
+      signal: message => app.signal(id, message),
+      ...(typeof app.setAudio === "function" ? { setAudio: (enabled: boolean) => app.setAudio(id, enabled) } : {}),
+      end: () => app.endVideo(id),
+    };
   }
 
   private stream(ws: WebSocket, display: number, relayed: boolean, wantsVideo: boolean, width: number | undefined, maxFps?: number, diagnostics = false, codec?: "hevc", turn = false, match?: ScreenMatch, audio = false): void {
     let shown = this.displays.find((entry) => entry.index === display) ?? this.displays[0];
     let desired: ScreenConfiguration = { display: shown?.index ?? 0, width: width ?? 1920, maxFps: maxFps === 30 || maxFps === 60 || maxFps === 120 ? maxFps : undefined, paused: false };
     let desiredAudio = audio;
+    let audioPendingSync = false;
     let closed = false;
     const live = () => !closed && ws.readyState === ws.OPEN;
     const tell = (message: object) => { if (live()) ws.send(JSON.stringify(message)); };
@@ -1162,7 +1188,14 @@ export class ScreenShare {
             if (!configuration.paused) await startControl(true);
             if (!current(change)) continue;
             inputEnabled = !configuration.paused;
-            if (!configuration.paused) { resumed(); startReminder(); }
+            if (!configuration.paused) {
+              resumed();
+              startReminder();
+              if (audioPendingSync) {
+                audioPendingSync = false;
+                video?.setAudio?.(desiredAudio);
+              }
+            }
             if (change.requestId !== undefined) tell({ session: {
               t: "configured", requestId: change.requestId, display: target.index, width: applied.width, height: applied.height,
               maxFps: applied.maxFps, paused: applied.paused,
@@ -1287,10 +1320,24 @@ export class ScreenShare {
         if (desired.paused || !inputEnabled) return tell({ clipboardResult: { ok: false, message: "需要先获得控制权限" } });
         void answerClipboard(message, this.clipboard).then((answer) => { if (live()) tell(answer); });
       }
+      else if (kind === "screen.privacy") {
+        if (desired.paused || !inputEnabled) return;
+        const p = message as { curtain?: unknown; lockOnDisconnect?: unknown };
+        const next = this.privacy({
+          ...(typeof p.curtain === "boolean" ? { curtain: p.curtain } : {}),
+          ...(typeof p.lockOnDisconnect === "boolean" ? { lockOnDisconnect: p.lockOnDisconnect } : {}),
+        });
+        tell({ privacy: next });
+      }
       else if (kind === "audio") {
         const enabled = (message as { enabled?: unknown }).enabled === true;
         desiredAudio = enabled;
-        if (!desired.paused) video?.setAudio?.(enabled);
+        if (!desired.paused && !configuring) {
+          audioPendingSync = false;
+          video?.setAudio?.(enabled);
+        } else {
+          audioPendingSync = true;
+        }
       } else if (kind === "control" && !desired.paused) {
         // Requesting control only records intent. Input still needs the applied generation,
         // and startup/configuration must finish before the helper can be joined.

@@ -302,6 +302,7 @@ describe("screen-viewer modular exports, ?audio=1 UI toggle, and audio DataChann
       constructor(public readonly init: Record<string, unknown>) {}
     }
 
+    const windowListeners = new Map<string, Array<() => void>>();
     const ctxObj: Record<string, unknown> = {
       URLSearchParams,
       location: { protocol: "http:", host: "127.0.0.1:9999", pathname: "/", search: "?video=1&audio=1", replace: () => {} },
@@ -325,7 +326,11 @@ describe("screen-viewer modular exports, ?audio=1 UI toggle, and audio DataChann
         removeEventListener: () => {},
         querySelector: () => null,
       },
-      addEventListener: () => {},
+      addEventListener: (event: string, fn: () => void) => {
+        const list = windowListeners.get(event) ?? [];
+        list.push(fn);
+        windowListeners.set(event, list);
+      },
       removeEventListener: () => {},
       setTimeout,
       clearTimeout,
@@ -378,12 +383,17 @@ describe("screen-viewer modular exports, ?audio=1 UI toggle, and audio DataChann
     createdPcs[0]!.ondatachannel?.({ channel: audioChannel });
     expect(audioChannel.binaryType).toBe("arraybuffer");
 
-    // Send a 20 ms 48 kHz stereo PCM16 packet.
+    // Send a 20 ms 48 kHz stereo PCM16 packet while AudioContext is still suspended -> must drop instead of piling nodes.
     const pcm = Buffer.alloc(960 * 2 * 2);
     pcm.writeInt16LE(16384, 0); // +0.5 left
     pcm.writeInt16LE(-16384, 2); // -0.5 right
     const pcmPacket = encodeScreenAudioPacket({ codec: SCREEN_AUDIO_CODEC_PCM16, seq: 1, timestampMs: 20, payload: pcm });
     const pcmAb = pcmPacket.buffer.slice(pcmPacket.byteOffset, pcmPacket.byteOffset + pcmPacket.byteLength);
+    audioChannel.onmessage?.({ data: pcmAb });
+    expect(scheduledStarts).toHaveLength(0);
+
+    // User gesture unlocks AudioContext to "running"; subsequent PCM16 packets schedule cleanly.
+    for (const fn of windowListeners.get("pointerdown") ?? []) fn();
     audioChannel.onmessage?.({ data: pcmAb });
 
     expect(scheduledStarts).toHaveLength(1);

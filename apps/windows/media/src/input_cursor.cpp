@@ -275,9 +275,10 @@ bool InputCursorController::HandleEvent(const json& event, bool lossy) {
 
   std::string type = event["t"].get<std::string>();
 
-  // Forward to LinkShellScreenService when targeting UAC / Lock Screen / elevated Admin window.
+  // Forward to LinkShellScreenService when targeting UAC / Lock Screen / elevated Admin window
+  // (including physical keydown/keyup scan codes now handled by LinkShell.Screen.exe).
   bool force_elev_check = (type != "move" && type != "scroll");
-  if (ShouldForwardElevated(force_elev_check) && type != "keydown" && type != "keyup") {
+  if (ShouldForwardElevated(force_elev_check)) {
     if (ForwardToService(event)) return true;
   }
 

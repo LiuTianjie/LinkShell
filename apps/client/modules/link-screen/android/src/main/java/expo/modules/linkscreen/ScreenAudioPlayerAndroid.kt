@@ -81,14 +81,17 @@ internal class ScreenAudioPlayerAndroid(initialMuted: Boolean = true) {
 
   fun setMuted(value: Boolean) {
     val previous = muted.getAndSet(value)
-    if (previous == value || stopped.get()) return
-    executor.execute {
-      if (stopped.get()) return@execute
-      if (value) {
-        pauseAndFlush()
-      } else {
-        ensureTrackStarted()
+    if (previous == value || stopped.get() || executor.isShutdown) return
+    try {
+      executor.execute {
+        if (stopped.get()) return@execute
+        if (value) {
+          pauseAndFlush()
+        } else {
+          ensureTrackStarted()
+        }
       }
+    } catch (_: Throwable) {
     }
   }
 

@@ -106,27 +106,49 @@ export function ShortcutUrlHandler() {
         router.push({ pathname: "/session/[id]", params: { id: target.id } });
         return;
       }
-      const allowOpt =
-        perm.options.find((opt) => opt.kind === "allow_once") ??
-        perm.options.find((opt) => opt.kind === "allow_always");
-      if (!allowOpt) {
+      // Never auto-approve via URL scheme without explicit user confirmation, and never silently
+      // fall back to `allow_always`.
+      const allowOnce = perm.options.find((opt) => opt.kind === "allow_once");
+      if (!allowOnce) {
         router.push({ pathname: "/session/[id]", params: { id: target.id } });
         return;
       }
-      void actions
-        .respond(target.id, perm.requestId, allowOpt.optionId)
-        .then(() => {
-          haptics.success();
-          router.push({ pathname: "/session/[id]", params: { id: target.id } });
-        })
-        .catch((reason: unknown) => {
-          haptics.error();
-          Alert.alert(
-            pick({ zh: "审批失败", en: "Approval failed", ja: "承認に失敗しました" }),
-            reason instanceof Error ? reason.message : String(reason),
-          );
-          router.push({ pathname: "/session/[id]", params: { id: target.id } });
-        });
+      const detail = [target.title?.trim(), perm.title?.trim()].filter(Boolean).join(" · ");
+      Alert.alert(
+        pick({ zh: "确认审批权限请求？", en: "Approve permission request?", ja: "権限リクエストを承認しますか？" }),
+        detail || pick({ zh: "将对最近一条待处理权限请求执行“允许本次”。", en: "Allow once for the latest pending permission request.", ja: "最新の保留中リクエストを「今回のみ許可」します。" }),
+        [
+          {
+            text: pick({ zh: "取消", en: "Cancel", ja: "キャンセル" }),
+            style: "cancel",
+          },
+          {
+            text: pick({ zh: "查看详情", en: "Review", ja: "詳細を見る" }),
+            onPress: () => {
+              router.push({ pathname: "/session/[id]", params: { id: target.id } });
+            },
+          },
+          {
+            text: pick({ zh: "允许本次", en: "Allow once", ja: "今回のみ許可" }),
+            onPress: () => {
+              void actions
+                .respond(target.id, perm.requestId, allowOnce.optionId)
+                .then(() => {
+                  haptics.success();
+                  router.push({ pathname: "/session/[id]", params: { id: target.id } });
+                })
+                .catch((reason: unknown) => {
+                  haptics.error();
+                  Alert.alert(
+                    pick({ zh: "审批失败", en: "Approval failed", ja: "承認に失敗しました" }),
+                    reason instanceof Error ? reason.message : String(reason),
+                  );
+                  router.push({ pathname: "/session/[id]", params: { id: target.id } });
+                });
+            },
+          },
+        ],
+      );
     }
   }, [pendingAction, navigation?.key, sessions, views, sessionsLoaded, online, actions, pick]);
 

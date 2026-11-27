@@ -180,6 +180,14 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
     }
   }
 
+  func clipboard(_ message: [String: Any]) {
+    queue.async {
+      guard !self.closed, self.ready, self.session.active else { return }
+      guard let kind = message["t"] as? String, kind == "clipboard.read" || kind == "clipboard.write" else { return }
+      self.signal(message)
+    }
+  }
+
   func requestControl(_ message: [String: Any] = ["t": "control"]) {
     queue.async {
       guard !self.closed, self.session.active, message["t"] as? String == "control" else { return }
@@ -300,6 +308,15 @@ final class ScreenConnection: NSObject, RTCPeerConnectionDelegate, RTCDataChanne
     if let state = message["control"] as? [String: Any] {
       trusted = state["available"] as? Bool == true && state["trusted"] as? Bool == true
       onMessage?(["control": state])
+    }
+    if let clip = message["clipboard"] as? [String: Any] {
+      onMessage?(["clipboard": clip])
+    }
+    if let clipResult = message["clipboardResult"] as? [String: Any] {
+      onMessage?(["clipboardResult": clipResult])
+    }
+    if let privacy = message["privacy"] as? [String: Any] {
+      onMessage?(["privacy": privacy])
     }
     guard let rtc = message["rtc"] as? [String: Any], let type = rtc["t"] as? String else { return }
     switch type {

@@ -211,10 +211,37 @@ export async function openPathInExternalApp(params: {
     return;
   }
   if (!connection) return;
-  await connection.link.call("desktop.openPath", {
-    path: targetPath,
-    app,
-  });
+  if (connection.computer.key === DESKTOP_LOCAL) {
+    await connection.link.call("desktop.openPath", {
+      path: targetPath,
+      app,
+    });
+    return;
+  }
+  // Host RPC restricts desktop.* to the local loopback/socket link, so when viewing this
+  // computer through its gateway alias, dispatch desktop.openPath through the local link.
+  const existingLocal = engine.connectionForKey(DESKTOP_LOCAL);
+  if (existingLocal) {
+    await existingLocal.link.call("desktop.openPath", {
+      path: targetPath,
+      app,
+    });
+    return;
+  }
+  const localComputer = engine.state.getState().localComputer;
+  if (localComputer) {
+    const retained = engine.retainComputer(localComputer, { metadataOnly: true });
+    try {
+      await retained.connection.link.call("desktop.openPath", {
+        path: targetPath,
+        app,
+      });
+    } finally {
+      retained.release();
+    }
+    return;
+  }
+  await desktopInvoke("openPath", { path: targetPath, app });
 }
 
 type FileReadResult = MethodResult<"fs.read">;

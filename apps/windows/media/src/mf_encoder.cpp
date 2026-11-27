@@ -4,7 +4,9 @@
 #include <propvarutil.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstring>
+#include <thread>
 
 #include "api/video/encoded_image.h"
 #include "api/video_codecs/h264_profile_level_id.h"
@@ -595,11 +597,14 @@ int32_t MediaFoundationVideoEncoder::Encode(
   };
 
   if (is_async_) {
-    // Wait for METransformNeedInput (preserving any extra NeedInput tokens received during output drain).
+    // Wait for METransformNeedInput with a bounded timeout so a GPU driver TDR never deadlocks mu_.
     for (int tries = 0; tries < 64 && pending_need_input_ <= 0; ++tries) {
       ComPtr<IMFMediaEvent> ev;
-      HRESULT hr = event_gen_->GetEvent(0, &ev);
-      if (FAILED(hr) || !ev) return WEBRTC_VIDEO_CODEC_ERROR;
+      HRESULT hr = GetAsyncEventWithTimeout(2000, &ev);
+      if (FAILED(hr) || !ev) {
+        if (log_) log_(impl_name_ + " async MFT timed out waiting for METransformNeedInput");
+        return WEBRTC_VIDEO_CODEC_ERROR;
+      }
       MediaEventType type = MEUnknown;
       ev->GetType(&type);
       if (type == METransformNeedInput) {
@@ -624,11 +629,14 @@ int32_t MediaFoundationVideoEncoder::Encode(
     pending_meta_.push_back(std::move(meta));
     while (pending_meta_.size() > 8) pending_meta_.pop_front();
 
-    // Wait for METransformHaveOutput (low-latency 1-in-1-out; remember extra METransformNeedInput tokens!).
+    // Wait for METransformHaveOutput with bounded timeout (remember extra METransformNeedInput tokens!).
     for (int tries = 0; tries < 32; ++tries) {
       ComPtr<IMFMediaEvent> ev;
-      HRESULT hr = event_gen_->GetEvent(0, &ev);
-      if (FAILED(hr) || !ev) break;
+      HRESULT hr = GetAsyncEventWithTimeout(2000, &ev);
+      if (FAILED(hr) || !ev) {
+        if (log_) log_(impl_name_ + " async MFT timed out waiting for METransformHaveOutput");
+        return WEBRTC_VIDEO_CODEC_ERROR;
+      }
       MediaEventType type = MEUnknown;
       ev->GetType(&type);
       if (type == METransformHaveOutput) {
@@ -686,6 +694,26 @@ int32_t MediaFoundationVideoEncoder::Encode(
     }
   }
   return WEBRTC_VIDEO_CODEC_OK;
+}
+
+HRESULT MediaFoundationVideoEncoder::GetAsyncEventWithTimeout(
+    int timeout_ms,
+    ComPtr<IMFMediaEvent>* out_ev) {
+  if (!event_gen_ || !out_ev) return E_POINTER;
+  const int64_t start_us = NowMicros();
+  const int64_t deadline_us = start_us + static_cast<int64_t>(timeout_ms) * 1000;
+  for (;;) {
+    out_ev->Reset();
+    HRESULT hr = event_gen_->GetEvent(MF_EVENT_FLAG_NO_WAIT, out_ev->GetAddressOf());
+    if (hr != MF_E_NO_EVENTS_AVAILABLE) return hr;
+    int64_t now_us = NowMicros();
+    if (now_us >= deadline_us) return HRESULT_FROM_WIN32(ERROR_TIMEOUT);
+    if (now_us - start_us < 500) {
+      std::this_thread::yield();
+    } else {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+  }
 }
 
 bool MediaFoundationVideoEncoder::DrainAsyncOutput() {

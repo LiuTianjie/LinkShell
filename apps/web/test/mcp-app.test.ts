@@ -36,6 +36,12 @@ describe("an MCP App's page", () => {
       .toBe("<!doctype html><html lang=\"zh\"><head><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'\"><title>x</title></head><body></body></html>");
     expect(appDocument("<html><body>x</body></html>", "a")).toBe("<html><head><meta http-equiv=\"Content-Security-Policy\" content=\"a\"></head><body>x</body></html>");
     expect(appDocument("<p>x</p>", "a\"b")).toContain("content=\"a&quot;b\"");
+    // Defeats HTML comment spoofing (`<!-- <head> -->`) and leading `<script>` bypasses.
+    const spoofed = appDocument("<!-- <head> --><script>evil()</script><head></head>", "default-src 'none'");
+    expect(spoofed.indexOf("Content-Security-Policy")).toBeLessThan(spoofed.indexOf("<script>evil()</script>"));
+    expect(spoofed).not.toMatch(/<!--[^>]*Content-Security-Policy/);
+    const headerDoc = appDocument("<header>hi</header>", "default-src 'none'");
+    expect(headerDoc.indexOf("Content-Security-Policy")).toBeLessThan(headerDoc.indexOf("<header>"));
   });
 });
 
@@ -141,6 +147,17 @@ describe("the bridge to an app's frame", () => {
     await settle();
     expect((sent[0] as { result: { hostCapabilities: Record<string, unknown> } }).result.hostCapabilities.message).toEqual({ text: {}, image: {} });
     expect(message).toHaveBeenCalledWith([{ type: "text", text: "看这里" }]);
+    bridge.dispose();
+  });
+
+  it("rejects non-http(s) URLs on ui/open-link", async () => {
+    const { sent, fromPage, settle, bridge, handlers } = frameWithBridge();
+    fromPage({ jsonrpc: "2.0", id: 9, method: "ui/open-link", params: { url: "javascript:alert(1)" } });
+    fromPage({ jsonrpc: "2.0", id: 10, method: "ui/open-link", params: { url: "https://example.com" } });
+    await settle();
+    expect(sent).toContainEqual({ jsonrpc: "2.0", id: 9, error: { code: -32602, message: "链接地址无效或不受支持" } });
+    expect(handlers.openLink).toHaveBeenCalledTimes(1);
+    expect(handlers.openLink).toHaveBeenCalledWith("https://example.com");
     bridge.dispose();
   });
 });

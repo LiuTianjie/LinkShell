@@ -1,4 +1,4 @@
-import type { McpApp } from "@linkshell/wire";
+import type { ContentBlock, McpApp } from "@linkshell/wire";
 import { Stack, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Linking, Pressable, ScrollView, useColorScheme, View } from "react-native";
@@ -145,6 +145,12 @@ export function McpAppScreen() {
   }, [id, link, online, pick, refreshSeq, selectedApp]);
 
   const themeMode: "light" | "dark" = scheme === "dark" ? "dark" : "light";
+  const latestContextRef = useRef({
+    themeMode,
+    locale,
+    containerSize,
+  });
+  latestContextRef.current = { themeMode, locale, containerSize };
 
   useEffect(() => {
     if (!id || !selectedApp || !loadedPage) {
@@ -153,32 +159,43 @@ export function McpAppScreen() {
       return;
     }
 
+    let live = true;
+    const { themeMode: initialTheme, locale: initialLocale, containerSize: initialSize } = latestContextRef.current;
     const context: AppHostContext = {
-      theme: themeMode,
+      theme: initialTheme,
       displayMode: "fullscreen",
       availableDisplayModes: ["fullscreen"],
       platform: "mobile",
-      locale,
-      ...(containerSize ? { containerDimensions: containerSize } : {}),
+      locale: initialLocale,
+      ...(initialSize ? { containerDimensions: initialSize } : {}),
+    };
+
+    const callTool = async (name: string, args: Record<string, unknown>) => {
+      const result = await link.call(
+        "mcp.call",
+        {
+          sessionId: id,
+          server: selectedApp.server,
+          tool: name,
+          arguments: args,
+          connector: selectedApp.connector,
+        },
+        30_000,
+      );
+      return {
+        content: result.content,
+        structuredContent: result.structuredContent,
+        isError: result.isError,
+        _meta: result.meta,
+      };
     };
 
     const controller = new McpAppBridgeController(
       (script) => webRef.current?.injectJavaScript(script),
       {
-        callTool: (name, args) =>
-          link.call(
-            "mcp.call",
-            {
-              sessionId: id,
-              server: selectedApp.server,
-              tool: name,
-              arguments: args,
-              connector: selectedApp.connector,
-            },
-            30_000,
-          ),
-        readResource: (uri) =>
-          link.call(
+        callTool,
+        readResource: async (uri) => {
+          const resource = await link.call(
             "mcp.resource",
             {
               sessionId: id,
@@ -187,21 +204,33 @@ export function McpAppScreen() {
               connector: selectedApp.connector,
             },
             20_000,
-          ),
+          );
+          return {
+            contents: [
+              {
+                uri,
+                mimeType: resource.mimeType,
+                ...(resource.blob !== undefined
+                  ? { blob: resource.blob }
+                  : { text: resource.text ?? "" }),
+                _meta: resource.meta,
+              },
+            ],
+          };
+        },
         openLink: (url) => {
           if (isSafeExternalUrl(url)) {
             void Linking.openURL(url).catch(() => {});
           }
         },
         message: async (content) => {
-          const blocks = mcpContentBlocks(content);
-          const text = blocks
-            .filter((block): block is { type: "text"; text: string } => block.type === "text")
-            .map((block) => block.text)
-            .join("\n\n")
-            .trim();
-          if (text) {
-            const outcome = await actions.send(id, [{ type: "text", text }]);
+          const blocks: ContentBlock[] = mcpContentBlocks(content).flatMap((block): ContentBlock[] => {
+            if (block.type === "text" && block.text.trim()) return [{ type: "text", text: block.text }];
+            if (block.type === "image") return [{ type: "image", data: block.data, mimeType: block.mimeType }];
+            return [];
+          });
+          if (blocks.length > 0) {
+            const outcome = await actions.send(id, blocks);
             if (outcome === "failed") {
               Alert.alert(
                 pick({ zh: "发送失败", en: "Send failed", ja: "送信失敗" }),
@@ -217,24 +246,45 @@ export function McpAppScreen() {
         onSizeChanged: (next) => {
           setReportedSize(next);
         },
-        ready: () => {},
+        ready: () => {
+          void callTool(selectedApp.tool, {}).then(
+            (result) => {
+              if (!live) return;
+              controller.notify("ui/notifications/tool-input", { arguments: {} });
+              controller.notify("ui/notifications/tool-result", result);
+            },
+            (reason: unknown) => {
+              if (!live) return;
+              controller.notify("ui/notifications/tool-input", { arguments: {} });
+              controller.notify("ui/notifications/tool-result", {
+                content: [{ type: "text", text: describeActionError(reason) }],
+                isError: true,
+              });
+            },
+          );
+        },
       },
       context,
     );
     bridgeRef.current = controller;
 
     return () => {
+      live = false;
       void controller.teardown();
       controller.dispose();
       if (bridgeRef.current === controller) {
         bridgeRef.current = null;
       }
     };
-  }, [actions, containerSize, id, link, loadedPage, locale, pick, selectedApp, themeMode]);
+  }, [actions, id, link, loadedPage, pick, selectedApp]);
 
   useEffect(() => {
     bridgeRef.current?.setContext({ theme: themeMode });
   }, [themeMode]);
+
+  useEffect(() => {
+    bridgeRef.current?.setContext({ locale });
+  }, [locale]);
 
   useEffect(() => {
     if (containerSize) {
@@ -406,8 +456,21 @@ export function McpAppScreen() {
                 if (request.url === "about:blank" || request.url.startsWith("about:blank#")) {
                   return true;
                 }
+                // Never auto-launch an external browser from unprompted JS redirects (`window.location = ...`).
+                // Require explicit confirmation so drive-by external navigation is blocked.
                 if (isSafeExternalUrl(request.url)) {
-                  void Linking.openURL(request.url).catch(() => {});
+                  const target = request.url.trim();
+                  Alert.alert(
+                    pick({ zh: "打开外部链接？", en: "Open external link?", ja: "外部リンクを開きますか？" }),
+                    target,
+                    [
+                      { text: pick({ zh: "取消", en: "Cancel", ja: "キャンセル" }), style: "cancel" },
+                      {
+                        text: pick({ zh: "打开", en: "Open", ja: "開く" }),
+                        onPress: () => void Linking.openURL(target).catch(() => {}),
+                      },
+                    ],
+                  );
                 }
                 return false;
               }}

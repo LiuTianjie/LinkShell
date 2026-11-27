@@ -22,7 +22,7 @@ pressable($("mode"), () => {
 });
 pressable($("clipbar"), toggleConnectionPanel);
 const audiobarButton = $("audiobar");
-if (audiobarButton) pressable(audiobarButton, toggleAudio);
+if (audiobarButton) pressable(audiobarButton, () => toggleAudio());
 pressable($("info"), toggleConnectionPanel);
 tappable($("closeinfo"), closeMenu);
 // On a phone the button is there only while the key bar is not, which is while the page knows of no keyboard:
@@ -477,7 +477,11 @@ function applyLang(force) {
     $(id).setAttribute("aria-label", label);
   }
   refreshAudioButton();
-  $("compose").textContent = copy.composePrompt;
+  const composeEl = $("compose");
+  composeEl.innerHTML = ICON.compose;
+  const composeText = document.createElement("span");
+  composeText.textContent = copy.composePrompt;
+  composeEl.appendChild(composeText);
   $("wordshint").textContent = copy.wordsHint;
   $("pasteclip").textContent = copy.pasteClip;
   $("sendreturn").textContent = copy.sendReturn;

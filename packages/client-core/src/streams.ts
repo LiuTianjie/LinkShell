@@ -94,16 +94,20 @@ export class HostStreams {
   private retryTimer?: ReturnType<typeof setTimeout>;
   private stopped = false;
   private relayEpoch = 0;
-  private openingRelayed = 0;
+  private openingStreams = 0;
   private readonly pathListeners = new Set<(path: StreamPath) => void>();
   /** Streams on the RPC channel, by stream id. */
   private readonly relayed = new Map<string, StreamHandlers>();
   /** Frames for a relayed stream whose `proxy.open` hasn't resolved yet. */
   private readonly earlyRelayed = new Map<string, EarlyBuffer<EarlyRelayedFrame>>();
+  /** Recently closed relayed streams whose trailing frames must not re-populate `earlyRelayed`. */
+  private readonly closedRelayed = new Set<string>();
   /** Streams on the direct channel, by their number there. */
   private readonly directed = new Map<number, StreamHandlers>();
   /** Frames for a direct stream whose `proxy.open` hasn't answered yet (a server that speaks first). */
   private readonly early = new Map<number, EarlyBuffer<DirectFrame>>();
+  /** Recently closed direct streams whose trailing frames must not saturate `early`. */
+  private readonly closedDirect = new Set<number>();
 
   constructor(
     private readonly link: HostLink,
@@ -115,7 +119,7 @@ export class HostStreams {
         handlers.data(base64.decode(data));
         return;
       }
-      if (this.openingRelayed > 0) {
+      if (this.openingStreams > 0 && !this.closedRelayed.has(streamId)) {
         const bytes = base64.decode(data);
         this.bufferEarly(this.earlyRelayed, streamId, { type: "data", data: bytes }, bytes.byteLength);
       }
@@ -124,10 +128,11 @@ export class HostStreams {
       const handlers = this.relayed.get(streamId);
       if (handlers) {
         this.relayed.delete(streamId);
+        this.rememberClosed(this.closedRelayed, streamId);
         handlers.closed(error);
         return;
       }
-      if (this.openingRelayed > 0) {
+      if (this.openingStreams > 0 && !this.closedRelayed.has(streamId)) {
         this.bufferEarly(this.earlyRelayed, streamId, { type: "closed", error }, 0, true);
       }
     });
@@ -218,98 +223,111 @@ export class HostStreams {
     if (this.stopped) throw new Error("连接已断开");
     const relayEpoch = this.relayEpoch;
     const connection = options.direct !== false && this.pathValue === "direct" ? this.connection : undefined;
-    if (!connection) this.openingRelayed += 1;
-    let result: { streamId: string; channel?: number };
+    this.openingStreams += 1;
     try {
-      result = await this.link.call("proxy.open", { port, direct: connection ? true : undefined });
-    } finally {
-      if (!connection) this.openingRelayed -= 1;
-    }
-    const { streamId } = result;
-    // Dropped or stopped while `proxy.open` was in flight: clean up the newly opened stream immediately.
-    if (this.stopped || this.relayEpoch !== relayEpoch) {
-      this.earlyRelayed.delete(streamId);
-      if (result.channel !== undefined) {
-        this.early.delete(result.channel);
-        if (connection && this.connection === connection) {
-          connection.send(encodeDirectFrame({ type: "close", stream: result.channel }));
+      const result = await this.link.call("proxy.open", { port, direct: connection ? true : undefined });
+      const { streamId } = result;
+      // Dropped or stopped while `proxy.open` was in flight: clean up the newly opened stream immediately.
+      if (this.stopped || this.relayEpoch !== relayEpoch) {
+        this.earlyRelayed.delete(streamId);
+        this.rememberClosed(this.closedRelayed, streamId);
+        if (result.channel !== undefined) {
+          this.early.delete(result.channel);
+          this.rememberClosed(this.closedDirect, result.channel);
+          if (connection && this.connection === connection) {
+            connection.send(encodeDirectFrame({ type: "close", stream: result.channel }));
+          }
+        } else if (this.link.status === "online") {
+          void this.link.call("proxy.close", { streamId }).catch(() => {});
         }
-      } else if (this.link.status === "online") {
-        void this.link.call("proxy.close", { streamId }).catch(() => {});
+        throw new Error("连接已断开");
       }
-      throw new Error("连接已断开");
-    }
-    if (result.channel !== undefined && connection && this.connection === connection) {
-      const stream = result.channel;
-      this.directed.set(stream, handlers);
-      const pendingDirect = this.early.get(stream);
-      if (pendingDirect) {
-        this.early.delete(stream);
-        if (pendingDirect.overflowed) {
-          this.directed.delete(stream);
-          connection.send(encodeDirectFrame({ type: "close", stream }));
+      if (result.channel !== undefined && connection && this.connection === connection) {
+        const stream = result.channel;
+        this.directed.set(stream, handlers);
+        const pendingDirect = this.early.get(stream);
+        if (pendingDirect) {
+          this.early.delete(stream);
+          if (pendingDirect.overflowed) {
+            this.directed.delete(stream);
+            this.rememberClosed(this.closedDirect, stream);
+            connection.send(encodeDirectFrame({ type: "close", stream }));
+            handlers.closed("缓冲已满，连接已重置");
+          } else {
+            for (const frame of pendingDirect.frames) {
+              if (!this.directed.has(stream)) break;
+              this.receive(frame);
+            }
+          }
+        }
+        let closed = false;
+        return {
+          direct: true,
+          write: (bytes) => {
+            if (closed || this.connection !== connection) return;
+            for (let offset = 0; offset < bytes.length; offset += DIRECT_CHUNK) {
+              connection.send(encodeDirectFrame({ type: "data", stream, data: bytes.subarray(offset, offset + DIRECT_CHUNK) }));
+            }
+          },
+          close: () => {
+            if (closed) return;
+            closed = true;
+            this.rememberClosed(this.closedDirect, stream);
+            if (this.directed.delete(stream) && this.connection === connection) connection.send(encodeDirectFrame({ type: "close", stream }));
+          },
+        };
+      }
+      if (result.channel !== undefined) {
+        // The direct channel went away while the stream was being opened: its end on the computer is gone with it.
+        throw new Error("直连中断了");
+      }
+      this.relayed.set(streamId, handlers);
+      const pendingRelayed = this.earlyRelayed.get(streamId);
+      if (pendingRelayed) {
+        this.earlyRelayed.delete(streamId);
+        if (pendingRelayed.overflowed) {
+          this.relayed.delete(streamId);
+          this.rememberClosed(this.closedRelayed, streamId);
+          void this.link.call("proxy.close", { streamId }).catch(() => {});
           handlers.closed("缓冲已满，连接已重置");
         } else {
-          for (const frame of pendingDirect.frames) {
-            if (!this.directed.has(stream)) break;
-            this.receive(frame);
+          for (const item of pendingRelayed.frames) {
+            if (!this.relayed.has(streamId)) break;
+            if (item.type === "data") handlers.data(item.data);
+            else {
+              this.relayed.delete(streamId);
+              this.rememberClosed(this.closedRelayed, streamId);
+              handlers.closed(item.error);
+            }
           }
         }
       }
       let closed = false;
       return {
-        direct: true,
+        direct: false,
         write: (bytes) => {
-          if (closed || this.connection !== connection) return;
-          for (let offset = 0; offset < bytes.length; offset += DIRECT_CHUNK) {
-            connection.send(encodeDirectFrame({ type: "data", stream, data: bytes.subarray(offset, offset + DIRECT_CHUNK) }));
-          }
+          if (closed) return;
+          void this.link.call("proxy.write", { streamId, data: base64.encode(bytes) }).catch(() => {
+            if (this.relayed.delete(streamId)) {
+              this.rememberClosed(this.closedRelayed, streamId);
+              handlers.closed("发送失败");
+            }
+          });
         },
         close: () => {
           if (closed) return;
           closed = true;
-          if (this.directed.delete(stream) && this.connection === connection) connection.send(encodeDirectFrame({ type: "close", stream }));
+          this.rememberClosed(this.closedRelayed, streamId);
+          if (this.relayed.delete(streamId)) void this.link.call("proxy.close", { streamId }).catch(() => {});
         },
       };
-    }
-    if (result.channel !== undefined) {
-      // The direct channel went away while the stream was being opened: its end on the computer is gone with it.
-      throw new Error("直连中断了");
-    }
-    this.relayed.set(streamId, handlers);
-    const pendingRelayed = this.earlyRelayed.get(streamId);
-    if (pendingRelayed) {
-      this.earlyRelayed.delete(streamId);
-      if (pendingRelayed.overflowed) {
-        this.relayed.delete(streamId);
-        void this.link.call("proxy.close", { streamId }).catch(() => {});
-        handlers.closed("缓冲已满，连接已重置");
-      } else {
-        for (const item of pendingRelayed.frames) {
-          if (!this.relayed.has(streamId)) break;
-          if (item.type === "data") handlers.data(item.data);
-          else {
-            this.relayed.delete(streamId);
-            handlers.closed(item.error);
-          }
-        }
+    } finally {
+      this.openingStreams -= 1;
+      if (this.openingStreams === 0) {
+        this.early.clear();
+        this.earlyRelayed.clear();
       }
     }
-    let closed = false;
-    return {
-      direct: false,
-      write: (bytes) => {
-        if (closed) return;
-        void this.link.call("proxy.write", { streamId, data: base64.encode(bytes) }).catch(() => {
-          if (this.relayed.delete(streamId)) handlers.closed("发送失败");
-        });
-      },
-      close: () => {
-        if (closed) return;
-        closed = true;
-        if (this.relayed.delete(streamId)) void this.link.call("proxy.close", { streamId }).catch(() => {});
-      },
-    };
   }
 
   /** Looks for a direct path again after `stop` (an app coming back to a connection it had put down). */
@@ -350,17 +368,30 @@ export class HostStreams {
     entry.bytes += byteLength;
   }
 
+  private rememberClosed<K>(tombstones: Set<K>, key: K): void {
+    tombstones.delete(key);
+    tombstones.add(key);
+    if (tombstones.size > 512) {
+      const oldest = tombstones.values().next().value;
+      if (oldest !== undefined) tombstones.delete(oldest);
+    }
+  }
+
   private receive(frame: DirectFrame): void {
     const handlers = this.directed.get(frame.stream);
     if (!handlers) {
-      // Not a stream we know (yet): keep it for the `proxy.open` that is about to answer.
-      const bytes = frame.type === "data" ? frame.data.byteLength : 0;
-      this.bufferEarly(this.early, frame.stream, frame, bytes, frame.type !== "data");
+      // Only buffer unknown stream frames while a `proxy.open` is actually in flight and the
+      // stream hasn't already been closed, so late frames from closed streams never saturate `early`.
+      if (this.openingStreams > 0 && !this.closedDirect.has(frame.stream)) {
+        const bytes = frame.type === "data" ? frame.data.byteLength : 0;
+        this.bufferEarly(this.early, frame.stream, frame, bytes, frame.type !== "data");
+      }
       return;
     }
     if (frame.type === "data") handlers.data(frame.data);
     else {
       this.directed.delete(frame.stream);
+      this.rememberClosed(this.closedDirect, frame.stream);
       handlers.closed(frame.error);
     }
   }
@@ -407,6 +438,7 @@ export class HostStreams {
     const streams = [...this.directed.values()];
     this.directed.clear();
     this.early.clear();
+    this.closedDirect.clear();
     this.setPath("relay");
     for (const handlers of streams) handlers.closed("直连中断了");
   }
@@ -416,6 +448,7 @@ export class HostStreams {
     const streams = [...this.relayed.values()];
     this.relayed.clear();
     this.earlyRelayed.clear();
+    this.closedRelayed.clear();
     for (const handlers of streams) handlers.closed(error);
   }
 }

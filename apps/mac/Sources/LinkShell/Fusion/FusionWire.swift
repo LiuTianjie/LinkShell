@@ -151,11 +151,21 @@ final class FusionWire {
   func close(reason: String = "closed") {
     lock.lock(); let was = closed; closed = true; lock.unlock()
     guard !was else { return }
-    watchdog?.cancel()
-    pinger?.cancel()
-    cancelWaiting()
-    connection.cancel()
-    DispatchQueue.main.async { self.onClose?(reason) }
+    queue.async {
+      self.watchdog?.cancel()
+      self.watchdog = nil
+      self.pinger?.cancel()
+      self.pinger = nil
+      self.cancelWaiting()
+      self.connection.cancel()
+    }
+    DispatchQueue.main.async {
+      let notify = self.onClose
+      self.onReady = nil
+      self.onMessage = nil
+      self.onClose = nil
+      notify?(reason)
+    }
   }
 
   private func readHeader() {

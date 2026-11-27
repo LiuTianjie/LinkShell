@@ -3,7 +3,7 @@ import { LoaderCircle, RefreshCw } from "lucide-react";
 import type { ContentBlock } from "@linkshell/wire";
 import { Button } from "@/components/ui/button";
 import { EmptyState, messageOf, useConnection } from "./common";
-import { AppBridge, appCsp, appDocument, appResourceMeta, isAppPage } from "./mcp-app";
+import { AppBridge, appCsp, appDocument, appResourceMeta, isAppPage, isSafeExternalUrl } from "./mcp-app";
 
 /** An MCP App open in the inspector: one per app page, reused by its later calls. */
 export interface AppTab {
@@ -107,7 +107,9 @@ export function McpAppView({
           const resource = await link.call("mcp.resource", { sessionId, server, connector, uri });
           return { contents: [{ uri, mimeType: resource.mimeType, ...(resource.blob !== undefined ? { blob: resource.blob } : { text: resource.text ?? "" }), _meta: resource.meta }] };
         },
-        openLink: (url) => void window.open(url, "_blank", "noopener,noreferrer"),
+        openLink: (url) => {
+          if (isSafeExternalUrl(url)) void window.open(url, "_blank", "noopener,noreferrer");
+        },
         message: say ? (content) => say(blocksOf(content)) : undefined,
         ready: () => {
           const opened = latest.current;

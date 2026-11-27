@@ -311,6 +311,21 @@ export class Gateway {
     send({ t: "challenge", nonce });
 
     socket.on("message", async (data) => {
+      if (!peer) {
+        const byteLength = typeof data === "string"
+          ? Buffer.byteLength(data)
+          : Buffer.isBuffer(data)
+            ? data.byteLength
+            : Array.isArray(data)
+              ? data.reduce((sum, buf) => sum + buf.byteLength, 0)
+              : data instanceof ArrayBuffer
+                ? data.byteLength
+                : Buffer.byteLength(data.toString());
+        if (byteLength > 64 * 1024) {
+          socket.close(1009, "message too big");
+          return;
+        }
+      }
       let parsed;
       try {
         parsed = clientFrameSchema.safeParse(JSON.parse(data.toString()));
@@ -486,7 +501,17 @@ export class Gateway {
     if (!via) return undeliverable("not_allowed");
     if (!target || target.socket.readyState !== WebSocket.OPEN) return undeliverable("offline");
     const limit = this.options.maxBufferedBytes ?? MAX_BUFFERED_BYTES;
-    if (target.socket.bufferedAmount > limit) {
+    const frame = JSON.stringify({
+      t: "from",
+      from: { id: from.record.id, signKey: from.record.signKey, boxKey: from.record.boxKey },
+      via,
+      d: data,
+    } satisfies ServerFrame);
+    const frameBytes = Buffer.byteLength(frame);
+    if (
+      target.socket.bufferedAmount > limit ||
+      (target.socket.bufferedAmount > 0 && target.socket.bufferedAmount + frameBytes > limit)
+    ) {
       // Never pause the sender's multiplexed socket: closing only the slow receiver avoids
       // freezing other devices and heartbeats sharing the machine's WebSocket.
       // Send 1013 so live clients know why they were disconnected, then force-terminate if
@@ -509,12 +534,6 @@ export class Gateway {
       }
       return undeliverable("backpressure");
     }
-    const frame = JSON.stringify({
-      t: "from",
-      from: { id: from.record.id, signKey: from.record.signKey, boxKey: from.record.boxKey },
-      via,
-      d: data,
-    } satisfies ServerFrame);
     this.options.onRouted?.(frame);
     target.socket.send(frame);
   }

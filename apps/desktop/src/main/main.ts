@@ -618,7 +618,7 @@ function showProblem(message: string) {
     button{-webkit-app-region:no-drag;height:32px;padding:0 12px;border-radius:6px;border:0;font:inherit;font-size:13px;font-weight:500;background:light-dark(#4c5fd5,#5263e8);color:#fff}
     button:hover{background:light-dark(#4254c7,#4d5fe0)}
   </style><main><h1>${escapeHtml(t("problem.title"))}</h1><p></p><button>${escapeHtml(t("problem.retry"))}</button></main>
-  <script>document.querySelector("p").textContent=${JSON.stringify(message)};document.querySelector("button").onclick=()=>location.href="linkshell-retry:";</script>`;
+  <script>document.querySelector("p").textContent=${JSON.stringify(message).replace(/</g, "\\u003c").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029")};document.querySelector("button").onclick=()=>location.href="linkshell-retry:";</script>`;
   void window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
 }
 
@@ -1165,6 +1165,17 @@ function psSingleQuote(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
 
+/** Formats one argument for Win32 CommandLineToArgvW before handing it to PowerShell Start-Process. */
+function quoteWindowsArg(value: string): string {
+  if (value.length > 0 && !/[\s"]/.test(value)) return value;
+  return `"${value.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, "$1$1")}"`;
+}
+
+function buildWindowsRunAsScript(filePath: string, args: string[]): string {
+  const commandLine = args.map(quoteWindowsArg).join(" ");
+  return `$p = Start-Process -FilePath ${psSingleQuote(filePath)} -ArgumentList ${psSingleQuote(commandLine)} -Verb RunAs -Wait -PassThru -WindowStyle Hidden; if ($null -eq $p) { exit 1 }; exit $p.ExitCode`;
+}
+
 async function queryWindowsElevatedService(): Promise<WindowsElevatedServiceStatus | undefined> {
   if (!WINDOWS || !runtime.helper || !existsSync(runtime.helper)) return undefined;
   try {
@@ -1208,8 +1219,7 @@ async function setWindowsElevatedService(enable: boolean): Promise<WindowsElevat
   const helperArgs = enable
     ? ["--install-service", await currentWindowsUserSid(), cleanHome]
     : ["--uninstall-service", cleanHome];
-  const argArray = helperArgs.map(psSingleQuote).join(", ");
-  const script = `$p = Start-Process -FilePath ${psSingleQuote(helper)} -ArgumentList @(${argArray}) -Verb RunAs -Wait -PassThru -WindowStyle Hidden; if ($null -eq $p) { exit 1 }; exit $p.ExitCode`;
+  const script = buildWindowsRunAsScript(helper, helperArgs);
   const encoded = Buffer.from(script, "utf16le").toString("base64");
   try {
     await execFileAsync("powershell.exe", ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-EncodedCommand", encoded], {
@@ -1273,8 +1283,7 @@ async function setWindowsVirtualDisplay(action: "install" | "uninstall" | "enabl
     : action === "uninstall"
       ? ["--uninstall-vdd", cleanHome]
       : [action === "enable" ? "--enable-vdd" : "--disable-vdd"];
-  const argArray = helperArgs.map(psSingleQuote).join(", ");
-  const script = `$p = Start-Process -FilePath ${psSingleQuote(helper)} -ArgumentList @(${argArray}) -Verb RunAs -Wait -PassThru -WindowStyle Hidden; if ($null -eq $p) { exit 1 }; exit $p.ExitCode`;
+  const script = buildWindowsRunAsScript(helper, helperArgs);
   const encoded = Buffer.from(script, "utf16le").toString("base64");
   try {
     await execFileAsync("powershell.exe", ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-EncodedCommand", encoded], {

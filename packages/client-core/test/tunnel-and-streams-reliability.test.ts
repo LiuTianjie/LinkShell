@@ -371,4 +371,66 @@ describe("HostStreams race cleanup and capped direct.offer retries", () => {
     expect(tunnel.readyState).toBe(3);
     expect(errors).toEqual([{ message: "与网关的连接断开了", code: undefined }]);
   });
+
+  it("ignores stale frames from >64 closed direct/relayed streams so later opens never lose early frames", async () => {
+    const link = fakeOnlineLink();
+    let onDirectMessage: ((bytes: Uint8Array) => void) | undefined;
+    let onDirectState: ((state: "open" | "closed") => void) | undefined;
+    const connector = vi.fn((): DirectConnection => ({
+      offer: () => Promise.resolve("v=0"),
+      accept: () => Promise.resolve(),
+      send: () => {},
+      onState: (listener) => {
+        onDirectState = listener;
+      },
+      onMessage: (listener) => {
+        onDirectMessage = listener;
+      },
+      close: () => {},
+    }));
+
+    let nextChannel = 1;
+    let resolveLateOpen!: (value: { streamId: string; channel?: number }) => void;
+    link.call.mockImplementation((method: string, params: Record<string, unknown>) => {
+      if (method === "direct.offer") return Promise.resolve({ sdp: "v=0" });
+      if (method === "proxy.open") {
+        if (params.port === 5000) {
+          return new Promise<{ streamId: string; channel?: number }>((resolve) => {
+            resolveLateOpen = resolve;
+          });
+        }
+        const ch = nextChannel++;
+        return Promise.resolve({ streamId: `s-${ch}`, channel: ch });
+      }
+      return Promise.resolve({});
+    });
+
+    const { encodeDirectFrame } = await import("@linkshell/wire");
+    const streams = new HostStreams(link as unknown as HostLink, {
+      connector,
+      iceServers: () => ["stun:stun.example.com:3478"],
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    onDirectState?.("open");
+
+    // Open and close 70 streams, then deliver late frames for each closed stream.
+    for (let i = 1; i <= 70; i += 1) {
+      const opened = await streams.open(4000, { data: () => {}, closed: () => {} });
+      opened.close();
+      onDirectMessage?.(encodeDirectFrame({ kind: "data", stream: i, payload: new Uint8Array([1, 2, 3]) }));
+    }
+
+    // Stream #71 opens on direct, then Host falls back to relay and sends early relayed data before proxy.open resolves.
+    const received: string[] = [];
+    const opening = streams.open(5000, {
+      data: (bytes) => received.push(new TextDecoder().decode(bytes)),
+      closed: () => {},
+    });
+    link.notify("proxy.data", { streamId: "fallback-71", data: btoa("hello-71") });
+    resolveLateOpen({ streamId: "fallback-71" });
+    await opening;
+    expect(received).toEqual(["hello-71"]);
+    streams.stop();
+  });
 });

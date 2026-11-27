@@ -77,6 +77,9 @@ final class Service {
       if let id = command["v"] as? String { response["v"] = id }
       if let requestId = command["requestId"] { response["requestId"] = requestId }
       return link.emit(response)
+    case "lock", "screen.lock":
+      ScreenPrivacy.shared.lockNow()
+      return link.emit(["t": "locked", "ok": true])
     case "clipboard.read":
       let text = Launch.dryRun ? "" : (NSPasteboard.general.string(forType: .string) ?? "")
       var response: [String: Any] = ["t": "clipboard", "text": text]

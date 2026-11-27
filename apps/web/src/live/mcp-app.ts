@@ -59,12 +59,64 @@ export function appCsp(csp: AppCsp): string {
   ].map((rule) => rule.trim()).join("; ");
 }
 
+export function isSafeExternalUrl(raw: string): boolean {
+  try {
+    const parsed = new URL(raw.trim());
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Skips leading whitespace, doctype, and HTML comments so an attacker cannot hide a fake
+ * `<head>` inside `<!-- <head> -->` or place a `<script>` ahead of the injected CSP meta tag.
+ */
+function injectIntoDocumentHead(html: string, injection: string): string {
+  const len = html.length;
+  let pos = 0;
+  const skipPreamble = (allowDoctype: boolean) => {
+    while (pos < len) {
+      const ws = /^\s+/.exec(html.slice(pos));
+      if (ws) { pos += ws[0].length; continue; }
+      if (html.startsWith("<!--", pos)) {
+        const end = html.indexOf("-->", pos + 4);
+        pos = end >= 0 ? end + 3 : len;
+        continue;
+      }
+      if (allowDoctype) {
+        const dt = /^<!doctype\b[^>]*>/i.exec(html.slice(pos));
+        if (dt) { pos += dt[0].length; continue; }
+      }
+      break;
+    }
+  };
+  skipPreamble(true);
+  const htmlTag = /^<html(?:\s[^>]*)?>/i.exec(html.slice(pos));
+  if (htmlTag) {
+    const afterHtml = pos + htmlTag[0].length;
+    pos = afterHtml;
+    skipPreamble(false);
+    const headTag = /^<head(?:\s[^>]*)?>/i.exec(html.slice(pos));
+    if (headTag) {
+      const insertAt = pos + headTag[0].length;
+      return `${html.slice(0, insertAt)}${injection}${html.slice(insertAt)}`;
+    }
+    return `${html.slice(0, afterHtml)}<head>${injection}</head>${html.slice(afterHtml)}`;
+  }
+  const headTag = /^<head(?:\s[^>]*)?>/i.exec(html.slice(pos));
+  if (headTag) {
+    const insertAt = pos + headTag[0].length;
+    return `${html.slice(0, insertAt)}${injection}${html.slice(insertAt)}`;
+  }
+  return `<!doctype html><html><head>${injection}</head><body>${html}</body></html>`;
+}
+
 /** The page as the frame loads it: its own document with the policy first in its head. */
 export function appDocument(html: string, csp: string): string {
-  const meta = `<meta http-equiv="Content-Security-Policy" content="${csp.replace(/"/g, "&quot;")}">`;
-  if (/<head[^>]*>/i.test(html)) return html.replace(/<head[^>]*>/i, (head) => `${head}${meta}`);
-  if (/<html[^>]*>/i.test(html)) return html.replace(/<html[^>]*>/i, (root) => `${root}<head>${meta}</head>`);
-  return `<!doctype html><html><head>${meta}</head><body>${html}</body></html>`;
+  const safeCsp = csp.replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const meta = `<meta http-equiv="Content-Security-Policy" content="${safeCsp}">`;
+  return injectIntoDocumentHead(html, meta);
 }
 
 export interface AppHostContext {
@@ -199,8 +251,10 @@ export class AppBridge {
         // The inspector is the only place an app shows: whatever it asks, it is there.
         return { mode: "fullscreen" };
       case "ui/open-link": {
-        if (typeof params.url !== "string") throw new BridgeError(-32602, "缺少链接");
-        this.handlers.openLink(params.url);
+        if (typeof params.url !== "string" || !isSafeExternalUrl(params.url)) {
+          throw new BridgeError(-32602, "链接地址无效或不受支持");
+        }
+        this.handlers.openLink(params.url.trim());
         return {};
       }
       case "ui/message": {

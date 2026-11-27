@@ -195,7 +195,9 @@ export class PollRelay {
       const id = path.slice(POLL_PATH.length + 1);
       socket = this.sessions.get(id) ?? this.lingering.get(id);
       const token = request.headers.authorization?.replace(/^Bearer /, "") ?? "";
-      if (!socket || token.length !== socket.token.length || !timingSafeEqual(Buffer.from(token), Buffer.from(socket.token))) {
+      const provided = Buffer.from(token, "utf8");
+      const expected = socket ? Buffer.from(socket.token, "utf8") : undefined;
+      if (!socket || !expected || provided.length !== expected.length || !timingSafeEqual(provided, expected)) {
         throw new PollError(401, "invalid_session");
       }
       if (socket.busy) throw new PollError(409, "poll_in_progress");

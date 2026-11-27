@@ -618,10 +618,20 @@ export class SessionHub {
 
   private readonly pendingQuestions = new Map<string, AsyncQuestion[]>();
 
+  private parseDriverJson<T>(raw: string | undefined, fallback: T): T {
+    if (!raw) return fallback;
+    try {
+      return JSON.parse(raw) as T;
+    } catch {
+      return fallback;
+    }
+  }
+
   private questionsOf(sessionId: string): AsyncQuestion[] {
     let questions = this.pendingQuestions.get(sessionId);
     if (!questions) {
-      questions = JSON.parse(this.store.getDriverState(sessionId, "asyncQuestions") ?? "[]") as AsyncQuestion[];
+      const parsed = this.parseDriverJson<unknown>(this.store.getDriverState(sessionId, "asyncQuestions"), []);
+      questions = Array.isArray(parsed) ? (parsed as AsyncQuestion[]) : [];
       this.pendingQuestions.set(sessionId, questions);
     }
     return questions;
@@ -1455,7 +1465,7 @@ export class SessionHub {
     // Not in that app (or not read yet): the flag is LinkShell's alone, or stays as last merged.
     if (!reported) return summary;
     const saved = this.store.getDriverState(summary.id, APP_ARCHIVE);
-    const seen = saved ? JSON.parse(saved) as { archived: boolean; since: number } : undefined;
+    const seen = this.parseDriverJson<{ archived: boolean; since: number } | undefined>(saved, undefined);
     if (!seen && !reported.archived) return summary;
     // Only a change counts as the app archiving it: the app rewrites its record for much else.
     const app = seen?.archived === reported.archived ? seen : { archived: reported.archived, since: reported.at };
@@ -1466,7 +1476,8 @@ export class SessionHub {
 
   private localArchive(summary: SessionSummary): { archived: boolean; at: number } {
     const saved = this.store.getDriverState(summary.id, LOCAL_ARCHIVE);
-    if (saved) return JSON.parse(saved) as { archived: boolean; at: number };
+    const parsed = this.parseDriverJson<{ archived: boolean; at: number } | undefined>(saved, undefined);
+    if (parsed) return parsed;
     // Until the app's state is first merged in, the flag is LinkShell's own choice.
     const local = { archived: summary.archived, at: 0 };
     this.store.setDriverState(summary.id, LOCAL_ARCHIVE, JSON.stringify(local));
@@ -1843,9 +1854,9 @@ export class SessionHub {
     if (before && session.updatedAt > before.updatedAt) {
       // Renamed just now: the session keeps its place in the list.
       const renamed = this.store.getDriverState(before.id, RENAMED);
-      if (renamed) {
-        const hold = JSON.parse(renamed) as { updatedAt: number; until: number };
-        if (session.updatedAt <= hold.until) session = { ...session, updatedAt: before.updatedAt };
+      const hold = this.parseDriverJson<{ updatedAt: number; until: number } | undefined>(renamed, undefined);
+      if (hold && typeof hold.until === "number" && session.updatedAt <= hold.until) {
+        session = { ...session, updatedAt: before.updatedAt };
       }
     }
     const stored = this.store.upsertSession({

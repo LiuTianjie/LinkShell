@@ -48,6 +48,8 @@ export interface ScreenPageMessage {
   text?: unknown;
   phase?: string;
   nativeLoading?: boolean;
+  curtain?: boolean;
+  lockOnDisconnect?: boolean;
   session?: { t?: string; configure?: boolean; pause?: boolean; paused?: boolean; version?: number };
 }
 
@@ -275,7 +277,7 @@ export function ScreenSessionProvider({ children }: { children: ReactNode }) {
     setAudioState(enabled);
     saveScreenAudio(enabled);
     const activeViewer = lease.getSnapshot().resource;
-    if (activeViewer && activeViewer.playback !== "native") {
+    if (activeViewer) {
       web.current?.injectJavaScript(screenAudioInjectScript(enabled));
     }
   }, [lease]);
@@ -448,8 +450,8 @@ export function ScreenSessionProvider({ children }: { children: ReactNode }) {
 
   const onLoaded = useCallback((current: Viewer) => {
     if (lease.getSnapshot().resource !== current) return;
-    const audioBridge = current.playback !== "native" ? screenAudioBridgeInstallScript() : "";
-    const audioSync = current.playback !== "native" && audioRef.current ? screenAudioInjectScript(true) : "";
+    const audioBridge = screenAudioBridgeInstallScript();
+    const audioSync = audioRef.current ? screenAudioInjectScript(true) : "";
     web.current?.injectJavaScript(`${current.playback === "native" ? 'if (!window.linkshellNative) window.ReactNativeWebView.postMessage(JSON.stringify({type:"nativeUnavailable"}));' : ""} if (typeof window.linkshellSession !== "function") window.ReactNativeWebView.postMessage(JSON.stringify({type:"screenLegacy"})); ${audioBridge} ${audioSync} true;`);
     sendChrome();
     sendSession(lease.getSnapshot().active && AppState.currentState === "active");

@@ -928,6 +928,7 @@ export class ClaudeDriver extends AcpDriver {
 
   /** Per side conversation: a Claude of its own on the session, kept open between questions. */
   private readonly sideClaudes = new Map<string, { query: SideQuery; end: () => void; child?: ChildProcess; idle?: ReturnType<typeof setTimeout> }>();
+  private readonly takingOver = new Map<string, Promise<void>>();
 
   protected override hasSide(): boolean {
     return true;
@@ -940,10 +941,16 @@ export class ClaudeDriver extends AcpDriver {
    * nothing, so it never becomes a writer of the session.
    */
   override async sideAsk(nativeId: string, request: SideRequest, out: SideOutput, signal: AbortSignal): Promise<void> {
+    if (signal.aborted) return;
     if (!findTranscript(this.configDir, nativeId, request.cwd)) throw RpcError.app("not_ready", "这个 Claude 会话还没有任何消息：先发一条再问");
     const key = `${nativeId}\n${request.sideId}`;
     if (!this.sideClaudes.has(key) && this.modes.get(nativeId) !== "remote") await this.followHolder(nativeId);
+    if (signal.aborted) return;
     const side = this.sideClaudes.get(key) ?? (await this.openSideClaude(key, nativeId, request.cwd));
+    if (signal.aborted) {
+      this.closeSideClaude(key);
+      return;
+    }
     clearTimeout(side.idle);
     const stop = () => this.closeSideClaude(key);
     signal.addEventListener("abort", stop, { once: true });
@@ -958,12 +965,17 @@ export class ClaudeDriver extends AcpDriver {
       throw error;
     } finally {
       signal.removeEventListener("abort", stop);
-    }
-    // Follow-up questions within a few minutes reuse it; then it goes.
-    const kept = this.sideClaudes.get(key);
-    if (kept) {
-      kept.idle = setTimeout(() => this.closeSideClaude(key), 5 * 60_000);
-      kept.idle.unref?.();
+      if (signal.aborted) {
+        this.closeSideClaude(key);
+      } else {
+        // Follow-up questions within a few minutes reuse it; then it goes.
+        const kept = this.sideClaudes.get(key);
+        if (kept) {
+          clearTimeout(kept.idle);
+          kept.idle = setTimeout(() => this.closeSideClaude(key), 5 * 60_000);
+          kept.idle.unref?.();
+        }
+      }
     }
   }
 
@@ -1186,6 +1198,16 @@ export class ClaudeDriver extends AcpDriver {
 
   /** Makes this host the session's only writer, taking it from the desktop if needed. */
   private async ensureRemote(nativeId: string): Promise<void> {
+    const inflight = this.takingOver.get(nativeId);
+    if (inflight) return inflight;
+    const pending = this.performEnsureRemote(nativeId).finally(() => {
+      if (this.takingOver.get(nativeId) === pending) this.takingOver.delete(nativeId);
+    });
+    this.takingOver.set(nativeId, pending);
+    return pending;
+  }
+
+  private async performEnsureRemote(nativeId: string): Promise<void> {
     const deadline = Date.now() + TAKEOVER_BUDGET_MS;
     await this.reconcileDesktopWriter(nativeId);
     const state = this.sessions.get(nativeId);
@@ -1212,59 +1234,68 @@ export class ClaudeDriver extends AcpDriver {
     const tail = this.tails.get(nativeId);
     tail?.poll();
     tail?.pause();
-    if (!findTranscript(this.configDir, nativeId, cwd) && !state?.loaded) {
-      tail?.resumeAtEnd();
-      throw RpcError.app("not_ready", "这个 Claude 会话还没有任何消息：先在电脑上发一条");
-    }
-    const target = this.stateFor(nativeId, cwd);
-    if (!target.loaded) {
-      this.restoreMessageAliases(nativeId, target);
-      const baseParams = await this.sessionParameters(cwd, target.settings);
-      const routed = this.routedMeta(nativeId) as { _meta?: Record<string, unknown> };
-      const mergedMeta = baseParams._meta || routed._meta
-        ? { _meta: { ...(baseParams._meta as Record<string, unknown> | undefined), ...routed._meta } }
-        : {};
-      // Leaves a little of the budget for the settings below; omit replayFrom because the transcript owns history.
-      const response = await this.rpc<Record<string, unknown>>("session/resume", { ...baseParams, ...mergedMeta, sessionId: nativeId }, Math.max(5000, deadline - Date.now() - 8000))
-        .catch((error: unknown) => {
-          if (error instanceof RpcError && error.appCode === "timeout") {
-            throw RpcError.app("timeout", "电脑上的 Claude 没能及时打开这个会话：它可能连不上网络或代理、或某个 MCP 服务启动卡住。详情见电脑上的 ~/.linkshell/host.log");
-          }
-          throw error;
-        });
-      target.config = toConfigOptions(response);
-      this.rememberModels(target.config, false);
-      target.loaded = true;
-    }
-    // The session keeps the settings it ran with on the computer, except where
-    // the phone chose otherwise while the desktop had it.
-    const observed = this.observed.get(nativeId) ?? {};
-    const kept = Object.fromEntries(target.config.flatMap((option) => [[option.id, observedValue(option, observed)]]).filter(([, value]) => value !== undefined));
-    const pending = this.pendingConfig(nativeId);
-    // Each change can take seconds (Claude may ask its service); all of them must still fit,
-    // with the resume, in the device's 60 s. One that doesn't is left as it was, and said so.
-    for (const [optionId, value] of Object.entries({ ...kept, ...pending } as Record<string, string>)) {
-      const option = target.config.find((entry) => entry.id === optionId);
-      if (option && option.current !== value && option.values.some((entry) => entry.value === value)) {
-        const left = deadline - Date.now();
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        const late = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`no answer in ${Math.round(Math.max(0, left) / 1000)} s`)), Math.max(0, left)); });
-        await Promise.race([super.setConfig(nativeId, optionId, value), late])
-          .catch((error: unknown) => {
-            this.host?.log(`[claude] couldn't apply ${optionId}: ${String(error)}`);
-            // The settings shown next are what Claude runs with; this says why the choice isn't among them.
-            this.emit(nativeId, { sessionUpdate: "ls_notice", level: "warning", title: "没能应用之前选的设置", detail: `${option.name} 仍是 Claude 原来的设置，可以再选一次。` });
-          })
-          .finally(() => clearTimeout(timer));
+    let handoffComplete = false;
+    try {
+      if (!findTranscript(this.configDir, nativeId, cwd) && !state?.loaded) {
+        tail?.resumeAtEnd();
+        throw RpcError.app("not_ready", "这个 Claude 会话还没有任何消息：先在电脑上发一条");
       }
+      const target = this.stateFor(nativeId, cwd);
+      if (!target.loaded) {
+        this.restoreMessageAliases(nativeId, target);
+        const baseParams = await this.sessionParameters(cwd, target.settings);
+        const routed = this.routedMeta(nativeId) as { _meta?: Record<string, unknown> };
+        const mergedMeta = baseParams._meta || routed._meta
+          ? { _meta: { ...(baseParams._meta as Record<string, unknown> | undefined), ...routed._meta } }
+          : {};
+        // Leaves a little of the budget for the settings below; omit replayFrom because the transcript owns history.
+        const response = await this.rpc<Record<string, unknown>>("session/resume", { ...baseParams, ...mergedMeta, sessionId: nativeId }, Math.max(5000, deadline - Date.now() - 8000))
+          .catch((error: unknown) => {
+            if (error instanceof RpcError && error.appCode === "timeout") {
+              throw RpcError.app("timeout", "电脑上的 Claude 没能及时打开这个会话：它可能连不上网络或代理、或某个 MCP 服务启动卡住。详情见电脑上的 ~/.linkshell/host.log");
+            }
+            throw error;
+          });
+        target.config = toConfigOptions(response);
+        this.rememberModels(target.config, false);
+        target.loaded = true;
+      }
+      // The session keeps the settings it ran with on the computer, except where
+      // the phone chose otherwise while the desktop had it.
+      const observed = this.observed.get(nativeId) ?? {};
+      const kept = Object.fromEntries(target.config.flatMap((option) => [[option.id, observedValue(option, observed)]]).filter(([, value]) => value !== undefined));
+      const pending = this.pendingConfig(nativeId);
+      // Each change can take seconds (Claude may ask its service); all of them must still fit,
+      // with the resume, in the device's 60 s. One that doesn't is left as it was, and said so.
+      for (const [optionId, value] of Object.entries({ ...kept, ...pending } as Record<string, string>)) {
+        const option = target.config.find((entry) => entry.id === optionId);
+        if (option && option.current !== value && option.values.some((entry) => entry.value === value)) {
+          const left = deadline - Date.now();
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          const late = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`no answer in ${Math.round(Math.max(0, left) / 1000)} s`)), Math.max(0, left)); });
+          await Promise.race([super.setConfig(nativeId, optionId, value), late])
+            .catch((error: unknown) => {
+              this.host?.log(`[claude] couldn't apply ${optionId}: ${String(error)}`);
+              // The settings shown next are what Claude runs with; this says why the choice isn't among them.
+              this.emit(nativeId, { sessionUpdate: "ls_notice", level: "warning", title: "没能应用之前选的设置", detail: `${option.name} 仍是 Claude 原来的设置，可以再选一次。` });
+            })
+            .finally(() => clearTimeout(timer));
+        }
+      }
+      if (Object.keys(pending).length) this.host?.state(this.id, nativeId).set("pendingConfig", "{}");
+      this.beginTranscriptStream(nativeId);
+      this.setWriter(nativeId, "remote");
+      this.setMode(nativeId, "remote");
+      handoffComplete = true;
+      // From here Claude asks over ACP, in the phone's own question cards.
+      await this.reportQuestions(nativeId);
+      this.emitConfig(nativeId, target);
+    } catch (error) {
+      if (!handoffComplete && this.modes.get(nativeId) !== "remote") {
+        tail?.resumeSkipping(() => false);
+      }
+      throw error;
     }
-    if (Object.keys(pending).length) this.host?.state(this.id, nativeId).set("pendingConfig", "{}");
-    this.beginTranscriptStream(nativeId);
-    this.setWriter(nativeId, "remote");
-    this.setMode(nativeId, "remote");
-    // From here Claude asks over ACP, in the phone's own question cards.
-    await this.reportQuestions(nativeId);
-    this.emitConfig(nativeId, target);
     if (alsoOpenIn) {
       // That Claude keeps its own copy of the conversation and can't be told about this one.
       this.emit(
