@@ -25,7 +25,7 @@ import { DesktopIcon, type DesktopIconName } from "../icons";
 import { Kbd } from "./Kbd";
 import type { PopoverPlacement } from "./Popover";
 import { Tooltip } from "./Tooltip";
-import { cn, mergeRefs, toCssAnchorName } from "./utils";
+import { cn, mergeRefs, toCssAnchorName, useAnchorPositionFallback } from "./utils";
 
 interface MenuContextValue {
   closeMenu: () => void;
@@ -229,6 +229,12 @@ export function Menu({
     (triggerProps.style as React.CSSProperties | undefined) ?? {};
 
   const ctx = useMemo<MenuContextValue>(() => ({ closeMenu }), [closeMenu]);
+  const fallbackMenuStyle = useAnchorPositionFallback(
+    open,
+    triggerRef,
+    popoverRef,
+    placement,
+  );
 
   return (
     <MenuContext.Provider value={ctx}>
@@ -260,7 +266,7 @@ export function Menu({
         popover={useNativePopoverApi ? "auto" : undefined}
         data-placement={placement}
         data-state={open ? "open" : "closed"}
-        style={{ positionAnchor: anchorName } as React.CSSProperties}
+        style={{ positionAnchor: anchorName, ...fallbackMenuStyle } as React.CSSProperties}
         className={cn("ls-popover ls-menu-popover", className)}
         onToggle={(event) => {
           const nextState = (event as unknown as { newState?: string })
@@ -402,6 +408,13 @@ export function ContextMenu({
   }, [open, useNativePopoverApi]);
 
   const ctx = useMemo<MenuContextValue>(() => ({ closeMenu }), [closeMenu]);
+  const fallbackContextStyle = useAnchorPositionFallback(
+    open,
+    placeholderRef,
+    popoverRef,
+    "bottom-start",
+    { gap: 2, triggerSeq: openSeq },
+  );
 
   const childProps = isValidElement(children)
     ? (children.props as Record<string, unknown>)
@@ -456,7 +469,7 @@ export function ContextMenu({
             popover={useNativePopoverApi ? "auto" : undefined}
             data-placement="bottom-start"
             data-state={open ? "open" : "closed"}
-            style={{ positionAnchor: anchorName } as React.CSSProperties}
+            style={{ positionAnchor: anchorName, ...fallbackContextStyle } as React.CSSProperties}
             className={cn("ls-popover ls-menu-popover", className)}
             onToggle={(event) => {
               const nextState = (event as unknown as { newState?: string })

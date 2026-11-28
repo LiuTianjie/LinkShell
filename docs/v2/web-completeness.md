@@ -1,8 +1,10 @@
 # Web 工作台完整性与验收
 
-更新时间：2026-11-21。范围为 `apps/web`（Gateway 浏览器工作台）、共享客户端状态和现有 Host RPC。
+更新时间：2026-11-28。范围为 `apps/desktop-ui`（桌面端与 Gateway 浏览器统一工作台）、共享客户端状态和现有 Host RPC。
 
-2026-11-21 浏览器工作台收敛与补齐：`apps/web` 已定位为纯 Gateway 浏览器控制台（Electron 桌面 UI 独立于 `apps/desktop-ui`），移除所有 `isDesktop` / `isElectronDesktop` / `isWindowsDesktop` 分支及遗留桌面专属组件、状态存储、本地登录面板和 `desktop*.css` / `management.css` 样式，保留 `/config.js`、账号与配对鉴权、中文界面与既有视觉规范，并继续保留与 `apps/mac` 共享的 `test/brand-colors.test.ts` 校验。
+2026-11-28 Web 与 Desktop 工作台统一：移除独立维护的旧版 `apps/web`，由 `@linkshell/desktop-ui` 同时承担 Electron 桌面端（`data-shell="electron"`）与 `@linkshell/gateway` 根路径浏览器工作台（`data-shell="browser"`）。完整保留 `/config.js` 官方/私有部署切换、IndexedDB 设备身份（`linkshell.web.identity`）与旧版 `linkshell.web.*` 存储无感迁移、多标签页 `navigator.locks` + `BroadcastChannel` 连接接管、邮箱密码与 PKCE OAuth 弹窗回调（`/?linkshell-auth-callback=1` 与 `127.0.0.1` `/linkshell/callback`）、Safari/Firefox 锚点定位回退、窄屏抽屉侧栏，以及跨端 `test/brand-colors.test.ts` 校验。
+
+2026-11-21 浏览器工作台收敛与补齐（历史记录）：`apps/web` 曾定位为纯 Gateway 浏览器控制台（Electron 桌面 UI 独立于 `apps/desktop-ui`），移除所有 `isDesktop` / `isElectronDesktop` / `isWindowsDesktop` 分支及遗留桌面专属组件、状态存储、本地登录面板和 `desktop*.css` / `management.css` 样式，保留 `/config.js`、账号与配对鉴权、中文界面与既有视觉规范，并继续保留与 `apps/mac` 共享的 `test/brand-colors.test.ts` 校验。
 
 2026-11-21 新增与补全能力（待实机浏览器与真实 Host E2E 复测）：
 - **文件重命名与删除**：文件浏览器目录行与文件预览头接入 Host RPC `fs.rename` 与 `fs.delete`（目录删除启用 `recursive: true`）；删除前弹二次确认框，重命名校验有效文件名且兼容 POSIX/Windows 路径，保留未保存编辑确认保护并及时刷新目录列表与打开的文件路径；失败通过 `ErrorNotice` 展示。
@@ -87,13 +89,11 @@ Web 采用 Linear 产品界面的视觉方向，使用现有 shadcn/ui（Radix�
 
 夹具还验证了：手动触发真实 120000 ms 定时器回调后移除 iframe 并关闭一次 socket，返回新建会话；HostLink 仍在线时单独关闭观看 socket，显示断开重试且返回重新启动；丢弃暂停确认后两秒关闭；旧 Host 无能力声明时离页关闭、返回及改宽度重新启动。伪造消息来源或 channel 没有改变会话能力。过期检查加速触发定时器，没有等待两分钟墙钟时间；夹具未直接覆盖 `ScreenDetail` 的 engine lease，后者依赖组件卸载清理和现有共享连接单元测试。上述浏览器媒体、协议和生命周期证据不证明真实 Mac 采集停止、真实输入坐标、手机或公网表现。
 
-- `pnpm --filter @linkshell/web build`：生产包与 TypeScript。
-- `pnpm --filter @linkshell/web lint`。
-- `pnpm --filter @linkshell/web test`：传输、文件行号/分块、屏幕偏好、共享连接和预览 worker 恢复。
+- `pnpm --filter @linkshell/desktop-ui build`：生产包与 TypeScript（`@linkshell/gateway` 的 `build:web` 调用该产物写入 `packages/gateway/web-client/`，剔除仅桌面端使用的 `fusion.html`）。
+- `pnpm --filter @linkshell/desktop-ui lint`。
+- `pnpm --filter @linkshell/desktop-ui test`：统一工作台单元回归（含 `test/browser-web.test.tsx` 浏览器模式端到端状态、旧版存储迁移、多标签连接锁、自建网关配对与 `test/brand-colors.test.ts` 跨端色值一致性）。
 - `pnpm --filter @linkshell/client-core test`：共享状态、会话分页、真实本地 Host/流传输等。
 - `pnpm typecheck`：全部 workspace TypeScript。
-- 浏览器测试用 `apps/web/scripts/fixture.ts`：真实本地 Gateway/Host/PTY，模拟 Agent，临时独立状态目录。`/async-test` 提供三种问题，“完整验证”第一次模拟失败，可验证重试；`/ask-test` 提供结构化审批。
-- 屏幕复用夹具为 `apps/web/test/screen-reuse-fixture.html`，由普通 Vite 开发服务打开。使用实际 `ScreenSessionSlot`、`Screen`、隔离 iframe 桥和 Host 生成的 viewer，Host RPC/流端替换为浏览器 canvas WebRTC 发送端；用于检查会话身份、配置与导航生命周期，不代表真实 Mac 采集、输入坐标或公网性能。
 
 新建的测试主机、网关、PTY 与临时状态目录在测试结束后清理。此前 Web 验收中的手机方向修复与编译不等于当前设备复测；移动端的验证范围另见 `screen-realtime.md`。
 

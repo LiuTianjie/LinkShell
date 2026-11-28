@@ -65,7 +65,7 @@ const harness = vi.hoisted(() => {
       if (!refs[idx]) refs[idx] = { current: initial };
       return refs[idx] as { current: T };
     },
-    useCallback<T extends Function>(fn: T): T {
+    useCallback<T extends (...args: never[]) => unknown>(fn: T): T {
       return fn;
     },
     useEffect(effect: () => void | (() => void), deps?: readonly unknown[]) {
@@ -102,7 +102,7 @@ const harness = vi.hoisted(() => {
 vi.mock("react", () => ({
   useState: <T>(initial: T) => harness.useState(initial),
   useRef: <T>(initial: T) => harness.useRef(initial),
-  useCallback: <T extends Function>(fn: T) => harness.useCallback(fn),
+  useCallback: <T extends (...args: never[]) => unknown>(fn: T) => harness.useCallback(fn),
   useEffect: (effect: () => void | (() => void), deps?: readonly unknown[]) => harness.useEffect(effect, deps),
 }));
 vi.mock("react-native", () => ({

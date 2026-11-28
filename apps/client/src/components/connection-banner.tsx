@@ -3,7 +3,8 @@ import { HOST_PROTOCOL } from "@linkshell/wire";
 import { router } from "expo-router";
 import { ActivityIndicator, Pressable, StyleSheet, View } from "react-native";
 import { Text } from "@/components/fixed-text";
-import { useClient, useConnection, useConnectionStatus } from "@/lib/client";
+import { useClient, useConnection, useConnectionSettling, useConnectionStatus } from "@/lib/client";
+import { reconnectRelays } from "@/lib/computers";
 import { colors } from "@/theme/colors";
 import { radius, type } from "@/theme/type";
 import { Icon } from "./icon";
@@ -50,9 +51,27 @@ export function needsRepairing(formatted?: string): boolean {
   return !!formatted && /重新配对|没有权限连接/.test(formatted);
 }
 
+/**
+ * Suppresses transient "正在连接电脑…" banners during the initial launch/resume settle window
+ * when cached sessions are already on screen, while keeping locked/refusal banners immediate.
+ */
+export function shouldHideConnectionBanner(input: {
+  status: string;
+  formattedDetail?: string;
+  settling: boolean;
+  loaded: boolean;
+}): boolean {
+  if (input.status === "online" || input.status === "idle") return true;
+  if (input.status === "locked") return false;
+  if (needsRepairing(input.formattedDetail)) return false;
+  return input.loaded && input.settling && input.status === "connecting";
+}
+
 /** Shown while the host is unreachable; tapping opens the connection sheet. */
 export function ConnectionBanner() {
   const status = useConnectionStatus();
+  const settling = useConnectionSettling();
+  const loaded = useClient((state) => state.sessionsLoaded);
   const detail = useClient((state) => state.statusDetail);
   const formattedDetail = formatConnectionDetail(detail);
   const { link } = useConnection();
@@ -71,7 +90,7 @@ export function ConnectionBanner() {
       </View>
     );
   }
-  if (status === "online" || status === "idle") return null;
+  if (shouldHideConnectionBanner({ status, formattedDetail, settling, loaded })) return null;
   if (status === "locked") {
     return (
       <PressableFeedback
@@ -97,7 +116,10 @@ export function ConnectionBanner() {
   return (
     <PressableFeedback
       onPress={() => router.push(repair ? "/pair" : "/connect")}
-      onLongPress={() => link.reconnectNow(true)}
+      onLongPress={() => {
+        reconnectRelays({ force: true });
+        link.reconnectNow(true);
+      }}
       accessibilityRole="button"
       accessibilityHint={repair ? "重新配对这台电脑" : "打开连接设置"}
       outerStyle={{ marginTop: 8 }}
@@ -131,6 +153,7 @@ export function ConnectionBanner() {
         <Pressable
           onPress={(event) => {
             event.stopPropagation?.();
+            reconnectRelays({ force: true });
             link.reconnectNow(true);
           }}
           hitSlop={8}

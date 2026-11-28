@@ -11,7 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { Kbd } from "./Kbd";
-import { cn, mergeRefs, toCssAnchorName } from "./utils";
+import { cn, mergeRefs, toCssAnchorName, useAnchorPositionFallback } from "./utils";
 
 export type TooltipPlacement = "top" | "bottom" | "left" | "right";
 
@@ -128,6 +128,14 @@ export function Tooltip({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [fallbackOpen, hideHint]);
 
+  const fallbackTooltipStyle = useAnchorPositionFallback(
+    fallbackOpen && !useDeclarativeInterest,
+    anchorRef,
+    popoverRef,
+    placement,
+    { gap: 6 },
+  );
+
   if (content === null || content === undefined || content === false || content === "") {
     return children;
   }
@@ -144,7 +152,7 @@ export function Tooltip({
       style={
         useDeclarativeInterest
           ? undefined
-          : ({ positionAnchor: anchorName } as React.CSSProperties)
+          : ({ positionAnchor: anchorName, ...fallbackTooltipStyle } as React.CSSProperties)
       }
       className={cn("ls-tooltip", className)}
     >

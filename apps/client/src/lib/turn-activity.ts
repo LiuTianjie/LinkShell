@@ -11,11 +11,13 @@ export interface TurnActivityState {
 }
 
 /** Delivery is local; execution belongs to the host. Keep the gap visible without inventing a running turn. */
-export function turnActivity({ session, progress, online, connecting, locked, ready, hasPermission, queued, view }: {
+export function turnActivity({ session, progress, online, connecting, settling, locked, ready, hasPermission, queued, view }: {
   session: SessionSummary;
   progress?: PromptProgress;
   online: boolean;
   connecting?: boolean;
+  /** Silent launch/resume grace window while cached history is already shown. */
+  settling?: boolean;
   /** The computer asks for its access password first. */
   locked?: boolean;
   ready: boolean;
@@ -26,6 +28,11 @@ export function turnActivity({ session, progress, online, connecting, locked, re
 }): TurnActivityState | undefined {
   // Locked reconnects nothing by itself: the password is what it waits for.
   if (locked) return { label: "这台电脑设置了访问密码，输入后继续", tone: "muted", animated: false };
+  if (settling && (!online || !ready)) {
+    if (progress) return { label: progress.phase === "sending" ? "正在发送…" : "已发送，等待 Agent 开始…", tone: "active", animated: true };
+    if (hasPermission) return undefined;
+    if (session.state !== "running") return undefined;
+  }
   if (!online) return connecting
     ? { label: "正在恢复连接…", tone: "muted", animated: true }
     : { label: "连接已断开，等待重连…", tone: "muted", animated: false };

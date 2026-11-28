@@ -2,6 +2,7 @@ import {
   RPC_METHOD_NOT_FOUND,
   RpcError,
   RpcPeer,
+  type MachineInfo,
   type MethodName,
   type MethodParams,
   type MethodResult,
@@ -112,7 +113,7 @@ export class HostLink {
   private readonly eventListeners = new Set<(event: SessionEvent) => void>();
   private readonly eventsListeners = new Set<(events: SessionEvent[]) => void>();
   private readonly summaryListeners = new Set<(summary: SessionSummary) => void>();
-  private readonly onlineListeners = new Set<() => void>();
+  private readonly onlineListeners = new Set<(machine?: MachineInfo) => void>();
   private readonly restoredListeners = new Set<(summary: SessionSummary) => void>();
   private readonly notificationListeners = new Map<string, Set<(params: unknown) => void>>();
   lastError?: string;
@@ -120,6 +121,7 @@ export class HostLink {
   private latest = false;
   private openedAt = 0;
   private probePromise?: Promise<boolean>;
+  private probeReconnectOnFail = false;
   /** Used when no `accessToken` store is given: lasts as long as this link. */
   private heldToken?: string;
 
@@ -164,7 +166,7 @@ export class HostLink {
   }
 
   /** Called every time the link (re)connects, after subscriptions are restored. */
-  onOnline(listener: () => void): () => void {
+  onOnline(listener: (machine?: MachineInfo) => void): () => void {
     this.onlineListeners.add(listener);
     return () => this.onlineListeners.delete(listener);
   }
@@ -179,6 +181,7 @@ export class HostLink {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     this.probePromise = undefined;
+    this.probeReconnectOnFail = false;
     this.peer?.close("连接已停止");
     const socket = this.socket;
     this.socket = undefined;
@@ -199,6 +202,7 @@ export class HostLink {
       this.heartbeatTimer = undefined;
     }
     this.probePromise = undefined;
+    this.probeReconnectOnFail = false;
     if (this.socket) {
       const stuck = this.socket;
       this.socket = undefined;
@@ -213,23 +217,33 @@ export class HostLink {
 
   /**
    * Checks an online connection still answers (the app came back to the foreground): concurrent
-   * checks share one request, and a socket that fails to answer reconnects immediately.
+   * checks share one request, and a socket that fails to answer reconnects immediately unless the
+   * caller opts out (`{ reconnect: false }`) to reset upstream relays first.
    */
-  probe(timeoutMs = 2500): Promise<boolean> {
+  probe(timeoutMs = 2500, options?: { reconnect?: boolean }): Promise<boolean> {
     const socket = this.socket;
     if (this.statusValue !== "online" || !socket || !this.peer) return Promise.resolve(false);
-    if (this.probePromise) return this.probePromise;
+    const shouldReconnect = options?.reconnect ?? true;
+    if (this.probePromise) {
+      if (shouldReconnect) this.probeReconnectOnFail = true;
+      return this.probePromise;
+    }
+    this.probeReconnectOnFail = shouldReconnect;
     const active = this.peer
       .request("machine.info", { ping: true }, timeoutMs)
       .then(
         () => true,
         () => {
-          if (this.socket === socket && this.statusValue !== "stopped") this.reconnectNow(true);
+          const autoReconnect = this.probeReconnectOnFail;
+          if (autoReconnect && this.socket === socket && this.statusValue !== "stopped") this.reconnectNow(true);
           return false;
         },
       )
       .finally(() => {
-        if (this.probePromise === active) this.probePromise = undefined;
+        if (this.probePromise === active) {
+          this.probePromise = undefined;
+          this.probeReconnectOnFail = false;
+        }
       });
     this.probePromise = active;
     return active;
@@ -384,9 +398,9 @@ export class HostLink {
       }, heartbeat);
     }
     // Hosts without a password (and older hosts) don't say `locked`: nothing changes for them.
-    let info: { locked?: boolean } | undefined;
+    let info: (Partial<MachineInfo> & { locked?: boolean }) | undefined;
     try {
-      info = await this.peer?.request<{ locked?: boolean }>("machine.info", {}, 10_000);
+      info = await this.peer?.request<Partial<MachineInfo> & { locked?: boolean }>("machine.info", {}, 10_000);
     } catch (error) {
       if (this.socket !== socket) return;
       if (!(error instanceof RpcError && error.code === RPC_METHOD_NOT_FOUND)) {
@@ -415,8 +429,11 @@ export class HostLink {
         return;
       }
       this.saveToken(unlocked.token);
+      this.goOnline(socket);
+      return;
     }
-    this.goOnline(socket);
+    const readyInfo = info && typeof info.machineId === "string" && Array.isArray(info.agents) ? (info as MachineInfo) : undefined;
+    this.goOnline(socket, readyInfo);
   }
 
   /**
@@ -441,14 +458,14 @@ export class HostLink {
     else this.heldToken = token;
   }
 
-  private goOnline(socket: SocketLike): void {
+  private goOnline(socket: SocketLike, machine?: MachineInfo): void {
     // Resolve online readiness immediately so RPC calls (`sessions.list`, prompts, permissions,
     // terminals, screen) aren't blocked for up to ~96s when one open session is slow to restore.
     const useLatest = this.latest;
     this.latest = false;
     this.setStatus("online", "");
     for (const wake of [...this.waiters]) wake();
-    for (const listener of this.onlineListeners) listener();
+    for (const listener of this.onlineListeners) listener(machine);
     for (const sessionId of [...this.subscriptions.keys()]) {
       void this.restore(sessionId, socket, useLatest);
     }

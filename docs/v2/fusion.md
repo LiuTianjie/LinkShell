@@ -312,7 +312,7 @@ host：`fusion.ts` 的 `fusionPlatform()` 决定本机能当哪种远端；`fusi
 - `packages/host/test/fusion-remote.test.ts`、`test/windows-fusion.test.ts` 与 Electron/Mac 单测：覆盖 `file-clipboard` 协商（50 MiB 上限、`512 KiB` 分块 `clip.file.start`/`clip.file.chunk`/`clip.file.end`、路径穿越防护与临时目录清理）、Windows 融合侧基于 `GetCursorInfo`/`GetIconInfo` 的光标形状同步与 STA 文件列表剪贴板，以及 Mac `NSPasteboard` 文件读写和 Swift `FusionProtocolTests`。
 - TLS-PSK 套件：Network.framework、OpenSSL 3.5、Electron 44 两两握手（每个套件逐一）。
 
-未验证（需要 Windows 实机或 Windows CI / 双机实测）：`Fusion.cs` 的 `.NET Framework 4.8` 编译、P/Invoke 光标捕获与 STA 文件列表剪贴板、`gfxcapture` 截取与硬件编码、`SendInput` 落点、任务栏 AppUserModelID 分组与开始菜单快捷方式、多显示器与缩放、双 Mac / Mac↔Windows 跨机 `file-clipboard` 整条路径。Windows CI 新增 `apps/windows/test/fusion.test.mjs`（记事本：目录、启动、窗口与标题栏、缩放、关闭）。
+未验证（需要 Windows 实机或 Windows CI / 双机实测）：`LinkShell.Screen.exe`（原生 C++20 `apps/windows/media/src/helper/fusion_helper.cpp`）在 Windows 上的 CMake/MSVC 编译、Win32 光标捕获与 OLE STA 文件列表剪贴板、WGC 截取与硬件编码、`SendInput` 落点、任务栏 AppUserModelID 分组与开始菜单快捷方式、多显示器与缩放、双 Mac / Mac↔Windows 跨机 `file-clipboard` 整条路径。Windows CI 新增 `apps/windows/test/fusion.test.mjs`（记事本：目录、启动、窗口与标题栏、缩放、关闭）。
 
 Electron 本地端的剪贴板（`apps/desktop/src/main/fusion/clipboard.ts`）：除文字与 PNG 外，现支持 `file-clipboard`（读写 macOS `NSFilenamesPboardType` plist / `public.file-url` 与 Windows `CF_HDROP` / `FileNameW`）并隔离暂存接收文件；Electron 没有剪贴板变化计数，仍沿用窗口获焦检查与驻留摘要对比。Windows 两侧的 RTF 仍未支持。
 

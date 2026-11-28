@@ -7,6 +7,7 @@ import { RELAY_PATH, RelayClient, type MachineEntry, type MachineInfo, type Publ
 import { useAccount } from "./account";
 import { deviceIdentity } from "./identity";
 import { DEFAULT_HOST_URL } from "./settings";
+import { snapshotStorage } from "./snapshot-db";
 import { createSocket } from "./socket";
 import {
   annotateComputersWithLan,
@@ -70,6 +71,8 @@ export type SavedComputerProfile = ComputerProfile & { peerId: string };
 interface Saved {
   profiles?: Record<string, SavedComputerProfile>;
   relay: { gateway: string; machine: Omit<MachineEntry, "online"> }[];
+  /** Last discovered account-only computers for the signed-in userId so cold starts resolve at 0ms. */
+  accountMachines?: { userId: string; gateway: string; machines: Omit<MachineEntry, "online">[] };
   direct: { url: string; name: string; machine?: PublicIdentity; fallbackGateway?: string }[];
   /** Optional LAN WebSocket URLs bound by computer key or machine id for local Wi-Fi fast-path. */
   lanUrls?: Record<string, { url: string; e2ee?: boolean } | string>;
@@ -231,13 +234,13 @@ export function dropRelayIfUnused(gateway: string): void {
   });
 }
 
-export function reconnectRelays(): void {
-  for (const relay of relays.values()) relay.reconnectNow();
+export function reconnectRelays(options?: { force?: boolean }): void {
+  for (const relay of relays.values()) relay.reconnectNow(options);
 }
 
 /** Back in the foreground: a gateway connection that looks open may have died meanwhile. */
-export function probeRelays(): void {
-  for (const relay of relays.values()) relay.probe();
+export function probeRelays(timeoutMs = 1500): void {
+  for (const relay of relays.values()) relay.probe(timeoutMs);
 }
 
 // ── store ────────────────────────────────────────────────────────────
@@ -406,14 +409,24 @@ export const useComputers = create<ComputersState>((set, get) => ({
       delete nextLanUrls[key];
       if (relayEntry) delete nextLanUrls[relayEntry.machine.id];
     }
+    const nextAccountMachines = current.accountMachines
+      ? {
+          ...current.accountMachines,
+          machines: current.accountMachines.machines.filter(
+            (entry) => relayKey(current.accountMachines!.gateway, entry.id) !== key,
+          ),
+        }
+      : undefined;
     const saved: Saved = {
       profiles: Object.fromEntries(Object.entries(current.profiles ?? {}).filter(([id]) => id !== key)),
       relay: current.relay.filter((entry) => relayKey(entry.gateway, entry.machine.id) !== key),
+      ...(nextAccountMachines ? { accountMachines: nextAccountMachines } : {}),
       direct: current.direct.filter((entry) => `direct:${entry.url}` !== key),
       ...(nextLanUrls && Object.keys(nextLanUrls).length > 0 ? { lanUrls: nextLanUrls } : {}),
       selected: current.selected === key ? undefined : current.selected,
     };
     persist(saved);
+    snapshotStorage.clear(key);
     set((state) => ({
       saved,
       ...(relayEntry
@@ -463,7 +476,30 @@ export const useComputers = create<ComputersState>((set, get) => ({
       // Signing out while offline can leave the gateway's old account binding intact.
       // Only a matching authenticated account may restore its account-only computers.
       const visibleMachines = machines.filter((machine) => machine.via === "paired" || accountMatches);
+      let nextSaved: Saved | undefined;
+      if (accountMatches && accountId) {
+        const accountOnly = visibleMachines
+          .filter((machine) => machine.via === "account")
+          .map(({ online: _online, ...rest }) => rest);
+        const prev = get().saved.accountMachines;
+        const unchanged =
+          prev?.userId === accountId &&
+          prev.gateway === gateway &&
+          prev.machines.length === accountOnly.length &&
+          prev.machines.every(
+            (item, idx) =>
+              item.id === accountOnly[idx]?.id &&
+              item.name === accountOnly[idx]?.name &&
+              item.signKey === accountOnly[idx]?.signKey &&
+              item.boxKey === accountOnly[idx]?.boxKey,
+          );
+        if (!unchanged) {
+          nextSaved = { ...get().saved, accountMachines: { userId: accountId, gateway, machines: accountOnly } };
+          persist(nextSaved);
+        }
+      }
       set((state) => ({
+        ...(nextSaved ? { saved: nextSaved } : {}),
         live: { ...state.live, [gateway]: visibleMachines },
         discovery: { ...state.discovery, [gateway]: accountId && !accountMatches ? "refused" : "ready" },
       }));
@@ -506,7 +542,23 @@ useAccount.subscribe((state, previous) => {
   // Account-only computers must disappear immediately, before account.leave can wait on the
   // network. Saved pairings still come from their trusted keys and remain available.
   discoveryRequests.set(url, (discoveryRequests.get(url) ?? 0) + 1);
-  useComputers.setState((current) => ({ live: { ...current.live, [url]: [] }, discovery: { ...current.discovery, [url]: "loading" } }));
+  const currentSaved = useComputers.getState().saved;
+  if (currentSaved.accountMachines) {
+    const pairedKeys = new Set(currentSaved.relay.map((entry) => relayKey(entry.gateway, entry.machine.id)));
+    for (const machine of currentSaved.accountMachines.machines) {
+      const key = relayKey(currentSaved.accountMachines.gateway, machine.id);
+      if (!pairedKeys.has(key)) snapshotStorage.clear(key);
+    }
+    const { accountMachines: _removed, ...cleanedSaved } = currentSaved;
+    persist(cleanedSaved);
+    useComputers.setState((current) => ({
+      saved: cleanedSaved,
+      live: { ...current.live, [url]: [] },
+      discovery: { ...current.discovery, [url]: "loading" },
+    }));
+  } else {
+    useComputers.setState((current) => ({ live: { ...current.live, [url]: [] }, discovery: { ...current.discovery, [url]: "loading" } }));
+  }
   if (!relay) {
     if (state.session || useComputers.getState().saved.relay.some((entry) => entry.gateway === url)) relayFor(url);
     return;
@@ -540,7 +592,10 @@ export function useComputerDiscovery(): DiscoveryStatus {
 
 /** All computers, merged: saved paired ones (with live status), account ones, direct hosts, and optional LAN reachability hints. */
 export function listComputers(
-  state: Pick<ComputersState, "saved" | "live"> & { lanHosts?: readonly DiscoveredLanHost[] },
+  state: Pick<ComputersState, "saved" | "live"> & {
+    lanHosts?: readonly DiscoveredLanHost[];
+    discovery?: Record<string, DiscoveryStatus>;
+  },
 ): Computer[] {
   const out: Computer[] = [];
   const seen = new Set<string>();
@@ -565,6 +620,26 @@ export function listComputers(
         out.push({ key, kind: "relay", gateway, machine, ...(lan.lanUrl ? { lanUrl: lan.lanUrl } : {}), ...(lan.lanE2ee ? { lanE2ee: true } : {}) });
       }
       seen.add(key);
+    }
+  }
+  const acct = state.saved.accountMachines;
+  const activeUserId = useAccount.getState?.()?.session?.userId;
+  const gwDiscovery = acct ? (state.discovery?.[acct.gateway] ?? useComputers.getState?.()?.discovery?.[acct.gateway]) : undefined;
+  if (acct && activeUserId && acct.userId === activeUserId && gwDiscovery !== "ready" && gwDiscovery !== "refused") {
+    for (const entry of acct.machines) {
+      const key = relayKey(acct.gateway, entry.id);
+      if (!seen.has(key)) {
+        const lan = resolveSavedLan(state.saved.lanUrls, key, entry.id);
+        out.push({
+          key,
+          kind: "relay",
+          gateway: acct.gateway,
+          machine: { ...entry, online: false },
+          ...(lan.lanUrl ? { lanUrl: lan.lanUrl } : {}),
+          ...(lan.lanE2ee ? { lanE2ee: true } : {}),
+        });
+        seen.add(key);
+      }
     }
   }
   for (const entry of state.saved.direct) {

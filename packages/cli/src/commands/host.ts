@@ -674,6 +674,7 @@ export function restoreTerminal(stdout: { isTTY?: boolean; write: (chunk: string
 
 /** True when a stdin chunk contains only terminal focus-in (`\x1b[I`) / focus-out (`\x1b[O`) reports. */
 export function isTerminalFocusSequence(text: string): boolean {
+  // eslint-disable-next-line no-control-regex
   return text.length > 0 && /^(?:\x1b\[[IO])+$/.test(text);
 }
 

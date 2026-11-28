@@ -188,6 +188,7 @@ describe("WebRTC screen viewer ICE restart patience timer", () => {
         onconnectionstatechange: (() => void) | null = null;
 
         constructor() {
+          // eslint-disable-next-line @typescript-eslint/no-this-alias
           currentPc = this;
         }
         async setRemoteDescription() {}

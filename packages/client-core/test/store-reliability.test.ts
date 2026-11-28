@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ContentBlock, SessionEvent, SessionSummary } from "@linkshell/wire";
-import { HostLink } from "../src/host-link.js";
-import { createClientStore, type OutboxItem } from "../src/store.js";
+import type { ContentBlock, MachineInfo, SessionEvent, SessionSummary } from "@linkshell/wire";
+import { HostLink, type LinkStatus } from "../src/host-link.js";
+import { createClientStore, type ClientSnapshot, type OutboxItem } from "../src/store.js";
 
 const text = (value: string): ContentBlock[] => [{ type: "text", text: value }];
 
@@ -277,5 +277,157 @@ describe("client store reliability", () => {
     eventListener(ev1);
     restoredListener({ ...baseSession, lastSeq: 1 });
     expect(store.getState().views[baseSession.id]?.items).toMatchObject([{ kind: "agent", id: "a1", text: "hello" }]);
+  });
+
+  it("hydrates snapshots synchronously at 0ms, catches up incrementally from cached lastSeq, and wipes on locked status", async () => {
+    const snapshots = new Map<string, ClientSnapshot>();
+    const snapshotStorage = {
+      load: vi.fn((key: string) => snapshots.get(key)),
+      save: vi.fn((key: string, snap: ClientSnapshot) => {
+        snapshots.set(key, snap);
+      }),
+      clear: vi.fn((key: string) => {
+        snapshots.delete(key);
+      }),
+    };
+    const outboxByKey = new Map<string, OutboxItem[]>();
+    const outboxStorage = {
+      load: vi.fn((key: string) => outboxByKey.get(key) ?? []),
+      save: vi.fn((key: string, items: OutboxItem[]) => {
+        outboxByKey.set(key, items);
+      }),
+    };
+
+    const machine: MachineInfo = {
+      machineId: "mac-pro",
+      hostname: "Studio",
+      home: "/Users/dev",
+      platform: "darwin",
+      hostVersion: "2.0.0",
+      agents: [],
+    };
+
+    // 1. Run 1: populate sessions, projects, an open conversation view, and a failed outbox message, then flush.
+    let eventListener1!: (event: SessionEvent) => void;
+    const link1 = new HostLink({ url: "ws://host-snap" });
+    vi.spyOn(link1, "onEvent").mockImplementation((fn) => {
+      eventListener1 = fn;
+      return () => {};
+    });
+    vi.spyOn(link1, "subscribe").mockResolvedValue({ ...baseSession, lastSeq: 2 });
+    vi.spyOn(link1, "call").mockImplementation(async (method) => {
+      if (method === "sessions.tasks") return { tasks: [] } as never;
+      throw new Error("offline");
+    });
+
+    const store1 = createClientStore(link1, {
+      snapshotKey: "comp-snap",
+      snapshotStorage,
+      outboxKey: "comp-snap",
+      outboxStorage,
+      newId: () => "unsent-1",
+    });
+    store1.setState({
+      status: "online",
+      machine,
+      sessions: { [baseSession.id]: { ...baseSession, title: "Instant Session", lastSeq: 2 } },
+      projects: [{ cwd: "/work", name: "work", sessionCount: 1, lastActiveAt: 10 }],
+      sessionsLoaded: true,
+    });
+    store1.getState().openSession(baseSession.id);
+    eventListener1({
+      sessionId: baseSession.id,
+      seq: 1,
+      ts: 10,
+      update: { sessionUpdate: "user_message_chunk", messageId: "u1", content: { type: "text", text: "Hi" } },
+    });
+    eventListener1({
+      sessionId: baseSession.id,
+      seq: 2,
+      ts: 20,
+      update: { sessionUpdate: "agent_message_chunk", messageId: "a1", content: { type: "text", text: "Ready " } },
+    });
+    await Promise.resolve();
+    expect(await store1.getState().send(baseSession.id, text("Offline tail"))).toBe("failed");
+
+    store1.getState().flushSnapshot();
+    expect(snapshotStorage.save).toHaveBeenCalledTimes(1);
+    // Snapshot strips unconfirmed/failed local bubbles so outboxStorage remains their single owner.
+    expect(snapshots.get("comp-snap")?.views[0]?.items.map((it) => it.id)).toEqual(["u1", "a1"]);
+
+    // 2. Run 2 (cold start): store is immediately ready at 0ms before any network traffic, with outbox appended!
+    let statusListener2!: (status: LinkStatus, detail?: string) => void;
+    let onlineListener2!: (info?: MachineInfo) => void;
+    let eventListener2!: (event: SessionEvent) => void;
+    const link2 = new HostLink({ url: "ws://host-snap" });
+    vi.spyOn(link2, "onStatus").mockImplementation((fn) => {
+      statusListener2 = fn;
+      return () => {};
+    });
+    vi.spyOn(link2, "onOnline").mockImplementation((fn) => {
+      onlineListener2 = fn;
+      return () => {};
+    });
+    vi.spyOn(link2, "onEvent").mockImplementation((fn) => {
+      eventListener2 = fn;
+      return () => {};
+    });
+    let subscribedCursor = -1;
+    vi.spyOn(link2, "subscribe").mockImplementation(async (_id, cursor) => {
+      subscribedCursor = cursor();
+      // Host sends only seq=3 delta!
+      eventListener2({
+        sessionId: baseSession.id,
+        seq: 3,
+        ts: 30,
+        update: { sessionUpdate: "agent_message_chunk", messageId: "a1", content: { type: "text", text: "now!" } },
+      });
+      return { ...baseSession, title: "Instant Session", lastSeq: 3 };
+    });
+    const callSpy2 = vi.spyOn(link2, "call").mockImplementation(async (method) => {
+      if (method === "sessions.list") return { sessions: [{ ...baseSession, title: "Instant Session", lastSeq: 3 }] } as never;
+      if (method === "projects.list") return { projects: [{ cwd: "/work", name: "work", sessionCount: 1, lastActiveAt: 10 }] } as never;
+      if (method === "agents.pending") return { interactions: [] } as never;
+      if (method === "sessions.tasks") return { tasks: [] } as never;
+      throw new Error(`unexpected ${method}`);
+    });
+
+    const store2 = createClientStore(link2, {
+      snapshotKey: "comp-snap",
+      snapshotStorage,
+      outboxKey: "comp-snap",
+      outboxStorage,
+    });
+
+    // Frame 0 (before connect): sessionsLoaded, machine, projects, cached messages AND failed outbox bubble are all present!
+    expect(store2.getState().sessionsLoaded).toBe(true);
+    expect(store2.getState().machine?.home).toBe("/Users/dev");
+    expect(store2.getState().projects).toHaveLength(1);
+    expect(store2.getState().views[baseSession.id]?.items.map((it) => it.id)).toEqual(["u1", "a1", "local-unsent-1"]);
+
+    // Opening the session subscribes from cached lastSeq = 2 and merges seq = 3 seamlessly.
+    statusListener2("online");
+    onlineListener2(machine);
+    store2.getState().openSession(baseSession.id);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(subscribedCursor).toBe(2);
+    // `onOnline(machine)` skipped redundant `machine.info` RPC!
+    expect(callSpy2.mock.calls.some(([method]) => method === "machine.info")).toBe(false);
+    expect(store2.getState().views[baseSession.id]?.items).toMatchObject([
+      { kind: "user", id: "u1" },
+      { kind: "agent", id: "a1", text: "Ready now!" },
+      { kind: "user", id: "local-unsent-1", failed: true },
+    ]);
+
+    // 3. Computer becomes locked -> wipes cached state in memory and clears persisted snapshot!
+    statusListener2("locked", "这台电脑设置了访问密码");
+    expect(store2.getState().sessionsLoaded).toBe(false);
+    expect(store2.getState().sessions).toEqual({});
+    expect(store2.getState().projects).toEqual([]);
+    expect(store2.getState().views).toEqual({});
+    expect(store2.getState().machine).toBeUndefined();
+    expect(snapshotStorage.clear).toHaveBeenCalledWith("comp-snap");
+    expect(snapshots.has("comp-snap")).toBe(false);
   });
 });

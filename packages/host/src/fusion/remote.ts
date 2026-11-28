@@ -66,6 +66,7 @@ interface IncomingFileTransfer {
 export function resolveSafeClipFilePath(stageDir: string, index: number, rawName: string): string | null {
   if (!rawName || rawName.length > 255) return null;
   if (rawName === "." || rawName === "..") return null;
+  // eslint-disable-next-line no-control-regex
   if (/[/\\\0]/.test(rawName) || /[\x00-\x1f]/.test(rawName)) return null;
   const subDir = resolve(stageDir, String(index));
   const resolved = resolve(subDir, rawName);

@@ -23,7 +23,11 @@ import {
   desktopFetch,
   desktopHostWsUrl,
   desktopPlatform,
+  gatewayDeployment,
+  hasDesktopSidecar,
+  initialBrowserGateway,
   isElectronDesktop,
+  isElectronRuntime,
   type LanHostEntry,
 } from "../bridge/desktop-bridge";
 import {
@@ -61,6 +65,7 @@ import {
   saveLocal,
   type DesktopSidecarAccount,
 } from "./storage";
+import { accountMembership, accountReferral } from "./web-account";
 
 export type { Computer, Connection };
 export type GatewaySource = "official" | "self-hosted";
@@ -108,7 +113,11 @@ export function validateGateway(value: string): string {
     throw new Error("请输入网关根地址，不需要附加路径");
   }
   const pageHttps = typeof location !== "undefined" && location.protocol === "https:";
-  if (url.protocol === "ws:" && (pageHttps || !isLocalOrLanHostname(url.hostname))) {
+  const sameHttpHost =
+    typeof location !== "undefined" &&
+    location.protocol === "http:" &&
+    location.hostname.toLowerCase() === url.hostname.toLowerCase();
+  if (url.protocol === "ws:" && (pageHttps || (!isLocalOrLanHostname(url.hostname) && !sameHttpHost))) {
     throw new Error("请使用 wss:// 安全连接；ws:// 仅限本地或局域网 HTTP 环境");
   }
   return url.origin;
@@ -147,16 +156,36 @@ export interface EngineState {
   localError?: string;
 }
 
+function resolveSavedSourceAndGateway(): { source: GatewaySource; gateway: string } {
+  const browserSelfHosted =
+    !hasDesktopSidecar() && gatewayDeployment() === "self-hosted";
+  const savedSource = readLocal<GatewaySource>(
+    STORAGE_KEYS.source,
+    browserSelfHosted ? "self-hosted" : "official",
+  );
+  const source: GatewaySource = browserSelfHosted ? "self-hosted" : savedSource;
+  const fallbackGateway = initialBrowserGateway(OFFICIAL_GATEWAY);
+  const gateway =
+    source === "official"
+      ? OFFICIAL_GATEWAY
+      : readLocal<string>(STORAGE_KEYS.gateway, fallbackGateway);
+  return { source, gateway };
+}
+
+function shouldUseBrowserTabLock(): boolean {
+  return (
+    !hasDesktopSidecar() &&
+    typeof navigator !== "undefined" &&
+    typeof navigator.locks?.request === "function"
+  );
+}
+
 export class DesktopEngine {
   readonly state = createStore<EngineState>(() => {
-    const savedSource = readLocal<GatewaySource>(STORAGE_KEYS.source, "official");
-    const savedGateway =
-      savedSource === "official"
-        ? OFFICIAL_GATEWAY
-        : readLocal<string>(STORAGE_KEYS.gateway, OFFICIAL_GATEWAY);
+    const { source, gateway } = resolveSavedSourceAndGateway();
     return {
-      source: savedSource,
-      gateway: savedGateway,
+      source,
+      gateway,
       computers: [],
       relayStatus: {},
       locked: false,
@@ -171,6 +200,8 @@ export class DesktopEngine {
   private readonly localAliases = new Map<string, Computer>();
   private selected: string = readLocal<string>(STORAGE_KEYS.selected, "");
   private active = false;
+  private releaseBrowserLock?: () => void;
+  private readonly ownerChannel?: BroadcastChannel;
   private starting?: Promise<void>;
   private authUser?: string;
   private pendingAccountFrom?: string | null;
@@ -189,6 +220,20 @@ export class DesktopEngine {
   private releaseSelected?: () => void;
 
   constructor(options?: { attachWindowListeners?: boolean }) {
+    if (
+      options?.attachWindowListeners !== false &&
+      typeof window !== "undefined" &&
+      typeof BroadcastChannel !== "undefined" &&
+      !hasDesktopSidecar()
+    ) {
+      this.ownerChannel = new BroadcastChannel("linkshell.web.owner");
+      this.ownerChannel.addEventListener("message", (event) => {
+        if (event.data === "yield") {
+          this.stop();
+          this.state.setState({ locked: true, ready: true });
+        }
+      });
+    }
     if (options?.attachWindowListeners !== false && typeof window !== "undefined") {
       window.addEventListener(DESKTOP_ERROR_EVENT, (event) =>
         this.report((event as CustomEvent<string>).detail),
@@ -225,14 +270,63 @@ export class DesktopEngine {
   }
 
   async start(): Promise<void> {
-    if (this.active) return;
+    if (this.active || this.releaseBrowserLock) return;
     if (this.starting) return this.starting;
-    this.starting = this.boot()
+    const run = shouldUseBrowserTabLock()
+      ? this.acquireBrowserLock(false)
+      : this.boot();
+    this.starting = run
       .catch((error: unknown) => this.report(error))
       .finally(() => {
         this.starting = undefined;
       });
     return this.starting;
+  }
+
+  /** Claims the single persisted browser device connection from another open tab. */
+  async claim(): Promise<void> {
+    if (!shouldUseBrowserTabLock()) {
+      await this.start();
+      return;
+    }
+    this.ownerChannel?.postMessage("yield");
+    if (this.starting) await this.starting.catch(() => undefined);
+    if (this.active || this.releaseBrowserLock) return;
+    this.starting = this.acquireBrowserLock(true)
+      .catch((error: unknown) => this.report(error))
+      .finally(() => {
+        this.starting = undefined;
+      });
+    await this.starting;
+  }
+
+  private async acquireBrowserLock(wait: boolean): Promise<void> {
+    const locks = typeof navigator !== "undefined" ? navigator.locks : undefined;
+    if (!locks?.request) {
+      await this.boot();
+      return;
+    }
+    // One persisted browser identity has one gateway connection. Do not let tabs replace each other.
+    await new Promise<void>((resolve, reject) => {
+      void locks
+        .request(
+          "linkshell.web.connection",
+          { ifAvailable: !wait },
+          async (lock) => {
+            if (!lock) {
+              this.state.setState({ locked: true, ready: true });
+              resolve();
+              return;
+            }
+            await new Promise<void>((release) => {
+              this.releaseBrowserLock = release;
+              this.state.setState({ locked: false });
+              void this.boot().then(resolve, reject);
+            });
+          },
+        )
+        .catch(reject);
+    });
   }
 
   private async boot(): Promise<void> {
@@ -244,11 +338,8 @@ export class DesktopEngine {
     this.active = true;
     this.paired = readLocal<Computer[]>(STORAGE_KEYS.paired, []);
     this.selected = readLocal<string>(STORAGE_KEYS.selected, "");
-    const savedSource = readLocal<GatewaySource>(STORAGE_KEYS.source, "official");
-    const savedGateway =
-      savedSource === "official"
-        ? OFFICIAL_GATEWAY
-        : readLocal<string>(STORAGE_KEYS.gateway, OFFICIAL_GATEWAY);
+    const { source: savedSource, gateway: savedGateway } =
+      resolveSavedSourceAndGateway();
 
     this.localAliases.clear();
     this.state.setState({
@@ -297,8 +388,14 @@ export class DesktopEngine {
   }
 
   async connectAccount(): Promise<void> {
+    if (!hasDesktopSidecar() && gatewayDeployment() === "self-hosted") {
+      throw new Error("私有部署使用设备配对");
+    }
+    const revision = this.accountRevision;
     const account = await fetchDesktopAccount();
-    this.applyAccount(account);
+    if (revision === this.accountRevision) {
+      this.applyAccount(account);
+    }
     this.state.setState({ source: "official", gateway: OFFICIAL_GATEWAY });
     saveLocal(STORAGE_KEYS.source, "official");
   }
@@ -523,13 +620,16 @@ export class DesktopEngine {
     const gateway = validateGateway(address);
     const existing = this.relays.get(gateway);
     if (existing) return existing;
-    const useAccount = gateway === OFFICIAL_GATEWAY;
+    const useAccount =
+      gateway === OFFICIAL_GATEWAY &&
+      (hasDesktopSidecar() || gatewayDeployment() !== "self-hosted");
+    const electron = isElectronRuntime();
     const relay = new RelayClient({
       url: gateway + RELAY_PATH,
       identity: this.identity,
       role: "device",
-      name: "LinkShell Desktop",
-      platform: relayPlatformLabel(),
+      name: electron ? "LinkShell Desktop" : "LinkShell Web",
+      platform: electron ? relayPlatformLabel() : "web",
       token: useAccount
         ? async () => {
             const accountRevision = this.accountRevision;
@@ -638,7 +738,9 @@ export class DesktopEngine {
     ) {
       return;
     }
-    const usesAccount = gateway === OFFICIAL_GATEWAY;
+    const usesAccount =
+      gateway === OFFICIAL_GATEWAY &&
+      (hasDesktopSidecar() || gatewayDeployment() !== "self-hosted");
     const accountMatches = usesAccount && Boolean(accountUser) && relay.account?.userId === accountUser;
     const found = machines
       .filter((machine) => machine.via === "paired" || accountMatches)
@@ -1024,12 +1126,17 @@ export class DesktopEngine {
     this.connections.clear();
     for (const relay of this.relays.values()) relay.stop();
     this.relays.clear();
+    this.releaseBrowserLock?.();
+    this.releaseBrowserLock = undefined;
   }
 }
 
 export const engine = new DesktopEngine();
 
 export async function fetchDesktopProMembership(expectedUserId: string): Promise<ProMembership> {
+  if (!hasDesktopSidecar()) {
+    return accountMembership(expectedUserId);
+  }
   const params = new URLSearchParams({ userId: expectedUserId });
   return desktopFetch<ProMembership>(`/desktop/membership?${params.toString()}`);
 }
@@ -1038,6 +1145,9 @@ export async function fetchDesktopReferralSummary(
   expectedUserId: string,
   locale?: Locale,
 ): Promise<ReferralSummary> {
+  if (!hasDesktopSidecar()) {
+    return accountReferral(expectedUserId, locale);
+  }
   const params = new URLSearchParams({ userId: expectedUserId });
   if (locale) params.set("locale", locale);
   return desktopFetch<ReferralSummary>(`/desktop/referral?${params.toString()}`);

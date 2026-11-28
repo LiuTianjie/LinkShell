@@ -1262,12 +1262,12 @@ async function setWindowsElevatedService(enable: boolean): Promise<WindowsElevat
     try {
       if (existsSync(errFile)) detail = readFileSync(errFile, "utf8").trim();
     } catch { /* Ignore unreadable error file. */ }
-    if (detail) throw new Error(`系统控制服务操作失败：${detail}`);
+    if (detail) throw new Error(`系统控制服务操作失败：${detail}`, { cause: error });
     const text = error instanceof Error ? `${error.message} ${String((error as { stderr?: string }).stderr ?? "")}` : String(error);
     if (/canceled by the user|被用户取消|1223/i.test(text)) {
-      throw new Error("已取消管理员授权，未更改系统控制服务");
+      throw new Error("已取消管理员授权，未更改系统控制服务", { cause: error });
     }
-    throw new Error(`系统控制服务操作失败：${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(`系统控制服务操作失败：${error instanceof Error ? error.message : String(error)}`, { cause: error });
   }
   const next = await queryWindowsElevatedService();
   if (!next) throw new Error("无法确认系统控制服务状态，请重试");
@@ -1326,12 +1326,12 @@ async function setWindowsVirtualDisplay(action: "install" | "uninstall" | "enabl
     try {
       if (existsSync(errFile)) detail = readFileSync(errFile, "utf8").trim();
     } catch { /* Ignore unreadable error file. */ }
-    if (detail) throw new Error(`虚拟显示器操作失败：${detail}`);
+    if (detail) throw new Error(`虚拟显示器操作失败：${detail}`, { cause: error });
     const text = error instanceof Error ? `${error.message} ${String((error as { stderr?: string }).stderr ?? "")}` : String(error);
     if (/canceled by the user|被用户取消|1223/i.test(text)) {
-      throw new Error("已取消管理员授权，未更改虚拟显示器驱动");
+      throw new Error("已取消管理员授权，未更改虚拟显示器驱动", { cause: error });
     }
-    throw new Error(`虚拟显示器操作失败：${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(`虚拟显示器操作失败：${error instanceof Error ? error.message : String(error)}`, { cause: error });
   }
   const next = await queryWindowsVirtualDisplay();
   if (!next) throw new Error("无法确认虚拟显示器状态，请重试");

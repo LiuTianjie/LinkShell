@@ -30,14 +30,14 @@ export async function runDesktopSidecarAction(
   switch (name) {
     case "startup": {
       try { await recoverDesktopUpdate(version); }
-      catch (error) { throw new Error(`服务恢复需要处理：${error instanceof Error ? error.message : String(error)}`); }
+      catch (error) { throw new Error(`服务恢复需要处理：${error instanceof Error ? error.message : String(error)}`, { cause: error }); }
       const running = await withRunningHost(async (client) => {
         await client.call("machine.info", {}, 5_000);
         return true;
       }).catch(() => false);
       if (!running && !readPid("host")) {
         try { await ensureHostRunning(); }
-        catch (error) { throw new Error(`后台服务启动失败：${error instanceof Error ? error.message : String(error)}`); }
+        catch (error) { throw new Error(`后台服务启动失败：${error instanceof Error ? error.message : String(error)}`, { cause: error }); }
       }
       return { kind: "snapshot" };
     }

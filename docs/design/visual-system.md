@@ -1,8 +1,8 @@
 # LinkShell 视觉规范
 
-手机 App（`apps/client`，含 Watch 和 Live Activity）、桌面端（`apps/desktop-ui` 和 `apps/mac` 的原生窗口）、网页控制台（`apps/web` 在浏览器里）和官网（`docs/site`）都照这一份做。改视觉先改这里，再三端一起改；不要只改一端。
+手机 App（`apps/client`，含 Watch 和 Live Activity）、桌面端与浏览器工作台（`apps/desktop-ui` 及 `apps/mac` 的原生窗口）和官网（`docs/site`）都照这一份做。改视觉先改这里，再各端一起改；不要只改一端。
 
-它取代了之前分散的几个方向：`apps/web/AGENTS.md` 和桌面端注释里各自写的方向、原生窗口的薄荷绿、官网的青绿。颜色和尺寸只用这里的值。
+它取代了之前分散的几个方向：旧版 `apps/web` 和桌面端注释里各自写的方向、原生窗口的薄荷绿、官网的青绿。颜色和尺寸只用这里的值。
 
 ## 原则
 
@@ -14,7 +14,7 @@
 
 ## 颜色
 
-唯一来源：[`apps/client/src/theme/brand-colors.json`](../../apps/client/src/theme/brand-colors.json)。`apps/web/src/theme.ts` 直接读它，Android 资源由 `with-brand-colors.js` 生成；Swift（`DesktopTheme.swift`、`WatchModels.swift`、Live Activity）和官网 CSS 抄同样的值，`apps/web/test/brand-colors.test.ts` 检查它们没有走样。
+唯一来源：[`apps/client/src/theme/brand-colors.json`](../../apps/client/src/theme/brand-colors.json)。`apps/desktop-ui/src/theme.ts` 直接读它，Android 资源由 `with-brand-colors.js` 生成；Swift（`DesktopTheme.swift`、`WatchModels.swift`、Live Activity）和官网 CSS 抄同样的值，`apps/desktop-ui/test/brand-colors.test.ts` 检查它们没有走样。
 
 | 用途 | token | 浅色 | 深色 |
 | --- | --- | --- | --- |
@@ -33,7 +33,7 @@
 
 文字色的值在浅色背景和深色背景上对比度都不低于 4.5:1；白字只放在 `accentFill`、`waitingFill`、`danger`（浅色）上，不放在深色模式的文字色上。
 
-中性色按平台：iOS 用系统语义色（`colors.ts` 已经这样做），Android 用 `brand-colors.json` 里同名的字面值，桌面和网页控制台用 `theme.ts` 里各自的中性色。浅色模式下 `secondaryLabel` 和 `tertiaryLabel` 在每一种浅色底上都不低于 4.5:1，`secondaryLabel` 明显深于 `tertiaryLabel`（`apps/web/test/theme.test.ts` 检查）；iOS 的系统色由系统决定。
+中性色按平台：iOS 用系统语义色（`colors.ts` 已经这样做），Android 用 `brand-colors.json` 里同名的字面值，桌面与网页工作台统一用 `apps/desktop-ui/src/theme.ts` 里的中性色。浅色模式下 `secondaryLabel` 和 `tertiaryLabel` 在每一种浅色底上都不低于 4.5:1，`secondaryLabel` 明显深于 `tertiaryLabel`（`apps/desktop-ui/test/theme-icons.test.ts` 检查）；iOS 的系统色由系统决定。
 
 ### 状态
 

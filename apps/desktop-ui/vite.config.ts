@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 export default defineConfig({
   plugins: [tailwindcss()],
   build: {
-    target: "chrome152",
+    target: ["es2022", "chrome120", "safari17.4", "firefox128"],
     rollupOptions: {
       // The workspace, and Fusion's hidden page (docs/v2/fusion.md §8.1).
       input: {

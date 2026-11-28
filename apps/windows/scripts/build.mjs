@@ -43,58 +43,48 @@ icons.forEach((png, i) => {
   offset += png.length;
 });
 writeFileSync(join(output, 'LinkShell.ico'), Buffer.concat([directory, ...icons]));
-const appearance = [`/win32icon:${join(output, 'LinkShell.ico')}`, `/win32manifest:${join(root, 'src/app.manifest')}`];
-const csc = join(process.env.WINDIR || 'C:\\Windows', 'Microsoft.NET', 'Framework64', 'v4.0.30319', 'csc.exe');
-if (!existsSync(csc)) throw new Error('The Windows screen helper requires .NET Framework 4.8 on 64-bit Windows.');
 
-// Minimal C# screen helper: LocalSystem service (UAC/lock-screen/admin input), Fusion window metadata,
-// JPEG fallback, and offline MttVDD IddCx virtual display installation.
-// Use /platform:anycpu on ARM64 so .NET 4.8.1 runs natively (required for SetupAPI driver installation).
-const screenPlatform = arch === 'arm64' ? '/platform:anycpu' : '/platform:x64';
-const screen = spawnSync(csc, [
-  '/nologo', '/optimize+', screenPlatform, '/target:exe', '/codepage:65001',
-  `/out:${join(output, 'LinkShell.Screen.exe')}`,
-  '/r:System.Drawing.dll', '/r:System.Windows.Forms.dll', '/r:System.Web.Extensions.dll', '/r:System.Core.dll', '/r:System.ServiceProcess.dll',
-  join(root, 'src/Screen.cs'),
-  join(root, 'src/DesktopDuplication.cs'),
-  join(root, 'src/VideoCapture.cs'),
-  join(root, 'src/Fusion.cs'),
-  join(root, 'src/ScreenService.cs'),
-  join(root, 'src/VirtualDisplay.cs'),
-], { stdio: 'inherit', windowsHide: true });
-if (screen.error) throw screen.error;
-if (screen.status !== 0) process.exit(screen.status || 1);
+const buildMedia = !process.argv.includes('--skip-media');
+const buildQa = process.argv.includes('--qa');
+const sdkRoot = buildMedia ? await ensureWebRtcSdk(arch) : '';
+const mediaBuild = join(output, `media-build-${arch}`);
+const cmakeArch = arch === 'arm64' ? 'ARM64' : 'x64';
+const cmakeEnv = { ...process.env };
+// Ensure CMake picks its default Visual Studio generator so -A <x64|ARM64> always works.
+delete cmakeEnv.CMAKE_GENERATOR;
+delete cmakeEnv.CMAKE_GENERATOR_PLATFORM;
+delete cmakeEnv.CMAKE_GENERATOR_TOOLSET;
 
-if (!process.argv.includes('--skip-media')) {
-  // Build the native C++20 libwebrtc media engine (LinkShell.Media.exe) for remote screen & Fusion.
-  const sdkRoot = await ensureWebRtcSdk(arch);
-  const mediaBuild = join(output, `media-build-${arch}`);
-  const cmakeArch = arch === 'arm64' ? 'ARM64' : 'x64';
-  const cmakeEnv = { ...process.env };
-  // Ensure CMake picks its default Visual Studio generator so -A <x64|ARM64> always works.
-  delete cmakeEnv.CMAKE_GENERATOR;
-  delete cmakeEnv.CMAKE_GENERATOR_PLATFORM;
-  delete cmakeEnv.CMAKE_GENERATOR_TOOLSET;
+const cmakeArgs = [
+  '-S', join(root, 'media'),
+  '-B', mediaBuild,
+  '-A', cmakeArch,
+  '-DLINKSHELL_BUILD_SCREEN=ON',
+  `-DLINKSHELL_BUILD_MEDIA=${buildMedia ? 'ON' : 'OFF'}`,
+  `-DLINKSHELL_BUILD_QA=${buildQa ? 'ON' : 'OFF'}`,
+];
+if (buildMedia) cmakeArgs.push(`-DWEBRTC_ROOT=${sdkRoot}`);
 
-  console.log(`Configuring LinkShell.Media.exe (${arch}) with libwebrtc at ${sdkRoot}...`);
-  const configure = spawnSync('cmake', [
-    '-S', join(root, 'media'),
-    '-B', mediaBuild,
-    '-A', cmakeArch,
-    `-DWEBRTC_ROOT=${sdkRoot}`,
-  ], { stdio: 'inherit', windowsHide: true, env: cmakeEnv });
-  if (configure.error) throw configure.error;
-  if (configure.status !== 0) process.exit(configure.status || 1);
+console.log(`Configuring native C++20 Windows binaries (${arch}, media=${buildMedia}, qa=${buildQa})...`);
+const configure = spawnSync('cmake', cmakeArgs, { stdio: 'inherit', windowsHide: true, env: cmakeEnv });
+if (configure.error) throw configure.error;
+if (configure.status !== 0) process.exit(configure.status || 1);
 
-  console.log(`Building LinkShell.Media.exe (${arch}, Release)...`);
-  const compiled = spawnSync('cmake', [
-    '--build', mediaBuild,
-    '--config', 'Release',
-    '--parallel',
-  ], { stdio: 'inherit', windowsHide: true, env: cmakeEnv });
-  if (compiled.error) throw compiled.error;
-  if (compiled.status !== 0) process.exit(compiled.status || 1);
+console.log(`Building native C++20 Windows binaries (${arch}, Release)...`);
+const compiled = spawnSync('cmake', [
+  '--build', mediaBuild,
+  '--config', 'Release',
+  '--parallel',
+], { stdio: 'inherit', windowsHide: true, env: cmakeEnv });
+if (compiled.error) throw compiled.error;
+if (compiled.status !== 0) process.exit(compiled.status || 1);
 
+const builtScreen = join(mediaBuild, 'Release', 'LinkShell.Screen.exe');
+if (!existsSync(builtScreen)) throw new Error(`Missing built native screen helper: ${builtScreen}`);
+cpSync(builtScreen, join(output, 'LinkShell.Screen.exe'));
+if (arch !== 'x64') cpSync(builtScreen, join(output, `LinkShell.Screen-${arch}.exe`));
+
+if (buildMedia) {
   const builtExe = join(mediaBuild, 'Release', 'LinkShell.Media.exe');
   if (!existsSync(builtExe)) throw new Error(`Missing built native media binary: ${builtExe}`);
   const archOut = arch === 'x64' ? join(output, 'LinkShell.Media.exe') : join(output, `LinkShell.Media-${arch}.exe`);
@@ -104,9 +94,8 @@ if (!process.argv.includes('--skip-media')) {
   if (existsSync(webrtcLicense)) cpSync(webrtcLicense, join(output, 'WEBRTC-LICENSE.md'));
 }
 
-if (process.argv.includes('--qa')) {
-  // A window that reports the clicks, text, shortcuts and wheel the remote screen sends; development only.
-  const probe = spawnSync(csc, ['/nologo', '/optimize+', '/platform:x64', '/target:winexe', '/codepage:65001', ...appearance, `/out:${join(output, 'LinkShell.InputQA.exe')}`, '/r:System.Drawing.dll', '/r:System.Windows.Forms.dll', join(root, 'src/InputProbe.cs')], { stdio: 'inherit', windowsHide: true });
-  if (probe.error) throw probe.error;
-  if (probe.status !== 0) process.exit(probe.status || 1);
+if (buildQa) {
+  const builtQa = join(mediaBuild, 'Release', 'LinkShell.InputQA.exe');
+  if (!existsSync(builtQa)) throw new Error(`Missing built native QA binary: ${builtQa}`);
+  cpSync(builtQa, join(output, 'LinkShell.InputQA.exe'));
 }

@@ -1,10 +1,18 @@
 import { createIdentity, type Identity, type MachineEntry } from "@linkshell/wire";
 import {
   desktopFetch,
+  gatewayDeployment,
   getDesktopCapability,
   isElectronDesktop,
   registerDesktopFlush,
 } from "../bridge/desktop-bridge";
+import {
+  accountClient,
+  accountToken,
+  resetWebAccountClientForTests,
+  signInWithAccountOAuth,
+  type WebAccountClient,
+} from "./web-account";
 
 export const DESKTOP_LOCAL = "desktop:local";
 export const DESKTOP_VISIBILITY_EVENT = "linkshell-desktop-visibility";
@@ -86,9 +94,75 @@ const unsaved = new Map<string, StorageWrite>();
 let cachedAccount: DesktopSidecarAccount = {};
 let accountRequest: Promise<DesktopSidecarAccount> | undefined;
 let accountGeneration = 0;
+let browserIdentityPromise: Promise<Identity> | undefined;
+let subscribedWebClient: WebAccountClient | undefined;
+let pendingBrowserLogin:
+  | {
+      method: DesktopSignInMethod;
+      url?: string;
+      controller: AbortController;
+    }
+  | undefined;
 
 function hasSidecarCapability(): boolean {
   return Boolean(getDesktopCapability());
+}
+
+function loadBrowserDeviceIdentity(): Promise<Identity> {
+  if (typeof indexedDB === "undefined" || typeof indexedDB.open !== "function") {
+    fallbackIdentity ??= createIdentity();
+    return Promise.resolve(fallbackIdentity);
+  }
+  return (browserIdentityPromise ??= new Promise<Identity>((resolve, reject) => {
+    const request = indexedDB.open("linkshell.web.identity", 1);
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains("keys")) {
+        request.result.createObjectStore("keys");
+      }
+    };
+    request.onerror = () =>
+      reject(new Error("无法保存浏览器设备身份，请允许此网站使用本地存储"));
+    request.onsuccess = () => {
+      const db = request.result;
+      const tx = db.transaction("keys", "readwrite");
+      const store = tx.objectStore("keys");
+      const getReq = store.get("device");
+      let identity: Identity | undefined;
+      getReq.onsuccess = () => {
+        identity = (getReq.result as Identity | undefined) ?? createIdentity();
+        if (!getReq.result) store.put(identity, "device");
+      };
+      tx.oncomplete = () => {
+        db.close();
+        fallbackIdentity = identity ?? createIdentity();
+        resolve(fallbackIdentity);
+      };
+      tx.onerror = () => {
+        db.close();
+        reject(new Error("设备身份保存失败"));
+      };
+    };
+  }));
+}
+
+function ensureWebAccountSubscription(): void {
+  if (hasSidecarCapability() || gatewayDeployment() === "self-hosted") return;
+  const currentClient = accountClient();
+  if (subscribedWebClient === currentClient) return;
+  subscribedWebClient = currentClient;
+  currentClient.auth.onAuthStateChange((_event, session) => {
+    accountGeneration++;
+    accountRequest = undefined;
+    updateCachedAccount(
+      session
+        ? {
+            userId: session.user.id,
+            email: session.user.email,
+            accessToken: session.access_token,
+          }
+        : {},
+    );
+  });
 }
 
 function notifyStorageListeners(): void {
@@ -156,14 +230,20 @@ export async function bootstrapDesktopStorage(): Promise<DesktopBootstrapPayload
   if (bootstrapPromise) return bootstrapPromise;
 
   if (!hasSidecarCapability()) {
-    fallbackIdentity ??= createIdentity();
-    const localPayload: DesktopBootstrapPayload = {
-      identity: fallbackIdentity,
-      storage: Object.fromEntries(fallbackMemory.entries()),
-    };
-    bootstrapState = localPayload;
-    notifyStorageListeners();
-    return localPayload;
+    bootstrapPromise = (async () => {
+      const identity = await loadBrowserDeviceIdentity();
+      const localPayload: DesktopBootstrapPayload = {
+        identity,
+        storage: Object.fromEntries(fallbackMemory.entries()),
+      };
+      bootstrapState = localPayload;
+      ensureWebAccountSubscription();
+      notifyStorageListeners();
+      return localPayload;
+    })().finally(() => {
+      bootstrapPromise = undefined;
+    });
+    return bootstrapPromise;
   }
 
   bootstrapPromise = (async () => {
@@ -209,6 +289,13 @@ export function bootstrappedLocalComputer(): BootstrappedComputer | undefined {
   return bootstrapState?.localComputer;
 }
 
+function legacyWebStorageKeys(key: string): string[] {
+  const keys = [`linkshell.web.${key}`];
+  if (key === STORAGE_KEYS.locale) keys.push(key);
+  if (key === STORAGE_KEYS.appearance) keys.push("linkshell.web.theme");
+  return keys;
+}
+
 export function readLocal<T>(key: string, fallback: T): T {
   if (bootstrapState && key in bootstrapState.storage) {
     const stored = bootstrapState.storage[key];
@@ -222,6 +309,13 @@ export function readLocal<T>(key: string, fallback: T): T {
     try {
       const raw = localStorage.getItem(`linkshell.desktop.${key}`);
       if (raw !== null) return (JSON.parse(raw) as T | null) ?? fallback;
+      // Preserve pairings, selected computers, gateway URLs, and preferences from `apps/web`.
+      for (const legacyKey of legacyWebStorageKeys(key)) {
+        const legacyRaw = localStorage.getItem(legacyKey);
+        if (legacyRaw !== null) {
+          return (JSON.parse(legacyRaw) as T | null) ?? fallback;
+        }
+      }
     } catch {
       return fallback;
     }
@@ -241,15 +335,22 @@ export function saveLocal(key: string, value: unknown): void {
   }
 
   if (bootstrapState) {
-    bootstrapState.storage[key] = snapshot;
+    if (value === undefined) delete bootstrapState.storage[key];
+    else bootstrapState.storage[key] = snapshot;
   }
   if (value === undefined) fallbackMemory.delete(key);
   else fallbackMemory.set(key, snapshot);
 
   if (!isElectronDesktop && typeof localStorage !== "undefined") {
     try {
-      if (value === undefined) localStorage.removeItem(`linkshell.desktop.${key}`);
-      else localStorage.setItem(`linkshell.desktop.${key}`, JSON.stringify(snapshot));
+      if (value === undefined) {
+        localStorage.removeItem(`linkshell.desktop.${key}`);
+        for (const legacyKey of legacyWebStorageKeys(key)) {
+          localStorage.removeItem(legacyKey);
+        }
+      } else {
+        localStorage.setItem(`linkshell.desktop.${key}`, JSON.stringify(snapshot));
+      }
     } catch {
       // Never block UI state mutations when browser quota is full.
     }
@@ -306,7 +407,41 @@ export function applySidecarAccountPush(next: DesktopSidecarAccount): DesktopSid
 }
 
 export function fetchDesktopAccount(): Promise<DesktopSidecarAccount> {
-  if (!hasSidecarCapability()) return Promise.resolve(cachedAccount);
+  if (!hasSidecarCapability()) {
+    if (gatewayDeployment() === "self-hosted") {
+      return Promise.resolve(updateCachedAccount({}));
+    }
+    ensureWebAccountSubscription();
+    if (accountRequest) return accountRequest;
+    const generation = accountGeneration;
+    const request = (async (): Promise<DesktopSidecarAccount> => {
+      const auth = accountClient().auth;
+      const { data, error } = await auth.getSession();
+      if (error) throw error;
+      if (!data.session?.user?.id) {
+        return generation === accountGeneration
+          ? updateCachedAccount({})
+          : cachedAccount;
+      }
+      const token = await accountToken(data.session.user.id);
+      const latest = await auth.getSession();
+      const session = latest.data.session ?? data.session;
+      const next: DesktopSidecarAccount = session?.user?.id
+        ? {
+            userId: session.user.id,
+            email: session.user.email,
+            accessToken: token ?? session.access_token,
+          }
+        : {};
+      return generation === accountGeneration
+        ? updateCachedAccount(next)
+        : cachedAccount;
+    })().finally(() => {
+      if (accountRequest === request) accountRequest = undefined;
+    });
+    accountRequest = request;
+    return request;
+  }
   if (accountRequest) return accountRequest;
   const generation = accountGeneration;
   const request = desktopFetch<DesktopSidecarAccount>("/desktop/account")
@@ -319,6 +454,53 @@ export function fetchDesktopAccount(): Promise<DesktopSidecarAccount> {
 }
 
 export async function startDesktopLogin(request: DesktopSignInRequest = { method: "web" }): Promise<void> {
+  if (!hasSidecarCapability()) {
+    if (gatewayDeployment() === "self-hosted") {
+      throw new Error("私有部署使用设备配对");
+    }
+    ensureWebAccountSubscription();
+    if (request.method === "password") {
+      const { data, error } = await accountClient().auth.signInWithPassword({
+        email: request.email,
+        password: request.password,
+      });
+      if (error) throw error;
+      if (!data.session) throw new Error("登录未完成，请重试");
+      accountGeneration++;
+      accountRequest = undefined;
+      updateCachedAccount({
+        userId: data.session.user.id,
+        email: data.session.user.email,
+        accessToken: data.session.access_token,
+      });
+      return;
+    }
+    if (request.method === "github" || request.method === "google") {
+      pendingBrowserLogin?.controller.abort();
+      const controller = new AbortController();
+      const entry: NonNullable<typeof pendingBrowserLogin> = {
+        method: request.method,
+        controller,
+      };
+      pendingBrowserLogin = entry;
+      try {
+        // Must invoke signInWithAccountOAuth synchronously before the first await so window.open isn't blocked.
+        await signInWithAccountOAuth(accountClient().auth, request.method, {
+          signal: controller.signal,
+          onAuthorizeUrl: (url) => {
+            if (pendingBrowserLogin === entry) entry.url = url;
+          },
+        });
+        accountGeneration++;
+        accountRequest = undefined;
+        await fetchDesktopAccount();
+      } finally {
+        if (pendingBrowserLogin === entry) pendingBrowserLogin = undefined;
+      }
+      return;
+    }
+    throw new Error("请使用 GitHub、Google 或邮箱密码直接完成登录");
+  }
   await desktopFetch("/desktop/login", {
     method: "POST",
     body: JSON.stringify(request),
@@ -330,6 +512,11 @@ export async function startDesktopLogin(request: DesktopSignInRequest = { method
 }
 
 export async function pollDesktopLoginState(): Promise<{ method: DesktopSignInMethod; url?: string } | undefined> {
+  if (!hasSidecarCapability()) {
+    return pendingBrowserLogin
+      ? { method: pendingBrowserLogin.method, url: pendingBrowserLogin.url }
+      : undefined;
+  }
   const { pending } = await desktopFetch<{ pending: { method: DesktopSignInMethod; url?: string } | null }>(
     "/desktop/login",
     { signal: AbortSignal.timeout(5_000) },
@@ -338,10 +525,22 @@ export async function pollDesktopLoginState(): Promise<{ method: DesktopSignInMe
 }
 
 export async function cancelDesktopLoginRequest(): Promise<void> {
+  if (!hasSidecarCapability()) {
+    pendingBrowserLogin?.controller.abort();
+    pendingBrowserLogin = undefined;
+    return;
+  }
   await desktopFetch("/desktop/login", { method: "DELETE" });
 }
 
 export async function logoutDesktopAccount(): Promise<void> {
+  if (!hasSidecarCapability()) {
+    await accountClient().auth.signOut({ scope: "local" });
+    accountGeneration++;
+    accountRequest = undefined;
+    updateCachedAccount({});
+    return;
+  }
   await desktopFetch("/desktop/logout", { method: "POST" });
   accountGeneration++;
   accountRequest = undefined;
@@ -361,11 +560,16 @@ export function resetDesktopStorageForTests(initialStorage: Record<string, unkno
   if (typeof localStorage !== "undefined") {
     for (let i = localStorage.length - 1; i >= 0; i--) {
       const k = localStorage.key(i);
-      if (k?.startsWith("linkshell.desktop.")) {
+      if (k?.startsWith("linkshell.desktop.") || k?.startsWith("linkshell.web.")) {
         localStorage.removeItem(k);
       }
     }
   }
+  pendingBrowserLogin?.controller.abort();
+  pendingBrowserLogin = undefined;
+  browserIdentityPromise = undefined;
+  subscribedWebClient = undefined;
+  resetWebAccountClientForTests();
   bootstrapState = {
     identity: fallbackIdentity ?? (fallbackIdentity = createIdentity()),
     storage: cloneJsonValue(initialStorage),

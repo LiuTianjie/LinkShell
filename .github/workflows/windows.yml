@@ -45,9 +45,9 @@ jobs:
       - if: matrix.arch == 'x64'
         run: pnpm --filter linkshell-cli exec vitest run test/desktop.test.ts test/desktop-update.test.ts test/desktop-workspace.test.ts test/daemon.test.ts test/auth.test.ts test/pro-membership.test.ts
       - if: matrix.arch == 'x64'
-        run: pnpm --filter @linkshell/web exec vitest run --maxWorkers=2
+        run: pnpm --filter @linkshell/desktop-ui exec vitest run --maxWorkers=2
       - if: matrix.arch == 'x64'
-        run: pnpm --filter @linkshell/web lint
+        run: pnpm --filter @linkshell/desktop-ui lint
       - if: matrix.arch == 'x64'
         run: pnpm --filter @linkshell/desktop test
       - run: pnpm --filter @linkshell/windows test

@@ -18,7 +18,6 @@ import {
   type GitInfo,
   type ProjectSummary,
   type WorktreeEntry,
-  type SessionNotice,
   type AcpAgentSettings,
   type AcpRemoteAgent,
   type PendingPermissionSummary,

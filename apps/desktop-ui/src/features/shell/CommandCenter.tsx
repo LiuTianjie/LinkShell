@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useStore } from "zustand";
 import {
   DESKTOP_LOCAL,
+  hasDesktopSidecar,
   isElectronRuntime,
   postDesktopMessage,
 } from "../../bridge/desktop-bridge";
@@ -396,7 +397,7 @@ export function CommandCenter({
         icon: "gateway-relay",
         run: () => setConnectModalOpen(true),
       },
-      ...(onOpenLocalPairingQr
+      ...(onOpenLocalPairingQr && (hasDesktopSidecar() || Boolean(localComputer))
         ? [
             {
               id: "pair-phone",
@@ -581,16 +582,31 @@ export function CommandCenter({
       settings: "desktop.manage.settings",
     };
 
-    for (const page of MANAGE_PAGES) {
-      const label = t(pageI18nMap[page]);
+    if (hasDesktopSidecar() || Boolean(localComputer)) {
+      for (const page of MANAGE_PAGES) {
+        const label = t(pageI18nMap[page]);
+        items.push({
+          id: `manage-${page}`,
+          group: groupSystem,
+          title: `${t("desktop.localManagement")} · ${label}`,
+          keywords: `manage host system 本机 管理 服务 ${page} ${label}`,
+          icon: MANAGE_PAGE_ICONS[page],
+          shortcut:
+            page === "settings"
+              ? formatShortcut(DESKTOP_SHORTCUTS.settings, activePlatform)
+              : undefined,
+          run: () => openSystemModal(page),
+        });
+      }
+    } else {
       items.push({
-        id: `manage-${page}`,
+        id: "manage-settings",
         group: groupSystem,
-        title: `${t("desktop.localManagement")} · ${label}`,
-        keywords: `manage host system 本机 管理 服务 ${page} ${label}`,
-        icon: MANAGE_PAGE_ICONS[page],
-        shortcut: page === "settings" ? formatShortcut(DESKTOP_SHORTCUTS.settings, activePlatform) : undefined,
-        run: () => openSystemModal(page),
+        title: t("desktop.shell.browserPreferences"),
+        keywords: "preferences settings language theme 偏好 设置 语言 主题",
+        icon: "settings",
+        shortcut: formatShortcut(DESKTOP_SHORTCUTS.settings, activePlatform),
+        run: () => openSystemModal("settings"),
       });
     }
 

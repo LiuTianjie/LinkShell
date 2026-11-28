@@ -9,7 +9,7 @@ import {
 } from "react";
 import { useStore } from "zustand";
 import type { SessionSummary } from "@linkshell/wire";
-import { DESKTOP_LOCAL, isElectronDesktop } from "../../bridge/desktop-bridge";
+import { DESKTOP_LOCAL, hasDesktopSidecar, isElectronDesktop } from "../../bridge/desktop-bridge";
 import {
   computerNames,
   computerSessionTrees,
@@ -741,6 +741,7 @@ export function Sidebar({
   const openScreen = useRouter((s) => s.openScreen);
   const openFusion = useRouter((s) => s.openFusion);
   const setCommandCenterOpen = useRouter((s) => s.setCommandCenterOpen);
+  const setConnectModalOpen = useRouter((s) => s.setConnectModalOpen);
   const handleToggleSidebar = onToggleSidebar ?? routerToggleSidebar;
 
   const computers = useStore(engine.state, (s) => s.computers);
@@ -910,9 +911,17 @@ export function Sidebar({
     next?.focus();
   };
 
-  const localUnavailable = !activeIsRemote && isLocalHostUnavailable(mgmt);
+  const emptyBrowser =
+    !activeComputer &&
+    !hasDesktopSidecar() &&
+    !mgmt.snapshot &&
+    !mgmt.starting &&
+    !mgmt.problem;
+  const localUnavailable = !emptyBrowser && !activeIsRemote && isLocalHostUnavailable(mgmt);
 
-  const emptyHint = localUnavailable ? (
+  const emptyHint = emptyBrowser ? (
+    <div className="sidebar-empty-hint">{t("desktop.shell.fleetEmpty")}</div>
+  ) : localUnavailable ? (
     <div className="sidebar-empty-hint" data-state="offline">
       {resolveLocalHostPhase(mgmt) === "stopped"
         ? t("desktop.fleet.localStoppedTitle")
@@ -975,7 +984,11 @@ export function Sidebar({
           type="button"
           className="desktop-new-session"
           onClick={() => {
-            onRequestNewSession(activeComputerKey);
+            if (emptyBrowser) {
+              setConnectModalOpen(true);
+            } else {
+              onRequestNewSession(activeComputerKey);
+            }
             onNavigateDone?.();
           }}
         >

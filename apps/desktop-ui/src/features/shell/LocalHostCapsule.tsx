@@ -1,4 +1,7 @@
+import { useStore } from "zustand";
+import { hasDesktopSidecar } from "../../bridge/desktop-bridge";
 import {
+  engine,
   newVersion,
   resolveLocalHostPhase,
   useI18n,
@@ -7,6 +10,7 @@ import {
 } from "../../core";
 import { DesktopIcon } from "../../icons";
 import { StatusDot } from "../../primitives";
+import { useConnectionStore } from "./shell-helpers";
 
 export interface LocalHostCapsuleProps {
   onActionDone?: () => void;
@@ -16,13 +20,41 @@ export function LocalHostCapsule({ onActionDone }: LocalHostCapsuleProps) {
   const { t } = useI18n();
   const mgmt = useManagement();
   const openSystemModal = useRouter((s) => s.openSystemModal);
+  const localComputer = useStore(engine.state, (s) => s.localComputer);
+  const activeConnection = useStore(engine.state, (s) => s.connection);
+  const relayStatus = useStore(engine.state, (s) => s.relayStatus);
+  const account = useStore(engine.state, (s) => s.account);
+  const linkStatus = useConnectionStore(activeConnection, (s) => s.status);
+
+  const pureBrowserMode =
+    !hasDesktopSidecar() &&
+    !localComputer &&
+    !mgmt.snapshot &&
+    !mgmt.starting &&
+    !mgmt.problem;
 
   const phase = resolveLocalHostPhase(mgmt);
-  const hasUpdate = newVersion(mgmt);
-  const keepAwakeOn = Boolean(mgmt.settings.keepAwake && mgmt.settings.keepAwake !== "off");
+  const hasUpdate = !pureBrowserMode && newVersion(mgmt);
+  const keepAwakeOn =
+    !pureBrowserMode &&
+    Boolean(mgmt.settings.keepAwake && mgmt.settings.keepAwake !== "off");
 
-  const statusTone =
-    phase === "starting" || mgmt.busy
+  const relayValues = Object.values(relayStatus);
+  const browserOnline =
+    linkStatus === "online" || relayValues.some((value) => value === "online");
+  const browserConnecting =
+    !browserOnline &&
+    (linkStatus === "connecting" ||
+      linkStatus === "reconnecting" ||
+      relayValues.some((value) => value === "connecting" || value === "reconnecting"));
+
+  const statusTone = pureBrowserMode
+    ? browserOnline
+      ? "online"
+      : browserConnecting
+        ? "waiting"
+        : "offline"
+    : phase === "starting" || mgmt.busy
       ? "waiting"
       : phase === "running"
         ? "online"
@@ -30,8 +62,13 @@ export function LocalHostCapsule({ onActionDone }: LocalHostCapsuleProps) {
           ? "offline"
           : "danger";
 
-  const statusWord =
-    phase === "running"
+  const statusWord = pureBrowserMode
+    ? browserOnline
+      ? (account ?? t("desktop.shell.online"))
+      : browserConnecting
+        ? t("desktop.manage.serviceConnecting")
+        : t("desktop.shell.offline")
+    : phase === "running"
       ? t("desktop.manage.serviceRunning")
       : phase === "starting"
         ? t("desktop.manage.serviceConnecting")
@@ -43,10 +80,12 @@ export function LocalHostCapsule({ onActionDone }: LocalHostCapsuleProps) {
     <footer className="desktop-sidebar-footer">
       <button
         type="button"
-        title={mgmt.problem || undefined}
+        title={pureBrowserMode ? undefined : mgmt.problem || undefined}
         className="sidebar-footer-settings-btn local-host-capsule__status"
         onClick={() => {
-          openSystemModal(hasUpdate ? "updates" : "overview");
+          openSystemModal(
+            pureBrowserMode ? "settings" : hasUpdate ? "updates" : "overview",
+          );
           onActionDone?.();
         }}
       >

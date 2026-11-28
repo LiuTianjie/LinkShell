@@ -108,19 +108,11 @@ function resourceName(uri: string): string {
   }
 }
 
-function blockedReason(props: ComposerProps, pick: (copy: LocalizedTriplet) => string): Blocked {
+export function blockedReason(
+  props: Pick<ComposerProps, "agent" | "online" | "connecting" | "agentInfo">,
+  pick: (copy: LocalizedTriplet) => string,
+): Blocked {
   const name = agentLook(props.agent).short;
-  if (!props.online) {
-    return props.connecting
-      ? {
-          title: pick({ zh: "正在连接电脑…", en: "Connecting to computer…", ja: "PC に接続中…" }),
-          detail: pick({ zh: "连接恢复后即可继续", en: "Resumes automatically when connected", ja: "接続が回復すると再開できます" }),
-        }
-      : {
-          title: pick({ zh: "电脑离线", en: "Computer offline", ja: "PC がオフライン" }),
-          detail: pick({ zh: "内容还能查看，电脑连上后才能继续", en: "History stays readable; reconnect to continue", ja: "履歴は閲覧可能です。再接続後に続行できます" }),
-        };
-  }
   const info = props.agentInfo;
   if (info && !info.installed) {
     return {
@@ -138,6 +130,14 @@ function blockedReason(props: ComposerProps, pick: (copy: LocalizedTriplet) => s
     return {
       title: pick({ zh: "这个 Agent 只有终端", en: "Terminal-only agent", ja: "ターミナル専用エージェント" }),
       detail: pick({ zh: "请在终端里输入", en: "Please type inside the terminal", ja: "ターミナルで入力してください" }),
+    };
+  }
+  if (!props.online) {
+    // Prompts sent while connecting persist to SQLite outbox and transmit automatically on `waitOnline`.
+    if (props.connecting) return null;
+    return {
+      title: pick({ zh: "电脑离线", en: "Computer offline", ja: "PC がオフライン" }),
+      detail: pick({ zh: "内容还能查看，电脑连上后才能继续", en: "History stays readable; reconnect to continue", ja: "履歴は閲覧可能です。再接続後に続行できます" }),
     };
   }
   return null;
@@ -642,7 +642,7 @@ export function Composer(props: ComposerProps) {
               <QueuePanel
                 contained
                 queue={props.queue}
-                disabled={inputDisabled}
+                disabled={!props.online || inputDisabled}
                 sendAction={queuedSendAction(props.agentInfo, turnActive, driver)}
                 status={
                   blocked?.title ??

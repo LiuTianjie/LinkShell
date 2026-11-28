@@ -43,4 +43,14 @@ describe("conversation activity feedback", () => {
     expect(turnActivity({ ...running, online: false, connecting: false })).toMatchObject({ label: "连接已断开，等待重连…", animated: false });
     expect(turnActivity({ ...input, ready: false, session: { ...session, state: "running" } })?.label).toBe("正在同步会话…");
   });
+
+  it("keeps idle cached sessions calm during the brief launch/resume settle window while surfacing optimistic sends", () => {
+    expect(turnActivity({ ...input, online: false, connecting: true, ready: false, settling: true })).toBeUndefined();
+    const progress = { clientMessageId: "optimistic-1", phase: "sending" as const, afterSeq: 0 };
+    expect(turnActivity({ ...input, online: false, connecting: true, ready: false, settling: true, progress })).toMatchObject({
+      label: "正在发送…",
+      animated: true,
+      tone: "active",
+    });
+  });
 });

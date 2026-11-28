@@ -83,6 +83,7 @@ export class RelayClient {
   private stableTimer?: ReturnType<typeof setTimeout>;
   private pinger?: ReturnType<typeof setInterval>;
   private probeTimer?: ReturnType<typeof setTimeout>;
+  private probeDeadline = 0;
   /** When the current socket last received anything. */
   private heardAt = 0;
   private heardSeq = 0;
@@ -188,15 +189,23 @@ export class RelayClient {
    * woke up): a connection that hears nothing within `timeoutMs` is dropped and made again.
    */
   probe(timeoutMs = 8000): void {
-    if (this.statusValue !== "online" || !this.socket || this.probeTimer) return;
+    if (this.statusValue !== "online" || !this.socket) return;
+    const deadline = Date.now() + timeoutMs;
+    if (this.probeTimer) {
+      if (deadline >= this.probeDeadline) return;
+      clearTimeout(this.probeTimer);
+      this.probeTimer = undefined;
+    }
     const socket = this.socket;
     const seen = this.heardSeq;
     if (!this.sendFrame({ t: "ping" })) {
       this.drop(socket, "网关没有响应");
       return;
     }
+    this.probeDeadline = deadline;
     this.probeTimer = setTimeout(() => {
       this.probeTimer = undefined;
+      this.probeDeadline = 0;
       if (this.socket === socket && this.heardSeq === seen) this.drop(socket, "网关没有响应");
     }, timeoutMs);
   }
@@ -525,6 +534,7 @@ export class RelayClient {
     this.pinger = undefined;
     clearTimeout(this.probeTimer);
     this.probeTimer = undefined;
+    this.probeDeadline = 0;
   }
 
   /**

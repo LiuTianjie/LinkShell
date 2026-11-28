@@ -108,6 +108,8 @@ export interface ClientActions {
   dismissNotice(sessionId: string, id: string): void;
   connect(): void;
   disconnect(): void;
+  /** Immediately writes any pending debounced state snapshot to `snapshotStorage`. */
+  flushSnapshot(): void;
   /** Gives the computer's access password while `status` is `locked`; throws when it's wrong. */
   unlock(password: string): Promise<void>;
   refresh(): Promise<void>;
@@ -223,6 +225,23 @@ export interface OutboxItem {
   createdAt: number;
 }
 
+export interface ClientSnapshot {
+  machine?: MachineInfo;
+  sessions: SessionSummary[];
+  sessionsNextBefore?: number;
+  sessionsNextBeforeId?: string;
+  projects: ProjectSummary[];
+  /** Cached session timelines ordered oldest -> newest so LRU order survives restarts. */
+  views: SessionView[];
+  savedAt: number;
+}
+
+export interface SnapshotStorage {
+  load(key: string): ClientSnapshot | undefined | null | Promise<ClientSnapshot | undefined | null>;
+  save(key: string, snapshot: ClientSnapshot): void;
+  clear?(key: string): void;
+}
+
 export interface ClientStoreOptions {
   sessionPreferences?: SessionPreferencesStore;
   /** Persists unsent or failed messages across app restarts, keyed by computer (`outboxKey` or link URL). */
@@ -232,6 +251,12 @@ export interface ClientStoreOptions {
   };
   /** Storage key passed to `outboxStorage` (defaults to `link.url` or `"default"`). */
   outboxKey?: string;
+  /** Persists sessions, projects, machine capabilities, and recent timelines for 0ms cold starts. */
+  snapshotStorage?: SnapshotStorage;
+  /** Storage key passed to `snapshotStorage` (defaults to `outboxKey` or `link.url` or `"default"`). */
+  snapshotKey?: string;
+  /** Trailing debounce for live snapshot saves in ms (default 1500). */
+  snapshotDebounceMs?: number;
   /** Generates client message ids; defaults to crypto.randomUUID when available. */
   newId?: () => string;
   /** The link was created with `lazyImages`: ask for history the same way. */
@@ -255,12 +280,31 @@ export function describeError(error: unknown): string {
   return String(error);
 }
 
+/** Strips unconfirmed/failed local user bubbles so `outboxStorage` stays their single source of truth. */
+function sanitizeViewForSnapshot(view: SessionView): SessionView {
+  const hasLocalUser = view.items.some(
+    (item) => item.kind === "user" && Boolean(item.pending || item.failed),
+  );
+  if (!hasLocalUser) return view;
+  const items = view.items.filter(
+    (item) => !(item.kind === "user" && Boolean(item.pending || item.failed)),
+  );
+  const index: Record<string, number> = {};
+  for (let i = 0; i < items.length; i += 1) index[items[i]!.id] = i;
+  return { ...view, items, index };
+}
+
 export function createClientStore(link: HostLink, options: ClientStoreOptions = {}): ClientStore {
   const newId = options.newId ?? defaultId;
   const outboxKey = options.outboxKey ?? (link as { url?: string }).url ?? "default";
+  const snapshotKey = options.snapshotKey ?? outboxKey;
+  const snapshotDebounceMs = Math.max(50, options.snapshotDebounceMs ?? 1500);
   const outboxCreatedAt = new Map<string, number>();
   const dismissedOutbox = new Set<string>();
   let suppressOutboxSave = false;
+  let suppressSnapshotSave = false;
+  let snapshotDirty = false;
+  let snapshotSaveTimer: ReturnType<typeof setTimeout> | undefined;
   let pending: SessionEvent[] = [];
   let flushTimer: ReturnType<typeof setTimeout> | undefined;
   let lastFlushAt = 0;
@@ -520,6 +564,8 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
   }
 
   const resolvedInteractions = new Set<string>();
+  let flushSnapshotNow = () => {};
+  let refreshInternal: (skipMachineInfo?: boolean) => Promise<void> = async () => {};
   const store = createStore<ClientState & ClientActions>()((set, get) => {
     const updateView = (sessionId: string, fn: (view: SessionView) => SessionView) =>
       set((state) => {
@@ -604,7 +650,12 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
       },
 
       disconnect() {
+        flushSnapshotNow();
         link.stop();
+      },
+
+      flushSnapshot() {
+        flushSnapshotNow();
       },
 
       unlock(password) {
@@ -612,50 +663,8 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
       },
       dismissNotice(sessionId, id) { set((state) => ({ notices: { ...state.notices, [sessionId]: (state.notices[sessionId] ?? []).filter((notice) => notice.id !== id) } })); },
 
-      async refresh() {
-        const machineAtStart = get().machine;
-        void link.call("agents.pending", {}).then(({ interactions }) => {
-          set((state) => {
-            const next = { ...state.interactions };
-            for (const { agent, request } of interactions) {
-              if (resolvedInteractions.has(`${agent}\n${request.requestId}`) || next[agent]?.some((pending) => pending.requestId === request.requestId)) continue;
-              next[agent] = [...(next[agent] ?? []), request];
-            }
-            return { interactions: next };
-          });
-        }).catch(() => {});
-        try {
-          const machinePromise = link.call("machine.info", {}).then((machine) => {
-            // A live metadata update may arrive while the slower session or project list is loading.
-            // Commit machine info as soon as it arrives without overwriting a newer machine.changed push.
-            set((state) => (state.machine === machineAtStart ? { machine } : {}));
-            return machine;
-          });
-          const [, list, projects] = await Promise.all([
-            machinePromise,
-            link.call("sessions.list", { limit: 200 }),
-            link.call("projects.list", { limit: 100 }),
-          ]);
-          set((state) => {
-            const sessions = { ...state.sessions };
-            // A complete list: anything live it doesn't mention was deleted meanwhile.
-            if (list.sessions.length < 200) {
-              const listed = new Set(list.sessions.map((session) => session.id));
-              for (const [id, session] of Object.entries(sessions)) if (!session.archived && !listed.has(id)) delete sessions[id];
-            }
-            for (const session of list.sessions) sessions[session.id] = session;
-            return {
-              sessions,
-              sessionsNextBefore: list.nextBefore,
-              sessionsNextBeforeId: list.nextBeforeId,
-              projects: projects.projects,
-              sessionsLoaded: true,
-              sessionsError: undefined,
-            };
-          });
-        } catch (error) {
-          set({ sessionsError: describeError(error) });
-        }
+      refresh() {
+        return refreshInternal(false);
       },
 
       openSession(sessionId) {
@@ -1099,6 +1108,200 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
     };
   });
 
+  refreshInternal = async (skipMachineInfo = false) => {
+    const machineAtStart = store.getState().machine;
+    void link.call("agents.pending", {}).then(({ interactions }) => {
+      store.setState((state) => {
+        const next = { ...state.interactions };
+        for (const { agent, request } of interactions) {
+          if (resolvedInteractions.has(`${agent}\n${request.requestId}`) || next[agent]?.some((pending) => pending.requestId === request.requestId)) continue;
+          next[agent] = [...(next[agent] ?? []), request];
+        }
+        return { interactions: next };
+      });
+    }).catch(() => {});
+    try {
+      const machinePromise = skipMachineInfo
+        ? Promise.resolve(undefined)
+        : link.call("machine.info", {}).then((machine) => {
+            // A live metadata update may arrive while the slower session or project list is loading.
+            // Commit machine info as soon as it arrives without overwriting a newer machine.changed push.
+            store.setState((state) => (state.machine === machineAtStart ? { machine } : {}));
+            return machine;
+          });
+      const [, list, projects] = await Promise.all([
+        machinePromise,
+        link.call("sessions.list", { limit: 200 }),
+        link.call("projects.list", { limit: 100 }),
+      ]);
+      store.setState((state) => {
+        const sessions = { ...state.sessions };
+        // A complete list: anything live it doesn't mention was deleted meanwhile.
+        if (list.sessions.length < 200) {
+          const listed = new Set(list.sessions.map((session) => session.id));
+          for (const [id, session] of Object.entries(sessions)) if (!session.archived && !listed.has(id)) delete sessions[id];
+        }
+        for (const session of list.sessions) sessions[session.id] = session;
+        return {
+          sessions,
+          sessionsNextBefore: list.nextBefore,
+          sessionsNextBeforeId: list.nextBeforeId,
+          projects: projects.projects,
+          sessionsLoaded: true,
+          sessionsError: undefined,
+        };
+      });
+    } catch (error) {
+      store.setState({ sessionsError: describeError(error) });
+    }
+  };
+
+  if (options.snapshotStorage) {
+    const storage = options.snapshotStorage;
+    const maxPersistedViews = Math.max(1, maxClosedViews || 12);
+    const buildSnapshot = (state: ClientState): ClientSnapshot | undefined => {
+      if (!state.sessionsLoaded || state.status === "locked" || state.machine?.locked) return undefined;
+      const sessions = Object.values(state.sessions)
+        .filter((s) => !s.archived)
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+        .slice(0, 200);
+      const orderedIds: string[] = [];
+      const seenIds = new Set<string>();
+      for (const id of closedViews) {
+        if (!state.open[id] && !seenIds.has(id)) {
+          seenIds.add(id);
+          orderedIds.push(id);
+        }
+      }
+      for (const id of Object.keys(state.open)) {
+        if (!seenIds.has(id)) {
+          seenIds.add(id);
+          orderedIds.push(id);
+        }
+      }
+      const views: SessionView[] = [];
+      for (const id of orderedIds) {
+        const view = state.views[id];
+        if (!view) continue;
+        const clean = sanitizeViewForSnapshot(view);
+        if (clean.lastSeq > 0 || clean.items.length > 0) views.push(clean);
+      }
+      return {
+        ...(state.machine && !state.machine.locked ? { machine: state.machine } : {}),
+        sessions,
+        ...(state.sessionsNextBefore !== undefined ? { sessionsNextBefore: state.sessionsNextBefore } : {}),
+        ...(state.sessionsNextBeforeId !== undefined ? { sessionsNextBeforeId: state.sessionsNextBeforeId } : {}),
+        projects: state.projects.slice(0, 100),
+        views: views.slice(-maxPersistedViews),
+        savedAt: Date.now(),
+      };
+    };
+
+    flushSnapshotNow = () => {
+      if (snapshotSaveTimer) {
+        clearTimeout(snapshotSaveTimer);
+        snapshotSaveTimer = undefined;
+      }
+      if (!snapshotDirty) return;
+      snapshotDirty = false;
+      const snap = buildSnapshot(store.getState());
+      if (!snap) return;
+      try {
+        storage.save(snapshotKey, snap);
+      } catch {
+        // Snapshot errors must never interrupt UI or session traffic.
+      }
+    };
+
+    store.subscribe((state, previous) => {
+      if (suppressSnapshotSave) return;
+      if (state.status === "locked" || state.machine?.locked) return;
+      if (!state.sessionsLoaded) return;
+      if (
+        state.sessions === previous.sessions &&
+        state.projects === previous.projects &&
+        state.views === previous.views &&
+        state.machine === previous.machine &&
+        state.sessionsLoaded === previous.sessionsLoaded
+      ) {
+        return;
+      }
+      snapshotDirty = true;
+      snapshotSaveTimer ??= setTimeout(flushSnapshotNow, snapshotDebounceMs);
+    });
+
+    const hydrateSnapshot = (snap: ClientSnapshot | undefined | null) => {
+      if (!snap || typeof snap !== "object") return;
+      const nowState = store.getState();
+      if (nowState.status === "locked" || nowState.sessionsLoaded) return;
+      suppressSnapshotSave = true;
+      try {
+        store.setState((state) => {
+          if (state.status === "locked" || state.sessionsLoaded) return state;
+          const sessions: Record<string, SessionSummary> = { ...state.sessions };
+          for (const session of Array.isArray(snap.sessions) ? snap.sessions : []) {
+            if (!session?.id) continue;
+            if (!sessions[session.id] || sessions[session.id]!.updatedAt <= session.updatedAt) {
+              sessions[session.id] = session;
+            }
+          }
+          const views: Record<string, SessionView> = { ...state.views };
+          for (const rawView of Array.isArray(snap.views) ? snap.views : []) {
+            if (!rawView?.sessionId || !Array.isArray(rawView.items)) continue;
+            const clean = sanitizeViewForSnapshot(rawView);
+            const existing = views[clean.sessionId];
+            if (existing && existing.lastSeq > clean.lastSeq) continue;
+            // Preserve any unsent local outbox bubbles that hydrated ahead of an async snapshot load.
+            let merged = clean;
+            if (existing) {
+              for (const item of existing.items) {
+                if (item.kind === "user" && (item.pending || item.failed) && merged.index[item.id] === undefined) {
+                  const items = [...merged.items, item];
+                  merged = { ...merged, items, index: { ...merged.index, [item.id]: items.length - 1 } };
+                }
+              }
+            }
+            views[clean.sessionId] = merged;
+            if (!state.open[clean.sessionId]) {
+              closedViews.delete(clean.sessionId);
+              closedViews.add(clean.sessionId);
+            }
+          }
+          while (closedViews.size > maxClosedViews) {
+            const oldest = closedViews.values().next().value as string | undefined;
+            if (!oldest) break;
+            closedViews.delete(oldest);
+            if (!state.open[oldest]) delete views[oldest];
+          }
+          const machine = state.machine ?? (snap.machine && !snap.machine.locked ? snap.machine : undefined);
+          const projects = state.projects.length > 0 ? state.projects : Array.isArray(snap.projects) ? snap.projects : [];
+          return {
+            ...(machine ? { machine } : {}),
+            sessions,
+            sessionsNextBefore: snap.sessionsNextBefore,
+            sessionsNextBeforeId: snap.sessionsNextBeforeId,
+            projects,
+            views,
+            sessionsLoaded: true,
+          };
+        });
+      } finally {
+        suppressSnapshotSave = false;
+      }
+    };
+
+    try {
+      const loaded = storage.load(snapshotKey);
+      if (loaded && typeof (loaded as Promise<ClientSnapshot | undefined | null>).then === "function") {
+        void (loaded as Promise<ClientSnapshot | undefined | null>).then(hydrateSnapshot, () => {});
+      } else {
+        hydrateSnapshot(loaded as ClientSnapshot | undefined | null);
+      }
+    } catch {
+      // Ignore corrupt snapshot storage on startup.
+    }
+  }
+
   if (options.outboxStorage) {
     const storage = options.outboxStorage;
     store.subscribe((state, previous) => {
@@ -1166,6 +1369,43 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
       replaying.clear();
       earlierRequests.clear();
       resolvedInteractions.clear();
+    }
+    if (status === "locked") {
+      if (snapshotSaveTimer) {
+        clearTimeout(snapshotSaveTimer);
+        snapshotSaveTimer = undefined;
+      }
+      snapshotDirty = false;
+      closedViews.clear();
+      try {
+        options.snapshotStorage?.clear?.(snapshotKey);
+      } catch {
+        // Ignore storage errors while enforcing locked state.
+      }
+      store.setState({
+        status,
+        statusDetail: detail || undefined,
+        machine: undefined,
+        sessions: {},
+        sessionsLoaded: false,
+        sessionsError: undefined,
+        sessionsNextBefore: undefined,
+        sessionsNextBeforeId: undefined,
+        archivedNextBefore: undefined,
+        archivedNextBeforeId: undefined,
+        projects: [],
+        views: {},
+        notices: {},
+        interactions: {},
+        ready: {},
+        loadingEarlier: {},
+        subagents: {},
+        workflows: {},
+        tasks: {},
+        subagentViews: {},
+        sides: {},
+      });
+      return;
     }
     store.setState({ status, statusDetail: detail || undefined, ...(status !== "online" ? { notices: {}, interactions: {}, ready: {}, loadingEarlier: {} } : {}) });
   });
@@ -1292,8 +1532,13 @@ export function createClientStore(link: HostLink, options: ClientStoreOptions = 
   link.onRestored((summary) => subscribed(summary, true));
   // Refresh the list after every (re)connect. A message sent while offline waits up to 30 s for
   // the link (`call`); one that failed after that stays failed, with its retry button.
-  link.onOnline(() => {
-    void store.getState().refresh();
+  link.onOnline((machine) => {
+    if (machine && !machine.locked) {
+      store.setState({ machine });
+      void refreshInternal(true);
+    } else {
+      void store.getState().refresh();
+    }
   });
 
   return store;

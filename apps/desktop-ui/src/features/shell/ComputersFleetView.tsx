@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useStore } from "zustand";
-import { DESKTOP_LOCAL } from "../../bridge/desktop-bridge";
+import { DESKTOP_LOCAL, hasDesktopSidecar } from "../../bridge/desktop-bridge";
 import {
   canUseFusionMode,
   computerNames,
@@ -449,6 +449,7 @@ export function ComputersFleetView({
   const computers = useStore(engine.state, (s) => s.computers);
   const localComputer = useStore(engine.state, (s) => s.localComputer);
   const activeConnection = useStore(engine.state, (s) => s.connection);
+  const gatewayUrl = useStore(engine.state, (s) => s.gateway);
   const [refreshing, setRefreshing] = useState(false);
 
   const allComputers =
@@ -456,15 +457,27 @@ export function ComputersFleetView({
   const activeKey = activeConnection?.computer.key ?? DESKTOP_LOCAL;
   const onlineCount = allComputers.filter((c) => c.machine.online).length;
 
+  const pureBrowserMode =
+    !hasDesktopSidecar() &&
+    !localComputer &&
+    !mgmt.snapshot &&
+    !mgmt.starting &&
+    !mgmt.problem;
+
   const isLocalHealthy = healthy(mgmt);
   const gatewayTitle = t("desktop.shell.gateway");
-  const subtitle = `${t("desktop.shell.localService")} ${serviceLabel(
-    mgmt.snapshot,
-    mgmt.problem,
-  )} · ${gatewayTitle} ${gatewayLabel(mgmt.snapshot, isLocalHealthy)} · ${t(
-    "desktop.shell.onlineCount",
-    { online: onlineCount, total: allComputers.length },
-  )}`;
+  const subtitle = pureBrowserMode
+    ? `${gatewayTitle} ${gatewayUrl} · ${t("desktop.shell.onlineCount", {
+        online: onlineCount,
+        total: allComputers.length,
+      })}`
+    : `${t("desktop.shell.localService")} ${serviceLabel(
+        mgmt.snapshot,
+        mgmt.problem,
+      )} · ${gatewayTitle} ${gatewayLabel(mgmt.snapshot, isLocalHealthy)} · ${t(
+        "desktop.shell.onlineCount",
+        { online: onlineCount, total: allComputers.length },
+      )}`;
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -497,7 +510,7 @@ export function ComputersFleetView({
               {t("desktop.shell.refresh")}
             </Button>
 
-            {onOpenLocalPairingQr ? (
+            {onOpenLocalPairingQr && !pureBrowserMode ? (
               <Button
                 size="md"
                 variant="secondary"

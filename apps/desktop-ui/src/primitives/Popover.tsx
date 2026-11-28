@@ -14,7 +14,7 @@ import {
   type ReactNode,
 } from "react";
 import { registerOverlayOpen } from "../bridge/top-layer-registry";
-import { cn, mergeRefs, toCssAnchorName } from "./utils";
+import { cn, mergeRefs, toCssAnchorName, useAnchorPositionFallback } from "./utils";
 
 export type PopoverPlacement =
   | "bottom-start"
@@ -208,6 +208,13 @@ export function PopoverContent({
   if (!ctx) {
     throw new Error("<PopoverContent> must be used inside <Popover>");
   }
+  const fallbackAnchorStyle = useAnchorPositionFallback(
+    ctx.open,
+    ctx.triggerRef,
+    ctx.contentRef,
+    placement,
+    { matchTriggerWidth },
+  );
 
   return (
     <div
@@ -221,6 +228,7 @@ export function PopoverContent({
       style={
         {
           positionAnchor: ctx.anchorName,
+          ...fallbackAnchorStyle,
           ...style,
         } as React.CSSProperties
       }

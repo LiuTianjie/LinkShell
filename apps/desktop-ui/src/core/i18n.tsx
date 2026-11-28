@@ -386,6 +386,10 @@ const desktopZh = {
   "desktop.shell.hoursAgo": "{count}小时前",
   "desktop.shell.daysAgo": "{count}天前",
   "desktop.shell.sessionNotFound": "会话已不存在",
+  "desktop.shell.tabLockedTitle": "已在其他标签页打开工作台",
+  "desktop.shell.tabLockedDesc": "同一浏览器中的设备身份同时保持一条网关连接。你可以在此标签页接管当前连接。",
+  "desktop.shell.tabClaimAction": "在此标签页使用",
+  "desktop.shell.browserPreferences": "偏好设置",
 } as const;
 
 export type DesktopI18nKey = keyof typeof desktopZh;
@@ -721,6 +725,10 @@ const desktopEn: Record<DesktopI18nKey, string> = {
   "desktop.shell.hoursAgo": "{count}h",
   "desktop.shell.daysAgo": "{count}d",
   "desktop.shell.sessionNotFound": "This session no longer exists",
+  "desktop.shell.tabLockedTitle": "Workspace open in another tab",
+  "desktop.shell.tabLockedDesc": "One browser identity maintains a single gateway connection at a time. Claim the connection in this tab to continue here.",
+  "desktop.shell.tabClaimAction": "Use in This Tab",
+  "desktop.shell.browserPreferences": "Preferences",
 };
 
 const desktopJa: Record<DesktopI18nKey, string> = {
@@ -1053,6 +1061,10 @@ const desktopJa: Record<DesktopI18nKey, string> = {
   "desktop.shell.hoursAgo": "{count}時間前",
   "desktop.shell.daysAgo": "{count}日前",
   "desktop.shell.sessionNotFound": "このセッションは存在しません",
+  "desktop.shell.tabLockedTitle": "別のタブでワークスペースが開かれています",
+  "desktop.shell.tabLockedDesc": "同一ブラウザのデバイス ID は同時に 1 つのゲートウェイ接続を維持します。このタブで引き継いで続行できます。",
+  "desktop.shell.tabClaimAction": "このタブで使用",
+  "desktop.shell.browserPreferences": "環境設定",
 };
 
 export const DESKTOP_DICTIONARIES: Record<Locale, Record<DesktopI18nKey, string>> = {

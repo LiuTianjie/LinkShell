@@ -192,14 +192,14 @@ export async function runDesktop(version: string, action: string, input: AsyncIt
     else if (action === "startup") {
       // Combine update recovery, stopped-host auto-start and initial snapshot into one process spawn.
       try { await recoverDesktopUpdate(version); }
-      catch (error) { throw new Error(`服务恢复需要处理：${error instanceof Error ? error.message : String(error)}`); }
+      catch (error) { throw new Error(`服务恢复需要处理：${error instanceof Error ? error.message : String(error)}`, { cause: error }); }
       const current = await desktopSnapshot(version, { includeSessions: false });
       if (current.status !== "stopped") {
         process.stdout.write(`${JSON.stringify(current)}\n`);
         return;
       }
       try { await ensureHostRunning(); }
-      catch (error) { throw new Error(`后台服务启动失败：${error instanceof Error ? error.message : String(error)}`); }
+      catch (error) { throw new Error(`后台服务启动失败：${error instanceof Error ? error.message : String(error)}`, { cause: error }); }
       process.stdout.write(`${JSON.stringify(await desktopSnapshot(version, { includeSessions: false }))}\n`);
       return;
     }

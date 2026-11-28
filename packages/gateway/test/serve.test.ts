@@ -104,6 +104,10 @@ describe("startGateway", () => {
     writeFileSync(join(dir, "assets", "index-abc.js"), "console.log('web')");
     const { http, ws } = await gateway({ web: { directory: dir }, verifyToken: undefined });
     expect(await (await fetch(http)).text()).toBe("<html>LinkShell</html>");
+    const oauthCallback = await fetch(http + "/linkshell/callback?code=pkce-test");
+    expect(oauthCallback.status).toBe(200);
+    expect(oauthCallback.headers.get("cache-control")).toBe("no-store");
+    expect(await oauthCallback.text()).toBe("<html>LinkShell</html>");
     const config = await fetch(http + "/config.js");
     expect(config.headers.get("cache-control")).toBe("no-store");
     expect(await config.text()).toContain('"deployment":"self-hosted"');

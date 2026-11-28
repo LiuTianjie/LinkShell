@@ -1290,7 +1290,7 @@ describe("mobile remote-desktop touch gestures", () => {
     // Natural 12px thumb resting drift must not cancel long-press.
     touch.advance(200);
     touch.move(310, 206);
-    touch.advance(300);
+    touch.advance(320);
     touch.up(310, 206);
 
     const { events, haptics } = touch.state();
@@ -1298,93 +1298,115 @@ describe("mobile remote-desktop touch gestures", () => {
     expect(haptics).toEqual(["medium"]);
   });
 
-  it("recognizes tap-to-focus then tap-and-move as a left-button drag without misfiring double-click", () => {
-    // Even after a natural 600ms pause between selecting a window and dragging it.
-    for (const gap of [180, 600]) {
-      for (const mode of ["touch", "trackpad"] as const) {
-        const touch = viewerTouch({ mode, zoom: mode === "touch" ? 2 : 1 });
-        // Tap 1: select/focus the window.
-        touch.down(400, 120);
-        touch.advance(60);
-        touch.up(400, 120);
-        // Pause, then Tap 2 + move without lifting.
-        touch.advance(gap);
-        touch.down(404, 122);
-        touch.advance(50);
-        touch.move(430, 140);
-        expect(touch.state().pressed).toBe(true);
-        touch.advance(50);
-        touch.move(520, 180);
-        touch.up(520, 180);
+  it("engages left-button drag ONLY on crisp double-tap-and-slide (< 260ms, < 28px), never on normal tap-then-move or stationary hold", () => {
+    for (const mode of ["touch", "trackpad"] as const) {
+      // 1. Intentional quick double-tap-and-slide (160ms gap, 4px apart, immediate slide) -> drags cleanly.
+      const drag = viewerTouch({ mode, zoom: mode === "touch" ? 2 : 1 });
+      drag.down(400, 120);
+      drag.advance(60);
+      drag.up(400, 120);
+      drag.advance(160);
+      drag.down(404, 122);
+      drag.advance(50);
+      drag.move(430, 140);
+      expect(drag.state().pressed).toBe(true);
+      drag.advance(50);
+      drag.move(520, 180);
+      drag.up(520, 180);
+      expect(drag.state().pressed).toBe(false);
+      expect(drag.state().events.some((e) => e.n === 2)).toBe(false);
+      expect(drag.state().events.map((e) => `${e.t}:${e.b}:${e.n ?? 1}`)).toEqual([
+        "down:left:1", "up:left:1",
+        "down:left:1", "up:left:1",
+      ]);
 
-        const { events, pressed } = touch.state();
-        expect(pressed).toBe(false);
-        // Must NEVER emit n:2 double-click!
-        expect(events.some((e) => e.n === 2)).toBe(false);
-        expect(events.map((e) => `${e.t}:${e.b}:${e.n ?? 1}`)).toEqual([
-          "down:left:1", "up:left:1",
-          "down:left:1", "up:left:1",
-        ]);
-      }
+      // 2. Normal tap-to-click followed 320ms later by moving cursor/panning -> MUST NOT drag!
+      const afterPause = viewerTouch({ mode, zoom: mode === "touch" ? 2 : 1 });
+      afterPause.down(400, 120);
+      afterPause.advance(60);
+      afterPause.up(400, 120);
+      afterPause.advance(320);
+      afterPause.down(404, 122);
+      afterPause.advance(40);
+      afterPause.move(460, 160);
+      expect(afterPause.state().pressed).toBe(false);
+      afterPause.up(460, 160);
+      expect(afterPause.state().events.map((e) => `${e.t}:${e.b}:${e.n ?? 1}`)).toEqual([
+        "down:left:1", "up:left:1",
+      ]);
+
+      // 3. Quick tap followed 150ms later by touching 40px away to move cursor -> MUST NOT drag!
+      const farMove = viewerTouch({ mode, zoom: mode === "touch" ? 2 : 1 });
+      farMove.down(400, 120);
+      farMove.advance(60);
+      farMove.up(400, 120);
+      farMove.advance(150);
+      farMove.down(440, 120);
+      farMove.advance(40);
+      farMove.move(500, 160);
+      expect(farMove.state().pressed).toBe(false);
+      farMove.up(500, 160);
+      expect(farMove.state().events.map((e) => `${e.t}:${e.b}:${e.n ?? 1}`)).toEqual([
+        "down:left:1", "up:left:1",
+      ]);
+
+      // 4. Quick tap followed 150ms later by resting finger stationary -> MUST NOT auto-fire drag on a timer!
+      const stationarySecond = viewerTouch({ mode, zoom: mode === "touch" ? 2 : 1 });
+      stationarySecond.down(300, 100);
+      stationarySecond.advance(50);
+      stationarySecond.up(300, 100);
+      stationarySecond.advance(150);
+      stationarySecond.down(302, 101);
+      stationarySecond.advance(380);
+      expect(stationarySecond.state().pressed).toBe(false);
+      stationarySecond.up(302, 101);
+      expect(stationarySecond.state().events.map((e) => `${e.t}:${e.b}:${e.n ?? 1}`)).toEqual([
+        "down:left:1", "up:left:1",
+      ]);
     }
   });
 
-  it("locks left-button drag on tap-then-hold without turning into a double-click on lift or delayed move", () => {
-    const touch = viewerTouch({ mode: "touch", zoom: 2 });
-    // Tap 1
-    touch.down(300, 100);
-    touch.advance(50);
-    touch.up(300, 100);
-    // Tap 2 within 160ms, hold stationary 260ms, then slide and lift
-    touch.advance(160);
-    touch.down(302, 101);
-    touch.advance(260);
-    expect(touch.state().pressed).toBe(true);
-    touch.move(420, 160);
-    touch.up(420, 160);
-
-    const { events, haptics } = touch.state();
-    expect(events.some((e) => e.n === 2)).toBe(false);
-    expect(events.map((e) => `${e.t}:${e.b}:${e.n ?? 1}`)).toEqual([
-      "down:left:1", "up:left:1",
-      "down:left:1", "up:left:1",
-    ]);
-    expect(haptics).toEqual(["light"]);
-  });
-
-  it("avoids Windows OS double-click collision when dragging a titlebar right after a focus tap", () => {
+  it("avoids Windows OS double-click collision when double-tap-dragging a titlebar", () => {
     const touch = viewerTouch({ mode: "touch", zoom: 1, windowsHost: true });
     touch.down(400, 100);
     touch.advance(50);
     touch.up(400, 100);
-    // 180ms later, press on same pixel and slide 15px right.
-    touch.advance(180);
+    // 160ms later, press on same pixel and slide 20px right.
+    touch.advance(160);
     touch.down(400, 100);
     touch.advance(30);
-    touch.move(415, 100);
+    touch.move(420, 100);
     touch.up(480, 100);
 
     const { events } = touch.state();
     const secondDown = events.filter((e) => e.t === "down")[1] as { at: { x: number; y: number } };
-    expect(Math.hypot(secondDown.at.x - 400, secondDown.at.y - 100)).toBeGreaterThanOrEqual(10);
+    expect(Math.hypot(secondDown.at.x - 400, secondDown.at.y - 100)).toBeGreaterThanOrEqual(8);
   });
 
-  it("supports direct single-finger drag in unzoomed touch mode and pans when zoomed in", () => {
-    const unzoomed = viewerTouch({ mode: "touch", zoom: 1 });
-    unzoomed.down(200, 150);
-    unzoomed.advance(40);
-    unzoomed.move(260, 180);
-    expect(unzoomed.state().pressed).toBe(true);
-    unzoomed.up(260, 180);
-    expect(unzoomed.state().events.map((e) => `${e.t}:${e.b}`)).toEqual(["down:left", "up:left"]);
+  it("pans cleanly on single-finger slide in touch mode without accidental desktop drag", () => {
+    for (const zoom of [1, 2]) {
+      const touch = viewerTouch({ mode: "touch", zoom });
+      touch.down(200, 150);
+      touch.advance(40);
+      touch.move(260, 180);
+      expect(touch.state().pressed).toBe(false);
+      touch.up(260, 180);
+      expect(touch.state().events).toEqual([]);
+      expect(touch.state().pans.length).toBeGreaterThan(0);
+    }
+  });
 
-    const zoomed = viewerTouch({ mode: "touch", zoom: 2 });
-    zoomed.down(200, 150);
-    zoomed.advance(40);
-    zoomed.move(260, 180);
-    zoomed.up(260, 180);
-    expect(zoomed.state().events).toEqual([]);
-    expect(zoomed.state().pans.length).toBeGreaterThan(0);
+  it("subtracts slop deadzone so trackpad cursor starts smoothly without jumping", () => {
+    const tp = viewerTouch({ mode: "trackpad", zoom: 1 });
+    tp.down(200, 200);
+    tp.advance(16);
+    // Crossing 10px slop at 12px should move by ~2px, not jump all 12px at once.
+    tp.move(212, 200);
+    const firstMove = tp.state().moves[0] as { dx: number; dy: number };
+    expect(firstMove.dx).toBeCloseTo(2, 3);
+    expect(firstMove.dy).toBeCloseTo(0, 3);
+    tp.up(212, 200);
+    expect(tp.state().events).toEqual([]);
   });
 
   it("preserves genuine quick double-tap click, two-finger tap right-click, and view-mode double-tap zoom", () => {

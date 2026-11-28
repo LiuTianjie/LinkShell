@@ -115,7 +115,7 @@ test('disabling sharing stops an idle input helper without waiting for another e
 });
 
 test('elevated screen service installs, starts as LocalSystem, reports running status, and uninstalls cleanly when admin', { skip: !supported, timeout: 30_000 }, (context) => {
-  let sid = '';
+  let sid;
   try {
     const out = execFileSync('whoami.exe', ['/user', '/fo', 'csv', '/nh'], { windowsHide: true, encoding: 'utf8', stdio: 'pipe' });
     sid = /"(S-1-[0-9-]+)"/.exec(out)?.[1] ?? '';

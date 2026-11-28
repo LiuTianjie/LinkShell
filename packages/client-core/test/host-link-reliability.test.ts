@@ -315,4 +315,38 @@ describe("HostLink reliability", () => {
     expect(sockets).toHaveLength(2);
     expect(link.status).toBe("connecting");
   });
+
+  it("lets callers opt out of automatic reconnect in probe({ reconnect: false }) and passes MachineInfo to onOnline", async () => {
+    vi.useFakeTimers();
+    const sockets: MockSocket[] = [];
+    const link = new HostLink({
+      url: "ws://host-opt-out",
+      heartbeatMs: 0,
+      createSocket: () => {
+        const socket = new MockSocket();
+        sockets.push(socket);
+        return socket;
+      },
+    });
+    links.push(link);
+
+    const onlineInfos: unknown[] = [];
+    link.onOnline((info) => onlineInfos.push(info));
+    link.start();
+    sockets[0]!.open();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(link.status).toBe("online");
+    expect(onlineInfos).toEqual([
+      { machineId: "host", hostname: "Mac", platform: "darwin", hostVersion: "test", agents: [] },
+    ]);
+
+    sockets[0]!.autoMachineInfo = false;
+    const probeRes = link.probe(1500, { reconnect: false });
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(await probeRes).toBe(false);
+    // Still on socket 0 until caller resets upstream relays and invokes reconnectNow(true).
+    expect(sockets).toHaveLength(1);
+    link.reconnectNow(true);
+    expect(sockets).toHaveLength(2);
+  });
 });

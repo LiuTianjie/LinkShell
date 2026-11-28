@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useStore } from "zustand";
-import { DESKTOP_LOCAL } from "../../bridge/desktop-bridge";
+import { DESKTOP_LOCAL, hasDesktopSidecar } from "../../bridge/desktop-bridge";
 import {
   computerNames,
   connectAndStartComputerFusion,
@@ -10,6 +10,7 @@ import {
   fusionStore,
   useActiveDesktopPlatform,
   useI18n,
+  useManagement,
   useRouter,
   type Computer,
 } from "../../core";
@@ -58,11 +59,22 @@ export function ComputerSwitcher({
   const setConnectModalOpen = useRouter((s) => s.setConnectModalOpen);
 
   const linkStatus = useConnectionStore(activeConnection, (s) => s.status);
+  const mgmt = useManagement();
   const activeComputer: Computer | undefined =
     activeConnection?.computer ?? localComputer ?? computers[0];
+  const emptyBrowser =
+    !activeComputer &&
+    !hasDesktopSidecar() &&
+    !mgmt.snapshot &&
+    !mgmt.starting &&
+    !mgmt.problem;
 
-  const activeName = displayComputerName(activeComputer, names, locale);
-  const activeRouteTag = connectionRouteBadge(activeComputer, undefined, locale);
+  const activeName = emptyBrowser
+    ? t("desktop.fleet.connectComputer")
+    : displayComputerName(activeComputer, names, locale);
+  const activeRouteTag = emptyBrowser
+    ? null
+    : connectionRouteBadge(activeComputer, undefined, locale);
 
   const dotTone = locked || linkStatus === "locked"
     ? "waiting"
@@ -108,13 +120,19 @@ export function ComputerSwitcher({
           >
             <span className="computer-switcher-trigger__icon" aria-hidden="true">
               <DesktopIcon
-                name={computerPlatformIcon(activeComputer?.machine.platform)}
+                name={
+                  emptyBrowser
+                    ? "gateway-relay"
+                    : computerPlatformIcon(activeComputer?.machine.platform)
+                }
                 size="sm"
               />
               <StatusDot tone={dotTone} size="sm" className="computer-switcher-trigger__dot" />
             </span>
             <span className="computer-switcher-trigger__name">{activeName}</span>
-            <span className="computer-switcher-trigger__route">{activeRouteTag.label}</span>
+            {activeRouteTag ? (
+              <span className="computer-switcher-trigger__route">{activeRouteTag.label}</span>
+            ) : null}
             <span className="computer-switcher-trigger__chevron" aria-hidden="true">
               <DesktopIcon name="chevrons-up-down" size="xs" />
             </span>

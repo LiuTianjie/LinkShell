@@ -14,7 +14,9 @@ export interface WebOptions {
 const types: Record<string, string> = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png",
-  ".ico": "image/x-icon", ".woff2": "font/woff2", ".json": "application/json",
+  ".ico": "image/x-icon", ".woff2": "font/woff2", ".woff": "font/woff",
+  ".ttf": "font/ttf", ".webp": "image/webp", ".wasm": "application/wasm",
+  ".json": "application/json",
 };
 
 export function webHandler(options: WebOptions = {}) {
@@ -41,11 +43,13 @@ export function webHandler(options: WebOptions = {}) {
       };
       body = `window.__LINKSHELL_CONFIG__ = ${JSON.stringify(config).replaceAll("<", "\\u003c")};\n`;
     } else {
-      body = assets.get(path === "/" ? "/index.html" : path);
+      const assetPath = path === "/" || path === "/linkshell/callback" ? "/index.html" : path;
+      body = assets.get(assetPath);
     }
     if (body === undefined) return false;
+    const resolvedPath = path === "/" || path === "/linkshell/callback" ? "/index.html" : path;
     response.writeHead(200, {
-      "content-type": types[extname(path === "/" ? "/index.html" : path)] ?? "application/octet-stream",
+      "content-type": types[extname(resolvedPath)] ?? "application/octet-stream",
       "content-length": Buffer.byteLength(body),
       "cache-control": path.startsWith("/assets/") ? "public, max-age=31536000, immutable" : "no-store",
       "x-content-type-options": "nosniff",

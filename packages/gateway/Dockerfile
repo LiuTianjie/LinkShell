@@ -11,15 +11,15 @@ COPY patches/ patches/
 COPY packages/wire/package.json packages/wire/
 COPY packages/gateway/package.json packages/gateway/
 COPY packages/client-core/package.json packages/client-core/
-COPY apps/web/package.json apps/web/
+COPY apps/desktop-ui/package.json apps/desktop-ui/
 
-RUN pnpm install --frozen-lockfile --filter @linkshell/gateway --filter @linkshell/wire --filter @linkshell/client-core --filter @linkshell/web
+RUN pnpm install --frozen-lockfile --filter @linkshell/gateway --filter @linkshell/wire --filter @linkshell/client-core --filter @linkshell/desktop-ui
 
 COPY packages/wire/ packages/wire/
 COPY packages/gateway/ packages/gateway/
 COPY tsconfig.base.json ./
 COPY packages/client-core/ packages/client-core/
-COPY apps/web/ apps/web/
+COPY apps/desktop-ui/ apps/desktop-ui/
 COPY apps/client/src/ apps/client/src/
 COPY apps/client/assets/ apps/client/assets/
 
@@ -29,7 +29,7 @@ RUN pnpm --filter @linkshell/wire build \
   && pnpm --filter @linkshell/gateway build:web
 
 # The browser is now static. Limit runtime dependency resolution to the relay workspace.
-RUN rm apps/web/package.json packages/client-core/package.json \
+RUN rm apps/desktop-ui/package.json packages/client-core/package.json \
   && pnpm --filter @linkshell/gateway deploy --legacy --prod --config.allow-unused-patches=true /app/pruned
 
 # ── Runtime ──────────────────────────────────────────────────────────

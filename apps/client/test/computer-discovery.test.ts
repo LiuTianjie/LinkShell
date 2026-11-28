@@ -199,7 +199,7 @@ it("lets go of a gateway that a failed pairing opened, and keeps one a computer 
 });
 
 it("cleans up state.live and stops unused custom gateway relays when removing a paired computer", async () => {
-  const { listComputers, relayKey, useComputers } = await import("../src/lib/computers");
+  const { listComputers, useComputers } = await import("../src/lib/computers");
   const gateway = "wss://selfhost.example.com";
   const pairedMachine = { ...machine, id: "paired-clean", via: "paired" as const };
   const key = useComputers.getState().addPaired(gateway, pairedMachine);
@@ -252,4 +252,44 @@ it("waits for an account-only saved selection during cold-start discovery instea
   };
   expect(isAwaitingSelectedAccountComputer(missingState, true)).toBe(false);
   expect(selectedComputer(missingState, { signedIn: true })?.key).toBe(relayKey("wss://other.example.com", "other-mac"));
+});
+
+it("caches discovered account-only computers for 0ms cold-start resolution and wipes them immediately on sign-out", async () => {
+  const { DEFAULT_GATEWAY, listComputers, relayKey, selectedComputer, startRelays, useComputers } = await import(
+    "../src/lib/computers"
+  );
+  const { useAccount } = await import("../src/lib/account");
+
+  startRelays();
+  const relay = fake.relays[0]!;
+  relay.request.mockResolvedValueOnce({ machines: [machine] });
+  relay.emit("online");
+  await settle();
+
+  const expectedKey = relayKey(DEFAULT_GATEWAY, machine.id);
+  useComputers.getState().select(expectedKey);
+  expect(useComputers.getState().saved.accountMachines?.machines).toMatchObject([{ id: machine.id }]);
+
+  // Simulate cold start before `machines.list` finishes (`live` empty, `discovery` loading):
+  // `selectedComputer` resolves immediately at 0ms instead of waiting on the gateway round-trip!
+  const coldStartState = {
+    saved: useComputers.getState().saved,
+    live: {},
+    discovery: { [DEFAULT_GATEWAY]: "loading" as const },
+  };
+  expect(selectedComputer(coldStartState, { signedIn: true })?.key).toBe(expectedKey);
+  expect(listComputers(coldStartState)).toMatchObject([{ key: expectedKey, machine: { id: machine.id, online: false } }]);
+
+  // Once `discovery` settles `ready` with an empty live list (machine removed elsewhere), live wins.
+  const removedLiveState = {
+    saved: useComputers.getState().saved,
+    live: { [DEFAULT_GATEWAY]: [] },
+    discovery: { [DEFAULT_GATEWAY]: "ready" as const },
+  };
+  expect(listComputers(removedLiveState)).toEqual([]);
+
+  // Signing out immediately wipes `saved.accountMachines`.
+  useAccount.setState({ session: undefined });
+  expect(useComputers.getState().saved.accountMachines).toBeUndefined();
+  expect(listComputers(useComputers.getState())).toEqual([]);
 });

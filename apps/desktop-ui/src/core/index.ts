@@ -1,4 +1,5 @@
 export * from "./storage";
+export * from "./web-account";
 export * from "./unsaved-work";
 export * from "./i18n";
 export * from "./direct";

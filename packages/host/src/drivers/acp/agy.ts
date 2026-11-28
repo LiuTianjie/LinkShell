@@ -31,6 +31,7 @@ const AGY_DEFAULT_MODES: SessionConfigOption = {
 
 const EFFORT_ID_SUFFIX = /^(.+)-(low|medium|high|xhigh|max)$/i;
 const EFFORT_NAME_SUFFIX = /^(.+?)\s*\((low|medium|high|xhigh|max)\)$/i;
+// eslint-disable-next-line no-control-regex
 const ANSI_ESCAPE = /\x1b\[[0-9;?]*[ -/]*[@-~]/g;
 
 export interface AgyModelCatalog {

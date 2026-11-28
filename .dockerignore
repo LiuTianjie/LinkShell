@@ -8,9 +8,9 @@ tmp/
 temp/
 *.tsbuildinfo
 
-# Include only the browser client and shared mobile source modules.
+# Include only the unified browser/desktop workspace and shared mobile source modules.
 apps/*
-!apps/web/
+!apps/desktop-ui/
 !apps/client/
 apps/client/*
 !apps/client/src/

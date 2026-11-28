@@ -491,8 +491,8 @@ Mac 回环新增按帧匹配的编码输入→解码观测：诊断模式在 H.2
 | Mac 协议、采集、编码、适配 | [Mac README](../../apps/mac/README.md)、[ScreenSession.swift](../../apps/mac/Sources/LinkShell/ScreenSession.swift)、[Tuning.swift](../../apps/mac/Sources/LinkShell/Tuning.swift) |
 | iOS 原生接收与 Metal | [模块 README](../../apps/client/modules/link-screen/README.md)、[ScreenConnection.swift](../../apps/client/modules/link-screen/ios/ScreenConnection.swift)、[ScreenMetalView.swift](../../apps/client/modules/link-screen/ios/ScreenMetalView.swift) |
 | 网页控件与手机会话/回退 | [screen-viewer.ts](../../packages/host/src/screen-viewer.ts)、[screen-session.tsx](../../apps/client/src/lib/screen-session.tsx)、[screen-playback.ts](../../apps/client/src/lib/screen-playback.ts)、[screen-screen.tsx](../../apps/client/src/screens/screen-screen.tsx) |
-| Web iframe 观看入口与保留层 | [Video.tsx](../../apps/web/src/live/Video.tsx)、[screen-session-slot.tsx](../../apps/web/src/live/screen-session-slot.tsx) |
-| Windows 桌面版接收端（Electron） | [RemoteScreen.tsx](../../apps/web/src/live/RemoteScreen.tsx)、[screen-receiver.ts](../../apps/web/src/live/screen-receiver.ts)、[screen-gate.ts](../../apps/web/src/live/screen-gate.ts)、[screen-input.ts](../../apps/web/src/live/screen-input.ts)、[screen-fullscreen.ts](../../apps/web/src/live/screen-fullscreen.ts) |
+| Web 与 Windows 桌面版统一接收端（`apps/desktop-ui`） | [RemoteScreenWorkspace.tsx](../../apps/desktop-ui/src/features/remote/RemoteScreenWorkspace.tsx)、[WebRtcScreenStage.tsx](../../apps/desktop-ui/src/features/remote/WebRtcScreenStage.tsx)、[screen-client.ts](../../apps/desktop-ui/src/core/screen-client.ts)、[screen-input.ts](../../apps/desktop-ui/src/core/screen-input.ts)、[screen-audio.ts](../../apps/desktop-ui/src/core/screen-audio.ts) |
+| Mac Electron 原生 Metal 接收桥 | [NativeMetalStage.tsx](../../apps/desktop-ui/src/features/remote/NativeMetalStage.tsx) |
 
 - [Apple ScreenCaptureKit](https://developer.apple.com/documentation/screencapturekit/capturing-screen-content-in-macos)：采集与 IOSurface 缓冲。
 - [Apple 低延迟 VideoToolbox](https://developer.apple.com/videos/play/wwdc2021/10158/)：硬件低延迟模式、码率适应与帧重排。

@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 /// One neutral system for LinkShell.app's own pages, matching the workspace page
-/// (apps/web/src/theme.ts, styles/desktop.css) and docs/design/visual-system.md.
+/// (apps/desktop-ui/src/theme.ts) and docs/design/visual-system.md.
 ///
 /// The window is a grey ground; panels sit on it one lightness step away with a hairline;
 /// inside a panel a well holds rows and settings. No gradients, glows or resting shadows.
@@ -10,7 +10,7 @@ import SwiftUI
 /// red failed, green online or a success). The one filled control on a page is the indigo fill.
 ///
 /// The hues are copies of apps/client/src/theme/brand-colors.json (Swift can't read it at build
-/// time); apps/web/test/brand-colors.test.ts fails when they drift.
+/// time); apps/desktop-ui/test/brand-colors.test.ts fails when they drift.
 enum DesktopStyle {
   private static func gray(_ light: CGFloat, _ dark: CGFloat) -> NSColor {
     NSColor(name: nil) { appearance in

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import type { SessionSummary } from "@linkshell/wire";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 

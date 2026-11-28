@@ -36,7 +36,7 @@ import { quoteForSide } from "@/lib/side-quote";
 import { LinkBase } from "@/lib/links";
 import { describeActionError, useLocale } from "@/lib/locale";
 import { isMcpAppsCapable } from "@/lib/mcp-app";
-import { useActions, useClient, useConnection, useConnectionStatus, useSessionSubscription } from "@/lib/client";
+import { useActions, useClient, useConnection, useConnectionSettling, useConnectionStatus, useSessionSubscription } from "@/lib/client";
 import { sessionTitle } from "@/lib/describe";
 import { baseName } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
@@ -184,6 +184,7 @@ export function SessionContent({
   const linkStatus = useClient((state) => state.status);
   const opening = useClient((state) => !!state.open[id] && !state.ready[id]);
   const connecting = useConnectionStatus() === "connecting";
+  const settling = useConnectionSettling();
   const loadingEarlier = useClient((state) => !!state.loadingEarlier[id]);
   const queueing = useClient((state) => state.queueing[id]);
   const promptProgress = useClient((state) => state.promptProgress[id]);
@@ -877,6 +878,7 @@ export function SessionContent({
                               progress: promptProgress,
                               online,
                               connecting,
+                              settling: settling && (cachedAtOpen || wasReady.current || items.length > 0),
                               locked: linkStatus === "locked",
                               ready,
                               hasPermission: !!view?.permissions.length,

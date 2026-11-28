@@ -179,6 +179,29 @@
     inset-inline-end: 148px;
   }
 
+  /* Standalone Web Browser (data-shell="browser"): no macOS traffic lights or Windows titleBarOverlay inside viewport */
+  .desktop-root[data-shell="browser"][data-platform="macos"]:not([data-fullscreen="true"]) .desktop-sidebar-header {
+    padding-inline-start: 14px;
+  }
+
+  .desktop-root[data-shell="browser"][data-platform="macos"][data-sidebar-collapsed="true"]:not([data-fullscreen="true"]) {
+    --titlebar-left-inset: 12px;
+  }
+
+  .desktop-root[data-shell="browser"][data-platform="windows"]:not([data-fullscreen="true"]) {
+    --ls-win-caption-w: 0px;
+    --caption-inset: 12px;
+  }
+
+  .desktop-root[data-shell="browser"] .modal-window-drag-strip {
+    display: none;
+    pointer-events: none;
+  }
+
+  .desktop-sidebar-backdrop {
+    display: none;
+  }
+
   /* =========================================================================
    * 3. Unified 3-Column Sculpted Island Workbench
    * ========================================================================= */
@@ -515,6 +538,64 @@
     .desktop-bottom-dock {
       transition-duration: 0.01ms;
       animation-duration: 0.01ms;
+    }
+  }
+
+  /* Responsive Tablet / Mobile Browser Layout (< 900px Inspector sheet, < 768px Sidebar drawer) */
+  @media (max-width: 900px) {
+    .desktop-root[data-shell="browser"][data-inspector-open="true"] .desktop-workbench {
+      --inspector-col: 0px;
+    }
+
+    .desktop-root[data-shell="browser"][data-inspector-open="true"] .desktop-inspector {
+      position: fixed;
+      inset-block: 0;
+      inset-inline-end: 0;
+      inline-size: min(420px, 100vw);
+      margin: 0;
+      border-radius: 0;
+      z-index: 38;
+      box-shadow: var(--ls-shadow-popover);
+    }
+  }
+
+  @media (max-width: 767px) {
+    .desktop-root[data-shell="browser"] {
+      block-size: 100dvh;
+    }
+
+    .desktop-root[data-shell="browser"] .desktop-workbench {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .desktop-root[data-shell="browser"] .desktop-col-sash,
+    .desktop-root[data-shell="browser"] .desktop-sidebar-edge-sensor {
+      display: none;
+    }
+
+    .desktop-root[data-shell="browser"]:not([data-sidebar-collapsed="true"]) .desktop-sidebar-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 41;
+      display: block;
+      background-color: rgba(0, 0, 0, 0.42);
+    }
+
+    .desktop-root[data-shell="browser"]:not([data-sidebar-collapsed="true"]) .desktop-sidebar {
+      position: fixed;
+      inset-block: 0;
+      inset-inline-start: 0;
+      inline-size: min(280px, calc(100vw - 36px));
+      z-index: 42;
+      border-inline-end: var(--ls-hairline) solid var(--ls-border-strong);
+      box-shadow: var(--ls-shadow-popover);
+    }
+
+    .desktop-root[data-shell="browser"] .desktop-main {
+      margin: 0;
+      border: 0;
+      border-radius: 0;
+      box-shadow: none;
     }
   }
 }

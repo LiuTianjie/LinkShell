@@ -6,16 +6,134 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 if(NOT WIN32)
-  message(FATAL_ERROR "LinkShell.Media is a Windows-only native media engine.")
+  message(FATAL_ERROR "LinkShell native Windows binaries require WIN32.")
 endif()
 
+option(LINKSHELL_BUILD_SCREEN "Build LinkShell.Screen.exe native helper" ON)
+option(LINKSHELL_BUILD_MEDIA "Build LinkShell.Media.exe native libwebrtc media engine" ON)
+option(LINKSHELL_BUILD_QA "Build LinkShell.InputQA.exe development input probe" OFF)
+
+# Match upstream Chromium/LiveKit static release CRT (/MT) so shipped binaries have zero MSVC redist dependencies.
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
+set(LINKSHELL_COMMON_DEFS
+  NOMINMAX
+  WIN32_LEAN_AND_MEAN
+  _WIN32_WINNT=0x0A00
+  WINVER=0x0A00
+  NTDDI_VERSION=0x0A00000C
+  UNICODE
+  _UNICODE
+  _CRT_SECURE_NO_WARNINGS
+  _CRT_NONSTDC_NO_WARNINGS
+  JSON_USE_IMPLICIT_CONVERSIONS=0
+)
+
+if(LINKSHELL_BUILD_SCREEN)
+  # Standalone C++20 Win32 helper (`LinkShell.Screen.exe`).
+  # Security invariant: LinkShellScreenService copies ONLY `LinkShell.Screen.exe` into Program Files to run as
+  # LocalSystem; it MUST NOT link `webrtc.lib`, Node, or Chromium.
+  add_executable(LinkShell.Screen
+    src/helper/screen_main.cpp
+    src/helper/screen_common.cpp
+    src/helper/jpeg_capture.cpp
+    src/helper/vdd_installer.cpp
+    src/helper/screen_service.cpp
+    src/helper/fusion_helper.cpp
+    LinkShell.Screen.manifest
+  )
+
+  set_target_properties(LinkShell.Screen PROPERTIES
+    OUTPUT_NAME "LinkShell.Screen"
+  )
+
+  target_include_directories(LinkShell.Screen PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party"
+  )
+
+  target_compile_definitions(LinkShell.Screen PRIVATE
+    ${LINKSHELL_COMMON_DEFS}
+  )
+
+  target_compile_options(LinkShell.Screen PRIVATE
+    /utf-8
+    /EHsc
+    /W3
+    /wd4100
+    /wd4244
+    /wd4267
+    $<$<CONFIG:Release>:/O2>
+  )
+
+  target_link_options(LinkShell.Screen PRIVATE
+    /OPT:REF
+    /OPT:ICF
+    /SUBSYSTEM:CONSOLE
+  )
+
+  target_link_libraries(LinkShell.Screen PRIVATE
+    d3d11.lib
+    dxgi.lib
+    dxguid.lib
+    ole32.lib
+    oleaut32.lib
+    uuid.lib
+    propsys.lib
+    gdi32.lib
+    gdiplus.lib
+    user32.lib
+    shell32.lib
+    shlwapi.lib
+    dwmapi.lib
+    shcore.lib
+    avrt.lib
+    crypt32.lib
+    advapi32.lib
+    setupapi.lib
+    cfgmgr32.lib
+    bcrypt.lib
+  )
+endif()
+
+if(LINKSHELL_BUILD_QA)
+  add_executable(LinkShell.InputQA WIN32
+    src/helper/input_probe.cpp
+    LinkShell.Screen.manifest
+  )
+
+  set_target_properties(LinkShell.InputQA PROPERTIES
+    OUTPUT_NAME "LinkShell.InputQA"
+  )
+
+  target_compile_definitions(LinkShell.InputQA PRIVATE
+    ${LINKSHELL_COMMON_DEFS}
+  )
+
+  target_compile_options(LinkShell.InputQA PRIVATE
+    /utf-8
+    /EHsc
+    /W3
+    $<$<CONFIG:Release>:/O2>
+  )
+
+  target_link_options(LinkShell.InputQA PRIVATE
+    /OPT:REF
+    /OPT:ICF
+    /SUBSYSTEM:WINDOWS
+  )
+
+  target_link_libraries(LinkShell.InputQA PRIVATE
+    user32.lib
+    gdi32.lib
+  )
+endif()
+
+if(LINKSHELL_BUILD_MEDIA)
 set(WEBRTC_ROOT "" CACHE PATH "Path to unpacked LiveKit libwebrtc Windows release directory")
 if(NOT WEBRTC_ROOT OR NOT EXISTS "${WEBRTC_ROOT}/lib/webrtc.lib")
   message(FATAL_ERROR "WEBRTC_ROOT must point to a directory containing lib/webrtc.lib and include/")
 endif()
-
-# Match upstream Chromium/LiveKit static release CRT (/MT) so LinkShell.Media.exe has zero MSVC redist dependencies.
-set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 add_executable(LinkShell.Media
   src/main.cpp
@@ -155,3 +273,4 @@ target_link_libraries(LinkShell.Media PRIVATE
   powrprof.lib
   runtimeobject.lib
 )
+endif()

@@ -931,6 +931,13 @@
     appearance: base-select;
   }
 
+  @supports not (appearance: base-select) {
+    select.ls-select {
+      appearance: none;
+      -webkit-appearance: none;
+    }
+  }
+
   select.ls-select {
     display: inline-flex;
     align-items: center;

@@ -23,7 +23,6 @@ import {
   planInstallGatewayService,
   planInstallService,
   planUninstallGatewayService,
-  planUninstallService,
   restartManagedHostService,
   runInstallService,
   runServiceStatus,

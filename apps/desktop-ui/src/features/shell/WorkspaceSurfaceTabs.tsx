@@ -204,30 +204,32 @@ export function WorkspaceSurfaceTabs({
               <span>{t("desktop.nav.screen")}</span>
             </button>
 
-            <Tooltip
-              content={fusionDisabledReason}
-              wrapDisabled={Boolean(fusionDisabledReason)}
-            >
-              <button
-                type="button"
-                data-surface="fusion"
-                data-connected={fusionState.connected ? "true" : undefined}
-                disabled={Boolean(fusionDisabledReason)}
-                className="desktop-surface-tab"
-                onClick={() => {
-                  openFusion(activeComputerKey);
-                  if (fusionState.phase === "idle") {
-                    void connectAndStartComputerFusion(activeComputerKey);
-                  }
-                }}
+            {fusionCap.reason !== "not-electron" ? (
+              <Tooltip
+                content={fusionDisabledReason}
+                wrapDisabled={Boolean(fusionDisabledReason)}
               >
-                <DesktopIcon name="fusion-mode" size="xs" />
-                <span>{t("desktop.nav.fusion")}</span>
-                {fusionState.connected ? (
-                  <StatusDot tone="ok" size="sm" />
-                ) : null}
-              </button>
-            </Tooltip>
+                <button
+                  type="button"
+                  data-surface="fusion"
+                  data-connected={fusionState.connected ? "true" : undefined}
+                  disabled={Boolean(fusionDisabledReason)}
+                  className="desktop-surface-tab"
+                  onClick={() => {
+                    openFusion(activeComputerKey);
+                    if (fusionState.phase === "idle") {
+                      void connectAndStartComputerFusion(activeComputerKey);
+                    }
+                  }}
+                >
+                  <DesktopIcon name="fusion-mode" size="xs" />
+                  <span>{t("desktop.nav.fusion")}</span>
+                  {fusionState.connected ? (
+                    <StatusDot tone="ok" size="sm" />
+                  ) : null}
+                </button>
+              </Tooltip>
+            ) : null}
           </>
         ) : null}
 

@@ -23,7 +23,8 @@ import { searchWords, sessionMatches, terminalMatches } from "@/lib/search";
 import { terminalState, useTerminals } from "@/lib/terminals";
 import { EmptyState, LoadingState, LockedComputer, unreachable, WaitingForComputer } from "@/components/state-views";
 import { LinkDot } from "@/components/status";
-import { useActions, useClient, useConnection, useConnectionStatus, useHasComputer } from "@/lib/client";
+import { useActions, useClient, useConnection, useConnectionSettling, useConnectionStatus, useHasComputer } from "@/lib/client";
+import { reconnectRelays } from "@/lib/computers";
 import { computerDisplayName, useComputerNames } from "@/lib/computer-names";
 import { Welcome } from "@/components/welcome";
 import { haptics } from "@/lib/haptics";
@@ -285,6 +286,9 @@ function Summary({ small = false, batteryPercent, lowBattery }: { small?: boolea
   const names = useComputerNames((state) => state.names);
   const name = computerDisplayName(computer, names);
   const status = useConnectionStatus();
+  const settling = useConnectionSettling();
+  const loaded = useClient((state) => state.sessionsLoaded);
+  const quietReady = loaded && settling && status === "connecting";
   const { t } = useLocale();
   return (
     <Pressable
@@ -309,7 +313,7 @@ function Summary({ small = false, batteryPercent, lowBattery }: { small?: boolea
         backgroundColor: pressed ? colors.fillStrong : colors.fill,
       })}
     >
-      <LinkDot health={status === "online" ? "online" : status === "connecting" ? "connecting" : "offline"} />
+      <LinkDot health={status === "online" || quietReady ? "online" : status === "connecting" ? "connecting" : "offline"} />
       <Text numberOfLines={1} style={[small ? type.footnote : type.subhead, { color: colors.secondaryLabel, flexShrink: 1 }]}>
         {name}
       </Text>
@@ -819,6 +823,7 @@ function HomeList({
   const sessionsNextBefore = useClient((state) => state.sessionsNextBefore);
   const error = useClient((state) => state.sessionsError);
   const connectionStatus = useConnectionStatus();
+  const settling = useConnectionSettling();
   const offline = unreachable(connectionStatus);
   const hasComputer = useHasComputer();
   const { refresh, loadMoreSessions } = useActions();
@@ -914,6 +919,7 @@ function HomeList({
     // Offline, the list call would wait half a minute for the link before failing: reconnect
     // instead (the banner says where that stands) and let go of the spinner.
     if (!online) {
+      reconnectRelays({ force: true });
       link.reconnectNow(true);
       return;
     }
@@ -982,7 +988,7 @@ function HomeList({
   return (
     <>
       <LegendList
-        data={!loaded || empty ? [] : searching ? results : items}
+        data={connectionStatus === "locked" || !loaded || empty ? [] : searching ? results : items}
         keyExtractor={(item) => item.key}
         getItemType={(item) => item.type}
         renderItem={renderItem}
@@ -1101,7 +1107,7 @@ function HomeList({
             </View>
             {!searching &&
             liveActivityPayload.active &&
-            (liveActivityPayload.phase === "stale" ||
+            ((liveActivityPayload.phase === "stale" && !settling) ||
               filter === "pinned" ||
               filter === "terminals" ||
               filter === "snoozed") ? (

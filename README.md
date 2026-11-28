@@ -110,7 +110,7 @@ Get the app: [iPhone](https://apps.apple.com/cn/app/linkshell/id6761547516) · [
 
 Every feature is free with a self-hosted gateway. To use the official gateway, buy LinkShell on its own (CNY 9.9/month or 49/year; USD 3.19/month or 13.49/year), or choose the all-products annual bundle (CNY 99 or USD 26.49). Prices include tax. [Choose a plan on iTool](https://www.itool.tech/en/pro?product=linkshell) with the same account; Alipay is one-time and Creem renews automatically until canceled. Refresh membership in the desktop app or web workspace after purchase. Existing access and referral rewards are preserved.
 
-The gateway also serves a browser client at its root URL, with the same pairing or account sign-in. See [the web client](apps/web/README.md).
+The gateway also serves a browser client at its root URL, with the same pairing or account sign-in. See [the web workspace](apps/desktop-ui/README.md).
 
 ## Agents
 
@@ -197,7 +197,7 @@ pnpm install
 pnpm build && pnpm typecheck && pnpm test
 ```
 
-On macOS the full build also builds LinkShell.app and needs Xcode's Swift toolchain. On Windows it builds the desktop and screen helper with .NET Framework 4.8; `pnpm -r --filter "./packages/*" build` builds the TypeScript packages only (what Linux CI runs). To work on the app, run a development host with its own state directory, then Metro:
+On macOS the full build also builds LinkShell.app and needs Xcode's Swift toolchain. On Windows it builds the native C++20 screen helper and media engine with CMake / Visual Studio Build Tools (only the standalone setup installer uses .NET Framework 4.8); `pnpm -r --filter "./packages/*" build` builds the TypeScript packages only (what Linux CI runs). To work on the app, run a development host with its own state directory, then Metro:
 
 ```bash
 LINKSHELL_HOME="$HOME/.linkshell-dev" pnpm dev:cli host --dev-port 7878
@@ -213,7 +213,7 @@ pnpm dev:app
 | `packages/client-core` | Client state and timeline shared by the apps |
 | `apps/client` | The iPhone, Apple Watch and Android app (Expo / React Native) |
 | `apps/mac` | LinkShell.app: screen capture, video, input, permissions, desktop workspace |
-| `apps/web` | The browser client served by the gateway |
+| `apps/desktop-ui` | The unified desktop and browser workspace served by Electron and the gateway |
 | `docs/site` | The website and the install script |
 
 Focused bug reports and pull requests are welcome. Include the CLI version, OS, agent and a minimal reproduction, and redact pairing codes and tokens. Releases follow the [release SOP](docs/release-sop.md).

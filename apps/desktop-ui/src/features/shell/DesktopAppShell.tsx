@@ -16,6 +16,7 @@ import {
   DESKTOP_WINDOW_EVENT,
   getActiveDesktopPlatform,
   getShellOpaqueWindow,
+  hasDesktopSidecar,
   isElectronDesktop,
   isElectronRuntime,
   normalizeDesktopPlatform,
@@ -39,11 +40,13 @@ import {
 } from "../../bridge/shortcuts";
 import { registerOverlayOpen } from "../../bridge/top-layer-registry";
 import {
+  STORAGE_KEYS,
   canUseFusionMode,
   computerNames,
   connectAndStartComputerFusion,
   engine,
   isLocalHostUnavailable,
+  readLocal,
   routerStore,
   sessionTitle,
   setNavigationConfirmer,
@@ -56,6 +59,7 @@ import { ScreenSessionSlot } from "../../core/screen-client";
 import { AgentMark, DesktopIcon } from "../../icons";
 import {
   Button,
+  EmptyState,
   ErrorBoundary,
   IconButton,
   SplitResizer,
@@ -182,6 +186,33 @@ function WorkspaceHomeHub({
   const compTitle = displayComputerName(activeComputer, names, locale);
   const isLocal = !activeComputer || isLocalComputer(activeComputer);
   const listState = sessionListState(activeComputer, linkStatus, sessionsLoaded);
+  const emptyBrowser =
+    !activeComputer &&
+    !hasDesktopSidecar() &&
+    !mgmt.snapshot &&
+    !mgmt.starting &&
+    !mgmt.problem;
+
+  if (emptyBrowser) {
+    return (
+      <div className="shell-page" style={{ display: "flex", alignItems: "center" }}>
+        <EmptyState
+          icon="computer-pc"
+          title={t("desktop.fleet.connectComputer")}
+          description={t("desktop.shell.fleetEmpty")}
+          actions={
+            <Button
+              variant="primary"
+              leadingIcon="pair-qr"
+              onClick={() => routerStore.getState().setConnectModalOpen(true)}
+            >
+              {t("desktop.fleet.connectComputer")}
+            </Button>
+          }
+        />
+      </div>
+    );
+  }
 
   // Local daemon stopped or unreachable state: give immediate recovery CTA without trapping navigation
   if (isLocal && isLocalHostUnavailable(mgmt)) {
@@ -581,6 +612,21 @@ export function DesktopAppShell({
     return () => observer.disconnect();
   }, [platformOverride]);
 
+  // Auto-collapse sidebar on narrow (<768px) initial browser viewports unless the user saved an explicit preference.
+  useEffect(() => {
+    if (
+      hasDesktopSidecar() ||
+      typeof window === "undefined" ||
+      window.innerWidth <= 0 ||
+      window.innerWidth >= 768
+    ) {
+      return;
+    }
+    if (readLocal<boolean | null>(STORAGE_KEYS.sidebarHidden, null) === null) {
+      routerStore.getState().toggleSidebar(true);
+    }
+  }, []);
+
   // Close hover peek whenever docked sidebar re-opens
   useEffect(() => {
     if (!sidebarHidden) {
@@ -800,6 +846,7 @@ export function DesktopAppShell({
     windowFocused &&
     !nativeScreenActive;
 
+  const isBrowserTabLocked = Boolean(locked && !activeConnection);
   const isConnectionLocked = Boolean(
     activeConnection && (locked || linkStatus === "locked"),
   );
@@ -821,6 +868,28 @@ export function DesktopAppShell({
     activeRoute.kind === "session" ? activeRoute.sessionId : undefined;
 
   const renderMainContent = () => {
+    if (isBrowserTabLocked) {
+      return (
+        <div className="shell-page" style={{ display: "flex", alignItems: "center" }}>
+          <EmptyState
+            icon="gateway-relay"
+            title={t("desktop.shell.tabLockedTitle")}
+            description={t("desktop.shell.tabLockedDesc")}
+            actions={
+              <Button
+                variant="primary"
+                onClick={() => {
+                  void engine.claim();
+                }}
+              >
+                {t("desktop.shell.tabClaimAction")}
+              </Button>
+            }
+          />
+        </div>
+      );
+    }
+
     // Computers, Projects & System views are always reachable even if a remote computer is locked
     if (activeRoute.kind === "computers") {
       return (
@@ -1014,10 +1083,28 @@ export function DesktopAppShell({
       ) : null}
 
       <div className="desktop-workbench" style={workbenchStyle}>
+        {!sidebarHidden && !isScreenFullscreen ? (
+          <div
+            aria-hidden="true"
+            className="desktop-sidebar-backdrop"
+            onClick={handleToggleSidebar}
+          />
+        ) : null}
+
         {/* Column 1: L1 Deep Carbon Left Sidebar Rail (unmounted while collapsed so hover-peek never mounts a duplicate Sidebar) */}
         {!sidebarHidden ? (
           <Sidebar
             onToggleSidebar={handleToggleSidebar}
+            onNavigateDone={() => {
+              if (
+                typeof window !== "undefined" &&
+                window.innerWidth > 0 &&
+                window.innerWidth < 768 &&
+                !routerStore.getState().sidebarHidden
+              ) {
+                handleToggleSidebar();
+              }
+            }}
             onRequestNewSession={handleRequestNewSession}
             renderFusionStatusBadge={renderFusionStatusBadge}
           />

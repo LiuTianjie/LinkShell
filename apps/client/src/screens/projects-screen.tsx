@@ -12,7 +12,7 @@ import { ConnectionBanner } from "@/components/connection-banner";
 import { BranchTag } from "@/components/branch-tag";
 import { Icon } from "@/components/icon";
 import { ListRow, positionOf, type RowPosition } from "@/components/session-row";
-import { EmptyState, LoadingState, unreachable, WaitingForComputer } from "@/components/state-views";
+import { EmptyState, LoadingState, LockedComputer, unreachable, WaitingForComputer } from "@/components/state-views";
 import { useClient, useConnection, useConnectionStatus, useHasComputer } from "@/lib/client";
 import { listComputers, useComputers, type Computer } from "@/lib/computers";
 import { computerDisplayName, useComputerNames } from "@/lib/computer-names";
@@ -179,6 +179,8 @@ export function ProjectsScreen() {
           <Welcome />
         ) : scope === "all" ? (
           <View>{computers.map((computer) => <ComputerProjects key={computer.key} computer={computer} enabled={focused} query={query.trim().toLowerCase()} now={now} wide={wide} current={computer.key === selected.key ? currentOverview : undefined} />)}</View>
+        ) : status === "locked" ? (
+          <LockedComputer />
         ) : !loaded ? (
           offline ? <WaitingForComputer what="电脑上的项目" /> : <LoadingState label="正在读取项目…" />
         ) : shown.length === 0 ? (

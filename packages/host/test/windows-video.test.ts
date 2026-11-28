@@ -404,7 +404,7 @@ describe("Windows video quality, pacing, recovery and in-band reconfigure", () =
     await fakeRx.setRemoteDescription({ type: "offer", sdp: offerSdp });
     const rawAnswer = await fakeRx.createAnswer();
     const baselineOnlyAnswer = rawAnswer.sdp
-      .replace(/m=video 9 UDP\/TLS\/RTP\/SAVPF [^\r\n]+/, "m=video 9 UDP\/TLS\/RTP\/SAVPF 100")
+      .replace(/m=video 9 UDP\/TLS\/RTP\/SAVPF [^\r\n]+/, "m=video 9 UDP/TLS/RTP/SAVPF 100")
       .split("\r\n")
       .filter(l => !/^a=(rtpmap|rtcp-fb|fmtp):(96|97|98|99)\b/.test(l))
       .join("\r\n");

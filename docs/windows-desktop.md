@@ -22,8 +22,8 @@ Windows 桌面端复用现有 Host / Gateway / 手机协议，窗口与 macOS �
 
 ## 系统与安装
 
-- Windows 10 1809 或更新版本、Windows 11，x64 与 ARM64（已接入 CI 与打包脚本；ARM64 实机仍待验证）；屏幕组件和安装器需要 .NET Framework 4.8。窗口自带 Chromium，不需要 WebView2 Runtime。
-- 在 Windows 上运行 `pnpm --filter @linkshell/windows build:standalone`（或指定 `--arch arm64` / `LINKSHELL_WINDOWS_ARCH=arm64`），生成 `artifacts/LinkShell-Setup-<版本>-windows-<arch>.exe` 与 ZIP 便携包。打包流程按 `x64` / `arm64` 编译原生 C++20 `LinkShell.Media.exe`（基于官方 Google `libwebrtc` M150 静态库），拉取对应架构的 Node 与 SignPath 签名 MIT `MttVDD`（IddCx）驱动文件，并保留对应架构的 `node-pty` / `sharp` 预编译二进制。
+- Windows 10 1809 或更新版本、Windows 11，x64 与 ARM64（已接入 CI 与打包脚本；ARM64 实机仍待验证）；应用运行时已全部收敛为原生 C++20（`LinkShell.Media.exe` 与 `LinkShell.Screen.exe` 均为 `/MT` 静态链接，无 .NET 运行时依赖），仅独立安装器 `LinkShell-Setup.exe` 使用系统自带 .NET Framework 4.8。窗口自带 Chromium，不需要 WebView2 Runtime。
+- 在 Windows 上运行 `pnpm --filter @linkshell/windows build:standalone`（或指定 `--arch arm64` / `LINKSHELL_WINDOWS_ARCH=arm64`），生成 `artifacts/LinkShell-Setup-<版本>-windows-<arch>.exe` 与 ZIP 便携包。打包流程按 `x64` / `arm64` 通过 CMake 编译原生 C++20 `LinkShell.Media.exe`（基于官方 Google `libwebrtc` M150 静态库）与原生 Win32 助手 `LinkShell.Screen.exe`，拉取对应架构的 Node 与 SignPath 签名 MIT `MttVDD`（IddCx）驱动文件，并保留对应架构的 `node-pty` / `sharp` 预编译二进制。
 - 手动安装默认安装到当前用户的 `%LOCALAPPDATA%\Programs\LinkShell`；应用内更新沿用当前安装目录，也支持 ZIP 解压的自定义目录。创建开始菜单入口，不需要管理员权限。当前构建与 CI 保持未签名发布流程（暂不启用 Authenticode / Trusted Signing 代码签名）；未在 Windows CI 配置签名凭据时输出未签名安装包与 ZIP。请从官方 Release 下载并核对随包提供的 SHA-256。
 - 安装器提供独立窗口，显示安装位置、解压百分比、已处理容量 / 文件数、服务恢复与开始菜单阶段。解压按实际读取的字节推进；替换文件与恢复服务期间禁止关闭，完成后可直接启动应用。解压时取消会清理暂存文件，失败会显示原因并允许重试。应用与安装器统一使用圆角矩形图标。
 - ZIP 解压后运行 `LinkShell.exe`。`linkshell.cmd` 为同一运行环境的 CLI 入口；不会修改系统 PATH。
@@ -43,7 +43,7 @@ Windows 屏幕与 Fusion 媒体由独立原生 C++20 引擎 **`LinkShell.Media.e
 - **原生 `libwebrtc` 传输与 Mac 对齐体验**：内置 Google `libwebrtc` M150（`WebRTC-ForceSendPlayoutDelay/min_ms:0,max_ms:0` + `FlexFEC-03`）、动态码率零重启更新（`SetRates` 直接调编码器，不中断画面）、PLI 即时关键帧、Mac 对齐的 `LanFloor` / `FrameRateController` / `SendQueue` 拥塞与帧率调度，最高支持 4K 与 120 fps、在线切换显示器/分辨率/暂停而不断开连接（`rtc.configure`）、物理键扫描码（`keydown`/`keyup`、`keys: true`）、60 Hz 光标同步与 5 Hz 光标形状捕获，以及 WASAPI Loopback 48 kHz 立体声系统音频。
 - **Windows Fusion 原生多流**：通过同一 `LinkShell.Media.exe` 的多 Transceiver `libwebrtc` 连接直接推送 WGC 窗口流与显示器流，GPU 固定画布零拷贝绘制并在 H.264/HEVC 码流中直接写入 `LinkShellFusion1` SEI 元数据。
 - **内置可一键安装的虚拟显示器驱动（无显示器 / 合盖 / 分辨率自适应）**：安装包内置经过 SignPath 签名的 MIT 开源 IddCx 驱动（`VirtualDrivers/Virtual-Display-Driver` `MttVDD`，约 300 KB，覆盖 x64 与 ARM64，仅信任发布者证书而不安装任何 Root CA）。用户可在桌面端「设置 → 虚拟显示器驱动」中一键离线安装、启用、待机或卸载；无物理显示器开机时自动唤醒虚拟屏，远程连接时支持与接收端匹配的分辨率切换（`ScreenMatch`）并在断开后自动恢复。
-- **可选 `LinkShellScreenService` 系统控制服务**：在首次安装完成页或桌面版「总览 / 通用设置」中一键授权一次后，将极简纯 C# 组件 `LinkShell.Screen.exe` 安装到受系统保护的 `%ProgramFiles%\LinkShell\ScreenService\` 并以 `LocalSystem` 运行（`LinkShell.Media.exe` / Node / Electron 绝不以 SYSTEM 运行，Named Pipe 同时校验用户 SID DACL 与 256 位随机密钥），支持操控管理员高权限窗口、实时查看与点击 UAC 安全桌面及锁屏，并在远程连接时免 UAC 自动唤醒/调整虚拟显示器。未安装系统服务时，弹出 UAC 仅暂停采集而不断开会话。设置页可随时关闭远程屏幕，拒绝后续采集与输入。
+- **可选 `LinkShellScreenService` 系统控制服务**：在首次安装完成页或桌面版「总览 / 通用设置」中一键授权一次后，将不链接 `libwebrtc` 的独立原生 C++20 组件 `LinkShell.Screen.exe` 安装到受系统保护的 `%ProgramFiles%\LinkShell\ScreenService\` 并以 `LocalSystem` 运行（`LinkShell.Media.exe` / Node / Electron 绝不以 SYSTEM 运行，Named Pipe 同时校验用户 SID DACL 与 256 位随机密钥），支持操控管理员高权限窗口、实时查看与点击 UAC 安全桌面及锁屏，并在远程连接时免 UAC 自动唤醒/调整虚拟显示器。未安装系统服务时，弹出 UAC 仅暂停采集而不断开会话。设置页可随时关闭远程屏幕，拒绝后续采集与输入。
 
 ## 更新与卸载
 
@@ -73,7 +73,7 @@ corepack pnpm --filter @linkshell/desktop test
 corepack pnpm --filter @linkshell/windows build:standalone
 ```
 
-使用仓库锁定的 pnpm 10。中文目录下运行 Windows cmd 包装脚本时，必要时先执行 `chcp 65001`。屏幕组件和安装器使用 Windows 自带 .NET Framework C# 编译器构建；窗口的图标和版本信息用固定校验的 electron/rcedit 2.0.0 写入。`node apps/windows/scripts/build.mjs --qa` 另生成 `LinkShell.InputQA.exe`，用于通过真实屏幕查看器验证点击、文本、快捷键和滚轮，不包含在安装包中。
+使用仓库锁定的 pnpm 10。中文目录下运行 Windows cmd 包装脚本时，必要时先执行 `chcp 65001`。屏幕组件（`LinkShell.Screen.exe`）与媒体引擎（`LinkShell.Media.exe`）统一通过 CMake + Visual Studio C++20 编译，仅外层安装器使用 Windows 自带 .NET Framework C# 编译器构建；窗口的图标和版本信息用固定校验的 electron/rcedit 2.0.0 写入。`node apps/windows/scripts/build.mjs --qa` 另通过 CMake 生成原生 `LinkShell.InputQA.exe`，用于通过真实屏幕查看器验证点击、文本、快捷键和滚轮，不包含在安装包中。
 
 已有便携 ZIP 时，`node apps/windows/scripts/installer-qa.mjs` 生成 `LinkShell.SetupQA.exe`，自动将真实安装文件解压到 `build/install-qa-*`，用于检查安装进度和完成界面；它不修改已安装应用、开始菜单或用户 Host。安装事务测试覆盖字节进度、取消、覆盖更新、旧版副本清理、失败回滚、临时文件占用、目录保护、无效 ZIP 路径与快捷方式失败。更新行为回归覆盖发布版本及通道选择、下载校验、损坏/中断清理、活动下载保留，以及 Windows 安装器参数、进程交接、junction 与取消不终止进程。
 
@@ -89,7 +89,7 @@ Codex 优先使用 PATH 中的命令行程序；没有全局命令时，自动�
 
 2026-10-19 本机验收：在 3456×2168、200% 缩放的已解锁桌面，通过真实 Host 和浏览器屏幕查看器核对了 JPEG 画面、左键、右键菜单、拖选、中文 / 英文输入、Ctrl+A 替换和向下滚动。实测修复了 Windows 滚轮方向与桌面控件 DPI 缩放。原生测试 4 项通过，无跳过；Host 相关测试 110 项通过；CLI 测试 28 项通过，2 项 POSIX 专用测试跳过。完整构建和类型检查通过，仓库外解压的便携包通过命名管道、SQLite、ConPTY 和运行时依赖 smoke。已安装的 Codex / Claude 及 Claude ACP 完成隔离初始化，未创建真实任务。
 
-验收仍应覆盖：150% 缩放、多显示器负坐标、拔插显示器、手机经网关配对与重连、生产账号登录，以及真实 Agent 的长任务和权限批准。隔离 Windows 更新场景不替代真实用户环境、手机真机或性能发布验收。Unix socket / POSIX 信号专用的旧测试不能视为 Windows 验收。此外，本轮新增的 Windows C# 光标形状捕获、WASAPI loopback 系统音频、`Fusion.cs` 文件剪贴板以及 ARM64 打包（CI 保持未签名）目前在 macOS 上通过了 C# 5 语法静态检查、`@linkshell/windows` 跨平台打包单测以及宿主机模拟助手/werift 回环测试；Windows 本机 `.NET Framework 4.8` `csc.exe` 编译、真实 WASAPI 音频捕获、ARM64 Windows Runner 打包与实机端到端仍待 Windows 环境验证。
+验收仍应覆盖：150% 缩放、多显示器负坐标、拔插显示器、手机经网关配对与重连、生产账号登录，以及真实 Agent 的长任务和权限批准。隔离 Windows 更新场景不替代真实用户环境、手机真机或性能发布验收。Unix socket / POSIX 信号专用的旧测试不能视为 Windows 验收。此外，已迁入原生 C++20 `LinkShell.Screen.exe`（`apps/windows/media/src/helper/`）的 DXGI/GDI JPEG 回退、WASAPI loopback `--audio`、Fusion 窗口与文件剪贴板、`LinkShellScreenService` 及离线虚拟屏驱动安装逻辑目前在 macOS 上通过了 `clang++ -std=c++20` 核心单测（`helper_core_test.cpp`）、`@linkshell/windows` 跨平台打包单测以及宿主机模拟助手测试；Windows 本机 CMake/MSVC 编译、真实 WASAPI 音频捕获、ARM64 Windows Runner 打包与实机端到端仍待 Windows 环境验证。
 
 2026-10-19 屏幕优化验收：在同一台主机、1280 像素输出的全屏滚动文字测试中，连续 10 秒的输出从旧版约 2.3 fps 提升到约 7.3 fps，帧间隔中位数从 412 ms 降到 137 ms；这是真实本机采集结果，不是稳定 30 fps 或手机端到端延迟的承诺。静态画面在 8 秒内只发送 5 帧（包含初始、清晰度补帧及心跳）。原生测试覆盖有效图像、不中断进程切换大小/质量、暂停恢复、强制补帧、禁用屏幕与输入释放，DXGI 与强制 GDI 两条路径均通过。`LINKSHELL_SCREEN_DIAGNOSTICS=1` 可输出各阶段平均耗时；`LINKSHELL_SCREEN_CAPTURE=gdi` 用于兼容路径排查。
 

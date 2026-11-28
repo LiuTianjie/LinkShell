@@ -26,6 +26,10 @@ import { createSessionSubscriptions } from "./session-subscriptions";
 import { syncComputerName } from "./computer-names";
 import { setAppBackgrounded, useAccount } from "./account";
 import { outboxStorage } from "./outbox-db";
+import { snapshotStorage } from "./snapshot-db";
+
+export const FOREGROUND_PROBE_MS = 1500;
+export const SILENT_SETTLE_MS = 2200;
 
 type Client = ClientState & ClientActions;
 
@@ -47,6 +51,8 @@ interface Connection {
 interface ConnectionContextValue {
   connection: Connection;
   recovering: boolean;
+  /** Brief silent grace window on launch/resume so fast reconnects never flash banners or spinners. */
+  settling: boolean;
   /** Points the app at a LAN host directly and reconnects. */
   setUrl(url: string): void;
 }
@@ -163,10 +169,12 @@ function createConnection(computer: Computer): Connection {
     newId: randomUUID,
     lazyImages: true,
     sessionPreferences,
-    ...(computer.key !== NO_COMPUTER_KEY ? { outboxStorage, outboxKey: computer.key } : {}),
+    ...(computer.key !== NO_COMPUTER_KEY
+      ? { outboxStorage, outboxKey: computer.key, snapshotStorage, snapshotKey: computer.key }
+      : {}),
   });
   // Paths render as ~/… with this computer's home, set before anything renders them.
-  setHostHome(undefined);
+  setHostHome(store.getState().machine?.home);
   const streams = new HostStreams(link, { connector: directConnector, iceServers: () => store.getState().machine?.direct?.iceServers });
   const subscribeSession = createSessionSubscriptions((id) => store.getState().openSession(id), (id) => store.getState().closeSession(id));
   return { key: computer.key, computer, latestComputerRef, url, link, store, streams, subscribeSession };
@@ -207,6 +215,7 @@ export function ClientProvider({ children }: { children: ReactNode }) {
   }, [saved, live, lanHosts, discovery, signedIn]);
   const [connection, setConnection] = useState(() => createConnection(selected));
   const [recovering, setRecovering] = useState(true);
+  const [settleWindow, setSettleWindow] = useState<{ quiet: boolean }>(() => ({ quiet: true }));
   const initialRecovery = useRef(true);
 
   if (selected.key === connection.key) {
@@ -240,15 +249,24 @@ export function ClientProvider({ children }: { children: ReactNode }) {
     });
     const hasComputer = connection.key !== NO_COMPUTER_KEY;
     let recoveryTimer: ReturnType<typeof setTimeout> | undefined;
+    let settleTimer: ReturnType<typeof setTimeout> | undefined;
+    const setQuiet = (quiet: boolean) => {
+      setSettleWindow((prev) => (prev.quiet === quiet ? prev : { quiet }));
+    };
     const clearRecovering = () => {
       clearTimeout(recoveryTimer);
+      clearTimeout(settleTimer);
       setRecovering(false);
+      setQuiet(false);
     };
     const recoveringNow = () => {
       clearTimeout(recoveryTimer);
+      clearTimeout(settleTimer);
       setRecovering(true);
-      // Reconnection is expected after suspension. A bounded grace period keeps a real
-      // outage visible without briefly calling the old, suspended socket a failure.
+      setQuiet(true);
+      // Reconnection is expected after suspension. Keep the UI completely calm for the first
+      // ~2.2s while cached state is readable, then surface a gentle connecting state up to 12s.
+      settleTimer = setTimeout(() => setQuiet(false), SILENT_SETTLE_MS);
       recoveryTimer = setTimeout(() => setRecovering(false), 12_000);
     };
     // Never burn the cold-start recovery grace period while waiting for the first real computer.
@@ -297,6 +315,9 @@ export function ClientProvider({ children }: { children: ReactNode }) {
     setAppBackgrounded(AppState.currentState !== "active");
     const subscription = AppState.addEventListener("change", (state) => {
       setAppBackgrounded(state !== "active");
+      if (state !== "active" && hasComputer) {
+        store.getState().flushSnapshot?.();
+      }
       if (state === "active") {
         // Back from the background, sessions show their latest turns at once; earlier ones load
         // on scroll. Only for this return: a reconnect later (a network blip while reading)
@@ -306,29 +327,35 @@ export function ClientProvider({ children }: { children: ReactNode }) {
         if (!hasComputer) {
           clearRecovering();
           reconnectRelays();
-          probeRelays();
+          probeRelays(FOREGROUND_PROBE_MS);
         } else if (link.status === "online") {
           recoveringNow();
-          // While suspended the sockets may have died without a word: probe with a 2.5s deadline
-          // instead of waiting a heartbeat (up to 35 s) or tearing down a live socket.
-          probeRelays();
-          void Promise.resolve(link.probe(2500)).then((alive) => {
-            if (alive === false) reconnectRelays();
-            else clearRecovering();
+          // While suspended the sockets may have died without a word: probe both gateway and host
+          // with a tight 1.5s deadline, then force-redial relays before the tunnel if dead.
+          probeRelays(FOREGROUND_PROBE_MS);
+          void Promise.resolve(link.probe(FOREGROUND_PROBE_MS, { reconnect: false })).then((alive) => {
+            if (alive === false) {
+              reconnectRelays({ force: true });
+              link.reconnectNow(true);
+            } else {
+              clearRecovering();
+            }
           });
           connection.streams.connect();
         } else if (link.status === "locked") {
           clearRecovering();
-          probeRelays();
+          probeRelays(FOREGROUND_PROBE_MS);
         } else {
           recoveringNow();
-          reconnectRelays();
+          reconnectRelays({ force: true });
           link.reconnectNow(true);
           connection.streams.connect();
         }
       } else if (state === "background") {
         clearTimeout(recoveryTimer);
+        clearTimeout(settleTimer);
         setRecovering(true);
+        setQuiet(true);
         if (hasComputer) link.resumeLatest();
       }
       if (state === "background" && hasComputer && hasActiveWork() && store.getState().status !== "online") {
@@ -350,14 +377,15 @@ export function ClientProvider({ children }: { children: ReactNode }) {
             lastNetworkInterface = event.interface;
             if (event.status === "unsatisfied") return;
             // Wi-Fi <-> 5G / interface transition: wake relays, restart mDNS discovery, and roam immediately.
-            reconnectRelays();
+            const switchedInterface = prevInterface !== undefined && prevInterface !== event.interface;
+            reconnectRelays(switchedInterface ? { force: true } : undefined);
             if (typeof restartLan === "function") restartLan();
             if (!hasComputer) return;
-            const switchedInterface = prevInterface !== undefined && prevInterface !== event.interface;
             if (link.status === "online" && !switchedInterface) {
-              void Promise.resolve(link.probe(2500)).then((alive) => {
+              probeRelays(FOREGROUND_PROBE_MS);
+              void Promise.resolve(link.probe(FOREGROUND_PROBE_MS, { reconnect: false })).then((alive) => {
                 if (alive === false) {
-                  reconnectRelays();
+                  reconnectRelays({ force: true });
                   link.reconnectNow(true);
                 } else {
                   clearRecovering();
@@ -373,6 +401,7 @@ export function ClientProvider({ children }: { children: ReactNode }) {
     return () => {
       clearTimeout(latestTimer);
       clearTimeout(recoveryTimer);
+      clearTimeout(settleTimer);
       clearInterval(bgWatchdog);
       unwatchMachine();
       unwatchStatus();
@@ -384,16 +413,18 @@ export function ClientProvider({ children }: { children: ReactNode }) {
     };
   }, [connection]);
 
+  const settling = recovering && settleWindow.quiet;
   const value = useMemo<ConnectionContextValue>(
     () => ({
       connection,
       recovering,
+      settling,
       setUrl(url) {
         const computers = useComputers.getState();
         computers.select(computers.addDirect(url, "局域网电脑"));
       },
     }),
-    [connection, recovering],
+    [connection, recovering, settling],
   );
 
   return <ConnectionContext value={value}>{children}</ConnectionContext>;
@@ -417,6 +448,10 @@ export function useHasComputer(): boolean {
 
 export function useConnectionRecovering(): boolean {
   return useConnectionContext().recovering;
+}
+
+export function useConnectionSettling(): boolean {
+  return useConnectionContext().settling;
 }
 
 /** Presentation only: permissions and actions continue to use the actual link status. */

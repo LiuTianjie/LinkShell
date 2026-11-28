@@ -1,11 +1,11 @@
-# LinkShell Desktop UI (`@linkshell/desktop-ui`)
+# LinkShell Workspace UI (`@linkshell/desktop-ui`)
 
-Dedicated frontend package for the LinkShell Desktop client on **macOS** and **Windows** (`apps/desktop`, `apps/mac`, `apps/windows`), completely decoupled from the gateway browser console (`apps/web`).
+Unified frontend package for **both** the LinkShell Desktop client on **macOS** and **Windows** (`apps/desktop`, `apps/mac`, `apps/windows`, rendered with `data-shell="electron"`) **and** the Gateway Browser Workspace served by `@linkshell/gateway` at `/` (`data-shell="browser"`).
 
 ## Browser Support Policy
 
-- **Browser Support Policy (`apps/desktop-ui`)**: **Electron `44.9.3` / Chromium `152+`** (pinned identically across macOS `arm64`/`x64` and Windows `win32-x64`).
-- Use native Chromium 152 HTML/CSS/DOM capabilities directly (`<dialog>` + `closedby`, `popover="auto" | "hint"`, `commandfor` / `command`, `interestfor`, CSS Anchor Positioning, `focusgroup`, customizable `<select>` with `appearance: base-select`, `light-dark()`, `field-sizing: content`, `element.startViewTransition()`, `Element.prototype.moveBefore()`, `scheduler.yield()`, `Element.prototype.setHTML()`).
+- **Desktop Runtime (`data-shell="electron"`)**: **Electron `44.9.3` / Chromium `152+`** (pinned identically across macOS `arm64`/`x64` and Windows `win32-x64` / `win32-arm64`).
+- **Gateway Browser Runtime (`data-shell="browser"`)**: Modern Evergreen browsers (Chromium 120+, Safari 17.4+, Firefox 128+). Native HTML/CSS capabilities (`<dialog>`, `popover`, CSS Anchor Positioning, `appearance: base-select`, `light-dark()`) are used directly, paired with lightweight progressive fallbacks (`useAnchorPositionFallback` in `src/primitives/utils.ts` when `CSS.supports("anchor-name", ...)` is absent, `@supports not (appearance: base-select)`, and `< 768px` mobile drawer layout).
 - **Zero legacy UI bloat**: Do NOT introduce `@radix-ui/*`, `radix-ui`, `lucide-react`, `@floating-ui/*`, `tw-animate-css`, or `class-variance-authority`.
 - **Safari-only exception**: `<input type="checkbox" switch>` is unsupported in Chromium; implement switches via `<input type="checkbox" role="switch">`.
 
@@ -17,7 +17,8 @@ Dedicated frontend package for the LinkShell Desktop client on **macOS** and **W
    - Every icon goes through `<DesktopIcon>`, `<AgentMark>`, or `<SubagentGlyph>` (`src/icons/`).
 2. **Smoke & Packaging Contracts**:
    - `pnpm --filter @linkshell/desktop-ui build` MUST emit `dist/index.html`, `dist/preview/bridge.html`, `dist/preview/bridge.js`, and `dist/preview/worker.js`.
-   - Root container MUST render `.desktop-root` with `data-shell="electron"` and `data-platform="macos" | "windows" | "linux"`, and honor `#view=manage[:<page>]`.
+   - Root container MUST render `.desktop-root` with `data-shell="electron" | "browser"` and `data-platform="macos" | "windows" | "linux"`, and honor `#view=manage[:<page>]`.
+   - Browser mode (`!hasDesktopSidecar()`) persists its device identity in IndexedDB (`linkshell.web.identity`), migrates legacy `linkshell.web.*` localStorage keys seamlessly, coordinates single-connection ownership across tabs via `navigator.locks` + `BroadcastChannel("linkshell.web.owner")`, and adapts to `/config.js` (`deployment: "official" | "self-hosted"`).
 3. **Native Metal `DesktopScreenSurface` Occlusion Guard**:
    - On macOS, `LinkShellNative.node` mounts an AppKit `CAMetalLayer` view above `WebContents`. Every open `<dialog>`, `[popover="auto" | "manual"]`, `[data-native-overlay]`, or measured customizable `<select>` picker (`::picker(select)`) tracked in `src/bridge/top-layer-registry.ts` MUST be cut out of it (`holes` in the layout message, boolean-subtracted in `DesktopScreenClipView` so overlapping holes stay transparent) until closed; an unmeasurable open `<select>` picker collapses the rect to `0×0`.
 4. **First-Class 融合模式 (Fusion Mode)**:

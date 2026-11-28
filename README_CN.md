@@ -110,7 +110,7 @@ Linux 上可以看屏幕但不能控制，需要 `ffmpeg` 和 X11 显示环境�
 
 自建网关可免费使用全部功能。如需使用官方网关，可单独购买 LinkShell（¥9.9/月或 ¥49/年；US$3.19/月或 US$13.49/年），也可选全产品年包（¥99/年或 US$26.49/年），价格均含税。用同一账号前往 [iTool 官网选择方案](https://www.itool.tech/zh/pro?product=linkshell)：支付宝单次付款，Creem 自动续订、可取消后续续费。开通后在桌面版或网页工作区刷新会员状态；已有权益和邀请奖励保持有效。
 
-网关根地址还提供浏览器客户端，同样支持配对或账号登录。详见[网页客户端](apps/web/README.md)。
+网关根地址还提供浏览器客户端，同样支持配对或账号登录。详见[网页与桌面工作台](apps/desktop-ui/README.md)。
 
 ## 支持的 Agent
 
@@ -197,7 +197,7 @@ pnpm install
 pnpm build && pnpm typecheck && pnpm test
 ```
 
-macOS 上完整构建还会编译 LinkShell.app，需要 Xcode 的 Swift 工具链；Windows 上使用 .NET Framework 4.8 编译桌面端与屏幕组件；`pnpm -r --filter "./packages/*" build` 只构建 TypeScript 包（Linux CI 跑的就是它）。开发 App 时，先用单独的状态目录启动开发 host，再启动 Metro：
+macOS 上完整构建还会编译 LinkShell.app，需要 Xcode 的 Swift 工具链；Windows 上使用 CMake 与 Visual Studio C++20 工具链编译原生屏幕组件与媒体引擎（仅独立安装器使用 .NET Framework 4.8）；`pnpm -r --filter "./packages/*" build` 只构建 TypeScript 包（Linux CI 跑的就是它）。开发 App 时，先用单独的状态目录启动开发 host，再启动 Metro：
 
 ```bash
 LINKSHELL_HOME="$HOME/.linkshell-dev" pnpm dev:cli host --dev-port 7878
@@ -213,7 +213,7 @@ pnpm dev:app
 | `packages/client-core` | 各客户端共用的状态与时间线 |
 | `apps/client` | iPhone、Apple Watch 和 Android App（Expo / React Native） |
 | `apps/mac` | LinkShell.app：屏幕采集、视频、输入、系统权限、桌面工作台 |
-| `apps/web` | 网关提供的浏览器客户端 |
+| `apps/desktop-ui` | 桌面端与网关共用的统一工作台前端 |
 | `docs/site` | 官网与安装脚本 |
 
 欢迎提交聚焦的问题反馈和 PR。请附上 CLI 版本、系统、Agent 和最小复现步骤，并去掉配对码和 token。发版流程见 [release SOP](docs/release-sop.md)。

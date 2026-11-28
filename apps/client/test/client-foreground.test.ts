@@ -22,6 +22,7 @@ const harness = vi.hoisted(() => {
   const restartLanDiscovery = vi.fn();
   const storeConnect = vi.fn();
   const storeDisconnect = vi.fn();
+  const storeFlushSnapshot = vi.fn();
   const streamsStart = vi.fn();
   const streamsStop = vi.fn();
   const streamsConnect = vi.fn();
@@ -72,6 +73,7 @@ const harness = vi.hoisted(() => {
     restartLanDiscovery,
     storeConnect,
     storeDisconnect,
+    storeFlushSnapshot,
     streamsStart,
     streamsStop,
     streamsConnect,
@@ -183,6 +185,7 @@ vi.mock("@linkshell/client-core", () => ({
         machine: undefined,
         connect: harness.storeConnect,
         disconnect: harness.storeDisconnect,
+        flushSnapshot: harness.storeFlushSnapshot,
         openSession: vi.fn(),
         closeSession: vi.fn(),
       }),
@@ -192,7 +195,8 @@ vi.mock("@linkshell/client-core", () => ({
 }));
 
 const { outboxStorage } = await import("../src/lib/outbox-db");
-const { ClientProvider, connectionSignature } = await import("../src/lib/client");
+const { snapshotStorage } = await import("../src/lib/snapshot-db");
+const { ClientProvider, FOREGROUND_PROBE_MS, connectionSignature } = await import("../src/lib/client");
 
 describe("ClientProvider foreground reconnect & outboxStorage wiring", () => {
   let cleanups: Array<() => void> = [];
@@ -228,10 +232,12 @@ describe("ClientProvider foreground reconnect & outboxStorage wiring", () => {
       .filter((fn): fn is () => void => typeof fn === "function");
   }
 
-  it("wires durable outboxStorage and per-computer outboxKey into createClientStore", () => {
+  it("wires durable outboxStorage and snapshotStorage per computer into createClientStore", () => {
     mountProvider();
     expect(harness.capturedStoreOptions?.outboxStorage).toBe(outboxStorage);
     expect(harness.capturedStoreOptions?.outboxKey).toBe("direct:ws://192.168.1.10:7878");
+    expect(harness.capturedStoreOptions?.snapshotStorage).toBe(snapshotStorage);
+    expect(harness.capturedStoreOptions?.snapshotKey).toBe("direct:ws://192.168.1.10:7878");
   });
 
   it("keeps connectionSignature strictly keyed by computer.key so mDNS lanUrl flapping never tears down connections", () => {
@@ -250,7 +256,7 @@ describe("ClientProvider foreground reconnect & outboxStorage wiring", () => {
     );
   });
 
-  it("probes with 2500ms on foreground active when online without tearing down a healthy socket and clears recovering", async () => {
+  it("probes with 1500ms on foreground active when online without tearing down a healthy socket and clears recovering", async () => {
     harness.linkStatus = "online";
     harness.linkProbe.mockResolvedValue(true);
     mountProvider();
@@ -259,8 +265,8 @@ describe("ClientProvider foreground reconnect & outboxStorage wiring", () => {
     harness.appStateListener?.("active");
     await Promise.resolve();
 
-    expect(harness.linkProbe).toHaveBeenCalledWith(2500);
-    expect(harness.probeRelays).toHaveBeenCalledTimes(1);
+    expect(harness.linkProbe).toHaveBeenCalledWith(FOREGROUND_PROBE_MS, { reconnect: false });
+    expect(harness.probeRelays).toHaveBeenCalledWith(FOREGROUND_PROBE_MS);
     expect(harness.linkReconnectNow).not.toHaveBeenCalled();
     expect(harness.reconnectRelays).not.toHaveBeenCalled();
     expect(harness.streamsConnect).toHaveBeenCalledTimes(1);
@@ -268,26 +274,34 @@ describe("ClientProvider foreground reconnect & outboxStorage wiring", () => {
     expect(harness.recoveringHistory).toEqual([true, false]);
   });
 
-  it("wakes relays if the 2500ms foreground probe detects a dead suspended socket", async () => {
+  it("force-resets relays before redialing the host tunnel when the foreground probe detects a dead suspended socket", async () => {
     harness.linkStatus = "online";
     harness.linkProbe.mockResolvedValue(false);
     mountProvider();
+    const callOrder: string[] = [];
+    harness.reconnectRelays.mockImplementation(() => callOrder.push("relays"));
+    harness.linkReconnectNow.mockImplementation(() => callOrder.push("link"));
+
+    harness.appStateListener?.("background");
+    expect(harness.storeFlushSnapshot).toHaveBeenCalledTimes(1);
 
     harness.appStateListener?.("active");
     await Promise.resolve();
 
-    expect(harness.linkProbe).toHaveBeenCalledWith(2500);
-    expect(harness.reconnectRelays).toHaveBeenCalledTimes(1);
+    expect(harness.linkProbe).toHaveBeenCalledWith(FOREGROUND_PROBE_MS, { reconnect: false });
+    expect(harness.reconnectRelays).toHaveBeenCalledWith({ force: true });
+    expect(harness.linkReconnectNow).toHaveBeenCalledWith(true);
+    expect(callOrder).toEqual(["relays", "link"]);
   });
 
-  it("forces immediate reconnectNow(true) + reconnectRelays() on foreground active when offline", () => {
+  it("forces immediate reconnectNow(true) + reconnectRelays({ force: true }) on foreground active when offline", () => {
     harness.linkStatus = "reconnecting";
     mountProvider();
 
     harness.appStateListener?.("active");
 
     expect(harness.linkReconnectNow).toHaveBeenCalledWith(true);
-    expect(harness.reconnectRelays).toHaveBeenCalledTimes(1);
+    expect(harness.reconnectRelays).toHaveBeenCalledWith({ force: true });
     expect(harness.linkProbe).not.toHaveBeenCalled();
     expect(harness.streamsConnect).toHaveBeenCalledTimes(1);
   });
@@ -320,7 +334,7 @@ describe("ClientProvider foreground reconnect & outboxStorage wiring", () => {
     expect(harness.restartLanDiscovery).toHaveBeenCalledTimes(1);
     expect(harness.streamsConnect).toHaveBeenCalledTimes(1);
 
-    // Interface switches from wifi -> cellular: must force reconnectNow(true) immediately.
+    // Interface switches from wifi -> cellular: must force reconnectRelays({ force: true }) and reconnectNow(true) immediately.
     vi.clearAllMocks();
     harness.networkPathListener?.({
       status: "satisfied",
@@ -328,7 +342,7 @@ describe("ClientProvider foreground reconnect & outboxStorage wiring", () => {
       isExpensive: true,
       isConstrained: false,
     });
-    expect(harness.reconnectRelays).toHaveBeenCalledTimes(1);
+    expect(harness.reconnectRelays).toHaveBeenCalledWith({ force: true });
     expect(harness.restartLanDiscovery).toHaveBeenCalledTimes(1);
     expect(harness.linkReconnectNow).toHaveBeenCalledWith(true);
     expect(harness.streamsConnect).toHaveBeenCalledTimes(1);

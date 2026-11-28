@@ -41,10 +41,17 @@ export interface ElectronPreloadBridge {
   getLanHosts?(): Promise<LanHostEntry[]>;
 }
 
+export interface LinkShellAccountConfig {
+  url: string;
+  anonKey: string;
+}
+
 export interface LinkShellRuntimeConfig {
   desktop?: boolean;
   desktopPlatform?: string;
-  deployment?: string;
+  deployment?: "official" | "self-hosted" | string;
+  gatewayUrl?: string;
+  account?: LinkShellAccountConfig;
   previewOrigin?: string;
 }
 
@@ -145,6 +152,44 @@ export function isElectronRuntime(): boolean {
     window.linkshellDesktop?.shell === "electron" ||
     window.__LINKSHELL_CONFIG__?.desktop === true
   );
+}
+
+/**
+ * Returns `true` when backed by an Electron preload bridge or a local desktop sidecar (`#desktop=<capability>`),
+ * and `false` when running as the standalone browser workspace served by `@linkshell/gateway`.
+ */
+export function hasDesktopSidecar(): boolean {
+  return isElectronRuntime() || Boolean(getDesktopCapability());
+}
+
+export function gatewayDeployment(): "official" | "self-hosted" {
+  if (
+    typeof window !== "undefined" &&
+    window.__LINKSHELL_CONFIG__?.deployment === "self-hosted"
+  ) {
+    return "self-hosted";
+  }
+  return "official";
+}
+
+export function initialBrowserGateway(
+  officialFallback = "wss://gateway.itool.tech",
+): string {
+  if (gatewayDeployment() === "self-hosted" && typeof window !== "undefined") {
+    const configured = window.__LINKSHELL_CONFIG__?.gatewayUrl;
+    if (typeof configured === "string" && configured.trim().length > 0) {
+      return configured.trim();
+    }
+    if (
+      typeof location !== "undefined" &&
+      (location.protocol === "http:" || location.protocol === "https:") &&
+      location.origin &&
+      location.origin !== "null"
+    ) {
+      return location.origin.replace(/^http/i, "ws");
+    }
+  }
+  return officialFallback;
 }
 
 /**

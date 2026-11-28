@@ -698,7 +698,7 @@ function releaseInput() {
   clearTimeout(disarming);
   clearInterval(statusTimer);
   clearTimeout(controls.timer);
-  if (gesture) { clearTimeout(gesture.hold); clearTimeout(gesture.dragHold); }
+  if (gesture) clearTimeout(gesture.hold);
   for (const id of touches.keys()) { try { stage.releasePointerCapture(id); } catch {} }
   touches.clear();
   gesture = lastTap = mouseHeld = null;
@@ -780,10 +780,16 @@ function nudge(dx, dy, dt) {
 
 // ---- Touch ----------------------------------------------------------------
 
-const SLOP = 10, MOVE_SLOP = SLOP, HOLD_SLOP = 16, HOLD_MS = 450, DRAG_HOLD_MS = 220;
-const DOUBLE_TAP_MS = 300, DOUBLE_TAP_HOLD_MAX_MS = 240, DOUBLE_TAP_DIST = 44;
-const DRAG_CHAIN_MS = 850, DRAG_CHAIN_DIST_TOUCH = 72, DRAG_CHAIN_DIST_TRACKPAD = 140;
-const TAP_MAX_MS = 420, TAP_MS = 350;
+// Calibrated to macOS Trackpad ("Tap to Drag" without Drag Lock) & mobile RD best practices:
+// - Single tap (< 280 ms, < 10 px drift) -> left click.
+// - Quick double-tap (< 260 ms gap, < 28 px apart, < 240 ms press) -> double click.
+// - Double-tap & slide (< 260 ms gap, < 28 px apart, then >= 14 px slide within 350 ms) -> left drag.
+//   Never auto-locks drag on a stationary timer, and never chains across normal tap-then-move cadence.
+// - Stationary long-press (500 ms, < 14 px drift, not part of a double-tap) -> right click.
+// - Trackpad 1-finger slide -> smooth velocity-accelerated pointer motion; Direct-touch 1-finger slide -> pan.
+const SLOP = 10, DRAG_SLOP = 14, HOLD_SLOP = 14, HOLD_MS = 500;
+const DOUBLE_TAP_MS = 260, DOUBLE_TAP_HOLD_MAX_MS = 240, DOUBLE_TAP_DIST = 28, DRAG_START_MAX_MS = 350;
+const TAP_MAX_MS = 280, TAP_MS = 320;
 const touches = new Map();
 let gesture = null;
 let lastTap = null;
@@ -798,17 +804,15 @@ function beginDrag(g, moveX, moveY, now) {
   if (mode === "touch") {
     // On Windows, SendInput ignores click count n and treats two left-downs within
     // ~500 ms and 4 px as a double-click (maximizing titlebars instead of dragging).
-    // When dragging immediately after a focus tap, anchor down at the moved point once past 6 px.
-    const avoidWinDouble = windowsHost && !!g.tapOrigin && now - g.tapOrigin.t < 550 && Math.hypot(g.x0 - g.tapOrigin.x, g.y0 - g.tapOrigin.y) < 12;
-    const useMoved = avoidWinDouble && Math.hypot(moveX - g.x0, moveY - g.y0) >= 6;
-    const px = useMoved ? clamp(moveX, shown.x, shown.x + shown.w) : g.x0;
-    const py = useMoved ? clamp(moveY, shown.y, shown.y + shown.h) : g.y0;
+    const avoidWinDouble = windowsHost && !!g.tapOrigin && now - g.tapOrigin.t < 550 && Math.hypot(g.x0 - g.tapOrigin.x, g.y0 - g.tapOrigin.y) < 10;
+    const dx = moveX - g.x0, dy = moveY - g.y0, dist = Math.hypot(dx, dy);
+    const px = avoidWinDouble && dist >= 6 ? clamp(g.x0 + (dx / dist) * 10, shown.x, shown.x + shown.w) : g.x0;
+    const py = avoidWinDouble && dist >= 6 ? clamp(g.y0 + (dy / dist) * 10, shown.y, shown.y + shown.h) : g.y0;
     if (!pointAt(px, py)) return false;
   }
   act({ t: "down", b: "left", n: 1, m: takeMods() });
   g.dragging = true;
   clearTimeout(g.hold);
-  clearTimeout(g.dragHold);
   lastTap = null;
   pointer.classList.add("pressed");
   tellApp({ type: "haptic", kind: "light" });
@@ -818,7 +822,6 @@ function beginDrag(g, moveX, moveY, now) {
 function endOne() {
   if (!gesture || gesture.kind !== "one") return;
   clearTimeout(gesture.hold);
-  clearTimeout(gesture.dragHold);
   if (gesture.dragging) {
     act({ t: "up", b: "left" });
     pointer.classList.remove("pressed");
@@ -836,33 +839,22 @@ stage.addEventListener("pointerdown", (event) => {
   touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
   const now = performance.now();
   if (closing) {
+    lastTap = null;
     gesture = { kind: "more", t0: now };
   } else if (touches.size === 1) {
     const gap = lastTap ? now - lastTap.t : Infinity;
     const dist = lastTap ? Math.hypot(event.clientX - lastTap.x, event.clientY - lastTap.y) : Infinity;
-    const doubleTap = !!lastTap && gap < DOUBLE_TAP_MS && dist < DOUBLE_TAP_DIST;
-    const chainDist = mode === "trackpad" ? DRAG_CHAIN_DIST_TRACKPAD : DRAG_CHAIN_DIST_TOUCH;
-    const dragChain = controlling() && !!lastTap && gap < DRAG_CHAIN_MS && dist < chainDist;
-    const tapOrigin = dragChain ? lastTap : null;
+    const again = !!lastTap && gap < DOUBLE_TAP_MS && dist < DOUBLE_TAP_DIST;
+    const tapOrigin = again ? lastTap : null;
     const mine = (gesture = {
       kind: "one", id: event.pointerId,
       x0: event.clientX, y0: event.clientY, x: event.clientX, y: event.clientY,
       t0: now, t: now,
-      doubleTap, dragChain, tapOrigin,
-      moving: false, dragging: false, held: false, hold: 0, dragHold: 0,
+      again, tapOrigin,
+      moving: false, dragging: false, held: false, hold: 0,
     });
-    if (dragChain) {
-      // After tapping once (e.g. selecting a window), holding down engages left-button drag
-      // instead of firing a stray double-click when released or moved slightly later.
-      const winWait = windowsHost && tapOrigin && Math.hypot(mine.x0 - tapOrigin.x, mine.y0 - tapOrigin.y) < 12
-        ? Math.max(DRAG_HOLD_MS, 560 - gap)
-        : DRAG_HOLD_MS;
-      mine.dragHold = setTimeout(() => {
-        if (gesture !== mine || mine.moving || mine.dragging || mine.held) return;
-        beginDrag(mine, mine.x, mine.y, performance.now());
-      }, winWait);
-    } else if (controlling()) {
-      // Staying down without deliberate sliding triggers right-click with generous fingertip wobble tolerance.
+    if (controlling() && !again) {
+      // Stationary press-and-hold triggers right-click with natural fingertip wobble tolerance.
       mine.hold = setTimeout(() => {
         if (gesture !== mine || mine.moving || mine.dragging) return;
         if (mode === "touch" && !pointAt(mine.x0, mine.y0)) return;
@@ -874,10 +866,12 @@ stage.addEventListener("pointerdown", (event) => {
     }
   } else if (touches.size === 2) {
     endOne();
+    lastTap = null;
     const c = centre();
     gesture = { kind: "two", t0: now, c0: c, c, d0: c.d, zoom0: zoom, what: null, restX: 0, restY: 0 };
   } else {
     endOne();
+    lastTap = null;
     gesture = { kind: touches.size === 3 ? "three" : "more", t0: now };
   }
 });
@@ -891,19 +885,25 @@ stage.addEventListener("pointermove", (event) => {
   touch.y = event.clientY;
   if (gesture.kind === "one" && gesture.id === event.pointerId) {
     const g = gesture, now = performance.now();
-    const dx = touch.x - g.x, dy = touch.y - g.y, dt = Math.max(1, now - g.t);
     if (!g.moving && !g.dragging) {
-      const directTouchDrag = controlling() && mode === "touch" && zoom <= 1.02;
-      const slop = g.dragChain ? MOVE_SLOP : (directTouchDrag ? HOLD_SLOP : MOVE_SLOP);
-      if (Math.hypot(touch.x - g.x0, touch.y - g.y0) < slop) return;
+      const slop = g.again ? DRAG_SLOP : (mode === "touch" ? HOLD_SLOP : SLOP);
+      const dist0 = Math.hypot(touch.x - g.x0, touch.y - g.y0);
+      if (dist0 < slop) return;
       g.moving = true;
       clearTimeout(g.hold);
-      clearTimeout(g.dragHold);
-      // A second touch that stays down and moves (or direct unzoomed touch slide) holds the left button to drag.
-      if (controlling() && !g.held && (g.dragChain || directTouchDrag)) {
+      // Only a crisp second touch that immediately slides engages left-button drag.
+      if (controlling() && !g.held && g.again && now - g.t0 < DRAG_START_MAX_MS) {
         beginDrag(g, touch.x, touch.y, now);
+      } else {
+        lastTap = null;
       }
+      // Subtract the deadzone so the first motion frame starts smoothly from zero without a jump.
+      const ratio = slop / dist0;
+      g.x = g.x0 + (touch.x - g.x0) * ratio;
+      g.y = g.y0 + (touch.y - g.y0) * ratio;
+      g.t = Math.max(g.t0, now - 16);
     }
+    const dx = touch.x - g.x, dy = touch.y - g.y, dt = Math.max(6, now - g.t);
     g.x = touch.x;
     g.y = touch.y;
     g.t = now;
@@ -977,7 +977,7 @@ function tap(g, now) {
   if (!controlling()) {
     if (mode !== "view") return explain(false);
     // Only watching: a double tap goes in on that spot, and back out.
-    if (g.doubleTap && now - g.t0 < DOUBLE_TAP_HOLD_MAX_MS) {
+    if (g.again && now - g.t0 < DOUBLE_TAP_HOLD_MAX_MS) {
       lastTap = null;
       return zoomTo(zoom > 1.05 ? 1 : 2.5, { x: g.x0, y: g.y0 });
     }
@@ -986,7 +986,7 @@ function tap(g, now) {
   }
   if (mode === "touch" && !pointAt(g.x0, g.y0)) return;
   glow();
-  const isDouble = g.doubleTap && now - g.t0 < DOUBLE_TAP_HOLD_MAX_MS;
+  const isDouble = g.again && now - g.t0 < DOUBLE_TAP_HOLD_MAX_MS;
   click("left", isDouble ? 2 : 1);
   lastTap = isDouble ? null : { t: now, x: g.x0, y: g.y0 };
 }

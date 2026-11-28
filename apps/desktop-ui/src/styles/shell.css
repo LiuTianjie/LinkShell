@@ -1302,6 +1302,7 @@
   }
 
   .desktop-surface-tab {
+    flex-shrink: 0;
     max-inline-size: 210px;
     min-inline-size: 0;
     block-size: 25px;

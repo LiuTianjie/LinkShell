@@ -34,9 +34,9 @@ jobs:
           python3 scripts/check-release-packages.py artifacts/npm
       - name: Build web client
         run: |
-          pnpm --filter @linkshell/web build
+          pnpm --filter @linkshell/desktop-ui build
           mkdir -p artifacts/web
-          tar -czf artifacts/web/linkshell-web-0.1.0.tar.gz -C apps/web/dist .
+          tar -czf artifacts/web/linkshell-web-0.1.0.tar.gz -C apps/desktop-ui/dist .
       - name: Prepare and verify gateway image without pushing
         run: |
           VERSION=$(node -p "require('./packages/gateway/package.json').version")

@@ -122,7 +122,7 @@ export function findCSharp6PlusViolations(source) {
     { rule: 'auto-property initializer', regex: /\{\s*(?:get|set)\s*;\s*(?:(?:private|protected|internal)\s+)?(?:get|set)?\s*;?\s*\}\s*=/g },
     { rule: 'switch expression', regex: /\bswitch\s*\{/g },
     { rule: 'pattern matching is-expression', regex: /\bis\s+(?:not\b|(?!null\b|true\b|false\b)[A-Za-z_][A-Za-z0-9_.<>]*\s+[a-z_][A-Za-z0-9_]*\b)/g },
-    { rule: 'expression-bodied member', regex: /(?:^|[;{}])\s*(?:(?:public|private|protected|internal|static|virtual|override|sealed|new|async|extern)\s+)*[A-Za-z_][A-Za-z0-9_<>\[\],\s]*\s+[A-Za-z_][A-Za-z0-9_]*(?:\([^;{}]*\))?\s*=>/gm },
+    { rule: 'expression-bodied member', regex: /(?:^|[;{}])\s*(?:(?:public|private|protected|internal|static|virtual|override|sealed|new|async|extern)\s+)*[A-Za-z_][A-Za-z0-9_<>[\],\s]*\s+[A-Za-z_][A-Za-z0-9_]*(?:\([^;{}]*\))?\s*=>/gm },
   ];
 
   for (const { rule, regex } of patterns) {
@@ -153,7 +153,7 @@ export function findCSharp6PlusViolations(source) {
     // A formal parameter declaration has modifiers/return type before the method/delegate name
     // (at least 2 tokens, no dots, no `new`/`return`/`=`/`(`/`,`/`:`).
     const isSignature = !/[.=(),?:]|(?:\b(?:new|return|if|while|for|else|case|throw)\b)/.test(header)
-      && /^(?:[A-Za-z_][A-Za-z0-9_<>\[\]]*\s+)+[A-Za-z_][A-Za-z0-9_]*$/.test(header);
+      && /^(?:[A-Za-z_][A-Za-z0-9_<>[\]]*\s+)+[A-Za-z_][A-Za-z0-9_]*$/.test(header);
     if (!isSignature) {
       violations.push({ line: lineAt(match.index), rule: 'inline out variable declaration', snippet: match[0].trim() });
     }
@@ -161,10 +161,10 @@ export function findCSharp6PlusViolations(source) {
   return violations;
 }
 
-test('every C# source file in apps/windows/src uses strict C# 5 syntax for .NET Framework 4.8 csc.exe', () => {
+test('remaining WPF installer C# files in apps/windows/src use strict C# 5 syntax and runtime helpers are migrated to C++20', () => {
   const srcDir = resolve('src');
   const files = readdirSync(srcDir).filter(name => name.endsWith('.cs')).sort();
-  assert.ok(files.length >= 6, `Expected C# files in ${srcDir}`);
+  assert.deepEqual(files, ['Installer.cs', 'InstallerEngine.cs', 'InstallerUpdate.cs']);
   for (const file of files) {
     const content = readFileSync(join(srcDir, file), 'utf8');
     const violations = findCSharp6PlusViolations(content);
@@ -209,70 +209,79 @@ test('C# 5 static validator catches forbidden C# 6+ constructs while ignoring co
   assert.deepEqual(findCSharp6PlusViolations(validCSharp5), []);
 });
 
-test('Windows native helpers maintain multi-GPU, dynamic display, monotonic tick, COM release and PerMonitorV2 invariants', () => {
-  const read = name => readFileSync(resolve('src', name), 'utf8');
-  const screen = read('Screen.cs');
-  assert.match(screen, /\bEnumDisplayMonitors\b/);
-  assert.match(screen, /\bDisplayHasActiveMonitor\b/);
-  assert.match(screen, /\bNudgeDesktopForCapture\b/);
-  assert.match(screen, /var displays = EnumerateDisplays\(\);/);
-  assert.match(screen, /SetStretchBltMode\(dc,\s*4\)/);
-  assert.match(screen, /\bEnsureSharingEnabled\b/);
-  assert.match(screen, /\bIsDefaultDesktopActive\b/);
-  assert.match(screen, /\bWaitForDefaultDesktop\b/);
+test('Windows native C++20 helpers and WPF setup engine maintain multi-GPU, dynamic display, monotonic tick, COM RAII, SDDL and PerMonitorV2 invariants', () => {
+  const readSrc = name => readFileSync(resolve('src', name), 'utf8');
+  const readMedia = name => readFileSync(resolve('media', name), 'utf8');
 
-  const videoCapture = read('VideoCapture.cs');
-  assert.match(videoCapture, /LINKSHELL_WINDOWS_PROFILE/);
-  assert.match(videoCapture, /Math\.Min\(3840,\s*width\)/);
-  assert.match(videoCapture, /24000000/);
-  assert.match(videoCapture, /scale_mode=bicubic/);
-  assert.match(videoCapture, /flags=bilinear/);
-  assert.match(videoCapture, /gfxcapture=/);
-  assert.match(videoCapture, /-f gdigrab/);
-  assert.match(videoCapture, /bt709/);
-  assert.match(videoCapture, /-rc vbr -cq 19/);
-  assert.match(videoCapture, /scale_d3d11=width=.*:format=nv12/);
-  assert.match(videoCapture, /\bVideoDesktopPaused\b/);
-  assert.match(videoCapture, /\bIsDesktopAccessLostMessage\b/);
-  assert.match(videoCapture, /\bTryStreamSecureDesktopVideo\b/);
-  assert.doesNotMatch(videoCapture, /-force_key_frames/);
-  assert.doesNotMatch(videoCapture, /-header_spacing\s+1/);
+  const screenCommon = readMedia('src/helper/screen_common.cpp');
+  assert.match(screenCommon, /\bEnumDisplayMonitors\b/);
+  assert.match(screenCommon, /\bDisplayHasActiveMonitor\b/);
+  assert.match(screenCommon, /\bNudgeDesktopForCapture\b/);
+  assert.match(screenCommon, /\bEnsureSharingEnabled\b/);
+  assert.match(screenCommon, /\bIsDefaultDesktopActive\b/);
+  assert.match(screenCommon, /\bWaitForDefaultDesktop\b/);
+  assert.match(screenCommon, /std::chrono::steady_clock/);
 
-  const screenService = read('ScreenService.cs');
+  const jpegCapture = readMedia('src/helper/jpeg_capture.cpp');
+  assert.match(jpegCapture, /\bCreateDXGIFactory1\b/);
+  assert.match(jpegCapture, /\bEnumAdapters1\b/);
+  assert.match(jpegCapture, /\bPrimaryVendor\b/);
+  assert.match(jpegCapture, /\bHALFTONE\b/);
+  assert.match(jpegCapture, /LINKSHELL_WINDOWS_PROFILE/);
+  assert.match(jpegCapture, /24000000/);
+  assert.match(jpegCapture, /scale_mode=bicubic/);
+  assert.match(jpegCapture, /flags=bilinear/);
+  assert.match(jpegCapture, /gfxcapture=/);
+  assert.match(jpegCapture, /-f gdigrab/);
+  assert.match(jpegCapture, /bt709/);
+  assert.match(jpegCapture, /-rc vbr -cq 19/);
+  assert.match(jpegCapture, /scale_d3d11=width=.*:format=nv12/);
+  assert.match(jpegCapture, /\bIsDesktopAccessLostLine\b/);
+  assert.match(jpegCapture, /\bTryStreamSecureDesktopVideo\b/);
+  assert.doesNotMatch(jpegCapture, /-force_key_frames/);
+  assert.doesNotMatch(jpegCapture, /-header_spacing\s+1/);
+
+  const screenService = readMedia('src/helper/screen_service.cpp');
   assert.match(screenService, /LinkShellScreenService/);
   assert.match(screenService, /\bConstantTimeEquals\b/);
   assert.match(screenService, /\bApplyAdminOnlyDirectoryAcl\b/);
-  assert.match(screenService, /\bCreateProcessAsUser\b/);
+  assert.match(screenService, /\bCreateProcessAsUserW\b/);
   assert.match(screenService, /\bServiceAttachActiveDesktop\b/);
   assert.match(screenService, /vdd-enable/);
   assert.match(screenService, /vdd-disable/);
   assert.match(screenService, /vdd-configure/);
 
-  const virtualDisplay = read('VirtualDisplay.cs');
-  assert.match(virtualDisplay, /Root\\MttVDD/);
-  assert.match(virtualDisplay, /StoreName\.TrustedPublisher/);
-  assert.doesNotMatch(virtualDisplay, /StoreName\.Root/);
-  assert.match(virtualDisplay, /\bUpdateDriverForPlugAndPlayDevices\b/);
-  assert.match(virtualDisplay, /\bpnputil\.exe\b/);
-  assert.match(virtualDisplay, /\bCM_Enable_DevNode\b/);
-  assert.match(virtualDisplay, /\bCM_Disable_DevNode\b/);
+  const vddInstaller = readMedia('src/helper/vdd_installer.cpp');
+  assert.match(vddInstaller, /Root\\\\MttVDD/);
+  assert.match(vddInstaller, /L"TrustedPublisher"/);
+  assert.doesNotMatch(vddInstaller, /L"Root"/);
+  assert.match(vddInstaller, /UpdateDriverForPlugAndPlayDevicesW/);
+  assert.match(vddInstaller, /pnputil\.exe/);
+  assert.match(vddInstaller, /\bCM_Enable_DevNode\b/);
+  assert.match(vddInstaller, /\bCM_Disable_DevNode\b/);
 
-  const dxgi = read('DesktopDuplication.cs');
-  assert.match(dxgi, /\bCreateDXGIFactory1\b/);
-  assert.match(dxgi, /\bEnumAdapters1\b/);
-  assert.match(dxgi, /\bPrimaryVendor\b/);
+  const fusionHelper = readMedia('src/helper/fusion_helper.cpp');
+  assert.doesNotMatch(fusionHelper, /\bGetTickCount\b/);
+  assert.doesNotMatch(fusionHelper, /\bGetTickCount64\b/);
+  assert.match(fusionHelper, /\bComPtr</);
+  assert.match(fusionHelper, /ExcludeClipboardContentFromMonitorProcessing/);
 
-  const fusion = read('Fusion.cs');
-  assert.doesNotMatch(fusion, /\bEnvironment\.TickCount\b/);
-  assert.doesNotMatch(fusion, /\bEnvironment\.TickCount64\b/);
-  assert.match(fusion, /\bFinalReleaseComObject\b/);
+  const cmake = readMedia('CMakeLists.txt');
+  assert.match(cmake, /add_executable\(LinkShell\.Screen\b/);
+  // Security invariant: LinkShell.Screen.exe (which can be installed as LocalSystem) must never link webrtc.lib.
+  const screenTargetBlock = cmake.slice(cmake.indexOf('add_executable(LinkShell.Screen'), cmake.indexOf('if(LINKSHELL_BUILD_MEDIA)'));
+  assert.doesNotMatch(screenTargetBlock, /webrtc\.lib/);
 
-  const installerEngine = read('InstallerEngine.cs');
+  const screenManifest = readMedia('LinkShell.Screen.manifest');
+  assert.match(screenManifest, /PerMonitorV2/);
+  assert.match(screenManifest, /level="asInvoker"/);
+
+  const installerEngine = readSrc('InstallerEngine.cs');
   assert.match(installerEngine, /\bQueryFullProcessImageNameW\b/);
   assert.match(installerEngine, /catch\s*\(Win32Exception\)/);
   assert.match(installerEngine, /LinkShell\.Media\.exe/);
   assert.match(installerEngine, /LINKSHELL_WINDOWS_MEDIA/);
 
-  const manifest = read('app.manifest');
+  const manifest = readSrc('app.manifest');
   assert.match(manifest, /PerMonitorV2/);
 });

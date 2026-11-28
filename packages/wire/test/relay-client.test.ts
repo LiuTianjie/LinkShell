@@ -363,4 +363,39 @@ describe("RelayClient resilience", () => {
       client.stop();
     }
   });
+
+  it("tightens an in-flight probe deadline when a shorter foreground probe arrives", () => {
+    vi.useFakeTimers();
+    const sockets: Socket[] = [];
+    const client = new RelayClient({
+      identity: createIdentity(),
+      name: "Test",
+      role: "device",
+      url: "ws://127.0.0.1/v2/connect",
+      pingMs: 0,
+      createSocket: () => {
+        const socket = new Socket();
+        sockets.push(socket);
+        return socket;
+      },
+    });
+    try {
+      client.start();
+      sockets[0]!.message({ t: "ready" });
+      expect(client.status).toBe("online");
+
+      // Start a default 8s probe, then tighten to 1.5s on foreground return.
+      client.probe(8_000);
+      client.probe(1_500);
+
+      vi.advanceTimersByTime(1_499);
+      expect(client.status).toBe("online");
+
+      vi.advanceTimersByTime(1);
+      expect(sockets[0]!.terminated).toBe(1);
+      expect(client.status).toBe("offline");
+    } finally {
+      client.stop();
+    }
+  });
 });

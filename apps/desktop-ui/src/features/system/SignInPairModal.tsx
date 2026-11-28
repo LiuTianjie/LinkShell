@@ -24,7 +24,10 @@ import {
   type DesktopSignInRequest,
 } from "../../core";
 import {
+  gatewayDeployment,
   getLanHosts,
+  hasDesktopSidecar,
+  initialBrowserGateway,
   isElectronRuntime,
   onLanHosts,
   postDesktopMessage,
@@ -73,7 +76,11 @@ export function SignInPairModal(props: {
   const titleId = useId();
   const descId = useId();
 
-  const [tab, setTab] = useState<"account" | "pair">(initialTab);
+  const desktopSidecar = hasDesktopSidecar();
+  const selfHostedBrowser = !desktopSidecar && gatewayDeployment() === "self-hosted";
+  const effectiveInitialTab: "account" | "pair" = selfHostedBrowser ? "pair" : initialTab;
+
+  const [tab, setTab] = useState<"account" | "pair">(effectiveInitialTab);
 
   // Workspace Account Login Lifecycle
   const [pendingMethod, setPendingMethod] = useState<DesktopSignInMethod>();
@@ -89,7 +96,7 @@ export function SignInPairModal(props: {
   const [codeDigits, setCodeDigits] = useState("");
   const [pastedLink, setPastedLink] = useState<string>();
   const [gatewayUrl, setGatewayUrl] = useState(
-    engineState.gateway || OFFICIAL_GATEWAY,
+    engineState.gateway || initialBrowserGateway(OFFICIAL_GATEWAY),
   );
   const [pairError, setPairError] = useState<{
     code?: string;
@@ -108,15 +115,15 @@ export function SignInPairModal(props: {
       }
       return;
     }
-    setTab(initialTab);
+    setTab(selfHostedBrowser ? "pair" : initialTab);
     setAuthError(undefined);
     setPairError({});
     if (!pastedLink) {
-      setGatewayUrl(engineState.gateway || OFFICIAL_GATEWAY);
+      setGatewayUrl(engineState.gateway || initialBrowserGateway(OFFICIAL_GATEWAY));
     }
     // Reset initial tab whenever modal opens.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, initialTab]);
+  }, [open, initialTab, selfHostedBrowser]);
 
   useEffect(() => {
     if (!open || tab !== "pair") return undefined;
@@ -326,21 +333,24 @@ export function SignInPairModal(props: {
       </DialogHeader>
 
       <Tabs
-        value={tab}
+        value={selfHostedBrowser ? "pair" : tab}
         variant="segmented"
         onValueChange={(next) => setTab(next as "account" | "pair")}
       >
-        <div className="ls-signin-pair-tabs-bar">
-          <TabList label={ts("authModal.title")}>
-            <Tab value="account" icon="user">
-              {ts("authModal.tabAccount")}
-            </Tab>
-            <Tab value="pair" icon="pair-qr">
-              {ts("authModal.tabPair")}
-            </Tab>
-          </TabList>
-        </div>
+        {!selfHostedBrowser ? (
+          <div className="ls-signin-pair-tabs-bar">
+            <TabList label={ts("authModal.title")}>
+              <Tab value="account" icon="user">
+                {ts("authModal.tabAccount")}
+              </Tab>
+              <Tab value="pair" icon="pair-qr">
+                {ts("authModal.tabPair")}
+              </Tab>
+            </TabList>
+          </div>
+        ) : null}
 
+        {!selfHostedBrowser ? (
         <TabPanel value="account">
           <div className="ls-signin-pair-panel-frame">
             {signedIn ? (
@@ -377,7 +387,8 @@ export function SignInPairModal(props: {
                 link={authLink}
                 error={authError}
                 disabled={accountBusy || engineState.locked}
-                showZeroLoginNote
+                showZeroLoginNote={desktopSidecar}
+                showBrowserAuth={desktopSidecar}
                 onPassword={(email, password) =>
                   void runWorkspaceLogin({ method: "password", email, password })
                 }
@@ -391,6 +402,7 @@ export function SignInPairModal(props: {
             )}
           </div>
         </TabPanel>
+        ) : null}
 
         <TabPanel value="pair">
           <div className="ls-signin-pair-panel-frame">

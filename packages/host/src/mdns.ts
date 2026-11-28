@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
-import { createSocket, type RemoteInfo, type Socket } from "node:dgram";
+import { createSocket, type RemoteInfo } from "node:dgram";
 import { accessSync, constants as fsConstants, readFileSync } from "node:fs";
 import { networkInterfaces, type NetworkInterfaceInfo } from "node:os";
 import { delimiter, join } from "node:path";

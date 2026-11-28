@@ -1,18 +1,32 @@
 import { useEffect, useId, useState, type ReactElement } from "react";
+import { useStore } from "zustand";
+import { LOCALE_LABELS, type LocalePreference } from "@linkshell/client-core";
+import {
+  DESKTOP_APPEARANCE_EVENT,
+  gatewayDeployment,
+  getShellAppearance,
+  hasDesktopSidecar,
+  setAppearanceBridge,
+} from "../../bridge/desktop-bridge";
 import {
   MANAGE_PAGES,
+  STORAGE_KEYS,
   accountAction,
   cancelLogin,
+  engine,
   healthy as isHealthy,
   managementStore,
   newVersion as hasNewVersion,
   pollManagement,
+  readLocal,
   refreshManagement,
   revokePairedDevice,
   routerStore,
+  saveLocal,
   serviceAction,
   setAccessPassword,
   upgradeInstall,
+  useI18n,
   useManagement,
   useRouter,
   type ManagePage,
@@ -22,12 +36,19 @@ import {
   AlertDialog,
   Button,
   Dialog,
+  DialogHeader,
+  DialogTitle,
   IconButton,
   Menu,
   MenuItem,
   MenuSeparator,
+  Select,
   StatusDot,
+  Tab,
+  TabList,
+  Tabs,
 } from "../../primitives";
+import { applyDesktopAppearance, type ThemeMode } from "../../theme";
 import { SystemDevicesPage } from "./SystemDevicesPage";
 import { SystemLogPage } from "./SystemLogPage";
 import {
@@ -56,10 +77,177 @@ const PAGE_ICONS: Record<ManagePage, DesktopIconName> = {
  * pairing phones, checking usage, or updating settings never unmounts active sessions,
  * xterm terminals, diffs, or Fusion windows.
  */
+function readBrowserAppearanceMode(): ThemeMode {
+  const fromShell = getShellAppearance();
+  if (fromShell === "light" || fromShell === "dark" || fromShell === "system") {
+    return fromShell;
+  }
+  const saved = readLocal<string>(STORAGE_KEYS.appearance, "system");
+  return saved === "light" || saved === "dark" ? saved : "system";
+}
+
+function BrowserPreferencesDialog({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}): ReactElement {
+  const { preference, setPreference, ts } = useSystemI18n();
+  const { t } = useI18n();
+  const titleId = useId();
+  const accountEmail = useStore(engine.state, (s) => s.account);
+  const accountUserId = useStore(engine.state, (s) => s.accountUserId);
+  const gatewayUrl = useStore(engine.state, (s) => s.gateway);
+  const [themeMode, setThemeMode] = useState<ThemeMode>(readBrowserAppearanceMode);
+
+  useEffect(() => {
+    const syncAppearance = () => setThemeMode(readBrowserAppearanceMode());
+    window.addEventListener(DESKTOP_APPEARANCE_EVENT, syncAppearance);
+    return () =>
+      window.removeEventListener(DESKTOP_APPEARANCE_EVENT, syncAppearance);
+  }, []);
+
+  const handleThemeChange = (next: ThemeMode) => {
+    setThemeMode(next);
+    saveLocal(STORAGE_KEYS.appearance, next);
+    applyDesktopAppearance(next);
+    setAppearanceBridge(next);
+  };
+
+  const selfHosted = gatewayDeployment() === "self-hosted";
+  const signedIn = Boolean(accountEmail || accountUserId);
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) onClose();
+      }}
+      size="md"
+      dismissible
+      unmountWhenClosed
+      aria-labelledby={titleId}
+    >
+      <DialogHeader onClose={onClose} closeLabel={ts("modal.close")}>
+        <DialogTitle id={titleId}>{t("desktop.shell.browserPreferences")}</DialogTitle>
+      </DialogHeader>
+
+      <div className="ls-system-stack" style={{ padding: "0 20px 20px" }}>
+        <div className="ls-system-card">
+          <div className="ls-system-row">
+            <div className="ls-system-row__copy">
+              <span className="ls-system-row__title">
+                <DesktopIcon name={selfHosted ? "gateway-relay" : "user"} size="sm" />
+                {selfHosted
+                  ? t("desktop.shell.gateway")
+                  : signedIn
+                    ? (accountEmail ?? accountUserId)
+                    : ts("overview.notSignedIn")}
+              </span>
+              <span className="ls-system-row__detail">{gatewayUrl}</span>
+            </div>
+            <div className="ls-system-row__controls">
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => {
+                  onClose();
+                  routerStore.getState().setConnectModalOpen(true);
+                }}
+              >
+                {t("desktop.fleet.connectComputer")}
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        <div className="ls-system-card">
+          <div className="ls-system-row">
+            <div className="ls-system-row__copy">
+              <span className="ls-system-row__title">
+                <DesktopIcon name="globe" size="sm" />
+                {ts("settings.language")}
+              </span>
+            </div>
+            <div className="ls-system-row__controls">
+              <Select
+                size="sm"
+                ariaLabel={ts("settings.language")}
+                value={preference}
+                onValueChange={(next) => setPreference(next as LocalePreference)}
+                options={[
+                  { value: "system", label: ts("settings.languageSystem") },
+                  { value: "zh", label: LOCALE_LABELS.zh },
+                  { value: "en", label: LOCALE_LABELS.en },
+                  { value: "ja", label: LOCALE_LABELS.ja },
+                ]}
+              />
+            </div>
+          </div>
+
+          <div className="ls-system-row">
+            <div className="ls-system-row__copy">
+              <span className="ls-system-row__title">
+                <DesktopIcon
+                  name={themeMode === "dark" ? "moon" : "sun"}
+                  size="sm"
+                />
+                {ts("settings.theme")}
+              </span>
+            </div>
+            <div className="ls-system-row__controls">
+              <Tabs
+                value={themeMode}
+                variant="segmented"
+                onValueChange={(next) => handleThemeChange(next as ThemeMode)}
+              >
+                <TabList label={ts("settings.theme")}>
+                  <Tab value="system">{ts("settings.themeSystem")}</Tab>
+                  <Tab value="light">{ts("settings.themeLight")}</Tab>
+                  <Tab value="dark">{ts("settings.themeDark")}</Tab>
+                </TabList>
+              </Tabs>
+            </div>
+          </div>
+
+          <div className="ls-system-row">
+            <div className="ls-system-row__copy">
+              <span className="ls-system-row__title">
+                <DesktopIcon name="command" size="sm" />
+                {t("desktop.shortcuts")}
+              </span>
+            </div>
+            <div className="ls-system-row__controls">
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  onClose();
+                  routerStore.getState().setShortcutSheetOpen(true);
+                }}
+              >
+                ?
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Dialog>
+  );
+}
+
 export function SystemHostModal(): ReactElement {
   const { ts, tm, pageTitle, computer } = useSystemI18n();
   const { open, page } = useRouter((s) => s.systemModal);
+  const localComputer = useStore(engine.state, (s) => s.localComputer);
   const state = useManagement();
+  const browserOnly =
+    !hasDesktopSidecar() &&
+    !localComputer &&
+    !state.snapshot &&
+    !state.starting &&
+    !state.problem;
   const healthy = isHealthy(state);
   // A hung Host (pid alive, socket silent) is recovered by restarting it; starting would only
   // spawn a second daemon beside it.
@@ -76,13 +264,13 @@ export function SystemHostModal(): ReactElement {
   const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!open) {
+    if (!open || browserOnly) {
       setConfirmAction(null);
       setActionError(null);
       return undefined;
     }
     return pollManagement();
-  }, [open]);
+  }, [browserOnly, open]);
 
   const navigatePage = (nextPage: ManagePage) => {
     setActionError(null);
@@ -203,6 +391,14 @@ export function SystemHostModal(): ReactElement {
       setConfirmBusy(false);
     }
   };
+
+  if (browserOnly) {
+    return <BrowserPreferencesDialog open={open} onClose={closeModal} />;
+  }
+
+  if (browserOnly) {
+    return <BrowserPreferencesDialog open={open} onClose={closeModal} />;
+  }
 
   return (
     <>

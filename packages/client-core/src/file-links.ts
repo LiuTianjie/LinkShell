@@ -229,7 +229,7 @@ function parseLinkDestination(source: string, openParen: number): { url: string;
   while (i < source.length && (source[i] === " " || source[i] === "\t")) i++;
   if (i >= source.length) return null;
 
-  let url = "";
+  let url: string;
   if (source[i] === "<") {
     i++;
     const start = i;

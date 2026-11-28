@@ -75,6 +75,7 @@ export interface SignInFormProps {
   error?: string;
   disabled?: boolean;
   showZeroLoginNote?: boolean;
+  showBrowserAuth?: boolean;
   onPassword: (email: string, password: string) => void;
   onProvider: (provider: OAuthProvider) => void;
   onBrowser: () => void;
@@ -88,6 +89,7 @@ export function SignInForm({
   error,
   disabled = false,
   showZeroLoginNote = false,
+  showBrowserAuth = true,
   onPassword,
   onProvider,
   onBrowser,
@@ -301,15 +303,19 @@ export function SignInForm({
         <ExternalTextLink href={SIGN_UP_URLS[locale]}>
           {ts("authModal.signUp")}
         </ExternalTextLink>
-        <span aria-hidden="true">·</span>
-        <button
-          type="button"
-          className="ls-signin-link"
-          disabled={blocked}
-          onClick={onBrowser}
-        >
-          {ts("authModal.browserAuth")}
-        </button>
+        {showBrowserAuth ? (
+          <>
+            <span aria-hidden="true">·</span>
+            <button
+              type="button"
+              className="ls-signin-link"
+              disabled={blocked}
+              onClick={onBrowser}
+            >
+              {ts("authModal.browserAuth")}
+            </button>
+          </>
+        ) : null}
       </div>
 
       {showZeroLoginNote ? (

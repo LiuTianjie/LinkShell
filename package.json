@@ -1,7 +1,7 @@
 {
   "name": "linkshell",
   "private": true,
-  "version": "0.10.129",
+  "version": "0.10.130",
   "packageManager": "pnpm@10.18.3",
   "pnpm": {
     "onlyBuiltDependencies": [
@@ -30,7 +30,7 @@
     "dev:gateway": "pnpm --filter @linkshell/gateway dev",
     "dev:cli": "pnpm --filter linkshell-cli dev",
     "dev:app": "pnpm --filter @linkshell/client start",
-    "dev:web": "pnpm --filter @linkshell/web dev",
+    "dev:web": "pnpm --filter @linkshell/desktop-ui dev",
     "dev:ios": "pnpm --filter @linkshell/client ios",
     "dev:android": "pnpm --filter @linkshell/client android",
     "lint": "eslint .",

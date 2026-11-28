@@ -40,6 +40,7 @@ vi.mock("@/lib/client", () => ({
   }),
   useActions: () => ({}),
   useSessionSubscriber: () => () => () => {},
+  useConnectionSettling: () => false,
   useConnectionStatus: () => "reconnecting",
   useClient: (selector: (state: Record<string, unknown>) => unknown) =>
     selector({
@@ -83,7 +84,7 @@ vi.mock("@/lib/live-activity-push", () => ({
   },
 }));
 
-const { formatConnectionDetail, needsRepairing } = await import("../src/components/connection-banner");
+const { formatConnectionDetail, needsRepairing, shouldHideConnectionBanner } = await import("../src/components/connection-banner");
 const { IOSAttentionSync } = await import("../src/components/ios-attention-sync");
 
 describe("ConnectionBanner Chinese error formatting & QR-paired IOSAttentionSync", () => {
@@ -142,5 +143,24 @@ describe("ConnectionBanner Chinese error formatting & QR-paired IOSAttentionSync
     const tree3 = IOSAttentionSync() as unknown as { type: () => unknown };
     tree3.type();
     expect(attentionHarness.attentionArgs?.[7]).toBe(true);
+  });
+
+  it("hides transient connecting banners during the settle window when cached sessions exist, but shows locked/repairing immediately", () => {
+    // Cached sessions on screen during 2.2s settle window -> completely hidden!
+    expect(shouldHideConnectionBanner({ status: "connecting", settling: true, loaded: true })).toBe(true);
+    // Brand-new computer with no cached sessions yet -> show connecting banner.
+    expect(shouldHideConnectionBanner({ status: "connecting", settling: true, loaded: false })).toBe(false);
+    // Settle window expired and still connecting -> show banner gently.
+    expect(shouldHideConnectionBanner({ status: "connecting", settling: false, loaded: true })).toBe(false);
+    // Locked or pairing/permission refusal -> never hidden!
+    expect(shouldHideConnectionBanner({ status: "locked", settling: true, loaded: true })).toBe(false);
+    expect(
+      shouldHideConnectionBanner({
+        status: "reconnecting",
+        formattedDetail: "这台电脑不再信任这台设备，请重新配对",
+        settling: true,
+        loaded: true,
+      }),
+    ).toBe(false);
   });
 });
