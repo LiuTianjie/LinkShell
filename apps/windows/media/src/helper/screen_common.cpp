@@ -528,10 +528,24 @@ bool EncodeRgbaToPng(const uint8_t* bgra, int width, int height, int stride, std
 }
 
 bool EncodeBgr24ToJpeg(const uint8_t* bgr, int width, int height, int stride, int quality, std::vector<uint8_t>* out_jpeg) {
-  if (!bgr || width <= 0 || height <= 0 || !out_jpeg) return false;
+  if (!bgr || width <= 0 || height <= 0 || stride < width * 3 || !out_jpeg) return false;
   CLSID jpeg_clsid{};
   if (!GetEncoderClsid(L"image/jpeg", &jpeg_clsid)) return false;
-  Gdiplus::Bitmap bmp(width, height, stride, PixelFormat24bppRGB, const_cast<BYTE*>(bgr));
+  // GDI+ PixelFormat24bppRGB requires a 4-byte-aligned stride (e.g. width=854 -> 2562 -> 2564).
+  const int aligned_stride = (stride % 4 == 0) ? stride : ((width * 3 + 3) & ~3);
+  std::vector<uint8_t> aligned;
+  const uint8_t* scan0 = bgr;
+  if (aligned_stride != stride) {
+    aligned.assign(static_cast<size_t>(aligned_stride) * static_cast<size_t>(height), 0);
+    const size_t row_bytes = static_cast<size_t>(width) * 3;
+    for (int y = 0; y < height; ++y) {
+      std::memcpy(aligned.data() + static_cast<size_t>(y) * aligned_stride,
+                  bgr + static_cast<size_t>(y) * stride,
+                  row_bytes);
+    }
+    scan0 = aligned.data();
+  }
+  Gdiplus::Bitmap bmp(width, height, aligned_stride, PixelFormat24bppRGB, const_cast<BYTE*>(scan0));
   static constexpr GUID kEncoderQualityGuid = {
       0x1d5be4b5, 0xfa4a, 0x452d, {0x9c, 0xdd, 0x5d, 0xb3, 0x51, 0x05, 0xe7, 0xeb}};
   Gdiplus::EncoderParameters params{};

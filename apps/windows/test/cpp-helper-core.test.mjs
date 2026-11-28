@@ -41,7 +41,9 @@ test('portable C++20 helper_core unit suite compiles and passes', (context) => {
       ], { cwd: scratch, stdio: 'pipe', windowsHide: true });
     } else {
       execFileSync(compiler.cmd, [
-        '-std=c++20', '-O2', '-Wall', '-Wextra', '-Werror', `-I${includeDir}`, sourceFile, '-o', outBin,
+        '-std=c++20', '-O2', '-Wall', '-Wextra', '-Werror',
+        ...(process.platform === 'win32' ? ['-D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH'] : []),
+        `-I${includeDir}`, sourceFile, '-o', outBin,
       ], { stdio: 'pipe', windowsHide: true });
     }
 
