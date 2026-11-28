@@ -587,11 +587,11 @@ std::optional<CursorShapeSnapshot> CaptureCursorShape(double fallback_scale) {
   BITMAP bm{};
   int px_w = 0, px_h = 0;
   if (icon_info.hbmColor && GetObjectW(icon_info.hbmColor, sizeof(bm), &bm) > 0) {
-    px_w = bm.bmWidth;
-    px_h = std::abs(bm.bmHeight);
+    px_w = static_cast<int>(bm.bmWidth);
+    px_h = static_cast<int>(std::abs(bm.bmHeight));
   } else if (icon_info.hbmMask && GetObjectW(icon_info.hbmMask, sizeof(bm), &bm) > 0) {
-    px_w = bm.bmWidth;
-    px_h = std::max(1, std::abs(bm.bmHeight) / 2);
+    px_w = static_cast<int>(bm.bmWidth);
+    px_h = std::max(1, static_cast<int>(std::abs(bm.bmHeight)) / 2);
   } else {
     px_w = GetSystemMetrics(SM_CXCURSOR);
     px_h = GetSystemMetrics(SM_CYCURSOR);
@@ -766,8 +766,8 @@ void InputState::Handle(const json& e, const RECT& target_bounds) {
 
   if (type == "move") {
     RECT all = VirtualScreenBounds();
-    int aw = std::max(1, (all.right - all.left) - 1);
-    int ah = std::max(1, (all.bottom - all.top) - 1);
+    int aw = std::max(1, static_cast<int>(all.right - all.left) - 1);
+    int ah = std::max(1, static_cast<int>(all.bottom - all.top) - 1);
     double nx = std::clamp(JsonNum(e, "x"), 0.0, 1.0);
     double ny = std::clamp(JsonNum(e, "y"), 0.0, 1.0);
     int x = target_bounds.left + static_cast<int>(nx * std::max(0, bw - 1));
