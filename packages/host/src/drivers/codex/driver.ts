@@ -725,6 +725,7 @@ export class CodexDriver implements AgentDriver {
       if (running !== watch.running) {
         watch.running = running;
         this.host?.update(this.id, threadId, { sessionUpdate: "ls_status", state: running ? "running" : "idle" });
+        if (!running) this.considerRelease(threadId);
       }
     } catch (error) {
       // Gone, or unreadable: opening it again says what is wrong.
@@ -1116,7 +1117,11 @@ export class CodexDriver implements AgentDriver {
 
   private async release(threadId: string): Promise<void> {
     if (this.watching.has(threadId) || this.kept.has(threadId) || this.fresh.has(threadId)) return;
-    if (this.observed.has(threadId)) {
+    const observed = this.observed.get(threadId);
+    if (observed) {
+      // Keep observing while the desktop turn is still active (e.g. waiting on an async question)
+      // so answers entered on the computer clear promptly instead of falling back to 30s discovery.
+      if (observed.running) return;
       this.stopObserving(threadId);
       this.host?.detached(this.id, threadId);
       return;

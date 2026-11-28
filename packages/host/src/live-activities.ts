@@ -12,10 +12,14 @@ import type { SessionHub, Subscriber } from "./hub.js";
 import type { TerminalManager } from "./terminals.js";
 
 const DEFAULT_PUSH_TO_START_COOLDOWN_MS = 15 * 60 * 1000;
+const ROUTINE_COALESCE_MS = 15_000;
+const DEFAULT_SCHEDULE_MS = 5000;
 
 interface Registration extends LiveActivitySubscription {
   sequence: number; retryAfter?: number; failures?: number;
   notices?: LiveActivityNotice[]; lastNoticeId?: string;
+  /** In-memory digest of the last accepted delivery to avoid burning APNs budget on unchanged heartbeats. */
+  lastPayloadHash?: string;
 }
 
 interface PendingPushToStart {
@@ -164,8 +168,17 @@ export class LiveActivityRelay {
     this.stopListeners.push(this.options.hub.onSummary((session) => this.sessionChanged(session)),
       this.options.hub.onRemoved((sessionId) => this.sessionRemoved(sessionId)),
       this.options.terminals.onChange((terminal, closed) => this.terminalChanged(terminal, closed)));
-    this.heartbeat = setInterval(() => this.schedule(), 60_000);
+    this.heartbeat = setInterval(() => {
+      if (this.stopped) return;
+      if (this.pushToStart.size && !this.registrations.size && !this.hasPendingPushToStart()) {
+        this.reconcileWatches(this.options.hub.listSessions({ limit: 200 }).sessions);
+      }
+      this.schedule();
+    }, 60_000);
     this.heartbeat.unref();
+    if (this.pushToStart.size && !this.registrations.size) {
+      this.reconcileWatches(this.options.hub.listSessions({ limit: 200 }).sessions);
+    }
     this.schedule(0);
   }
 
@@ -185,7 +198,8 @@ export class LiveActivityRelay {
       void this.retireSuperseded(old);
     }
     const previous = this.registrations.get(data.activityId);
-    this.registrations.set(data.activityId, { ...previous, ...data, sequence: previous?.sequence ?? 0 });
+    // Clear lastPayloadHash on (re)subscribe so foreground resume always pushes one fresh reconciliation snapshot.
+    this.registrations.set(data.activityId, { ...previous, ...data, sequence: previous?.sequence ?? 0, lastPayloadHash: undefined });
     if (!previous) this.options.log(`[live-activity] registered ${data.activityId}`);
     for (const row of this.pushToStart.values()) {
       if (row.computerKey === data.computerKey && (!data.deviceId || row.deviceId === data.deviceId)) {
@@ -245,6 +259,7 @@ export class LiveActivityRelay {
     });
     if (!previous) this.options.log(`[live-activity] registered push-to-start ${data.platform}:${data.deviceId}`);
     this.savePushToStart();
+    if (!this.stopped) this.reconcileWatches(this.options.hub.listSessions({ limit: 200 }).sessions);
     return { ok: true };
   }
 
@@ -256,7 +271,7 @@ export class LiveActivityRelay {
       this.resetPushToStartCooldown(registration.computerKey, registration.deviceId);
     }
     this.save();
-    if (!this.registrations.size) this.reconcileWatches([]);
+    if (!this.registrations.size && !this.pushToStart.size) this.reconcileWatches([]);
     if (!registration) return;
     try {
       await this.request()(`${this.serviceUrl}/v1/activities/${activityId}`, {
@@ -271,22 +286,32 @@ export class LiveActivityRelay {
     const before = this.sessions.get(session.id);
     this.sessions.set(session.id, session);
     const request = (value: SessionSummary) => [value.permission?.requestId, ...(value.asyncQuestions ?? []).map((question) => question.id)].filter(Boolean).join(":");
+    let immediate = false;
+    let routineRunning = false;
     if (!session.archived) {
       const task = liveActivitySessionTask(session);
       const beforePhase = before ? liveActivitySessionTask(before).phase : undefined;
       const attention = needsAttention(session) || session.state === "error";
+      const wasAttention = !!before && (needsAttention(before) || before.state === "error");
+      const attentionCleared = wasAttention && !attention;
       const attentionTransition = attention && (!before || beforePhase !== task.phase || request(before) !== request(session));
       const completedTransition = session.state === "idle" && !!before && (before.state === "running" || needsAttention(before));
+      routineRunning = !attention && !wasAttention && !completedTransition && before?.state === "running" && session.state === "running";
 
       if (this.registrations.size) {
         // Discovery can replay existing work after a restart. Alert on a transition
         // we observed, not on a historical question being discovered for the first time.
         if (attention && before && (beforePhase !== task.phase || request(before) !== request(session))) {
           this.enqueue(task, request(session) || String(session.updatedAt));
+          immediate = true;
         } else if (completedTransition) {
           this.enqueue(task, String(session.updatedAt));
+          immediate = true;
         } else {
           this.removeOutdatedNotices(task);
+          // Answering a question or resolving an approval on the computer must clear the lock-screen
+          // waiting prompt immediately rather than lingering behind a routine coalesce timer.
+          if (attentionCleared) immediate = true;
         }
       }
 
@@ -334,15 +359,26 @@ export class LiveActivityRelay {
           };
           queued = true;
         }
-        if (queued) this.schedule(0);
+        if (queued) immediate = true;
+      } else if (this.pushToStart.size && attentionCleared) {
+        for (const row of this.pushToStart.values()) {
+          if (row.pendingStart?.sessionId === session.id) row.pendingStart = undefined;
+        }
       }
     } else {
       for (const row of this.registrations.values()) row.notices = row.notices?.filter((notice) => notice.task.kind !== "session" || notice.task.id !== session.id);
       for (const row of this.pushToStart.values()) {
         if (row.pendingStart?.sessionId === session.id) row.pendingStart = undefined;
       }
+      if (before && (needsAttention(before) || before.state === "running" || before.state === "error")) immediate = true;
     }
-    this.schedule();
+    // Keep desktop sessions subscribed for push-to-start-only hosts so waiting/answer transitions
+    // are observed in real time rather than waiting for the 30s catalog refresh.
+    if (this.pushToStart.size && !this.registrations.size && !this.hasPendingPushToStart()) {
+      const stateChanged = !before || before.state !== session.state || before.archived !== session.archived || needsAttention(before) !== needsAttention(session);
+      if (stateChanged) this.reconcileWatches(this.options.hub.listSessions({ limit: 200 }).sessions);
+    }
+    this.schedule(immediate ? 0 : routineRunning ? ROUTINE_COALESCE_MS : DEFAULT_SCHEDULE_MS);
   }
   private sessionRemoved(sessionId: string) {
     this.sessions.delete(sessionId);
@@ -386,7 +422,7 @@ export class LiveActivityRelay {
   }
   private save() {
     const temporary = `${this.options.path}.tmp`;
-    const entries = [...this.registrations.values()].map(({ retryAfter: _retry, failures: _failures, ...entry }) => entry);
+    const entries = [...this.registrations.values()].map(({ retryAfter: _retry, failures: _failures, lastPayloadHash: _hash, ...entry }) => entry);
     writeFileSync(temporary, JSON.stringify(entries), { mode: 0o600 });
     chmodSync(temporary, 0o600);
     renameSync(temporary, this.options.path);
@@ -469,6 +505,12 @@ export class LiveActivityRelay {
           tasks: [notice.task, ...(payload.tasks ?? []).filter((task) => task.id !== notice.task.id || task.kind !== notice.task.kind)],
         } : payload.active ? { ...payload, noticeId: row.lastNoticeId }
           : { ...payload, phase: "completed", title: "任务已结束", subtitle: "打开 App 查看结果", noticeId: row.lastNoticeId });
+        const payloadHash = createHash("sha256")
+          .update(JSON.stringify({ event, contentState, hasNotice: Boolean(notice), noticeId: notice?.id ?? null }))
+          .digest("hex");
+        if (event === "update" && !notice && row.lastPayloadHash === payloadHash) {
+          return;
+        }
         row.sequence = Math.max(Date.now(), row.sequence + 1);
         try {
           const response = await this.request()(`${this.serviceUrl}/v1/activities/${row.activityId}/events`, {
@@ -485,10 +527,19 @@ export class LiveActivityRelay {
             this.options.log(`[live-activity] retired ${row.activityId}: ${response.status === 410 ? "registration expired" : "completed"}`);
           } else if (response.ok) {
             row.failures = 0; row.retryAfter = 0;
+            row.lastPayloadHash = payloadHash;
             if (notice) {
               row.notices = row.notices?.filter((item) => item.id !== notice.id);
               row.lastNoticeId = notice.id;
             }
+          } else if (response.status === 429) {
+            const retryAfterSec = Number(response.headers?.get?.("retry-after"));
+            const retryDelayMs = Number.isFinite(retryAfterSec) && retryAfterSec > 0
+              ? Math.min(15_000, Math.ceil(retryAfterSec * 1000) + 150)
+              : 1500;
+            row.retryAfter = Date.now() + retryDelayMs;
+            this.options.log(`[live-activity] coalesced HTTP 429 for ${row.activityId}; retrying in ${retryDelayMs}ms`);
+            this.schedule(retryDelayMs);
           } else {
             this.options.log(`[live-activity] delivery HTTP ${response.status} for ${row.activityId}; retaining registration`);
             throw new Error("delivery unavailable");

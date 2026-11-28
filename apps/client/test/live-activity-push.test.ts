@@ -16,6 +16,7 @@ const harness = vi.hoisted(() => ({
   onAppState: undefined as undefined | ((state: string) => void),
   onOnline: undefined as undefined | (() => void),
   getNative: vi.fn(), ready: vi.fn(), end: vi.fn(), call: vi.fn(), token: vi.fn(),
+  reconnectNow: vi.fn(), reconnectRelays: vi.fn(),
 }));
 vi.mock("react", () => ({ useEffect: (effect: () => void | (() => void)) => harness.effects.push(effect) }));
 vi.mock("react-native", () => ({ AppState: {
@@ -50,9 +51,12 @@ vi.mock("../src/lib/account", () => {
   const state = () => ({ session: harness.owner ? { userId: harness.owner } : undefined, token: harness.token });
   return { useAccount: Object.assign((select: (value: ReturnType<typeof state>) => unknown) => select(state()), { getState: state }) };
 });
+vi.mock("../src/lib/computers", () => ({
+  reconnectRelays: harness.reconnectRelays,
+}));
 vi.mock("../src/lib/client", () => ({
   useConnection: () => ({ computer: { key: harness.computerKey }, link: {
-    call: harness.call, get status() { return harness.online ? "online" : "reconnecting"; },
+    call: harness.call, reconnectNow: harness.reconnectNow, get status() { return harness.online ? "online" : "reconnecting"; },
     onOnline: (callback: () => void) => { harness.onOnline = callback; return () => { harness.onOnline = undefined; }; },
   } }),
   useClient: (select: (state: { status: string }) => unknown) => select({ status: harness.online ? "online" : "offline" }),
@@ -409,6 +413,30 @@ describe("ActivityKit registration handoff", () => {
       token: harness.native.token,
       grant: "07".repeat(32),
     });
+    expect(harness.ready).toHaveBeenCalledWith("activity-1");
+  });
+
+  it("wakes relay + host link and pre-registers a push-to-start activity arriving while offline, then hands off on online", async () => {
+    harness.online = false;
+    mount();
+    await settle();
+
+    // Must immediately try to wake the E2E link AND pre-register the new activity token with push.itool.tech.
+    expect(harness.reconnectRelays).toHaveBeenCalled();
+    expect(harness.reconnectNow).toHaveBeenCalled();
+    expect(request.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(1);
+    expect(harness.call).not.toHaveBeenCalled();
+    expect(harness.ready).not.toHaveBeenCalled();
+
+    // As soon as the link reconnects, Host handoff completes without repeating PUT.
+    harness.online = true;
+    harness.onOnline?.();
+    await settle();
+    expect(request.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(1);
+    expect(harness.call).toHaveBeenCalledWith(
+      "liveActivities.subscribe",
+      expect.objectContaining({ activityId: "activity-1", computerKey: "computer-1" }),
+    );
     expect(harness.ready).toHaveBeenCalledWith("activity-1");
   });
 });

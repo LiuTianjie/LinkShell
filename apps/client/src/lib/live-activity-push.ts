@@ -4,6 +4,7 @@ import { AppState } from "react-native";
 import * as linkLayout from "../../modules/link-layout";
 import { useAccount } from "./account";
 import { useConnection } from "./client";
+import { reconnectRelays } from "./computers";
 import { readSecret, writeSecret } from "./secure";
 
 const KEY = "linkshell.live-activity.push.v1";
@@ -331,9 +332,19 @@ export function useLiveActivityPush() {
             if (invalidated()) continue;
             const saved = records().find((record) => record.activityId === native.activityId);
             const currentComputer = native.computerKey === computer.key;
-            // A known background computer already has its grant. Token rotation only
-            // needs the push service; it must not wait for this phone to reconnect to it.
-            if ((!currentComputer || link.status !== "online") && !saved) continue;
+            // Do not register an unknown activity belonging to another computer.
+            if (!currentComputer && !saved) continue;
+            // A push-to-start activity woken while suspended may arrive while the E2E link is
+            // still reconnecting: wake the relay + host link right away AND register the new
+            // activity token with the push service so Host handoff completes as soon as online.
+            if (currentComputer && link.status !== "online") {
+              try {
+                reconnectRelays();
+                (link as { reconnectNow?: () => void }).reconnectNow?.();
+              } catch {
+                /* Best-effort wakeup during background registration. */
+              }
+            }
             const deviceId = ensureDeviceId();
             const matching =
               saved?.activityId === native.activityId &&
@@ -422,8 +433,12 @@ export function useLiveActivityPush() {
             }
             if (disposed || globalGeneration !== startGlobal) return;
             if (invalidated()) continue;
-            if (currentComputer && link.status === "online") await linkLayout.setNativeLiveActivityPushReady(record.activityId);
-            handedOff.set(signature, Date.now());
+            if (currentComputer && link.status === "online") {
+              await linkLayout.setNativeLiveActivityPushReady(record.activityId);
+              handedOff.set(signature, Date.now());
+            } else if (!currentComputer) {
+              handedOff.set(signature, Date.now());
+            }
           } catch {
             /* One unreachable computer must not block the others. */
           }

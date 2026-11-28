@@ -23,6 +23,7 @@ const harness = vi.hoisted(() => {
   const storeConnect = vi.fn();
   const storeDisconnect = vi.fn();
   const storeFlushSnapshot = vi.fn();
+  const storeRefresh = vi.fn(() => Promise.resolve());
   const streamsStart = vi.fn();
   const streamsStop = vi.fn();
   const streamsConnect = vi.fn();
@@ -74,6 +75,7 @@ const harness = vi.hoisted(() => {
     storeConnect,
     storeDisconnect,
     storeFlushSnapshot,
+    storeRefresh,
     streamsStart,
     streamsStop,
     streamsConnect,
@@ -186,6 +188,7 @@ vi.mock("@linkshell/client-core", () => ({
         connect: harness.storeConnect,
         disconnect: harness.storeDisconnect,
         flushSnapshot: harness.storeFlushSnapshot,
+        refresh: harness.storeRefresh,
         openSession: vi.fn(),
         closeSession: vi.fn(),
       }),
@@ -270,8 +273,10 @@ describe("ClientProvider foreground reconnect & outboxStorage wiring", () => {
     expect(harness.linkReconnectNow).not.toHaveBeenCalled();
     expect(harness.reconnectRelays).not.toHaveBeenCalled();
     expect(harness.streamsConnect).toHaveBeenCalledTimes(1);
-    // Probe succeeded -> recovering was set true on resume then cleared immediately to false (not stuck 12s).
+    // Probe succeeded -> recovering was set true on resume then cleared immediately to false (not stuck 12s),
+    // and sessions are refreshed silently to pick up any desktop state changes missed while suspended.
     expect(harness.recoveringHistory).toEqual([true, false]);
+    expect(harness.storeRefresh).toHaveBeenCalledTimes(1);
   });
 
   it("force-resets relays before redialing the host tunnel when the foreground probe detects a dead suspended socket", async () => {

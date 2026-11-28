@@ -339,6 +339,8 @@ export function ClientProvider({ children }: { children: ReactNode }) {
               link.reconnectNow(true);
             } else {
               clearRecovering();
+              // Reconcile any session summary updates (such as answered desktop questions) missed while suspended.
+              void (store.getState() as { refresh?: () => Promise<void> | void }).refresh?.();
             }
           });
           connection.streams.connect();

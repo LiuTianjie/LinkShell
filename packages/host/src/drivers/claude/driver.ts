@@ -328,6 +328,10 @@ export class ClaudeDriver extends AcpDriver {
   private remoteWatch?: ReturnType<typeof setInterval>;
   private remoteWatchRun?: Promise<void>;
   private readonly watchCache = new Map<string, { mtimeMs: number; size: number; checkedAt: number }>();
+  private readonly waitingPolls = new Map<string, { path: string; stamp: string; ticks: number; session: DiscoveredSession }>();
+  private waitingPollTimer?: ReturnType<typeof setInterval>;
+  private waitingPolling = false;
+  private readonly attentionRefreshes = new Set<string>();
   private tickHolders?: Map<string, SessionHolder[]>;
   private tickPsLines?: string[];
 
@@ -346,6 +350,10 @@ export class ClaudeDriver extends AcpDriver {
     for (const key of [...this.sideClaudes.keys()]) this.closeSideClaude(key);
     clearInterval(this.remoteWatch);
     this.remoteWatch = undefined;
+    clearInterval(this.waitingPollTimer);
+    this.waitingPollTimer = undefined;
+    this.waitingPolls.clear();
+    this.attentionRefreshes.clear();
     await this.remoteWatchRun;
     for (const tail of this.tails.values()) tail.stop();
     this.tails.clear();
@@ -524,11 +532,77 @@ export class ClaudeDriver extends AcpDriver {
     await this.appSessions.refresh();
     const listed = await super.listSessions(limit);
     const found = [...listed, ...await this.unplacedSessions(listed, limit)];
-    return Promise.all(found.map(async (session) => {
+    const results = await Promise.all(found.map(async (session) => {
       if (this.modes.get(session.nativeId) === "remote") return session;
       const asyncQuestions = session.state === "waiting" ? (await this.waitingQuestion(session.nativeId))?.questions ?? [] : [];
-      return { ...session, asyncQuestions };
+      const enriched = { ...session, asyncQuestions };
+      if (asyncQuestions.length > 0 && !this.tails.has(session.nativeId)) {
+        const path = findTranscript(this.configDir, session.nativeId, session.cwd);
+        if (path) {
+          let stamp = "";
+          try {
+            const st = statSync(path);
+            stamp = `${st.mtimeMs}:${st.size}`;
+          } catch {}
+          this.waitingPolls.set(session.nativeId, { path, stamp, ticks: 0, session: enriched });
+        }
+      } else {
+        this.waitingPolls.delete(session.nativeId);
+      }
+      return enriched;
     }));
+    this.reconcileWaitingPollTimer();
+    return results;
+  }
+
+  private reconcileWaitingPollTimer(): void {
+    if (this.waitingPolls.size > 0 && this.host) {
+      if (!this.waitingPollTimer) {
+        this.waitingPollTimer = setInterval(() => void this.pollWaitingQuestions(), 1500);
+        this.waitingPollTimer.unref?.();
+      }
+    } else if (this.waitingPollTimer) {
+      clearInterval(this.waitingPollTimer);
+      this.waitingPollTimer = undefined;
+    }
+  }
+
+  /** An answered desktop AskUserQuestion on an unopened Claude session must not wait 30s for full discovery. */
+  private async pollWaitingQuestions(): Promise<void> {
+    if (this.waitingPolling) return;
+    this.waitingPolling = true;
+    try {
+      for (const [nativeId, entry] of [...this.waitingPolls.entries()]) {
+        if (this.tails.has(nativeId) || this.modes.get(nativeId) === "remote") {
+          this.waitingPolls.delete(nativeId);
+          continue;
+        }
+        let stamp = "";
+        try {
+          const st = statSync(entry.path);
+          stamp = `${st.mtimeMs}:${st.size}`;
+        } catch {
+          stamp = "";
+        }
+        entry.ticks += 1;
+        if (stamp === entry.stamp && entry.ticks % 4 !== 0) continue;
+        entry.stamp = stamp;
+        const state = await this.discoveredState(nativeId, entry.session.cwd);
+        const questions = state === "waiting" ? (await this.waitingQuestion(nativeId))?.questions ?? [] : [];
+        const prevKey = JSON.stringify(entry.session.asyncQuestions ?? []);
+        const nextKey = JSON.stringify(questions);
+        if (state !== entry.session.state || prevKey !== nextKey) {
+          entry.session = { ...entry.session, state, asyncQuestions: questions, updatedAt: Date.now() };
+          this.host?.sessionSeen(this.id, entry.session);
+        }
+        if (questions.length === 0) {
+          this.waitingPolls.delete(nativeId);
+        }
+      }
+    } finally {
+      this.waitingPolling = false;
+      this.reconcileWaitingPollTimer();
+    }
   }
 
   /**
@@ -688,6 +762,11 @@ export class ClaudeDriver extends AcpDriver {
     this.tasks.delete(nativeId);
     this.routes.delete(nativeId);
     this.watchCache.delete(nativeId);
+    this.waitingPolls.delete(nativeId);
+    this.reconcileWaitingPollTimer();
+    // Detach closes the remote ACP session (loaded = false). Reset stale "remote" mode so
+    // subsequent desktop turns and AskUserQuestion prompts are discovered normally.
+    if (this.modes.get(nativeId) === "remote") this.modes.delete(nativeId);
     await super.detach(nativeId);
     this.unwrittenSessions.delete(nativeId);
     this.streamedTranscripts.delete(nativeId);
@@ -1194,6 +1273,34 @@ export class ClaudeDriver extends AcpDriver {
       this.observed.set(nativeId, settings);
       this.emitDesktopConfig(nativeId);
     }
+    if (
+      this.modes.get(nativeId) !== "remote" &&
+      (line.includes("AskUserQuestion") ||
+        ((this.reportedQuestions.get(nativeId) ?? "[]") !== "[]" &&
+          (line.includes('"tool_result"') || /"type":"(user|assistant)"/.test(line))))
+    ) {
+      this.scheduleDesktopAttentionRefresh(nativeId);
+    }
+  }
+
+  private scheduleDesktopAttentionRefresh(nativeId: string): void {
+    if (this.attentionRefreshes.has(nativeId)) return;
+    this.attentionRefreshes.add(nativeId);
+    void (async () => {
+      try {
+        if (!this.tails.has(nativeId) || this.modes.get(nativeId) === "remote") return;
+        const cwd = this.sessions.get(nativeId)?.cwd ?? "";
+        const state = await this.discoveredState(nativeId, cwd);
+        if (this.modes.get(nativeId) !== "remote") {
+          this.reportState(nativeId, state);
+          await this.reportQuestions(nativeId);
+        }
+      } catch {
+        // Best-effort fast path; watchRemoteSessions reconciles on its next tick.
+      } finally {
+        this.attentionRefreshes.delete(nativeId);
+      }
+    })();
   }
 
   /** Makes this host the session's only writer, taking it from the desktop if needed. */

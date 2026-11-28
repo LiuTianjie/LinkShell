@@ -348,6 +348,7 @@ describe("Host-owned Live Activity updates", () => {
       grant: grant2,
       expiresAt: Date.now() + 60_000,
     });
+    s.setSessions([{ ...first, title: "Codex 新进展", updatedAt: 3 }]);
     await Promise.resolve();
     await s.relay.flush();
 
@@ -397,5 +398,64 @@ describe("Host-owned Live Activity updates", () => {
     });
     const persisted = JSON.parse(readFileSync(s.path, "utf8")) as Array<{ activityId: string }>;
     expect(persisted.map((item) => item.activityId)).toEqual(["legacy-2"]);
+  });
+
+  it("flushes immediately when a waiting question is answered on the computer, skips unchanged heartbeats, and honors 429 Retry-After", async () => {
+    vi.useFakeTimers();
+    const s = setup();
+    s.relay.subscribe(s.subscription);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.request).toHaveBeenCalledTimes(1);
+
+    // Unchanged 60s heartbeats do NOT burn APNs budget with duplicate payloads.
+    await vi.advanceTimersByTimeAsync(180_000);
+    expect(s.request).toHaveBeenCalledTimes(1);
+
+    // Question arrives -> immediate flush with notice.
+    const waiting: SessionSummary = {
+      ...first,
+      state: "waiting",
+      asyncQuestions: [{ id: "q-1", title: "是否继续发布？", options: ["继续", "暂停"] }],
+      updatedAt: 10,
+    };
+    s.setSessions([waiting]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.request).toHaveBeenCalledTimes(2);
+    expect(s.body()).toMatchObject({ event: "update", contentState: { phase: "waiting_for_input" } });
+
+    // Question answered on computer -> session returns to running -> MUST flush at 0ms, not wait 5s!
+    s.request.mockResolvedValueOnce(new Response(JSON.stringify({ error: "coalesce_updates" }), { status: 429, headers: { "retry-after": "1" } }));
+    s.setSessions([{ ...first, state: "running", asyncQuestions: [], updatedAt: 11 }]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.request).toHaveBeenCalledTimes(3);
+    expect(s.body()).toMatchObject({ event: "update", notice: null, contentState: { phase: "running", waitingCount: 0 } });
+
+    // HTTP 429 with Retry-After: 1 retries in ~1150ms (NOT 5000ms backoff!) and delivers cleanly.
+    s.advance(1200);
+    await vi.advanceTimersByTimeAsync(1200);
+    expect(s.request).toHaveBeenCalledTimes(4);
+    expect(s.body()).toMatchObject({ event: "update", notice: null, contentState: { phase: "running", waitingCount: 0 } });
+  });
+
+  it("keeps desktop sessions watched for push-to-start-only devices and drops pendingStart if answered before delivery", async () => {
+    const s = setup();
+    s.relay.registerPushToStart({
+      deviceId: "ios-pts-only",
+      pushToStartToken: "fe".repeat(32),
+      platform: "ios",
+      serviceUrl: "https://push.itool.tech",
+      grant: "9".repeat(64),
+      expiresAt: Date.now() + 3_600_000,
+      computerKey: "computer-1",
+    });
+    // Registering push-to-start immediately subscribes running sessions so desktop answers are tracked live.
+    await Promise.resolve();
+    expect(s.subscribers.get(first.id)?.size).toBe(1);
+
+    // Waiting then immediately answered before flush -> cancels pendingStart so no stale card is sent.
+    s.setSessions([{ ...first, state: "waiting", asyncQuestions: [{ id: "q-fast", title: "快速回答", options: ["好"] }], updatedAt: 5 }]);
+    s.setSessions([{ ...first, state: "running", asyncQuestions: [], updatedAt: 6 }]);
+    await s.relay.flush();
+    expect(s.request).not.toHaveBeenCalled();
   });
 });

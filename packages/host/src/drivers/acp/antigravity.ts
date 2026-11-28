@@ -2573,11 +2573,11 @@ export class AntigravityDriver extends AcpDriver {
   private async pollDesktopInteractions(nativeId: string, watcher: DesktopWatcher): Promise<void> {
     if (watcher.pollingInteractions) return;
     watcher.pollingInteractions = true;
-    const transcriptPendingQuestion = watcher.transcriptPending;
     try {
       const conn = await this.languageServer();
       let foundAction: DesktopPendingAction | undefined;
       const observedStepIndices = new Set<number>();
+      let minObservedStep: number | undefined;
 
       if (conn) {
         // Steps carry their full content (~20 KB each): ask only for the newest few, where a waiting one would be.
@@ -2595,6 +2595,7 @@ export class AntigravityDriver extends AcpDriver {
             if (info?.trajectoryId) watcher.trajectoryId = info.trajectoryId;
             const stepIndex = info?.stepIndex ?? stepOffset + idx;
             observedStepIndices.add(stepIndex);
+            if (minObservedStep === undefined || stepIndex < minObservedStep) minObservedStep = stepIndex;
             if (watcher.resolvedStepIndices.has(stepIndex)) continue;
 
             const isWaiting =
@@ -2614,18 +2615,18 @@ export class AntigravityDriver extends AcpDriver {
                 step.askQuestion?.questions ??
                 (step.requestedInteraction?.askQuestion as { questions?: unknown[] } | undefined)?.questions;
               const askEntries = parseAskQuestionEntries({ questions: rawQuestions });
-              const questions = askEntries.length > 0 ? askEntries : transcriptPendingQuestion?.questions ?? [];
+              const questions = askEntries.length > 0 ? askEntries : watcher.transcriptPending?.questions ?? [];
               if (questions.length > 0) {
                 foundAction = {
                   kind: "question",
                   requestId: `agy-ask:${nativeId}:${stepIndex}`,
                   toolCallId:
                     step.metadata?.toolCall?.id ||
-                    transcriptPendingQuestion?.toolCallId ||
+                    watcher.transcriptPending?.toolCallId ||
                     `agy:tc:${Math.max(0, stepIndex - 1)}:0`,
                   stepIndex,
                   trajectoryId: info?.trajectoryId ?? watcher.trajectoryId,
-                  title: transcriptPendingQuestion?.title || questions[0]!.question.slice(0, 80) || "Antigravity 有问题需要你回答",
+                  title: watcher.transcriptPending?.title || questions[0]!.question.slice(0, 80) || "Antigravity 有问题需要你回答",
                   questions,
                 };
               }
@@ -2653,6 +2654,17 @@ export class AntigravityDriver extends AcpDriver {
               }
             }
           }
+          // If the live language server confirmed the question step is no longer waiting (or the
+          // trajectory has moved past it), drop the stale transcript fallback so a later transient
+          // RPC glitch cannot resurrect an already-answered question.
+          if (
+            !foundAction &&
+            watcher.transcriptPending &&
+            (observedStepIndices.has(watcher.transcriptPending.stepIndex) ||
+              (minObservedStep !== undefined && watcher.transcriptPending.stepIndex < minObservedStep))
+          ) {
+            watcher.transcriptPending = undefined;
+          }
         } catch {
           // ignore GetCascadeTrajectorySteps failure and fall back to transcript question detection below
         }
@@ -2660,6 +2672,7 @@ export class AntigravityDriver extends AcpDriver {
 
       // A transcript can end with ask_question after the native step was canceled.
       // Only use that fallback when the live response did not contain its step.
+      const transcriptPendingQuestion = watcher.transcriptPending;
       if (!foundAction && transcriptPendingQuestion && !observedStepIndices.has(transcriptPendingQuestion.stepIndex) && !watcher.resolvedStepIndices.has(transcriptPendingQuestion.stepIndex)) {
         foundAction = {
           kind: "question",

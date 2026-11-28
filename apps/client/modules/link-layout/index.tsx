@@ -332,7 +332,7 @@ function serializeActivityWork<T>(work: () => Promise<T>): Promise<T> {
   return result;
 }
 
-export function syncNativeLiveActivity(payload: LiveActivityPayload): Promise<boolean> {
+export function syncNativeLiveActivity(payload: LiveActivityPayload & { online?: boolean }): Promise<boolean> {
   const bounded = payload.active ? { ...payload, ...liveActivityContent(payload) } : payload;
   // ActivityKit methods suspend. Serialize creation/end across rapid snapshots
   // so a late update cannot recreate an activity after logout or computer switch.

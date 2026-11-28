@@ -23,6 +23,7 @@ private actor LiveActivitySerialQueue {
 
 private struct LiveActivitySyncInput: Sendable {
   let active: Bool
+  let online: Bool
   let computerKey: String?
   let computerName: String
   let phase: String
@@ -43,6 +44,7 @@ private struct LiveActivitySyncInput: Sendable {
   init(payload: [String: Any]) {
     let rawKey = (payload["computerKey"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
     self.active = (payload["active"] as? Bool) ?? false
+    self.online = (payload["online"] as? Bool) ?? false
     self.computerKey = (rawKey?.isEmpty == false) ? rawKey : nil
     self.computerName = (payload["computerName"] as? String) ?? "电脑"
     self.phase = (payload["phase"] as? String) ?? "running"
@@ -814,12 +816,30 @@ public class LinkLayoutModule: Module {
         ($0.activityState == .active || $0.activityState == .stale)
           && Self.normalizedComputerKey($0.attributes.computerKey) == computerKey
       }
-      // Once delegated, the host owns foreground and background updates alike.
-      // A cached phone snapshot must not end an activity before its final alert.
-      if let surviving, Self.isRemoteReady(surviving.id) {
+      // Once delegated, the host owns background and routine progress updates.
+      // A cached/offline phone snapshot must not end an activity before its final alert.
+      // However, when the app is active in foreground with a live online snapshot and the card
+      // is still stuck displaying a resolved attention prompt (waiting/failed), reconcile locally
+      // right away so an already-answered prompt never lingers if APNs delivery was delayed.
+      let survivingRemoteReady = surviving.map { Self.isRemoteReady($0.id) } ?? false
+      if let surviving, survivingRemoteReady {
         observeActivityLifecycle(surviving)
         activeActivityId = surviving.id
-        return true
+        let isAttentionPhase: (String) -> Bool = { phase in
+          phase == "waiting_for_approval" || phase == "waiting_for_input" || phase == "failed"
+        }
+        let resolvedInForeground =
+          input.online &&
+          UIApplication.shared.applicationState == .active &&
+          isAttentionPhase(surviving.content.state.phase) &&
+          (!input.active || !isAttentionPhase(input.phase))
+        if !resolvedInForeground {
+          return true
+        }
+        if !input.active {
+          await endActivityLocked(surviving)
+          return true
+        }
       }
       if !input.active {
         if let computerKey { UserDefaults.standard.removeObject(forKey: "LinkShellLiveActivity.dismissed." + computerKey) }
@@ -838,7 +858,7 @@ public class LinkLayoutModule: Module {
         tasks: input.tasksData.flatMap { try? JSONDecoder().decode([LiveActivityTask].self, from: $0) },
         noticeId: input.noticeId,
         selectionVersion: nil,
-        remotePending: pushEnabled ? true : nil,
+        remotePending: (pushEnabled && !survivingRemoteReady) ? true : nil,
         waitingCount: input.waitingCount,
         runningCount: input.runningCount,
         failedCount: input.failedCount,

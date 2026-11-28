@@ -163,13 +163,21 @@ export function mergeLiveViewsIntoSessions(
     // computer has logged events the view never got, and then the summary alone is right.
     const cached = views?.[session.id];
     const view = cached && cached.lastSeq >= session.lastSeq ? cached : undefined;
+    const viewAhead = Boolean(view && view.lastSeq > session.lastSeq);
     const progress = promptProgress?.[session.id];
     if (!view && !progress) return session;
     const isTurnActive = Boolean(
       progress ||
-      (view ? view.turnActive && view.state !== "idle" && view.state !== "error" : false),
+      (view && view.turnActive && view.state !== "idle" && view.state !== "error" && (viewAhead || session.state !== "idle")),
     );
-    const hasPerm = Boolean(view?.permissions?.length) || session.state === "waiting" || session.pendingPermissions > 0;
+    // Discovery updates (e.g. an answered desktop question) can clear waiting state without
+    // advancing lastSeq; only let cached view permissions win when the view is strictly ahead.
+    const activeViewPerms =
+      view?.permissions?.length &&
+      (viewAhead || session.state === "waiting" || session.pendingPermissions > 0 || Boolean(session.permission))
+        ? view.permissions
+        : undefined;
+    const hasPerm = Boolean(activeViewPerms?.length) || session.state === "waiting" || session.pendingPermissions > 0;
     const nextState = hasPerm
       ? "waiting"
       : isTurnActive
@@ -198,7 +206,7 @@ export function mergeLiveViewsIntoSessions(
       activity = { kind: "tool", title: `目标 · ${view.goal.objective}` };
     }
 
-    const firstPerm = view?.permissions?.[0];
+    const firstPerm = activeViewPerms?.[0];
     const permission =
       session.permission ??
       (firstPerm
@@ -220,7 +228,7 @@ export function mergeLiveViewsIntoSessions(
       ...(view?.title ? { title: view.title } : {}),
       state: nextState,
       ...(activity ? { activity } : {}),
-      ...(permission ? { permission, pendingPermissions: Math.max(session.pendingPermissions, view?.permissions?.length ?? 1) } : {}),
+      ...(permission ? { permission, pendingPermissions: Math.max(session.pendingPermissions, activeViewPerms?.length ?? 1) } : {}),
     };
   });
 }
@@ -776,10 +784,11 @@ export function createAttentionSyncScheduler(
       current.computerKey,
       goals,
     );
-    const payload: LiveActivityPayload = {
+    const payload: LiveActivityPayload & { online?: boolean } = {
       ...snapshot,
       ...(snapshot.active ? liveActivityContent(snapshot) : {}),
       computerKey: current.computerKey,
+      online: current.online,
     };
     const activityKey = liveActivityPayloadFingerprint(payload);
     let syncPromise: Promise<boolean>;

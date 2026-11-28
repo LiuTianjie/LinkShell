@@ -218,6 +218,23 @@ describe("session attention hierarchy, pin/snooze, and iOS Live Activities", () 
     const [live] = mergeLiveViewsIntoSessions([makeSession({ id: "s-closed", state: "idle", lastSeq: 38 })], { "s-closed": stale });
     expect(live?.state).toBe("waiting");
     expect(live?.permission?.requestId).toBe("r-1");
+
+    // Discovery clearing a desktop question keeps lastSeq unchanged: stale cached view permissions
+    // at equal lastSeq must NOT force the session back to waiting.
+    const [discoveredRunning] = mergeLiveViewsIntoSessions(
+      [makeSession({ id: "s-closed", state: "running", lastSeq: 40, pendingPermissions: 0 })],
+      { "s-closed": stale },
+    );
+    expect(discoveredRunning?.state).toBe("running");
+    expect(discoveredRunning?.permission).toBeUndefined();
+    expect(discoveredRunning?.pendingPermissions).toBe(0);
+
+    const [discoveredIdle] = mergeLiveViewsIntoSessions(
+      [makeSession({ id: "s-closed", state: "idle", lastSeq: 40, pendingPermissions: 0 })],
+      { "s-closed": stale },
+    );
+    expect(discoveredIdle?.state).toBe("idle");
+    expect(discoveredIdle?.permission).toBeUndefined();
   });
 
   it("wakes a snoozed session immediately if it needs attention or starts running", () => {

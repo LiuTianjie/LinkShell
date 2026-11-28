@@ -19,6 +19,7 @@
         "ITSAppUsesNonExemptEncryption": false,
         "CADisableMinimumFrameDurationOnPhone": true,
         "NSSupportsLiveActivities": true,
+        "NSSupportsLiveActivitiesFrequentUpdates": true,
         "UIBackgroundModes": [
           "fetch"
         ],
